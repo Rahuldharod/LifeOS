@@ -16,15 +16,41 @@ Local-first personal knowledge and work management, backed by typed Markdown fil
 - `../data`: synchronized user Markdown and assets; intentionally outside this Git repository.
 - `../backups`: read-only, checksummed data snapshots; also outside Git.
 
-## Start
+## Run locally
+
+Complete the first-time setup from the `code` directory:
 
 ```bash
 corepack pnpm install
 cp .env.example .env
-npm run dev
 ```
 
-Web runs at `http://127.0.0.1:5173`; the API runs at `http://127.0.0.1:4310`.
+Start LifeOS with:
+
+```bash
+corepack pnpm dev
+```
+
+Keep that Terminal window open while using the application. The web interface runs at `http://127.0.0.1:5173`; the API runs at `http://127.0.0.1:4310`.
+
+### Stop LifeOS
+
+In the Terminal window running LifeOS, press **Control+C**. This stops both the web interface and API.
+
+If that Terminal window is no longer available, identify the processes using the LifeOS ports:
+
+```bash
+lsof -nP -iTCP:5173 -sTCP:LISTEN
+lsof -nP -iTCP:4310 -sTCP:LISTEN
+```
+
+Stop each listed process using its numeric PID:
+
+```bash
+kill <PID>
+```
+
+Run the two `lsof` commands again. No output means both LifeOS servers are stopped.
 
 ## Safety baseline
 
