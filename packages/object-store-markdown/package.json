@@ -1,0 +1,1 @@
+{"name":"@lifeos/object-store-markdown","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lifeos/application":"workspace:*","@lifeos/domain":"workspace:*","yaml":"^2.8.0"}}

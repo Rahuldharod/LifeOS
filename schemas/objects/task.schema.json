@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeos.local/schemas/task.schema.json",
+  "title": "LifeOS task",
+  "allOf": [{ "$ref": "common.schema.json" }],
+  "type": "object",
+  "required": ["status", "owner_person_id"],
+  "properties": {
+    "type": { "const": "task" },
+    "status": { "enum": ["Inbox", "Next", "Waiting", "Done", "Cancelled"] },
+    "priority": { "enum": ["High", "Medium", "Low"] },
+    "owner_person_id": { "type": "string", "format": "uuid" },
+    "waiting_for_person_id": { "type": "string", "format": "uuid" },
+    "due_on": { "type": "string", "format": "date" },
+    "due_at": { "type": "string", "format": "date-time" },
+    "due_timezone": { "type": "string" }
+  },
+  "additionalProperties": true
+}

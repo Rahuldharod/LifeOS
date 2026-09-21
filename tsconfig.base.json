@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noUncheckedIndexedAccess": true,
+    "baseUrl": ".",
+    "paths": {
+      "@lifeos/domain": ["packages/domain/src/index.ts"],
+      "@lifeos/application": ["packages/application/src/index.ts"],
+      "@lifeos/contracts": ["packages/contracts/src/index.ts"],
+      "@lifeos/object-store-markdown": ["packages/object-store-markdown/src/index.ts"],
+      "@lifeos/index-memory": ["packages/index-memory/src/index.ts"],
+      "@lifeos/connectors": ["packages/connectors/src/index.ts"],
+      "@lifeos/ai": ["packages/ai/src/index.ts"],
+      "@lifeos/secrets": ["packages/secrets/src/index.ts"]
+    }
+  }
+}

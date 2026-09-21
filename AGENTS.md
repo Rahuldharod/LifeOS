@@ -1,0 +1,85 @@
+# LifeOS agent instructions
+
+This file is the repository-level operating guide for coding agents. Keep it tool-neutral and update it only when repository boundaries, required commands, or non-obvious engineering rules change.
+
+## Start here
+
+Read these sources in order, loading only what the task needs:
+
+1. `README.md` for setup, repository layout, and connection prerequisites.
+2. `docs/product-design/LifeOS_Solution_Design_v0.4.md` for the current product and solution baseline.
+3. `docs/architecture/README.md` for system boundaries and current architecture.
+4. The relevant file in `docs/decisions/` for decisions that must not be silently reversed.
+5. `docs/architecture/mvp-gap-analysis.md` for the original MVP audit and remaining deferred scope.
+6. `docs/product-design/Product Backlog.md` for improvement ideas and prioritization.
+
+There is intentionally no standalone user guide during the MVP. The interface and workflows are changing too quickly to justify maintaining one.
+
+## Repository map
+
+- `apps/web`: React and Vite UI.
+- `apps/server`: localhost Fastify API and composition root.
+- `packages/domain`: domain types, validation, and identity generation.
+- `packages/application`: use cases and adapter ports. Business orchestration belongs here.
+- `packages/object-store-markdown`: authoritative Markdown persistence and filesystem reconciliation.
+- `packages/index-memory`: disposable, rebuildable index.
+- `packages/connectors`: Google Calendar and mock connector adapters.
+- `packages/ai`: deterministic mock AI boundary.
+- `packages/assets-filesystem`: managed local images and duplicate detection.
+- `packages/backup-filesystem`: versioned, checksummed snapshots.
+- `packages/secrets`: macOS Keychain and test secret stores.
+- `schemas`: portable schemas and fixtures.
+- `tests/integration`: cross-package acceptance tests.
+- `docs/product-design`: versioned solution baseline and product backlog.
+- `../data`: real user Markdown and assets; outside Git and authoritative.
+- `../backups`: generated data snapshots; outside Git.
+
+## Non-negotiable rules
+
+- Markdown files under `../data` are the source of truth. Browser caches and the in-memory index are derived and disposable.
+- Keep code, real user data, secrets, logs, and backups out of the same Git history.
+- Never place OAuth credentials or tokens in Markdown, source files, fixtures, logs, or commits. Use the `SecretStore` boundary.
+- Write domain objects through application use cases and `ObjectStore`; do not bypass revision and expected-content-hash checks.
+- Preserve unknown Markdown frontmatter and body content during round trips.
+- External workflows must be idempotent. Meeting creation, review acceptance, and recovery must tolerate retries.
+- Store instants as ISO 8601 UTC. Preserve source timezone metadata and apply the user-selected timezone only when querying day boundaries or displaying values.
+- Managed image links must remain relative in persisted Markdown so the repository works on both devices.
+- Do not edit real files in `../data` merely to make a test pass. Tests must use temporary roots and synthetic records.
+- Treat the advisory device lease as a guardrail, not the sole concurrency control.
+
+## Commands
+
+Use Corepack because a global `pnpm` installation is not assumed:
+
+```bash
+corepack pnpm install
+corepack pnpm dev
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
+```
+
+The development UI uses `http://127.0.0.1:5173`; the API uses `http://127.0.0.1:4310`.
+
+## Change workflow
+
+1. Inspect the relevant port, use case, adapter, schema, and integration test before editing.
+2. Make the smallest change that preserves the architecture boundaries above.
+3. Add or update an integration test for persistence, connector, recovery, or cross-layer behavior.
+4. Run typecheck and the relevant tests; run the production build for UI, server, dependency, or bundling changes.
+5. Update documentation only when its stated contract changes:
+   - setup or top-level capabilities: `README.md`;
+   - boundaries or component responsibilities: architecture README;
+   - durable architectural decision: a new ADR;
+   - ideas and prioritization: `docs/product-design/Product Backlog.md`.
+
+Do not create feature-by-feature documentation pages or duplicate implementation details that are already clear from tests and code.
+
+## Definition of done
+
+- The requested behavior works through the real application boundary, not only in an isolated component.
+- Existing Markdown remains readable and round-trippable.
+- Failure and retry behavior is explicit for filesystem and external-service operations.
+- Typecheck and relevant integration tests pass.
+- The production build passes when runtime code changed.
+- No real data, generated backups, or secrets appear in the Git diff.

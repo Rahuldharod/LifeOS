@@ -1,0 +1,29 @@
+{
+  "name": "lifeos",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "corepack pnpm --parallel --filter @lifeos/server --filter @lifeos/web dev",
+    "build": "corepack pnpm -r build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@lifeos/ai": "workspace:*",
+    "@lifeos/application": "workspace:*",
+    "@lifeos/assets-filesystem": "workspace:*",
+    "@lifeos/backup-filesystem": "workspace:*",
+    "@lifeos/connectors": "workspace:*",
+    "@lifeos/index-memory": "workspace:*",
+    "@lifeos/object-store-markdown": "workspace:*",
+    "@lifeos/secrets": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.0"
+  }
+}

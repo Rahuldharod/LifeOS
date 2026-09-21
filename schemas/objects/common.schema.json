@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeos.local/schemas/common.schema.json",
+  "title": "LifeOS common object envelope",
+  "type": "object",
+  "required": ["id", "type", "schema_version", "revision", "title", "created_at", "updated_at", "updated_by_device"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "type": { "type": "string" },
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "updated_by_device": { "type": "string", "minLength": 1 },
+    "archived_at": { "type": "string", "format": "date-time" },
+    "deleted_at": { "type": "string", "format": "date-time" },
+    "area": { "type": "string" },
+    "subjects": { "type": "array", "items": { "type": "string" } },
+    "tags": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

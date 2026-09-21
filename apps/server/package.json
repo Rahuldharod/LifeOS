@@ -1,0 +1,22 @@
+{
+  "name": "@lifeos/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@lifeos/application": "workspace:*",
+    "@lifeos/assets-filesystem": "workspace:*",
+    "@lifeos/ai": "workspace:*",
+    "@lifeos/backup-filesystem": "workspace:*",
+    "@lifeos/connectors": "workspace:*",
+    "@lifeos/index-memory": "workspace:*",
+    "@lifeos/object-store-markdown": "workspace:*",
+    "@lifeos/secrets": "workspace:*",
+    "fastify": "^5.0.0",
+    "tsx": "^4.0.0"
+  }
+}

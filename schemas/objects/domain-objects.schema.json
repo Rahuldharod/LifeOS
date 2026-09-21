@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeos.local/schemas/domain-objects.schema.json",
+  "title": "LifeOS domain object inventory",
+  "description": "Versioned portable contract inventory. Runtime validation is implemented in packages/domain.",
+  "oneOf": [
+    { "$ref": "task.schema.json" },
+    { "$ref": "#/$defs/person" }, { "$ref": "#/$defs/client" }, { "$ref": "#/$defs/product" },
+    { "$ref": "#/$defs/project" }, { "$ref": "#/$defs/meeting" }, { "$ref": "#/$defs/meeting-note" },
+    { "$ref": "#/$defs/knowledge-note" }, { "$ref": "#/$defs/decision" }, { "$ref": "#/$defs/open-point" },
+    { "$ref": "#/$defs/source" }, { "$ref": "#/$defs/review-item" }, { "$ref": "#/$defs/agent-run" },
+    { "$ref": "#/$defs/audit-event" }, { "$ref": "#/$defs/connector-account" }, { "$ref": "#/$defs/sync-run" },
+    { "$ref": "#/$defs/daily-focus" }, { "$ref": "#/$defs/recurring-item" }
+  ],
+  "$defs": {
+    "base": { "allOf": [{ "$ref": "common.schema.json" }], "type": "object" },
+    "person": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "person" }, "given_name": { "type": "string" }, "is_self": { "type": "boolean" } }, "required": ["given_name"] },
+    "client": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "client" }, "status": { "type": "string" } }, "required": ["status"] },
+    "product": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "product" }, "status": { "type": "string" } }, "required": ["status"] },
+    "project": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "project" }, "status": { "type": "string" }, "objective": { "type": "string" } }, "required": ["status"] },
+    "meeting": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "meeting" }, "status": { "type": "string" }, "starts_at": { "type": "string", "format": "date-time" }, "ends_at": { "type": "string", "format": "date-time" }, "timezone": { "type": "string" }, "attendee_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } } }, "required": ["status", "starts_at", "ends_at", "timezone", "attendee_ids"] },
+    "meeting-note": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "meeting-note" }, "meeting_id": { "type": "string", "format": "uuid" } }, "required": ["meeting_id"] },
+    "knowledge-note": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "knowledge-note" }, "source_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "format": "uuid" } } }, "required": ["source_ids"] },
+    "decision": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "decision" }, "status": { "enum": ["active", "superseded", "reversed"] }, "decision_text": { "type": "string" }, "decided_at": { "type": "string", "format": "date-time" } }, "required": ["status", "decision_text", "decided_at"] },
+    "open-point": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "open-point" }, "status": { "enum": ["open", "resolved", "closed"] } }, "required": ["status"] },
+    "source": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "source" }, "source_type": { "type": "string" }, "captured_at": { "type": "string", "format": "date-time" }, "ingestion_status": { "enum": ["captured", "processed", "failed"] }, "fragments": { "type": "array" } }, "required": ["source_type", "captured_at", "ingestion_status"] },
+    "review-item": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "review-item" }, "target_object_type": { "type": "string" }, "proposed_fields": { "type": "object" }, "field_evidence": { "type": "object" }, "confidence_label": { "enum": ["High", "Medium", "Low"] }, "status": { "enum": ["pending", "accepted", "rejected"] } }, "required": ["target_object_type", "proposed_fields", "confidence_label", "status", "operation_id"] },
+    "agent-run": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "agent-run" }, "operation": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "prompt_version": { "type": "string" }, "status": { "enum": ["running", "succeeded", "failed"] } }, "required": ["operation", "provider", "model", "prompt_version", "status", "started_at"] },
+    "audit-event": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "audit-event" }, "actor_type": { "enum": ["person", "agent", "system"] }, "action": { "type": "string" } }, "required": ["occurred_at", "actor_type", "action"] },
+    "connector-account": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "connector-account" }, "provider": { "type": "string" }, "secret_ref": { "type": "string" }, "scopes": { "type": "array", "items": { "type": "string" } } }, "required": ["provider", "account_label", "external_account_id", "status", "secret_ref", "scopes"] },
+    "sync-run": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "sync-run" }, "connector_account_id": { "type": "string", "format": "uuid" }, "status": { "enum": ["running", "succeeded", "failed"] } }, "required": ["connector_account_id", "resource_type", "status", "started_at"] },
+    "daily-focus": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "daily-focus" }, "focus_on": { "type": "string", "format": "date" } }, "required": ["focus_on"] },
+    "recurring-item": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "recurring-item" }, "status": { "type": "string" } }, "required": ["status"] }
+  }
+}

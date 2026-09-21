@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vite/
+playwright-report/
+test-results/
+
+# LifeOS user data must never be committed.
+data/
+backups/
+local-index/

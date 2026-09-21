@@ -1,0 +1,6 @@
+{
+  "name": "@lifeos/backup-filesystem",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts"
+}

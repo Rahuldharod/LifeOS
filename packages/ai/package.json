@@ -1,0 +1,1 @@
+{"name":"@lifeos/ai","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lifeos/application":"workspace:*"}}
