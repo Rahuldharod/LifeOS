@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import "./styles.css";
+import { noteDraftBase, noteSaveRequest, openNoteDraft, reconcileNoteDraft, type NoteDraftBase } from "./noteDraft.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -57,8 +58,8 @@ function readCachedDraft(note: LifeObject) {
   } catch { return undefined; }
 }
 
-function cacheDraft(note: LifeObject, body: string) {
-  try { localStorage.setItem(draftKey(note.frontmatter.id), JSON.stringify({ body, baseHash: note.contentHash, cachedAt: new Date().toISOString() } satisfies CachedDraft)); }
+function cacheDraft(id: string, body: string, baseHash: string) {
+  try { localStorage.setItem(draftKey(id), JSON.stringify({ body, baseHash, cachedAt: new Date().toISOString() } satisfies CachedDraft)); }
   catch { /* Markdown autosave remains available if browser storage is full or disabled. */ }
 }
 
@@ -241,6 +242,7 @@ function App() {
   const [notes, setNotes] = useState<LifeObject[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   const [notesDraft, setNotesDraft] = useState("");
+  const [notesBase, setNotesBase] = useState<NoteDraftBase>();
   const [notesMode, setNotesMode] = useState<"visual" | "write" | "preview">("visual");
   const [capture, setCapture] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
@@ -324,38 +326,51 @@ function App() {
     if (selectedNoteId || !rememberedNoteId.current) return;
     const remembered = notes.find((note) => note.frontmatter.id === rememberedNoteId.current);
     if (!remembered) return;
-    const cached = readCachedDraft(remembered);
+    const opened = openNoteDraft(remembered, readCachedDraft(remembered));
     restoredNoteId.current = remembered.frontmatter.id;
-    setNotesDraft(cached?.body ?? remembered.body);
+    setNotesBase(opened.base); setNotesDraft(opened.draft);
     setSelectedNoteId(remembered.frontmatter.id);
-    if (cached?.baseHash !== undefined && cached.baseHash !== remembered.contentHash) setConflict(true);
+    if (opened.conflict) setConflict(true);
   }, [notes, selectedNoteId]);
 
   useEffect(() => {
     if (!selectedNote || restoredNoteId.current === selectedNote.frontmatter.id) return;
     restoredNoteId.current = selectedNote.frontmatter.id;
-    const cached = readCachedDraft(selectedNote);
-    setNotesDraft(cached?.body ?? selectedNote.body);
-    if (cached?.baseHash !== undefined && cached.baseHash !== selectedNote.contentHash) {
+    const opened = openNoteDraft(selectedNote, readCachedDraft(selectedNote));
+    setNotesBase(opened.base); setNotesDraft(opened.draft);
+    if (opened.conflict) {
       setConflict(true);
       setMessage("Recovered a browser draft, but the Markdown file also changed. Review before saving.");
     }
   }, [selectedNote]);
 
+  // A refreshed list may carry an external edit: adopt it if the draft is untouched, otherwise stop autosave.
+  useEffect(() => {
+    if (!selectedNote || !notesBase || notesAutoSaving) return;
+    const result = reconcileNoteDraft(notesBase, notesDraft, selectedNote);
+    if (result.kind === "resync") { setNotesBase(result.base); setNotesDraft(result.draft); }
+    if (result.kind === "conflict" && !conflict) {
+      setConflict(true);
+      setMessage("This note changed on disk while you were editing. Autosave paused; your draft is kept in the browser.");
+    }
+  }, [selectedNote?.contentHash, notesBase?.hash, notesAutoSaving]);
+
   useEffect(() => {
     if (!selectedNote || restoredNoteId.current !== selectedNote.frontmatter.id) return;
     if (!notesDirty) { clearCachedDraft(selectedNote.frontmatter.id); return; }
-    cacheDraft(selectedNote, notesDraft);
+    if (!notesBase || notesBase.noteId !== selectedNote.frontmatter.id) return;
+    cacheDraft(notesBase.noteId, notesDraft, notesBase.hash);
     if (readOnly || busy || conflict || notesAutoSaving) return;
-    const noteId = selectedNote.frontmatter.id;
-    const expectedHash = selectedNote.contentHash;
-    const bodyToSave = notesDraft;
+    const noteId = notesBase.noteId;
+    const request = noteSaveRequest(notesBase, notesDraft);
+    const bodyToSave = request.body;
     const timer = window.setTimeout(() => {
       setNotesAutoSaving(true);
-      void api<LifeObject>(`/api/v1/objects/${noteId}/body`, { method: "PUT", body: JSON.stringify({ body: bodyToSave, expectedHash }) })
+      void api<LifeObject>(`/api/v1/objects/${noteId}/body`, { method: "PUT", body: JSON.stringify(request) })
         .then((updated) => {
           setNotes((current) => current.map((note) => note.frontmatter.id === noteId ? updated : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at)));
-          if (activeNotesDraft.current === bodyToSave) clearCachedDraft(noteId); else cacheDraft(updated, activeNotesDraft.current);
+          setNotesBase((current?: NoteDraftBase) => current?.noteId === noteId ? noteDraftBase(updated) : current);
+          if (activeNotesDraft.current === bodyToSave) clearCachedDraft(noteId); else cacheDraft(noteId, activeNotesDraft.current, updated.contentHash);
           setMessage("Note autosaved to Markdown");
         })
         .catch((error) => {
@@ -365,13 +380,13 @@ function App() {
         .finally(() => setNotesAutoSaving(false));
     }, 1800);
     return () => window.clearTimeout(timer);
-  }, [selectedNoteId, notesDraft, selectedNote?.contentHash, notesDirty, readOnly, busy, conflict, notesAutoSaving]);
+  }, [selectedNoteId, notesDraft, selectedNote?.contentHash, notesBase, notesDirty, readOnly, busy, conflict, notesAutoSaving]);
 
   useEffect(() => {
     const note = workspace?.note;
     if (!note) return;
     if (!dirty) { clearCachedDraft(note.frontmatter.id); return; }
-    cacheDraft(note, draft);
+    cacheDraft(note.frontmatter.id, draft, note.contentHash);
     if (readOnly || busy || conflict || meetingAutoSaving) return;
     const noteId = note.frontmatter.id;
     const expectedHash = note.contentHash;
@@ -381,7 +396,7 @@ function App() {
       void api<LifeObject>(`/api/v1/objects/${noteId}/body`, { method: "PUT", body: JSON.stringify({ body: bodyToSave, expectedHash }) })
         .then((updated) => {
           setWorkspace((current) => current?.note?.frontmatter.id === noteId ? { ...current, note: updated } : current);
-          if (activeMeetingDraft.current === bodyToSave) clearCachedDraft(noteId); else cacheDraft(updated, activeMeetingDraft.current);
+          if (activeMeetingDraft.current === bodyToSave) clearCachedDraft(noteId); else cacheDraft(noteId, activeMeetingDraft.current, updated.contentHash);
           setMessage("Meeting note autosaved to Markdown");
         })
         .catch((error) => {
@@ -590,18 +605,18 @@ function App() {
   }
 
   function openNote(note: LifeObject) {
-    const cached = readCachedDraft(note);
+    const opened = openNoteDraft(note, readCachedDraft(note));
     restoredNoteId.current = note.frontmatter.id;
-    setSelectedNoteId(note.frontmatter.id); setNotesDraft(cached?.body ?? note.body); setNotesMode("visual");
+    setSelectedNoteId(note.frontmatter.id); setNotesBase(opened.base); setNotesDraft(opened.draft); setNotesMode("visual");
     localStorage.setItem("lifeos.activeNoteId", note.frontmatter.id);
-    setConflict(Boolean(cached && cached.baseHash !== note.contentHash));
+    setConflict(opened.conflict);
   }
 
   const saveSelectedNote = () => run(async () => {
-    if (!selectedNote) return;
-    const updated = await api<LifeObject>(`/api/v1/objects/${selectedNote.frontmatter.id}/body`, { method: "PUT", body: JSON.stringify({ body: notesDraft, expectedHash: selectedNote.contentHash }) });
+    if (!selectedNote || notesBase?.noteId !== selectedNote.frontmatter.id) return;
+    const updated = await api<LifeObject>(`/api/v1/objects/${selectedNote.frontmatter.id}/body`, { method: "PUT", body: JSON.stringify(noteSaveRequest(notesBase, notesDraft)) });
     setNotes((current) => current.map((note) => note.frontmatter.id === updated.frontmatter.id ? updated : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at)));
-    setNotesDraft(updated.body);
+    setNotesBase(noteDraftBase(updated)); setNotesDraft(updated.body);
     clearCachedDraft(updated.frontmatter.id);
     await loadCollections();
   }, "Note saved to Markdown");
@@ -658,7 +673,7 @@ function App() {
     const refreshed = await api<LifeObject[]>("/api/v1/notes");
     setNotes(refreshed);
     const note = refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
-    if (note) setNotesDraft(note.body);
+    if (note) { setNotesBase(noteDraftBase(note)); setNotesDraft(note.body); clearCachedDraft(note.frontmatter.id); }
     setConflict(false); setMessage("Reloaded the latest Markdown from disk");
   }
 
