@@ -256,3 +256,46 @@ describe("Keep browser version / Keep disk version (PB-002 conflict panel)", () 
     expect(isConflictedDraft(undefined, latest)).toBe(false); // cache cleared after adopting disk
   });
 });
+
+// undoKeepDiskVersion() (useNoteDraftController.ts) stashes the just-discarded draft as
+// { body, baseHash: <hash of the disk version that was kept>, noteId } and, to restore it, calls
+// openNoteDraft(latestRefetch, { body, baseHash }) — the same base-hash comparison openNoteDraft
+// already does for a recovered browser draft. These tests exercise that reused seam directly.
+describe("Undo \"Keep disk version\" (PB-016)", () => {
+  it("restores the discarded draft when the disk file hasn't moved on since the discard", async () => {
+    const { application, file, openNote } = await workspaceWithNote();
+    await editExternally(file); // the edit that originally caused the conflict
+    await application.rebuildIndex();
+    const keptDiskVersion = openNote(); // what "Keep disk version" adopted, and stashed the hash of
+
+    const stashed = { body: "Discarded browser edit\n", baseHash: keptDiskVersion.contentHash, noteId: noteId };
+
+    // Undo re-fetches the latest note (unchanged here) and reopens the draft against the stash.
+    const latestOnUndo = openNote();
+    const restored = openNoteDraft(latestOnUndo, { body: stashed.body, baseHash: stashed.baseHash });
+
+    expect(restored.conflict).toBe(false);
+    expect(restored.draft).toBe(stashed.body);
+    expect(restored.base.hash).toBe(latestOnUndo.contentHash);
+  });
+
+  it("reopens the conflict panel instead of restoring blind when disk changed again before undo", async () => {
+    const { application, file, openNote } = await workspaceWithNote();
+    await editExternally(file); // first external edit, the one "Keep disk version" resolved
+    await application.rebuildIndex();
+    const keptDiskVersion = openNote();
+    const stashed = { body: "Discarded browser edit\n", baseHash: keptDiskVersion.contentHash, noteId: noteId };
+
+    // A second external edit lands after the discard but before undo is used.
+    await writeFile(file, `${await readFile(file, "utf8")}\nA second, later external edit\n`, "utf8");
+    await application.rebuildIndex();
+    const latestOnUndo = openNote();
+    expect(latestOnUndo.contentHash).not.toBe(stashed.baseHash);
+
+    const restored = openNoteDraft(latestOnUndo, { body: stashed.body, baseHash: stashed.baseHash });
+
+    expect(restored.conflict).toBe(true);
+    expect(restored.draft).toBe(stashed.body); // the discarded draft is offered back, not silently lost
+    expect(restored.base).toEqual({ noteId, hash: stashed.baseHash }); // still pinned to the stale stash, not the new disk hash
+  });
+});
