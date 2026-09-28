@@ -83,3 +83,17 @@ Do not create feature-by-feature documentation pages or duplicate implementation
 - Typecheck and relevant integration tests pass.
 - The production build passes when runtime code changed.
 - No real data, generated backups, or secrets appear in the Git diff.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `Rahuldharod/LifeOS`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` glossary plus ADRs in `docs/decisions/`. See `docs/agents/domain.md`.
