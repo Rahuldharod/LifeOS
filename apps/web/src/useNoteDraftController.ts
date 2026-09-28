@@ -33,6 +33,17 @@ export type NoteDraftController = {
   saveNow: () => Promise<boolean>;
   keepDiskVersion: () => Promise<void>;
   keepBrowserVersion: () => Promise<void>;
+  /** True for a single, short-lived window right after "Keep disk version": the just-discarded
+   * browser draft can still be brought back with `undoKeepDiskVersion`. Cleared by any other
+   * draft-affecting action (typing, saving, opening a different note, `keepBrowserVersion`, or a
+   * later `keepDiskVersion`) — this is a one-shot offer, not a history browser. */
+  undoAvailable: boolean;
+  /** Restores the draft discarded by the most recent "Keep disk version", if the offer is still
+   * live. Re-checks the note's current disk hash against the hash that draft was discarded in
+   * favour of: if disk hasn't moved on, the draft comes back directly; if it has (another external
+   * edit landed after the discard), this reopens the conflict panel against the newer disk copy
+   * instead of silently overwriting it. No-op if `undoAvailable` is false. */
+  undoKeepDiskVersion: () => Promise<void>;
 };
 
 export type NoteDraftControllerOptions = {
@@ -49,25 +60,33 @@ export type NoteDraftControllerOptions = {
 };
 
 export function useNoteDraftController({ note, readOnly, busy, onMessage, onSaved, fetchLatest, autosaveDelayMs = 1800 }: NoteDraftControllerOptions): NoteDraftController {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraftState] = useState("");
   const [base, setBase] = useState<NoteDraftBase>();
   const [conflict, setConflict] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
+  const [undoable, setUndoable] = useState<{ body: string; baseHash: string; noteId: string } | undefined>(undefined);
   const activeDraft = useRef("");
   const restoredId = useRef<string | undefined>(undefined);
 
   useEffect(() => { activeDraft.current = draft; }, [draft]);
 
+  /** Typing is a draft-affecting action: it always retires a pending "Keep disk version" undo
+   * offer, same as saving or opening a different note. */
+  function setDraft(value: string) {
+    setUndoable(undefined);
+    setDraftState(value);
+  }
+
   function open(target: DraftControllerNote, cached?: CachedDraft) {
     const opened = openNoteDraft(target, cached);
     restoredId.current = target.frontmatter.id;
-    setBase(opened.base); setDraft(opened.draft); setConflict(opened.conflict);
+    setBase(opened.base); setDraftState(opened.draft); setConflict(opened.conflict); setUndoable(undefined);
     return { conflict: opened.conflict };
   }
 
   function reset() {
     restoredId.current = undefined;
-    setBase(undefined); setDraft(""); setConflict(false);
+    setBase(undefined); setDraftState(""); setConflict(false); setUndoable(undefined);
   }
 
   /** Shared by the debounced autosave effect and `saveNow`: PUT the draft pinned to `saveBase`,
@@ -75,6 +94,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
    * returns whether the save actually landed, so a caller doesn't have to read back potentially
    * stale state to find out. */
   async function performSave(saveBase: NoteDraftBase, bodyToSave: string): Promise<boolean> {
+    setUndoable(undefined);
     setAutoSaving(true);
     try {
       const updated = await api<DraftControllerNote>(`/api/v1/objects/${saveBase.noteId}/body`, { method: "PUT", body: JSON.stringify(noteSaveRequest(saveBase, bodyToSave)) });
@@ -128,17 +148,50 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
 
   /** "Keep disk version": discard the browser draft and adopt the current Markdown file. Always
    * clears the conflict flag, even if the note is gone — otherwise a deleted-elsewhere note would
-   * leave the panel stuck open with no way to dismiss it. */
+   * leave the panel stuck open with no way to dismiss it. Guards against the controller having
+   * moved on to a different note while `fetchLatest` was in flight (e.g. the user clicked another
+   * note before this resolved) — without this, a slow `keepDiskVersion` for note A could land after
+   * note B was opened and clobber B's freshly-opened draft with A's disk content. */
   async function keepDiskVersion() {
+    const discardedDraft = draft;
+    const openedNoteId = restoredId.current;
     const latest = await fetchLatest();
+    if (restoredId.current !== openedNoteId) return;
     if (!latest) {
       reset();
       onMessage("This note no longer exists on disk.");
       return;
     }
-    setBase(noteDraftBase(latest)); setDraft(latest.body); setConflict(false);
+    setBase(noteDraftBase(latest)); setDraftState(latest.body); setConflict(false);
     clearCachedDraft(latest.frontmatter.id);
+    // Stash the discarded draft against the hash of the disk version just kept (not the stale
+    // pre-conflict base hash) so `undoKeepDiskVersion` can tell whether disk has moved on again
+    // by the time undo is used.
+    setUndoable({ body: discardedDraft, baseHash: latest.contentHash, noteId: latest.frontmatter.id });
     onMessage("Kept the disk version; your browser draft was discarded");
+  }
+
+  /** Restores the draft discarded by the most recent `keepDiskVersion`, reusing the same
+   * base-hash comparison `open()`/`openNoteDraft` already do for a recovered browser draft:
+   * unchanged disk restores directly, a disk change since the discard reopens the conflict panel
+   * instead of overwriting it blind. One-shot — always clears the offer first. Same in-flight guard
+   * as `keepDiskVersion`: if the controller moved on to a different note while `fetchLatest` was
+   * pending, this bails out rather than clobbering that note's state. */
+  async function undoKeepDiskVersion() {
+    if (!undoable) return;
+    const stashed = undoable;
+    setUndoable(undefined);
+    const latest = await fetchLatest();
+    if (restoredId.current !== stashed.noteId) return;
+    if (!latest || latest.frontmatter.id !== stashed.noteId) {
+      onMessage("This note is no longer available to restore.");
+      return;
+    }
+    const restored = openNoteDraft(latest, { body: stashed.body, baseHash: stashed.baseHash });
+    setBase(restored.base); setDraftState(restored.draft); setConflict(restored.conflict);
+    onMessage(restored.conflict
+      ? "This note changed again after you kept the disk version. Compare before choosing."
+      : "Restored your browser draft");
   }
 
   /**
@@ -150,6 +203,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
    */
   async function keepBrowserVersion() {
     if (busy || readOnly) return;
+    setUndoable(undefined);
     const bodyToSave = draft;
     try {
       const latest = await fetchLatest();
@@ -157,7 +211,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
       const rebased = noteSaveRequest(noteDraftBase(latest), bodyToSave);
       const updated = await api<DraftControllerNote>(`/api/v1/objects/${latest.frontmatter.id}/body`, { method: "PUT", body: JSON.stringify(rebased) });
       onSaved(updated);
-      setBase(noteDraftBase(updated)); setDraft(updated.body); setConflict(false);
+      setBase(noteDraftBase(updated)); setDraftState(updated.body); setConflict(false);
       clearCachedDraft(updated.frontmatter.id);
       onMessage("Kept the browser version; the previous disk version is in its history");
     } catch (error) {
@@ -172,5 +226,5 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
 
   const dirty = Boolean(note && draft !== note.body);
 
-  return { draft, setDraft, base, conflict, autoSaving, dirty, open, reset, saveNow, keepDiskVersion, keepBrowserVersion };
+  return { draft, setDraft, base, conflict, autoSaving, dirty, open, reset, saveNow, keepDiskVersion, keepBrowserVersion, undoAvailable: undoable !== undefined, undoKeepDiskVersion };
 }
