@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -243,6 +243,26 @@ function App() {
   const conflictedNoteIds = new Set(notes.filter((note) => isConflictedDraft(readCachedDraft(note), note)).map((note) => note.frontmatter.id));
   const readOnly = health?.session.writeAllowed === false;
 
+  // Shared by notesController's `fetchLatest` option and the tab-refocus listener below: a "soft"
+  // refetch that only updates the notes list state, letting useNoteDraftController's own reconcile
+  // effect (watching note?.contentHash) decide whether to resync silently or flag a conflict.
+  // Deliberately does NOT call notesController.open() — that would hard-reset the draft and skip
+  // conflict detection entirely.
+  const fetchLatestNote = useCallback(async () => {
+    const refreshed = await api<LifeObject[]>("/api/v1/notes");
+    setNotes(refreshed);
+    return refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
+  }, [selectedNoteId]);
+
+  // Same "soft" refetch shape as fetchLatestNote, for the Calendar meeting workspace. No-ops when
+  // no workspace is open. Deliberately does NOT call meetingController.open() for the same reason.
+  const fetchLatestWorkspace = useCallback(async () => {
+    if (!workspace) return undefined;
+    const next = await api<Workspace>(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/workspace`);
+    setWorkspace(next);
+    return next.note;
+  }, [workspace]);
+
   // One shared draft/conflict controller per editor (Notes, Calendar meeting workspace) — see
   // useNoteDraftController.ts. Each owns its own draft, base hash and conflict state, so switching
   // views can never leak one editor's conflict flag into the other.
@@ -252,11 +272,7 @@ function App() {
     busy,
     onMessage: setMessage,
     onSaved: (updated) => setNotes((current) => current.map((note) => note.frontmatter.id === updated.frontmatter.id ? updated as LifeObject : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at))),
-    fetchLatest: async () => {
-      const refreshed = await api<LifeObject[]>("/api/v1/notes");
-      setNotes(refreshed);
-      return refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
-    }
+    fetchLatest: fetchLatestNote
   });
   const meetingController = useNoteDraftController({
     note: workspace?.note,
@@ -264,12 +280,7 @@ function App() {
     busy,
     onMessage: setMessage,
     onSaved: (updated) => setWorkspace((current) => current?.note?.frontmatter.id === updated.frontmatter.id ? { ...current, note: updated as LifeObject } : current),
-    fetchLatest: async () => {
-      if (!workspace) return undefined;
-      const next = await api<Workspace>(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/workspace`);
-      setWorkspace(next);
-      return next.note;
-    }
+    fetchLatest: fetchLatestWorkspace
   });
 
   const loadCollections = async () => {
@@ -313,6 +324,43 @@ function App() {
   }, [selectedDate, displayTimeZone]);
 
   useEffect(() => { localStorage.setItem("lifeos.activeView", view); }, [view]);
+
+  // Re-fetch whichever note/workspace is currently open as soon as the tab regains focus, so an
+  // external edit (another device, an agent, Git) is discovered immediately rather than only on
+  // the next unrelated list refresh. Both fetches are the same "soft" kind used above — they only
+  // update state, so useNoteDraftController's own reconcile effect on note?.contentHash decides
+  // whether to resync silently or open the conflict panel. Independent of `view`: a draft stays
+  // open (and its autosave keeps running) even after switching away from its editor.
+  //
+  // The handler reads these through refs (same pattern as activeDraft in useNoteDraftController.ts
+  // and rememberedNoteId above) rather than depending on them directly: `workspace` gets a new
+  // object identity on every autosave, and depending on it here would tear down and re-add the
+  // document listener on that same ~1.8s cadence instead of only when a note/workspace opens or
+  // closes.
+  const selectedNoteIdRef = useRef(selectedNoteId);
+  useEffect(() => { selectedNoteIdRef.current = selectedNoteId; }, [selectedNoteId]);
+  const workspaceRef = useRef(workspace);
+  useEffect(() => { workspaceRef.current = workspace; }, [workspace]);
+  const fetchLatestNoteRef = useRef(fetchLatestNote);
+  useEffect(() => { fetchLatestNoteRef.current = fetchLatestNote; }, [fetchLatestNote]);
+  const fetchLatestWorkspaceRef = useRef(fetchLatestWorkspace);
+  useEffect(() => { fetchLatestWorkspaceRef.current = fetchLatestWorkspace; }, [fetchLatestWorkspace]);
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      const refetches: Promise<unknown>[] = [];
+      if (selectedNoteIdRef.current) refetches.push(fetchLatestNoteRef.current());
+      if (workspaceRef.current) refetches.push(fetchLatestWorkspaceRef.current());
+      if (refetches.length === 0) return;
+      void Promise.allSettled(refetches).then((results) => {
+        const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+        if (failure) setMessage(failure.reason instanceof Error ? failure.reason.message : "Could not refresh after returning to the tab");
+      });
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   // Resume the last-open note on load. Every other path that switches notes (openNote, and the
   // reconcile/autosave effects inside useNoteDraftController) opens its draft explicitly too, so

@@ -144,6 +144,61 @@ describe("Meeting workspace draft conflict (PB-002 unification — same guarante
   });
 });
 
+describe("Tab refocus reconciliation (PB-015)", () => {
+  // These exercise the same `reconcileNoteDraft` path the tab-refocus listener feeds into once it
+  // refetches the currently open note — no real `document.visibilitychange` event is needed, since
+  // the listener's only job is to fetch the freshest note/workspace and hand it to this existing
+  // reconcile logic (see useNoteDraftController.ts's effect watching `note?.contentHash`).
+
+  it("Notes view: an untouched draft resyncs silently once the refetched note reveals an external edit", async () => {
+    const { application, file, openNote } = await workspaceWithNote();
+    const opened = openNoteDraft(openNote());
+
+    await editExternally(file); // simulates a change made while the tab was unfocused
+    await application.rebuildIndex();
+    const refetched = openNote(); // stands in for the refocus listener's refetch of the open note
+
+    const result = reconcileNoteDraft(opened.base, opened.draft, refetched);
+    expect(result).toMatchObject({ kind: "resync", draft: "Agent edit\n", base: { hash: refetched.contentHash } });
+  });
+
+  it("Notes view: an edited draft opens the conflict panel once the refetched note reveals an external edit", async () => {
+    const { application, file, openNote } = await workspaceWithNote();
+    const opened = openNoteDraft(openNote());
+    const draft = `${opened.draft}Browser edit\n`; // the user typed something before refocus
+
+    await editExternally(file);
+    await application.rebuildIndex();
+    const refetched = openNote();
+
+    expect(reconcileNoteDraft(opened.base, draft, refetched)).toEqual({ kind: "conflict" });
+  });
+
+  it("Meeting workspace: an untouched draft resyncs silently once the refetched workspace note reveals an external edit", async () => {
+    const { application, file, openNote } = await workspaceWithMeetingNote();
+    const opened = openNoteDraft(await openNote());
+
+    await editExternally(file);
+    await application.rebuildIndex();
+    const refetched = await openNote();
+
+    const result = reconcileNoteDraft(opened.base, opened.draft, refetched);
+    expect(result).toMatchObject({ kind: "resync", draft: "Agent edit\n", base: { hash: refetched.contentHash } });
+  });
+
+  it("Meeting workspace: an edited draft opens the conflict panel once the refetched workspace note reveals an external edit", async () => {
+    const { application, file, openNote } = await workspaceWithMeetingNote();
+    const opened = openNoteDraft(await openNote());
+    const draft = `${opened.draft}Browser edit\n`;
+
+    await editExternally(file);
+    await application.rebuildIndex();
+    const refetched = await openNote();
+
+    expect(reconcileNoteDraft(opened.base, draft, refetched)).toEqual({ kind: "conflict" });
+  });
+});
+
 describe("Keep browser version / Keep disk version (PB-002 conflict panel)", () => {
   it("Keep browser version rebases onto the latest disk copy and preserves the overwritten version in history", async () => {
     const { application, file, openNote } = await workspaceWithNote();
