@@ -5,7 +5,8 @@ import remarkGfm from "remark-gfm";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import "./styles.css";
-import { noteDraftBase, noteSaveRequest, openNoteDraft, reconcileNoteDraft, type NoteDraftBase } from "./noteDraft.js";
+import { isConflictedDraft, noteDraftBase, noteSaveRequest, openNoteDraft, reconcileNoteDraft, type NoteDraftBase } from "./noteDraft.js";
+import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -275,6 +276,9 @@ function App() {
   const dirty = Boolean(workspace?.note && draft !== workspace.note.body);
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
   const notesDirty = Boolean(selectedNote && notesDraft !== selectedNote.body);
+  // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
+  // base hash no longer matches the file on disk, whether or not it's the one currently open.
+  const conflictedNoteIds = new Set(notes.filter((note) => isConflictedDraft(readCachedDraft(note), note)).map((note) => note.frontmatter.id));
   const readOnly = health?.session.writeAllowed === false;
 
   const loadCollections = async () => {
@@ -668,13 +672,46 @@ function App() {
     finally { setBusy(false); }
   }
 
-  async function reloadSelectedNote() {
+  /** "Keep disk version": discard the browser draft and adopt the current Markdown file. */
+  async function keepDiskVersion() {
     if (!selectedNoteId) return;
     const refreshed = await api<LifeObject[]>("/api/v1/notes");
     setNotes(refreshed);
     const note = refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
     if (note) { setNotesBase(noteDraftBase(note)); setNotesDraft(note.body); clearCachedDraft(note.frontmatter.id); }
-    setConflict(false); setMessage("Reloaded the latest Markdown from disk");
+    setConflict(false); setMessage("Kept the disk version; your browser draft was discarded");
+  }
+
+  /**
+   * "Keep browser version": save the draft over whatever is currently on disk, rather than the
+   * (now stale) hash the draft was opened with. Refetches immediately before saving, since
+   * `selectedNote` may be a little behind if the file changed again after the conflict first
+   * appeared — the previous disk content isn't lost either way: the object store snapshots it to
+   * `.lifeos/versions/` before this overwrite.
+   */
+  async function keepBrowserVersion() {
+    if (!selectedNoteId || busy || readOnly) return;
+    setBusy(true);
+    try {
+      const refreshed = await api<LifeObject[]>("/api/v1/notes");
+      const note = refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
+      if (!note) { setNotes(refreshed); setMessage("This note no longer exists on disk."); return; }
+      const base = noteDraftBase(note);
+      const bodyToSave = notesDraft;
+      const updated = await api<LifeObject>(`/api/v1/objects/${selectedNoteId}/body`, { method: "PUT", body: JSON.stringify(noteSaveRequest(base, bodyToSave)) });
+      setNotes(refreshed.map((candidate) => candidate.frontmatter.id === updated.frontmatter.id ? updated : candidate).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at)));
+      setNotesBase(noteDraftBase(updated)); setNotesDraft(updated.body);
+      clearCachedDraft(updated.frontmatter.id);
+      setConflict(false); setMessage("Kept the browser version; the previous disk version is in its history");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        const refreshed = await api<LifeObject[]>("/api/v1/notes");
+        setNotes(refreshed);
+        setMessage("This note changed again while saving. Compare once more, then choose.");
+      } else {
+        setMessage(error instanceof Error ? error.message : "Could not save the browser version");
+      }
+    } finally { setBusy(false); }
   }
 
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
@@ -693,7 +730,7 @@ function App() {
       <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? "Read-only · another device active" : message}</p>
     </aside>
 
-    <section>
+    <section className={view === "Notes" && conflict ? "notes-comparing" : undefined}>
       {view === "Today" && <>
         <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
         <div className="summary">
@@ -811,11 +848,12 @@ function App() {
             <div className="notes-list-heading"><span>LATEST NOTES</span><small>{notes.length} total</small></div>
             {!notes.length && <p className="muted">No notes have been created yet.</p>}
             {notes.map((note) => <button className={note.frontmatter.id === selectedNoteId ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => openNote(note)}>
-              <b>{note.frontmatter.title}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {formatDate(note.frontmatter.updated_at)}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
+              <b>{note.frontmatter.title}{conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {formatDate(note.frontmatter.updated_at)}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
             </button>)}
           </article>
           <div className="notes-main">
-            {!selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <article className="editor-card">
+            {selectedNote && conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesDraft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={keepBrowserVersion} onKeepDiskVersion={keepDiskVersion} /> :
+            !selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <article className="editor-card">
               <div className="editor-heading"><div><span>{selectedNote.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedNote.frontmatter.title}</h3></div><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div></div>
               {notesMode === "write" ? <>
                 <div className="toolbar">
@@ -830,7 +868,6 @@ function App() {
                 <textarea ref={notesEditor} disabled={busy || readOnly} value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
               </> : notesMode === "visual" ? <VisualMarkdownEditor note={selectedNote} markdown={notesDraft} readOnly={busy || readOnly} onChange={setNotesDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesDraft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
               <div className="editor-footer"><div className="save-state"><i className={notesDirty ? "dirty" : "saved"} />{notesDirty ? notesAutoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}</div><div className="actions"><button className="primary" disabled={busy || readOnly || !notesDirty} onClick={saveSelectedNote}>Save now</button></div></div>
-              {conflict && <div className="conflict"><b>This note changed on disk.</b><span>Your draft was not overwritten.</span><button onClick={reloadSelectedNote}>Reload disk version</button></div>}
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </article>}
           </div>
