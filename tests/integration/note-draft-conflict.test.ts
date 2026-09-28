@@ -76,6 +76,74 @@ describe("Notes draft autosave after an external edit", () => {
   });
 });
 
+const meetingId = "01995d4e-a934-70e5-a5a6-85e31541a91f";
+
+async function workspaceWithMeetingNote() {
+  const root = await mkdtemp(path.join(tmpdir(), "lifeos-meeting-draft-"));
+  roots.push(root);
+  const store = new MarkdownObjectStore(root);
+  const now = "2026-09-20T08:00:00Z";
+  await store.write({ relativePath: "meetings/meeting.md", frontmatter: { id: meetingId, type: "meeting", schema_version: 1, revision: 1, title: "Meeting", created_at: now, updated_at: now, updated_by_device: "test", status: "scheduled", starts_at: now, ends_at: "2026-09-20T09:00:00Z", timezone: "UTC", attendee_ids: [] }, body: "" });
+  await store.write({ relativePath: "meetings/note.md", frontmatter: { schema_version: 1, revision: 1, id: noteId, type: "meeting-note", title: "Note", created_at: now, updated_at: now, updated_by_device: "test", meeting_id: meetingId }, body: "Original body\n" });
+  const application = new LifeOSApplication(store, new MemoryIndex());
+  await application.rebuildIndex();
+  const openNote = () => application.meetingWorkspace(meetingId).then((workspace) => workspace.note!);
+  return { application, file: path.join(root, "meetings/note.md"), openNote };
+}
+
+describe("Meeting workspace draft conflict (PB-002 unification — same guarantees through meetingWorkspace(), not just notes())", () => {
+  it("raises a conflict instead of overwriting the file when the workspace was refreshed", async () => {
+    const { application, file, openNote } = await workspaceWithMeetingNote();
+    const opened = openNoteDraft(await openNote());
+    const draft = `${opened.draft}Browser edit\n`;
+
+    await editExternally(file);
+    await application.rebuildIndex();
+    const refreshed = await openNote();
+    expect(refreshed.contentHash).not.toBe(opened.base.hash);
+    expect(reconcileNoteDraft(opened.base, draft, refreshed)).toEqual({ kind: "conflict" });
+
+    const request = noteSaveRequest(opened.base, draft);
+    await expect(application.updateBody(noteId, request.body, request.expectedHash)).rejects.toMatchObject({ name: "ObjectConflictError" });
+    expect(await readFile(file, "utf8")).toContain("Agent edit");
+  });
+
+  it("adopts the external version when the draft has no local edits", async () => {
+    const { application, file, openNote } = await workspaceWithMeetingNote();
+    const opened = openNoteDraft(await openNote());
+
+    await editExternally(file);
+    await application.rebuildIndex();
+    const result = reconcileNoteDraft(opened.base, opened.draft, await openNote());
+    expect(result).toMatchObject({ kind: "resync", draft: "Agent edit\n" });
+  });
+
+  it("Keep browser version rebases onto the workspace's latest disk copy", async () => {
+    const { application, file, openNote } = await workspaceWithMeetingNote();
+    const opened = openNoteDraft(await openNote());
+    const draft = `${opened.draft}Browser edit\n`;
+
+    await editExternally(file); // simulates an Agent writing the note directly while a draft is open
+    await application.rebuildIndex();
+    const latest = await openNote(); // stands in for the app's meetingWorkspace() refetch immediately before saving
+
+    const base = noteDraftBase(latest);
+    const updated = await application.updateBody(noteId, draft, noteSaveRequest(base, draft).expectedHash);
+    expect(updated.body).toBe(draft);
+    expect((await application.meetingWorkspace(meetingId)).note?.body).toBe(draft);
+  });
+
+  it("Keep disk version adopts the workspace's current note and clears the conflict", async () => {
+    const { application, file, openNote } = await workspaceWithMeetingNote();
+    await editExternally(file);
+    await application.rebuildIndex();
+    const latest = await openNote();
+
+    expect(isConflictedDraft({ body: "Cached browser draft\n", baseHash: "stale-hash" }, latest)).toBe(true);
+    expect(isConflictedDraft(undefined, latest)).toBe(false); // cache cleared after adopting disk
+  });
+});
+
 describe("Keep browser version / Keep disk version (PB-002 conflict panel)", () => {
   it("Keep browser version rebases onto the latest disk copy and preserves the overwritten version in history", async () => {
     const { application, file, openNote } = await workspaceWithNote();

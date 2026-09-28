@@ -5,8 +5,11 @@ import remarkGfm from "remark-gfm";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import "./styles.css";
-import { isConflictedDraft, noteDraftBase, noteSaveRequest, openNoteDraft, reconcileNoteDraft, type NoteDraftBase } from "./noteDraft.js";
+import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
+import { api } from "./api.js";
+import { readCachedDraft } from "./draftStorage.js";
+import { useNoteDraftController } from "./useNoteDraftController.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -47,38 +50,8 @@ type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
 type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
-type CachedDraft = { body: string; baseHash: string; cachedAt: string };
 
 const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
-const draftKey = (id: string) => `lifeos.draft.${id}`;
-
-function readCachedDraft(note: LifeObject) {
-  try {
-    const cached = JSON.parse(localStorage.getItem(draftKey(note.frontmatter.id)) ?? "null") as CachedDraft | null;
-    return cached && typeof cached.body === "string" && cached.body !== note.body ? cached : undefined;
-  } catch { return undefined; }
-}
-
-function cacheDraft(id: string, body: string, baseHash: string) {
-  try { localStorage.setItem(draftKey(id), JSON.stringify({ body, baseHash, cachedAt: new Date().toISOString() } satisfies CachedDraft)); }
-  catch { /* Markdown autosave remains available if browser storage is full or disabled. */ }
-}
-
-function clearCachedDraft(id: string) {
-  try { localStorage.removeItem(draftKey(id)); } catch { /* ignored */ }
-}
-
-class ApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
-}
-
-async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const headers = options?.body ? { "content-type": "application/json" } : undefined;
-  const response = await fetch(url, { ...options, headers });
-  const payload = await response.json();
-  if (!response.ok) throw new ApiError(payload.error ?? `Request failed: ${response.status}`, response.status);
-  return payload as T;
-}
 
 function formatDate(value: unknown) {
   if (typeof value !== "string") return "—";
@@ -242,8 +215,6 @@ function App() {
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
   const [notes, setNotes] = useState<LifeObject[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
-  const [notesDraft, setNotesDraft] = useState("");
-  const [notesBase, setNotesBase] = useState<NoteDraftBase>();
   const [notesMode, setNotesMode] = useState<"visual" | "write" | "preview">("visual");
   const [capture, setCapture] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
@@ -258,28 +229,48 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone));
   const [calendarFilter, setCalendarFilter] = useState("all");
   const [calendarSources, setCalendarSources] = useState<Record<string, { name: string; color?: string }>>({});
-  const [draft, setDraft] = useState("");
   const [editorMode, setEditorMode] = useState<"visual" | "write" | "preview">("visual");
   const [busy, setBusy] = useState(false);
-  const [notesAutoSaving, setNotesAutoSaving] = useState(false);
-  const [meetingAutoSaving, setMeetingAutoSaving] = useState(false);
-  const [conflict, setConflict] = useState(false);
   const [message, setMessage] = useState("Loading local workspace…");
   const editor = useRef<HTMLTextAreaElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
   const notesImageInput = useRef<HTMLInputElement>(null);
-  const activeNotesDraft = useRef("");
-  const activeMeetingDraft = useRef("");
-  const restoredNoteId = useRef<string | undefined>(undefined);
   const rememberedNoteId = useRef<string | undefined>(localStorage.getItem("lifeos.activeNoteId") ?? undefined);
-  const dirty = Boolean(workspace?.note && draft !== workspace.note.body);
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
-  const notesDirty = Boolean(selectedNote && notesDraft !== selectedNote.body);
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
   const conflictedNoteIds = new Set(notes.filter((note) => isConflictedDraft(readCachedDraft(note), note)).map((note) => note.frontmatter.id));
   const readOnly = health?.session.writeAllowed === false;
+
+  // One shared draft/conflict controller per editor (Notes, Calendar meeting workspace) — see
+  // useNoteDraftController.ts. Each owns its own draft, base hash and conflict state, so switching
+  // views can never leak one editor's conflict flag into the other.
+  const notesController = useNoteDraftController({
+    note: selectedNote,
+    readOnly,
+    busy,
+    onMessage: setMessage,
+    onSaved: (updated) => setNotes((current) => current.map((note) => note.frontmatter.id === updated.frontmatter.id ? updated as LifeObject : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at))),
+    fetchLatest: async () => {
+      const refreshed = await api<LifeObject[]>("/api/v1/notes");
+      setNotes(refreshed);
+      return refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
+    }
+  });
+  const meetingController = useNoteDraftController({
+    note: workspace?.note,
+    readOnly,
+    busy,
+    onMessage: setMessage,
+    onSaved: (updated) => setWorkspace((current) => current?.note?.frontmatter.id === updated.frontmatter.id ? { ...current, note: updated as LifeObject } : current),
+    fetchLatest: async () => {
+      if (!workspace) return undefined;
+      const next = await api<Workspace>(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/workspace`);
+      setWorkspace(next);
+      return next.note;
+    }
+  });
 
   const loadCollections = async () => {
     const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes] = await Promise.all([
@@ -291,9 +282,8 @@ function App() {
 
   const refreshWorkspace = async (meetingId: string) => {
     const next = await api<Workspace>(`/api/v1/meetings/${meetingId}/workspace`);
-    const cached = next.note ? readCachedDraft(next.note) : undefined;
-    setWorkspace(next); setDraft(cached?.body ?? next.note?.body ?? "");
-    setConflict(Boolean(cached && cached.baseHash !== next.note?.contentHash));
+    setWorkspace(next);
+    if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else meetingController.reset();
   };
 
   const loadCalendarDay = async (date = selectedDate) => {
@@ -323,100 +313,23 @@ function App() {
   }, [selectedDate, displayTimeZone]);
 
   useEffect(() => { localStorage.setItem("lifeos.activeView", view); }, [view]);
-  useEffect(() => { activeNotesDraft.current = notesDraft; }, [notesDraft]);
-  useEffect(() => { activeMeetingDraft.current = draft; }, [draft]);
 
+  // Resume the last-open note on load. Every other path that switches notes (openNote, and the
+  // reconcile/autosave effects inside useNoteDraftController) opens its draft explicitly too, so
+  // this is the only place a note change needs to prime the controller itself.
   useEffect(() => {
     if (selectedNoteId || !rememberedNoteId.current) return;
     const remembered = notes.find((note) => note.frontmatter.id === rememberedNoteId.current);
     if (!remembered) return;
-    const opened = openNoteDraft(remembered, readCachedDraft(remembered));
-    restoredNoteId.current = remembered.frontmatter.id;
-    setNotesBase(opened.base); setNotesDraft(opened.draft);
+    const opened = notesController.open(remembered, readCachedDraft(remembered));
     setSelectedNoteId(remembered.frontmatter.id);
-    if (opened.conflict) setConflict(true);
+    if (opened.conflict) setMessage("Recovered a browser draft, but the Markdown file also changed. Review before saving.");
   }, [notes, selectedNoteId]);
 
-  useEffect(() => {
-    if (!selectedNote || restoredNoteId.current === selectedNote.frontmatter.id) return;
-    restoredNoteId.current = selectedNote.frontmatter.id;
-    const opened = openNoteDraft(selectedNote, readCachedDraft(selectedNote));
-    setNotesBase(opened.base); setNotesDraft(opened.draft);
-    if (opened.conflict) {
-      setConflict(true);
-      setMessage("Recovered a browser draft, but the Markdown file also changed. Review before saving.");
-    }
-  }, [selectedNote]);
-
-  // A refreshed list may carry an external edit: adopt it if the draft is untouched, otherwise stop autosave.
-  useEffect(() => {
-    if (!selectedNote || !notesBase || notesAutoSaving) return;
-    const result = reconcileNoteDraft(notesBase, notesDraft, selectedNote);
-    if (result.kind === "resync") { setNotesBase(result.base); setNotesDraft(result.draft); }
-    if (result.kind === "conflict" && !conflict) {
-      setConflict(true);
-      setMessage("This note changed on disk while you were editing. Autosave paused; your draft is kept in the browser.");
-    }
-  }, [selectedNote?.contentHash, notesBase?.hash, notesAutoSaving]);
-
-  useEffect(() => {
-    if (!selectedNote || restoredNoteId.current !== selectedNote.frontmatter.id) return;
-    if (!notesDirty) { clearCachedDraft(selectedNote.frontmatter.id); return; }
-    if (!notesBase || notesBase.noteId !== selectedNote.frontmatter.id) return;
-    cacheDraft(notesBase.noteId, notesDraft, notesBase.hash);
-    if (readOnly || busy || conflict || notesAutoSaving) return;
-    const noteId = notesBase.noteId;
-    const request = noteSaveRequest(notesBase, notesDraft);
-    const bodyToSave = request.body;
-    const timer = window.setTimeout(() => {
-      setNotesAutoSaving(true);
-      void api<LifeObject>(`/api/v1/objects/${noteId}/body`, { method: "PUT", body: JSON.stringify(request) })
-        .then((updated) => {
-          setNotes((current) => current.map((note) => note.frontmatter.id === noteId ? updated : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at)));
-          setNotesBase((current?: NoteDraftBase) => current?.noteId === noteId ? noteDraftBase(updated) : current);
-          if (activeNotesDraft.current === bodyToSave) clearCachedDraft(noteId); else cacheDraft(noteId, activeNotesDraft.current, updated.contentHash);
-          setMessage("Note autosaved to Markdown");
-        })
-        .catch((error) => {
-          if (error instanceof ApiError && error.status === 409) setConflict(true);
-          setMessage(`Browser draft is safe; Markdown autosave failed: ${error instanceof Error ? error.message : "unknown error"}`);
-        })
-        .finally(() => setNotesAutoSaving(false));
-    }, 1800);
-    return () => window.clearTimeout(timer);
-  }, [selectedNoteId, notesDraft, selectedNote?.contentHash, notesBase, notesDirty, readOnly, busy, conflict, notesAutoSaving]);
-
-  useEffect(() => {
-    const note = workspace?.note;
-    if (!note) return;
-    if (!dirty) { clearCachedDraft(note.frontmatter.id); return; }
-    cacheDraft(note.frontmatter.id, draft, note.contentHash);
-    if (readOnly || busy || conflict || meetingAutoSaving) return;
-    const noteId = note.frontmatter.id;
-    const expectedHash = note.contentHash;
-    const bodyToSave = draft;
-    const timer = window.setTimeout(() => {
-      setMeetingAutoSaving(true);
-      void api<LifeObject>(`/api/v1/objects/${noteId}/body`, { method: "PUT", body: JSON.stringify({ body: bodyToSave, expectedHash }) })
-        .then((updated) => {
-          setWorkspace((current) => current?.note?.frontmatter.id === noteId ? { ...current, note: updated } : current);
-          if (activeMeetingDraft.current === bodyToSave) clearCachedDraft(noteId); else cacheDraft(noteId, activeMeetingDraft.current, updated.contentHash);
-          setMessage("Meeting note autosaved to Markdown");
-        })
-        .catch((error) => {
-          if (error instanceof ApiError && error.status === 409) setConflict(true);
-          setMessage(`Browser draft is safe; Markdown autosave failed: ${error instanceof Error ? error.message : "unknown error"}`);
-        })
-        .finally(() => setMeetingAutoSaving(false));
-    }, 1800);
-    return () => window.clearTimeout(timer);
-  }, [workspace?.note?.frontmatter.id, workspace?.note?.contentHash, draft, dirty, readOnly, busy, conflict, meetingAutoSaving]);
-
   async function run(action: () => Promise<void>, success: string) {
-    setBusy(true); setConflict(false);
+    setBusy(true);
     try { await action(); setMessage(success); return true; }
     catch (error) {
-      if (error instanceof ApiError && error.status === 409) setConflict(true);
       setMessage(error instanceof Error ? error.message : "Something went wrong");
       return false;
     } finally { setBusy(false); }
@@ -428,31 +341,45 @@ function App() {
     const next = health?.session.writeAllowed === false
       ? await api<Workspace>(`/api/v1/meetings/from-event/${encodeURIComponent(externalId)}`)
       : await api<Workspace>("/api/v1/meetings/from-event", { method: "POST", body: JSON.stringify({ externalId, calendarId, ...range }) });
-    const cached = next.note ? readCachedDraft(next.note) : undefined;
-    setWorkspace(next); setDraft(cached?.body ?? next.note?.body ?? ""); setEditorMode("visual");
+    setWorkspace(next); setEditorMode("visual");
+    if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else meetingController.reset();
     setEvents((current) => current.map((event) => event.externalId === externalId && event.calendarId === calendarId
       ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
       : event));
     localStorage.setItem("lifeos.activeMeetingId", next.meeting.frontmatter.id);
-    if (cached?.baseHash !== undefined && cached.baseHash !== next.note?.contentHash) setConflict(true);
     await loadCollections();
   }, "Canonical meeting note ready");
 
-  const saveNote = () => run(async () => {
-    if (!workspace?.note) return;
-    await api(`/api/v1/objects/${workspace.note.frontmatter.id}/body`, { method: "PUT", body: JSON.stringify({ body: draft, expectedHash: workspace.note.contentHash }) });
-    clearCachedDraft(workspace.note.frontmatter.id);
-    await refreshWorkspace(workspace.meeting.frontmatter.id);
-  }, "Note saved to Markdown");
+  // Not routed through run(): saveNow() already reports its own outcome (including a fresh
+  // conflict) via onMessage, and run()'s blanket success/error message would stomp on that.
+  const saveNote = async () => {
+    if (!workspace?.note) return false;
+    setBusy(true);
+    try {
+      if (!(await meetingController.saveNow())) return false;
+      await refreshWorkspace(workspace.meeting.frontmatter.id);
+      setMessage("Note saved to Markdown");
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Something went wrong");
+      return false;
+    } finally { setBusy(false); }
+  };
 
-  const processMeeting = () => run(async () => {
-    if (!workspace) return;
-    if (dirty) {
-      await api(`/api/v1/objects/${workspace.note!.frontmatter.id}/body`, { method: "PUT", body: JSON.stringify({ body: draft, expectedHash: workspace.note!.contentHash }) });
-    }
-    await api(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/process`, { method: "POST" });
-    await refreshWorkspace(workspace.meeting.frontmatter.id); await loadCollections();
-  }, "Mock AI proposal created");
+  const processMeeting = async () => {
+    if (!workspace) return false;
+    setBusy(true);
+    try {
+      if (meetingController.dirty && !(await meetingController.saveNow())) return false;
+      await api(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/process`, { method: "POST" });
+      await refreshWorkspace(workspace.meeting.frontmatter.id); await loadCollections();
+      setMessage("Mock AI proposal created");
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Something went wrong");
+      return false;
+    } finally { setBusy(false); }
+  };
 
   const accept = (reviewId: string) => run(async () => {
     await api(`/api/v1/review-items/${reviewId}/accept`, { method: "POST" });
@@ -541,9 +468,10 @@ function App() {
     if (!area) return;
     const start = area.selectionStart;
     const end = area.selectionEnd;
+    const draft = meetingController.draft;
     const selected = draft.slice(start, end) || placeholder;
     const next = `${draft.slice(0, start)}${before}${selected}${after}${draft.slice(end)}`;
-    setDraft(next);
+    meetingController.setDraft(next);
     requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + before.length, start + before.length + selected.length); });
   }
 
@@ -552,7 +480,8 @@ function App() {
     if (!area) return;
     const start = area.selectionStart;
     const end = area.selectionEnd;
-    setDraft(`${draft.slice(0, start)}${content}${draft.slice(end)}`);
+    const draft = meetingController.draft;
+    meetingController.setDraft(`${draft.slice(0, start)}${content}${draft.slice(end)}`);
     requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + selectFrom, start + selectFrom + selectLength); });
   }
 
@@ -561,12 +490,13 @@ function App() {
     if (!area) return;
     const selectionStart = area.selectionStart;
     const selectionEnd = area.selectionEnd;
+    const draft = meetingController.draft;
     const start = draft.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
     const nextBreak = draft.indexOf("\n", selectionEnd);
     const end = nextBreak === -1 ? draft.length : nextBreak;
     const source = draft.slice(start, end) || placeholder;
     const replacement = source.split("\n").map(transform).join("\n");
-    setDraft(`${draft.slice(0, start)}${replacement}${draft.slice(end)}`);
+    meetingController.setDraft(`${draft.slice(0, start)}${replacement}${draft.slice(end)}`);
     requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start, start + replacement.length); });
   }
 
@@ -578,12 +508,13 @@ function App() {
   function insertCodeBlock() {
     const language = window.prompt("Code language (for example: typescript, python, sql)", "typescript");
     if (language === null) return;
-    const selected = editor.current ? draft.slice(editor.current.selectionStart, editor.current.selectionEnd) : "";
+    const selected = editor.current ? meetingController.draft.slice(editor.current.selectionStart, editor.current.selectionEnd) : "";
     insertMarkdown(`\n\n\`\`\`${language.trim()}\n`, "\n\`\`\`\n\n", selected || "code");
   }
 
   async function uploadImage(file: File) {
     if (!workspace?.note || !file.type.startsWith("image/")) return;
+    const draft = meetingController.draft;
     const insertionStart = editor.current?.selectionStart ?? draft.length;
     const insertionEnd = editor.current?.selectionEnd ?? insertionStart;
     const suggestedAlt = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ");
@@ -599,7 +530,7 @@ function App() {
       });
       const stored = await api<StoredAsset>(`/api/v1/objects/${workspace.note.frontmatter.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 }) });
       const markdown = `![${altText.trim()}](${stored.markdownPath})`;
-      setDraft(`${draft.slice(0, insertionStart)}${markdown}${draft.slice(insertionEnd)}`);
+      meetingController.setDraft(`${draft.slice(0, insertionStart)}${markdown}${draft.slice(insertionEnd)}`);
       requestAnimationFrame(() => { editor.current?.focus(); editor.current?.setSelectionRange(insertionStart + markdown.length, insertionStart + markdown.length); });
       setMessage(stored.deduplicated ? "Existing image reused; Markdown link inserted" : "Image stored locally; Markdown link inserted");
       await loadCollections();
@@ -609,28 +540,32 @@ function App() {
   }
 
   function openNote(note: LifeObject) {
-    const opened = openNoteDraft(note, readCachedDraft(note));
-    restoredNoteId.current = note.frontmatter.id;
-    setSelectedNoteId(note.frontmatter.id); setNotesBase(opened.base); setNotesDraft(opened.draft); setNotesMode("visual");
+    notesController.open(note, readCachedDraft(note));
+    setSelectedNoteId(note.frontmatter.id); setNotesMode("visual");
     localStorage.setItem("lifeos.activeNoteId", note.frontmatter.id);
-    setConflict(opened.conflict);
   }
 
-  const saveSelectedNote = () => run(async () => {
-    if (!selectedNote || notesBase?.noteId !== selectedNote.frontmatter.id) return;
-    const updated = await api<LifeObject>(`/api/v1/objects/${selectedNote.frontmatter.id}/body`, { method: "PUT", body: JSON.stringify(noteSaveRequest(notesBase, notesDraft)) });
-    setNotes((current) => current.map((note) => note.frontmatter.id === updated.frontmatter.id ? updated : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at)));
-    setNotesBase(noteDraftBase(updated)); setNotesDraft(updated.body);
-    clearCachedDraft(updated.frontmatter.id);
-    await loadCollections();
-  }, "Note saved to Markdown");
+  const saveSelectedNote = async () => {
+    if (!selectedNote) return false;
+    setBusy(true);
+    try {
+      if (!(await notesController.saveNow())) return false;
+      await loadCollections();
+      setMessage("Note saved to Markdown");
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Something went wrong");
+      return false;
+    } finally { setBusy(false); }
+  };
 
   function editNotes(before: string, after = "", placeholder = "text") {
     const area = notesEditor.current;
     if (!area) return;
     const start = area.selectionStart; const end = area.selectionEnd;
+    const notesDraft = notesController.draft;
     const selected = notesDraft.slice(start, end) || placeholder;
-    setNotesDraft(`${notesDraft.slice(0, start)}${before}${selected}${after}${notesDraft.slice(end)}`);
+    notesController.setDraft(`${notesDraft.slice(0, start)}${before}${selected}${after}${notesDraft.slice(end)}`);
     requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + before.length, start + before.length + selected.length); });
   }
 
@@ -638,7 +573,8 @@ function App() {
     const area = notesEditor.current;
     if (!area) return;
     const start = area.selectionStart; const end = area.selectionEnd;
-    setNotesDraft(`${notesDraft.slice(0, start)}${content}${notesDraft.slice(end)}`);
+    const notesDraft = notesController.draft;
+    notesController.setDraft(`${notesDraft.slice(0, start)}${content}${notesDraft.slice(end)}`);
     requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + content.length, start + content.length); });
   }
 
@@ -646,15 +582,17 @@ function App() {
     const area = notesEditor.current;
     if (!area) return;
     const selectionStart = area.selectionStart; const selectionEnd = area.selectionEnd;
+    const notesDraft = notesController.draft;
     const start = notesDraft.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
     const nextBreak = notesDraft.indexOf("\n", selectionEnd); const end = nextBreak === -1 ? notesDraft.length : nextBreak;
     const replacement = (notesDraft.slice(start, end) || placeholder).split("\n").map(transform).join("\n");
-    setNotesDraft(`${notesDraft.slice(0, start)}${replacement}${notesDraft.slice(end)}`);
+    notesController.setDraft(`${notesDraft.slice(0, start)}${replacement}${notesDraft.slice(end)}`);
     requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start, start + replacement.length); });
   }
 
   async function uploadNotesImage(file: File) {
     if (!selectedNote || !file.type.startsWith("image/")) return;
+    const notesDraft = notesController.draft;
     const start = notesEditor.current?.selectionStart ?? notesDraft.length;
     const end = notesEditor.current?.selectionEnd ?? start;
     const altText = window.prompt("Describe this image for accessibility", file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "));
@@ -666,52 +604,18 @@ function App() {
       });
       const stored = await api<StoredAsset>(`/api/v1/objects/${selectedNote.frontmatter.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 }) });
       const markdown = `![${altText.trim()}](${stored.markdownPath})`;
-      setNotesDraft(`${notesDraft.slice(0, start)}${markdown}${notesDraft.slice(end)}`);
+      notesController.setDraft(`${notesDraft.slice(0, start)}${markdown}${notesDraft.slice(end)}`);
       setMessage(stored.deduplicated ? "Existing image reused; Markdown link inserted" : "Image stored locally; Markdown link inserted");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Image upload failed"); }
     finally { setBusy(false); }
   }
 
-  /** "Keep disk version": discard the browser draft and adopt the current Markdown file. */
-  async function keepDiskVersion() {
-    if (!selectedNoteId) return;
-    const refreshed = await api<LifeObject[]>("/api/v1/notes");
-    setNotes(refreshed);
-    const note = refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
-    if (note) { setNotesBase(noteDraftBase(note)); setNotesDraft(note.body); clearCachedDraft(note.frontmatter.id); }
-    setConflict(false); setMessage("Kept the disk version; your browser draft was discarded");
-  }
-
-  /**
-   * "Keep browser version": save the draft over whatever is currently on disk, rather than the
-   * (now stale) hash the draft was opened with. Refetches immediately before saving, since
-   * `selectedNote` may be a little behind if the file changed again after the conflict first
-   * appeared — the previous disk content isn't lost either way: the object store snapshots it to
-   * `.lifeos/versions/` before this overwrite.
-   */
-  async function keepBrowserVersion() {
-    if (!selectedNoteId || busy || readOnly) return;
+  // "Keep browser version" / "Keep disk version" for both editors now live on their respective
+  // controller (useNoteDraftController.ts) — wrapped with `busy` here since only the caller knows
+  // when a click, rather than autosave, is in flight.
+  async function withBusy(action: () => Promise<void>) {
     setBusy(true);
-    try {
-      const refreshed = await api<LifeObject[]>("/api/v1/notes");
-      const note = refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
-      if (!note) { setNotes(refreshed); setMessage("This note no longer exists on disk."); return; }
-      const base = noteDraftBase(note);
-      const bodyToSave = notesDraft;
-      const updated = await api<LifeObject>(`/api/v1/objects/${selectedNoteId}/body`, { method: "PUT", body: JSON.stringify(noteSaveRequest(base, bodyToSave)) });
-      setNotes(refreshed.map((candidate) => candidate.frontmatter.id === updated.frontmatter.id ? updated : candidate).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at)));
-      setNotesBase(noteDraftBase(updated)); setNotesDraft(updated.body);
-      clearCachedDraft(updated.frontmatter.id);
-      setConflict(false); setMessage("Kept the browser version; the previous disk version is in its history");
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        const refreshed = await api<LifeObject[]>("/api/v1/notes");
-        setNotes(refreshed);
-        setMessage("This note changed again while saving. Compare once more, then choose.");
-      } else {
-        setMessage(error instanceof Error ? error.message : "Could not save the browser version");
-      }
-    } finally { setBusy(false); }
+    try { await action(); } finally { setBusy(false); }
   }
 
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
@@ -730,7 +634,7 @@ function App() {
       <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? "Read-only · another device active" : message}</p>
     </aside>
 
-    <section className={view === "Notes" && conflict ? "notes-comparing" : undefined}>
+    <section className={(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : undefined}>
       {view === "Today" && <>
         <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
         <div className="summary">
@@ -800,6 +704,7 @@ function App() {
                   <Meta label="Attendees" value={workspace.context.people.map((person) => person.frontmatter.title).join(", ") || "None"} />
                 </div>
               </article>
+              {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <article className="editor-card">
                 <div className="editor-heading">
                   <div><span>CANONICAL NOTE</span><h3>{workspace.note?.frontmatter.title}</h3></div>
@@ -823,15 +728,14 @@ function App() {
                     <button disabled={readOnly} title="Insert table" onClick={() => insertAtCursor("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>
                     <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertAtCursor(`[${object.frontmatter.title}](lifeos://object/${object.frontmatter.id})`); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
                   </div>
-                  <textarea ref={editor} disabled={!workspace.note || busy || readOnly} value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} placeholder="Capture meeting notes… Paste or drop an image here." />
-                </> : editorMode === "visual" && workspace.note ? <VisualMarkdownEditor note={workspace.note} markdown={draft} readOnly={busy || readOnly} onChange={setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+                  <textarea ref={editor} disabled={!workspace.note || busy || readOnly} value={meetingController.draft} onChange={(event) => meetingController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} placeholder="Capture meeting notes… Paste or drop an image here." />
+                </> : editorMode === "visual" && workspace.note ? <VisualMarkdownEditor note={workspace.note} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
                 <div className="editor-footer">
-                  <div className="save-state"><i className={dirty ? "dirty" : "saved"} />{dirty ? meetingAutoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}</div>
-                  <div className="actions"><button disabled={!workspace.note || busy || !dirty || readOnly} onClick={saveNote}>Save Markdown</button><button className="primary" disabled={!workspace.note || busy || !draft.trim() || readOnly} onClick={processMeeting}>Save & process</button></div>
+                  <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}</div>
+                  <div className="actions"><button disabled={!workspace.note || busy || !meetingController.dirty || readOnly} onClick={saveNote}>Save Markdown</button><button className="primary" disabled={!workspace.note || busy || !meetingController.draft.trim() || readOnly} onClick={processMeeting}>Save & process</button></div>
                 </div>
-                {conflict && <div className="conflict"><b>This note changed on disk.</b><span>Your browser draft was not overwritten.</span><button onClick={() => { if (workspace.note) clearCachedDraft(workspace.note.frontmatter.id); void refreshWorkspace(workspace.meeting.frontmatter.id); }}>Discard draft & reload disk</button></div>}
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
-              </article>
+              </article>}
               <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
                 {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(title) => editReview(review.frontmatter.id, title)} />)}
@@ -852,7 +756,7 @@ function App() {
             </button>)}
           </article>
           <div className="notes-main">
-            {selectedNote && conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesDraft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={keepBrowserVersion} onKeepDiskVersion={keepDiskVersion} /> :
+            {selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :
             !selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <article className="editor-card">
               <div className="editor-heading"><div><span>{selectedNote.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedNote.frontmatter.title}</h3></div><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div></div>
               {notesMode === "write" ? <>
@@ -865,9 +769,9 @@ function App() {
                   <button disabled={readOnly} title="Horizontal divider" onClick={() => insertNotes("\n\n---\n\n")}>―</button><button disabled={readOnly} title="Insert table" onClick={() => insertNotes("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>
                   <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertNotes(`[${object.frontmatter.title}](lifeos://object/${object.frontmatter.id})`); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
                 </div>
-                <textarea ref={notesEditor} disabled={busy || readOnly} value={notesDraft} onChange={(event) => setNotesDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
-              </> : notesMode === "visual" ? <VisualMarkdownEditor note={selectedNote} markdown={notesDraft} readOnly={busy || readOnly} onChange={setNotesDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesDraft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
-              <div className="editor-footer"><div className="save-state"><i className={notesDirty ? "dirty" : "saved"} />{notesDirty ? notesAutoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}</div><div className="actions"><button className="primary" disabled={busy || readOnly || !notesDirty} onClick={saveSelectedNote}>Save now</button></div></div>
+                <textarea ref={notesEditor} disabled={busy || readOnly} value={notesController.draft} onChange={(event) => notesController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
+              </> : notesMode === "visual" ? <VisualMarkdownEditor note={selectedNote} markdown={notesController.draft} readOnly={busy || readOnly} onChange={notesController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+              <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}</div><div className="actions"><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </article>}
           </div>

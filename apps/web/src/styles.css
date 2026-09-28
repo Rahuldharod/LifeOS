@@ -172,8 +172,9 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 
 /* PB-002: Notes conflict resolution (NoteConflictPanel.tsx). Chosen after prototyping three
    directions on the prototype/pb-002-conflict-ui branch (inline banner, this split panel, a
-   blocking modal); this one won. */
-section.notes-comparing { max-width: 1900px; width: 100%; padding-right: 40px; }
+   blocking modal); this one won. Shared by the Notes view and the Calendar meeting workspace,
+   which show the same panel via the same draft controller (useNoteDraftController.ts). */
+section.comparing-conflict { max-width: 1900px; width: 100%; padding-right: 40px; }
 .note-conflict-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; padding: 2px 7px; border: 1px solid #e2a29c; border-radius: 999px; background: #fbdedb; color: #9a2c20; font-size: 10px; font-weight: 800; letter-spacing: .02em; vertical-align: middle; }
 
 .diff-line { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; padding: 1px 8px; }
