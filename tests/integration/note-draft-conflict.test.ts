@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LifeOSApplication } from "@lifeos/application";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
-import { noteSaveRequest, openNoteDraft, reconcileNoteDraft } from "../../apps/web/src/noteDraft.js";
+import { isConflictedDraft, noteDraftBase, noteSaveRequest, openNoteDraft, reconcileNoteDraft } from "../../apps/web/src/noteDraft.js";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
@@ -73,5 +73,63 @@ describe("Notes draft autosave after an external edit", () => {
     const request = noteSaveRequest(restored.base, restored.draft);
     await expect(application.updateBody(noteId, request.body, request.expectedHash)).rejects.toMatchObject({ name: "ObjectConflictError" });
     expect(await readFile(file, "utf8")).toContain("Agent edit");
+  });
+});
+
+describe("Keep browser version / Keep disk version (PB-002 conflict panel)", () => {
+  it("Keep browser version rebases onto the latest disk copy and preserves the overwritten version in history", async () => {
+    const { application, file, openNote } = await workspaceWithNote();
+    const opened = openNoteDraft(openNote());
+    const draft = `${opened.draft}Browser edit\n`;
+
+    await editExternally(file);
+    await application.rebuildIndex();
+    const latest = openNote(); // stands in for the app's refetch immediately before saving
+
+    const base = noteDraftBase(latest);
+    const updated = await application.updateBody(noteId, draft, noteSaveRequest(base, draft).expectedHash);
+    expect(updated.body).toBe(draft);
+    expect(await readFile(file, "utf8")).toContain(draft);
+
+    const versionsDir = path.join(path.dirname(file), "..", ".lifeos", "versions", noteId);
+    const versions = await import("node:fs/promises").then((fs) => fs.readdir(versionsDir));
+    const previousVersion = await Promise.all(versions.map((name) => import("node:fs/promises").then((fs) => fs.readFile(path.join(versionsDir, name), "utf8"))));
+    expect(previousVersion.some((content) => content.includes("Agent edit"))).toBe(true);
+  });
+
+  it("Keep browser version fails as a fresh conflict if the file changed again after the refetch", async () => {
+    const { application, file, openNote } = await workspaceWithNote();
+    const opened = openNoteDraft(openNote());
+    const draft = `${opened.draft}Browser edit\n`;
+
+    await editExternally(file); // first external edit, seen by the refetch below
+    await application.rebuildIndex();
+    const staleBase = noteDraftBase(openNote());
+
+    // A second, distinct external edit lands after the refetch but before the save. `editExternally`
+    // targets a substring the first edit already consumed, so it would be a no-op here — append
+    // instead, to guarantee a genuinely different hash rather than accidentally rewriting the same content.
+    await writeFile(file, `${await readFile(file, "utf8")}\nA second, later external edit\n`, "utf8");
+    await application.rebuildIndex();
+
+    const request = noteSaveRequest(staleBase, draft);
+    await expect(application.updateBody(noteId, request.body, request.expectedHash)).rejects.toMatchObject({ name: "ObjectConflictError" });
+    expect(await readFile(file, "utf8")).not.toContain("Browser edit");
+  });
+
+  it("Keep disk version adopts the file's current content and clears the conflict", async () => {
+    const { application, file, openNote } = await workspaceWithNote();
+    await editExternally(file);
+    await application.rebuildIndex();
+    const latest = openNote();
+
+    const cached = { body: "Cached browser draft\n", baseHash: "stale-hash" };
+    expect(isConflictedDraft(cached, latest)).toBe(true);
+
+    // "Keep disk version" is a pure discard of the local draft in favour of what's already on
+    // disk — no write happens, so nothing above the object store needs asserting beyond this.
+    const rebased = noteDraftBase(latest);
+    expect(rebased.body).toBe(latest.body);
+    expect(isConflictedDraft(undefined, latest)).toBe(false); // cache cleared after adopting disk
   });
 });
