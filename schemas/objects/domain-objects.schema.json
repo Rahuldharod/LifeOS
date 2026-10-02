@@ -10,7 +10,7 @@
     { "$ref": "#/$defs/knowledge-note" }, { "$ref": "#/$defs/decision" }, { "$ref": "#/$defs/open-point" },
     { "$ref": "#/$defs/source" }, { "$ref": "#/$defs/review-item" }, { "$ref": "#/$defs/agent-run" },
     { "$ref": "#/$defs/audit-event" }, { "$ref": "#/$defs/connector-account" }, { "$ref": "#/$defs/sync-run" },
-    { "$ref": "#/$defs/daily-focus" }, { "$ref": "#/$defs/recurring-item" }
+    { "$ref": "#/$defs/daily-focus" }, { "$ref": "#/$defs/recurring-item" }, { "$ref": "#/$defs/app-setting" }
   ],
   "$defs": {
     "base": { "allOf": [{ "$ref": "common.schema.json" }], "type": "object" },
@@ -28,6 +28,7 @@
     "agent-run": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "agent-run" }, "operation": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "prompt_version": { "type": "string" }, "status": { "enum": ["running", "succeeded", "failed"] } }, "required": ["operation", "provider", "model", "prompt_version", "status", "started_at"] },
     "audit-event": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "audit-event" }, "actor_type": { "enum": ["person", "agent", "system"] }, "action": { "type": "string" } }, "required": ["occurred_at", "actor_type", "action"] },
     "connector-account": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "connector-account" }, "provider": { "type": "string" }, "secret_ref": { "type": "string" }, "scopes": { "type": "array", "items": { "type": "string" } } }, "required": ["provider", "account_label", "external_account_id", "status", "secret_ref", "scopes"] },
+    "app-setting": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "app-setting" }, "setting_key": { "type": "string", "minLength": 1 } }, "required": ["setting_key"] },
     "sync-run": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "sync-run" }, "connector_account_id": { "type": "string", "format": "uuid" }, "status": { "enum": ["running", "succeeded", "failed"] } }, "required": ["connector_account_id", "resource_type", "status", "started_at"] },
     "daily-focus": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "daily-focus" }, "focus_on": { "type": "string", "format": "date" } }, "required": ["focus_on"] },
     "recurring-item": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "recurring-item" }, "status": { "type": "string" } }, "required": ["status"] }

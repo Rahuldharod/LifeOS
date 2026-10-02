@@ -4,7 +4,7 @@ import { z } from "zod";
 export const objectTypes = [
   "person", "client", "product", "project", "meeting", "meeting-note",
   "knowledge-note", "task", "decision", "open-point", "source", "review-item",
-  "agent-run", "audit-event", "connector-account", "sync-run", "daily-focus", "recurring-item"
+  "agent-run", "audit-event", "connector-account", "sync-run", "daily-focus", "recurring-item", "app-setting"
 ] as const;
 
 export const envelopeSchema = z.object({
@@ -50,6 +50,7 @@ const id = z.uuid();
 const ids = z.array(id);
 const contextFields = { primary_project_id: id.optional(), primary_client_id: id.optional(), primary_product_id: id.optional() };
 const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
+  "app-setting": envelopeSchema.extend({ type: z.literal("app-setting"), setting_key: z.string().min(1) }),
   person: envelopeSchema.extend({ type: z.literal("person"), given_name: z.string().min(1), is_self: z.boolean().optional() }),
   client: envelopeSchema.extend({ type: z.literal("client"), status: z.string().min(1), primary_contact_person_id: id.optional() }),
   product: envelopeSchema.extend({ type: z.literal("product"), status: z.string().min(1), owner_person_id: id.optional() }),

@@ -54,6 +54,35 @@ export interface IndexStore {
 export interface CalendarConnector {
   readonly provider?: string;
   listEvents(from: Date, to: Date): Promise<CalendarEvent[]>;
+  /** Every calendar the account can view, whether or not it has events in a given range. */
+  listCalendars?(): Promise<CalendarSummary[]>;
+}
+
+export interface CalendarPreferences {
+  disabledCalendarIds: string[];
+  defaultCalendarId?: string;
+  /** Hash of the stored file; absent until the preferences are first saved. Send it back as the expected hash. */
+  contentHash?: string;
+}
+
+/** Same name as the object store's conflict error, which the server maps to HTTP 409 (the application cannot import adapters). */
+class SettingsConflictError extends Error { override name = "ObjectConflictError"; }
+
+const calendarPreferencesPath = "settings/calendar-preferences.md";
+
+function preferencesFrom(frontmatter: ObjectEnvelope): Omit<CalendarPreferences, "contentHash"> {
+  const disabled = frontmatter.disabled_calendar_ids;
+  const defaultId = frontmatter.default_calendar_id;
+  return {
+    disabledCalendarIds: Array.isArray(disabled) ? disabled.filter((id): id is string => typeof id === "string") : [],
+    ...(typeof defaultId === "string" && defaultId ? { defaultCalendarId: defaultId } : {})
+  };
+}
+
+export interface CalendarSummary {
+  id: string;
+  name: string;
+  color?: string;
 }
 
 export interface CalendarEvent {
@@ -205,6 +234,48 @@ export class LifeOSApplication {
   async listCalendarEvents(from = new Date(), to = new Date(Date.now() + 7 * 86_400_000)) {
     if (!this.calendar) throw new Error("Calendar connector is not configured");
     return this.withNoteLinks(await this.calendar.listEvents(from, to));
+  }
+
+  async listCalendars() {
+    if (!this.calendar) throw new Error("Calendar connector is not configured");
+    return this.calendar.listCalendars ? this.calendar.listCalendars() : [];
+  }
+
+  /** Synced calendar preferences (ADR 0005). One fixed file, read from disk so another device's edit is seen at once. */
+  async getCalendarPreferences(): Promise<CalendarPreferences> {
+    const current = await this.readSetting(calendarPreferencesPath);
+    return current ? { ...preferencesFrom(current.frontmatter), contentHash: current.contentHash } : { disabledCalendarIds: [] };
+  }
+
+  async saveCalendarPreferences(input: { disabledCalendarIds: string[]; defaultCalendarId?: string }, expectedHash?: string): Promise<CalendarPreferences> {
+    const disabled = [...new Set(input.disabledCalendarIds.filter((id) => typeof id === "string" && id))];
+    const defaultId = input.defaultCalendarId || undefined;
+    const current = await this.readSetting(calendarPreferencesPath);
+    const now = new Date().toISOString();
+    if (current && current.contentHash !== expectedHash) throw new SettingsConflictError("Calendar preferences changed on another device; reload and try again");
+    if (!current && expectedHash) throw new SettingsConflictError("Calendar preferences were removed; reload and try again");
+    const kept: Record<string, unknown> = { ...current?.frontmatter };
+    delete kept.default_calendar_id;
+    const id = current?.frontmatter.id ?? uuidV7();
+    const written = await this.objects.write({
+      relativePath: calendarPreferencesPath,
+      expectedHash: current?.contentHash,
+      frontmatter: {
+        ...kept,
+        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId } : this.envelope(id, "app-setting", "Calendar preferences", now)),
+        setting_key: "calendar-preferences",
+        disabled_calendar_ids: disabled,
+        ...(defaultId ? { default_calendar_id: defaultId } : {})
+      } as ObjectEnvelope,
+      body: "# Calendar preferences\n\nWhich calendars the Calendar view offers, and which one opens by default.\n"
+    });
+    await this.rebuildIndex();
+    return { ...preferencesFrom(written.frontmatter), contentHash: written.contentHash };
+  }
+
+  private async readSetting(relativePath: string) {
+    try { return await this.objects.read(relativePath); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   }
 
   async syncCalendar(from = new Date(), to = new Date(Date.now() + 7 * 86_400_000)) {

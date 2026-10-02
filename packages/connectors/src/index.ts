@@ -1,9 +1,12 @@
-import type { CalendarConnector } from "@lifeos/application";
+import type { CalendarConnector, CalendarSummary } from "@lifeos/application";
 import type { SecretStore } from "@lifeos/application";
 import { createHash, randomBytes } from "node:crypto";
 
 export class MockCalendarConnector implements CalendarConnector {
   readonly provider = "mock";
+  async listCalendars(): Promise<CalendarSummary[]> {
+    return [{ id: "mock-calendar", name: "LifeOS Demo", color: "#5f8b7c" }];
+  }
   async listEvents(from: Date, to: Date) {
     const startsAt = new Date(Math.max(from.getTime(), Date.now() + 3_600_000));
     return startsAt < to ? [{
@@ -85,7 +88,16 @@ export class GoogleCalendarConnector implements CalendarConnector {
     this.authFailure = undefined;
   }
 
-  async listEvents(from: Date, to: Date) {
+  async listCalendars(): Promise<CalendarSummary[]> {
+    const { calendars } = await this.fetchCalendars();
+    return calendars.map((calendar) => ({
+      id: String(calendar.id),
+      name: String(calendar.summaryOverride ?? calendar.summary ?? calendar.id),
+      color: typeof calendar.backgroundColor === "string" ? calendar.backgroundColor : undefined
+    }));
+  }
+
+  private async fetchCalendars() {
     const accessToken = await this.accessToken();
     const headers = { authorization: `Bearer ${accessToken}` };
     const calendarsResponse = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250&showHidden=false", { headers });
@@ -93,6 +105,11 @@ export class GoogleCalendarConnector implements CalendarConnector {
     if (calendarsResponse.status === 401) throw this.failAuth(`Google rejected the Calendar access token: ${calendarsPayload.error?.message ?? 401}`);
     if (!calendarsResponse.ok) throw new Error(`Google Calendar list request failed: ${calendarsPayload.error?.message ?? calendarsResponse.status}`);
     const calendars = (calendarsPayload.items ?? []).filter((calendar) => calendar.id && calendar.hidden !== true && calendar.selected !== false);
+    return { headers, calendars };
+  }
+
+  async listEvents(from: Date, to: Date) {
+    const { headers, calendars } = await this.fetchCalendars();
     const eventGroups = await Promise.all(calendars.map(async (calendar) => {
       const query = new URLSearchParams({ timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: "true", orderBy: "startTime", maxResults: "250" });
       const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(String(calendar.id))}/events?${query}`, { headers });

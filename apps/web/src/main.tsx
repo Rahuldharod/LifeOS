@@ -9,6 +9,7 @@ import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api, ApiError } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
+import { enabledCalendars, noCalendarPrefs, reconcileFilter, resolveDefaultFilter, type CalendarOption, type CalendarPrefs } from "./calendarPrefs.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
 
 type CrepeInstance = {
@@ -252,6 +253,11 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone));
   const [calendarFilter, setCalendarFilter] = useState("all");
   const [calendarSources, setCalendarSources] = useState<Record<string, { name: string; color?: string }>>({});
+  // Every calendar the account can view; empty until loaded, or when the calendar connection is unavailable.
+  const [calendarCatalog, setCalendarCatalog] = useState<CalendarOption[]>([]);
+  const [calendarCatalogLoaded, setCalendarCatalogLoaded] = useState(false);
+  const [calendarPrefs, setCalendarPrefs] = useState<CalendarPrefs>(noCalendarPrefs);
+  const defaultFilterApplied = useRef(false);
   const [editorMode, setEditorMode] = useState<"visual" | "write" | "preview">("visual");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Loading local workspace…");
@@ -347,6 +353,28 @@ function App() {
     if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else if (!previewTarget.current) meetingController.reset();
   };
 
+  // Preferences live in the synced data folder; the calendar list comes from Google. Either may fail independently.
+  const loadCalendarCatalog = async () => {
+    const [catalog, prefs] = await Promise.all([
+      api<CalendarOption[]>("/api/v1/calendar/calendars").catch(() => [] as CalendarOption[]),
+      api<CalendarPrefs>("/api/v1/settings/calendar-preferences").catch(() => undefined)
+    ]);
+    setCalendarCatalog(catalog);
+    if (prefs) setCalendarPrefs(prefs);
+    setCalendarCatalogLoaded(true);
+  };
+
+  const updateCalendarPrefs = async (next: CalendarPrefs) => {
+    const previous = calendarPrefs;
+    setCalendarPrefs(next);
+    try {
+      setCalendarPrefs(await api<CalendarPrefs>("/api/v1/settings/calendar-preferences", { method: "PUT", body: JSON.stringify({ ...next, expectedHash: previous.contentHash }) }));
+    } catch (error) {
+      setMessage(error instanceof ApiError && error.status === 409 ? "Calendar preferences changed on another device. Reloaded the latest; try again." : error instanceof Error ? error.message : "Could not save calendar preferences");
+      await loadCalendarCatalog();
+    }
+  };
+
   const loadCalendarDay = async (date = selectedDate) => {
     const range = dayRange(date, displayTimeZone);
     const nextEvents = await api<Event[]>(`/api/v1/calendar/events?${new URLSearchParams(range)}`);
@@ -361,6 +389,7 @@ function App() {
   };
 
   useEffect(() => {
+    void loadCalendarCatalog();
     Promise.all([api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection), loadCollections()])
       .then(async () => {
         const meetingId = localStorage.getItem("lifeos.activeMeetingId");
@@ -777,9 +806,23 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
+  // Open on the default calendar once the list is known; afterwards only drop a selection that is no longer offered.
+  useEffect(() => {
+    if (!calendarCatalogLoaded) return;
+    if (!defaultFilterApplied.current) {
+      defaultFilterApplied.current = true;
+      setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
+    } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
+  }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
+  useEffect(() => { if (view === "Settings") void loadCalendarCatalog(); }, [view]);
+
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
+  const offeredCalendars: CalendarOption[] = calendarCatalog.length
+    ? enabledCalendars(calendarCatalog, calendarPrefs)
+    : Object.entries(calendarSources).map(([id, source]) => ({ id, name: source.name, color: source.color })).filter((calendar) => !calendarPrefs.disabledCalendarIds.includes(calendar.id));
   const filteredEvents = events
+    .filter((event) => !event.calendarId || !calendarPrefs.disabledCalendarIds.includes(event.calendarId))
     .filter((event) => calendarFilter === "all" || event.calendarId === calendarFilter)
     .sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
   const allDayEvents = filteredEvents.filter((event) => event.isAllDay);
@@ -828,7 +871,7 @@ function App() {
               <label><small>Date</small><input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} /></label>
               <label><small>Calendar</small><select value={calendarFilter} onChange={(event) => setCalendarFilter(event.target.value)}>
                 <option value="all">All calendars</option>
-                {Object.entries(calendarSources).sort(([, left], [, right]) => left.name.localeCompare(right.name)).map(([id, source]) => <option value={id} key={id}>{source.name}</option>)}
+                {[...offeredCalendars].sort((left, right) => left.name.localeCompare(right.name)).map((calendar) => <option value={calendar.id} key={calendar.id}>{calendar.name}</option>)}
               </select></label>
             </div>
             <h3 className="timeline-date">{new Date(`${selectedDate}T12:00:00.000Z`).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone })}</h3>
@@ -984,7 +1027,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onChange={updateCalendarPrefs} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
     </section>
   </main>;
 }
@@ -1017,6 +1060,25 @@ function EntityCrudPage({ type, title, objects, people, busy, readOnly, embedded
   const setField = (id: string, key: string, value: unknown) => setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
   const create = () => { onCreate(type, { title: newTitle }); setNewTitle(""); };
   return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className="crud-card" key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{entityFields[type].map((field) => <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : field.kind === "person" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}><option value="">None</option>{people.map((person) => <option value={person.frontmatter.id} key={person.frontmatter.id}>{person.frontmatter.title}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions"><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button></div></div>; })}</div></article></>;
+}
+
+function CalendarListCard({ catalog, loaded, prefs, onChange }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; onChange: (prefs: CalendarPrefs) => Promise<void> }) {
+  const toggle = (id: string, enabled: boolean) => onChange({ ...prefs, disabledCalendarIds: enabled ? prefs.disabledCalendarIds.filter((item) => item !== id) : [...prefs.disabledCalendarIds, id] });
+  const defaultMissing = Boolean(prefs.defaultCalendarId) && loaded && !enabledCalendars(catalog, prefs).some((calendar) => calendar.id === prefs.defaultCalendarId);
+  return <article className="calendar-list-setting"><span>CALENDARS</span><h3>Calendars in the Calendar view</h3>
+    <p className="muted">Tick the calendars to include. The default one is selected when you open the Calendar view.</p>
+    {!loaded && <p className="muted">Loading calendars…</p>}
+    {loaded && !catalog.length && <p className="muted">No calendars available. Connect Google Calendar to choose from your calendars.</p>}
+    {catalog.map((calendar) => {
+      const enabled = !prefs.disabledCalendarIds.includes(calendar.id);
+      return <div className="calendar-row" key={calendar.id}>
+        <label><input type="checkbox" checked={enabled} onChange={(event) => toggle(calendar.id, event.target.checked)} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}</label>
+        <label className="calendar-default"><input type="radio" name="default-calendar" checked={prefs.defaultCalendarId === calendar.id} disabled={!enabled} onChange={() => onChange({ ...prefs, defaultCalendarId: calendar.id })} />Default</label>
+      </div>;
+    })}
+    {prefs.defaultCalendarId && <button onClick={() => onChange({ ...prefs, defaultCalendarId: undefined })}>Clear default</button>}
+    {defaultMissing && <p className="muted" role="status">Your default calendar is switched off or unavailable, so the Calendar view opens on All calendars.</p>}
+  </article>;
 }
 
 function GoogleSecretCard({ provider, title, status, busy, onSave }: { provider: "calendar" | "drive"; title: string; status?: { configured: boolean; connected: boolean }; busy: boolean; onSave: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean> }) {
