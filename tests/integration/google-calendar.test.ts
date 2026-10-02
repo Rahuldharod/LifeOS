@@ -25,4 +25,20 @@ describe("Google Calendar connector", () => {
     expect(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]?.[0])).toContain("singleEvents=true");
     expect(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]?.[0])).toContain("calendars/primary/events");
   });
+
+  it("lists every visible calendar, even with no events, and skips hidden ones", async () => {
+    const secrets = new MemorySecretStore();
+    await secrets.set("google:default:tokens", JSON.stringify({ access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3_600_000 }));
+    const connector = new GoogleCalendarConnector({ clientId: "client.apps.googleusercontent.com", redirectUri: "http://127.0.0.1:4310/api/v1/connections/google/callback", secrets });
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ items: [
+      { id: "primary", summary: "Work", backgroundColor: "#4f7cac" },
+      { id: "family@example.com", summary: "Family", summaryOverride: "Home" },
+      { id: "hidden@example.com", summary: "Hidden", selected: false }
+    ] }), { status: 200, headers: { "content-type": "application/json" } }));
+    expect(await connector.listCalendars()).toEqual([
+      { id: "primary", name: "Work", color: "#4f7cac" },
+      { id: "family@example.com", name: "Home", color: undefined }
+    ]);
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+  });
 });

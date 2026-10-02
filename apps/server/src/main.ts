@@ -35,7 +35,7 @@ if (process.env.GOOGLE_CLIENT_ID) await secrets.set("google:default:client-id", 
 const savedGoogleClientId = await secrets.get("google:default:client-id");
 let google = savedGoogleClientId ? new GoogleCalendarConnector({ clientId: savedGoogleClientId, redirectUri: googleRedirectUri, secrets }) : undefined;
 const mockCalendar = new MockCalendarConnector();
-const calendar = { get provider() { return (google ?? mockCalendar).provider; }, listEvents: (from: Date, to: Date) => (google ?? mockCalendar).listEvents(from, to) };
+const calendar = { get provider() { return (google ?? mockCalendar).provider; }, listEvents: (from: Date, to: Date) => (google ?? mockCalendar).listEvents(from, to), listCalendars: () => (google ?? mockCalendar).listCalendars() };
 const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId);
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 
@@ -67,6 +67,12 @@ server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/ev
   const to = request.query.to ? new Date(request.query.to) : undefined;
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   return application.listCalendarEvents(from, to);
+});
+server.get("/api/v1/calendar/calendars", async () => application.listCalendars());
+server.get("/api/v1/settings/calendar-preferences", async () => application.getCalendarPreferences());
+server.put<{ Body: { disabledCalendarIds?: string[]; defaultCalendarId?: string; expectedHash?: string } }>("/api/v1/settings/calendar-preferences", async (request) => {
+  const { disabledCalendarIds = [], defaultCalendarId, expectedHash } = request.body ?? {};
+  return application.saveCalendarPreferences({ disabledCalendarIds, defaultCalendarId }, expectedHash);
 });
 server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/sync", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
