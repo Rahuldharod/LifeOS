@@ -44,7 +44,16 @@ During a restart the page shows **Reconnecting…**; keep typing, the draft save
 corepack pnpm dev
 ```
 
-Development runs separately at `http://127.0.0.1:5174` (API on 4311) with live reload. It uses synthetic data in `.dev-data/` (created from `schemas/fixtures` on first run; delete the folder to reset) and the mock calendar, so it never touches the real `../data`. Press **Control+C** to stop it.
+Development runs separately at `http://127.0.0.1:5174` (API on 4311) with live reload. It uses synthetic data in `.dev-data/` (created from `schemas/fixtures` on first run; delete the folder to reset) and the mock calendar, so it never touches the real `../data`. Press **Control+C** to stop it. Dev and the stable app can run at the same time.
+
+To see a code change in your daily LifeOS, run `corepack pnpm update-app` when you are not mid-note.
+
+### Maintenance
+
+| Command | What it does |
+| --- | --- |
+| `corepack pnpm reconcile-meetings` | Reports meetings duplicated for the same calendar event; changes nothing |
+| `corepack pnpm reconcile-meetings --apply` | Run after `corepack pnpm stop`. Backs up, then archives the empty extra copies (files are kept and marked `archived_at`) and audits them. Copies that both hold notes are left for a manual merge |
 
 ## Safety baseline
 

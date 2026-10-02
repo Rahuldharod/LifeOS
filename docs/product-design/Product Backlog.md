@@ -23,11 +23,10 @@ Use a lightweight score rather than false precision:
 
 ## Now
 
-Items required to make the current version dependable for regular use.
+Items required to make the current version dependable for regular use. Empty after PB-001 and PB-004; the next work comes from Next by score.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-004 | Duplicate meeting reconciliation (absorbs PB-022c) | Stop the creation race that made two Product Weekly meetings 80 ms apart (per-event lock; identity = provider + calendar + event id), then a one-off dry-run → `--apply` cleanup that keeps the richest copy and archives the empty one, logged to audit. Out of scope: recreating notes for never-opened events (normal since PB-020) and Sync Run cleanup. **Status 2026-10-02:** race fix and `pnpm reconcile-meetings` shipped; dry run on real data matches the survey; `--apply` waits for Rahul. | 4 | High | 3 | — | — |
 
 ## Next
 
@@ -88,6 +87,7 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-022a | Google token failure is visible: Reconnect banner with last sync time, real error in the timeline, throttled failed Sync Runs | 2026-10-02 |
 | PB-021 | Delete a note as a tombstone (`deleted_at`, file kept, confirm first); no in-app restore yet | 2026-10-02 |
 | PB-001 | Stable launcher: `pnpm start/stop/status/update-app` runs the built app in the background on 4310 (no reloads), "Reconnecting…" banner with autosave retry, dev isolated on 5174/4311 with synthetic data and mock calendar | 2026-10-02 |
+| PB-004 | Duplicate meetings: creation serialized per event, `pnpm reconcile-meetings` (dry run, `--apply` with backup); the empty Product Weekly copy and its note archived (absorbs PB-022c) | 2026-10-02 |
 | PB-025 | Notes: Open/Deleted tabs, keyword search (every word, ignoring case and accents) and restore; restore refused when the meeting has a newer note | 2026-10-02 |
 
 ## Decision log
@@ -102,3 +102,4 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-02 | PB-001: terminal commands first (no macOS app yet); one process on 4310 serves UI and API; `update-app` builds before stopping so a failed build never takes the app down; PID file and log live on the device, not in Drive. | Confirm the stable build solves the reloads before investing in macOS packaging; a Drive-synced PID file would mislead the other device. |
 | 2026-10-02 | Dev mode never touches real data: ports 5174/4311, `.dev-data/` seeded from fixtures, mock calendar. | Two servers writing `../data` at once is not covered by the advisory lease. |
 | 2026-10-02 | PB-022c merged into PB-004. Survey: one duplicate (Product Weekly 2026-09-21), caused by a check-then-write race in `createMeetingFromEvent`; one missing note is a never-opened event, not a defect. | Avoid building the same duplicate detector twice; fix the cause, not just the symptom. |
+| 2026-10-02 | Archive means `archived_at` in place, not a move to `data/archive/` (ADR 0006). | Moving files would bypass ObjectStore hash checks, and the scan reads every folder, so a moved duplicate would still be flagged. |

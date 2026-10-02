@@ -2,7 +2,7 @@
 
 LifeOS is a modular monolith. The browser calls application use cases through the localhost API. Application code owns orchestration; domain code owns invariants; adapters own Markdown, filesystem, connector, AI and secret-store details.
 
-The Markdown data root is authoritative and lives at `../data` by default. The in-memory index is rebuilt at process start and may always be discarded. Google Calendar and mock AI adapters implement application-owned ports, keeping external services out of the domain and persistence layers.
+The stable app is a single localhost process on port 4310 that serves the API and the production web build; development runs separately on 5174/4311 against synthetic `.dev-data/` (ADR 0006). The Markdown data root is authoritative and lives at `../data` by default. The in-memory index is rebuilt at process start and may always be discarded. Google Calendar and mock AI adapters implement application-owned ports, keeping external services out of the domain and persistence layers.
 
 The first complete flow now works without bypassing these boundaries:
 
