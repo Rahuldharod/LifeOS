@@ -142,6 +142,10 @@ server.get<{ Params: { "*": string } }>("/api/v1/assets/*", async (request, repl
   if (!mimeType) return reply.status(404).send({ error: "Unsupported asset" });
   return reply.type(mimeType).send(await assets.read(relativePath));
 });
+server.delete<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required to delete a note" });
+  return application.deleteNote(request.params.id, request.body.expectedHash);
+});
 server.post<{ Params: { id: string }; Body: { expectedHash: string } }>("/api/v1/objects/:id/archive", async (request) => application.archiveObject(request.params.id, request.body.expectedHash));
 server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (request) => application.processMeeting(request.params.id));
 server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id));

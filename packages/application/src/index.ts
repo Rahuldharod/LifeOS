@@ -251,7 +251,7 @@ export class LifeOSApplication {
       Array.isArray(object.frontmatter.external_refs) &&
       object.frontmatter.external_refs.some((reference: unknown) => typeof reference === "object" && reference !== null && (reference as { external_id?: string }).external_id === externalId));
     if (existing) {
-      const existingNote = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === existing.frontmatter.id);
+      const existingNote = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === existing.frontmatter.id && !object.frontmatter.deleted_at);
       if (!existingNote) {
         // Either finishing an interrupted create-meeting operation, or a meeting that has no note
         // yet (the PB-020 flow, or a meeting created before it): create the note now.
@@ -351,7 +351,7 @@ export class LifeOSApplication {
 
   async meetingWorkspace(meetingId: string) {
     const meeting = this.required(meetingId, "meeting");
-    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId);
+    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && !object.frontmatter.deleted_at);
     const reviews = this.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === meetingId);
     const tasks = this.index.all().filter((object) => object.frontmatter.type === "task" && object.frontmatter.source_meeting_id === meetingId);
     const resolve = (value: unknown) => typeof value === "string" ? this.index.get(value) : undefined;
@@ -373,6 +373,8 @@ export class LifeOSApplication {
 
   async updateBody(id: string, body: string, expectedHash: string) {
     const current = this.required(id);
+    // A stale tab or the other device must not keep autosaving into a deleted note.
+    if (current.frontmatter.deleted_at) throw new Error("This note was deleted; it can no longer be edited");
     const now = new Date().toISOString();
     const updated = await this.objects.write({
       relativePath: current.relativePath,
@@ -535,6 +537,23 @@ export class LifeOSApplication {
     if (safe.status === "Cancelled") safe.cancelled_at = now; else safe.cancelled_at = undefined;
     const updated = await this.objects.write({ relativePath: task.relativePath, expectedHash, frontmatter: { ...task.frontmatter, ...safe, revision: task.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId }, body: task.body });
     await this.writeAudit("task.updated", id, now, { changes: safe });
+    await this.rebuildIndex();
+    return updated;
+  }
+
+  /**
+   * Deletes a meeting or knowledge note as a tombstone (PB-021): `deleted_at` is set and the file
+   * stays on disk, so another device cannot resurrect it and it can be restored by hand. Physical
+   * removal is a separate maintenance step. The meeting itself is kept; opening its event again
+   * starts a fresh note. Idempotent: deleting an already-deleted note returns it unchanged.
+   */
+  async deleteNote(id: string, expectedHash: string) {
+    const current = this.required(id);
+    if (!["meeting-note", "knowledge-note"].includes(current.frontmatter.type)) throw new Error("Only notes can be deleted here");
+    if (current.frontmatter.deleted_at) return current;
+    const now = new Date().toISOString();
+    const updated = await this.objects.write({ relativePath: current.relativePath, expectedHash, frontmatter: { ...current.frontmatter, deleted_at: now, revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId }, body: current.body });
+    await this.writeAudit("note.deleted", id, now, { type: current.frontmatter.type, meeting_id: current.frontmatter.meeting_id });
     await this.rebuildIndex();
     return updated;
   }
@@ -738,7 +757,7 @@ export class LifeOSApplication {
         body: meeting.body
       });
     }
-    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id);
+    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
     if (note && !note.frontmatter.primary_project_id) {
       await this.objects.write({
         relativePath: note.relativePath,

@@ -113,7 +113,7 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .actions, .review-actions { display: flex; gap: 8px; }
 .actions button, .review-actions button, .conflict button { padding: 8px 12px; border: 1px solid #b8c4bd; border-radius: 7px; background: white; color: #23483c; font-size: 12px; font-weight: 750; }
 .actions .primary, .review-actions .primary { border-color: #245646; background: #245646; color: white; }
-.review-actions .danger { border-color: #d5b5ab; color: #954b38; }
+.actions .danger, .review-actions .danger { border-color: #d5b5ab; color: #954b38; }
 .metadata-strip { display: grid; grid-template-columns: 1fr 1fr .6fr 2fr; gap: 18px; padding: 13px 24px 18px; border-top: 1px solid #ebe9e0; background: #faf8f1; }
 .conflict { display: flex; align-items: center; gap: 12px; padding: 12px 24px; background: #fff0db; color: #7a4519; font-size: 12px; }
 .conflict span { flex: 1; }

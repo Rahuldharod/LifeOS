@@ -8,8 +8,8 @@ import "./styles.css";
 import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api, ApiError } from "./api.js";
-import { readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
-import { useNoteDraftController } from "./useNoteDraftController.js";
+import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
+import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -677,6 +677,33 @@ function App() {
     localStorage.setItem("lifeos.activeNoteId", note.frontmatter.id);
   }
 
+  // PB-021: deleting tombstones the note (the Markdown file stays on disk, marked deleted). Confirms
+  // first, and says so when unsaved text would be discarded with it.
+  const deleteNote = async (note: LifeObject, controller: NoteDraftController, afterDelete: () => void) => {
+    const unsaved = controller.dirty ? "\n\nUnsaved changes in this note will be lost." : "";
+    if (!window.confirm(`Delete "${note.frontmatter.title}"?\n\nIt disappears from LifeOS. The Markdown file is kept and marked as deleted.${unsaved}`)) return false;
+    return run(async () => {
+      await api(`/api/v1/notes/${note.frontmatter.id}`, { method: "DELETE", body: JSON.stringify({ expectedHash: note.contentHash }) });
+      clearCachedDraft(note.frontmatter.id);
+      controller.reset();
+      afterDelete();
+      await loadCollections();
+    }, "Note deleted");
+  };
+
+  const deleteSelectedNote = () => selectedNote && deleteNote(selectedNote, notesController, () => {
+    setSelectedNoteId(undefined);
+    rememberedNoteId.current = undefined;
+    localStorage.removeItem("lifeos.activeNoteId");
+  });
+
+  const deleteMeetingNote = () => workspace?.note && deleteNote(workspace.note, meetingController, () => {
+    const noteId = workspace.note?.frontmatter.id;
+    setWorkspace(undefined);
+    localStorage.removeItem("lifeos.activeMeetingId");
+    setEvents((current) => current.map((event) => event.noteId === noteId ? { ...event, hasNote: false, noteId: undefined } : event));
+  });
+
   const saveSelectedNote = async () => {
     if (!selectedNote) return false;
     setBusy(true);
@@ -873,7 +900,7 @@ function App() {
                 </> : editorMode === "visual" && editorReady ? <VisualMarkdownEditor editorKey={`meeting:${editorSession}`} owner={meetingOwner} ensureOwner={ensureMeetingNote} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
                 <div className="editor-footer">
                   <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.pending && !meetingController.dirty ? "Not saved yet · nothing is written until you edit" : meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>
-                  <div className="actions"><button disabled={!editorReady || busy || !meetingController.dirty || readOnly} onClick={saveNote}>Save Markdown</button><button className="primary" disabled={!editorReady || busy || !meetingController.draft.trim() || readOnly} onClick={processMeeting}>Save & process</button></div>
+                  <div className="actions">{workspace.note && <button className="danger" disabled={busy || readOnly || meetingController.autoSaving} onClick={deleteMeetingNote}>Delete note</button>}<button disabled={!editorReady || busy || !meetingController.dirty || readOnly} onClick={saveNote}>Save Markdown</button><button className="primary" disabled={!editorReady || busy || !meetingController.draft.trim() || readOnly} onClick={processMeeting}>Save & process</button></div>
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </article>}
@@ -912,7 +939,7 @@ function App() {
                 </div>
                 <textarea ref={notesEditor} disabled={busy || readOnly} value={notesController.draft} onChange={(event) => notesController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
               </> : notesMode === "visual" ? <VisualMarkdownEditor editorKey={selectedNote.frontmatter.id} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} markdown={notesController.draft} readOnly={busy || readOnly} onChange={notesController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
-              <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
+              <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </article>}
           </div>
