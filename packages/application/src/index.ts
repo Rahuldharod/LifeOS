@@ -16,6 +16,11 @@ function slugify(value: string) {
     .slice(0, 80) || "untitled";
 }
 
+/** Lowercase and strip accents so "reunion" finds "Réunion". */
+function foldForSearch(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
 function timestampPrefix(timestamp: string, timeZone = "UTC") {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -128,6 +133,28 @@ export class LifeOSApplication {
     return this.index.all()
       .filter((object) => ["meeting-note", "knowledge-note"].includes(object.frontmatter.type) && !object.frontmatter.deleted_at)
       .sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at));
+  }
+
+  /** Tombstoned notes (PB-021), most recently deleted first. */
+  deletedNotes() {
+    return this.index.all()
+      .filter((object) => ["meeting-note", "knowledge-note"].includes(object.frontmatter.type) && object.frontmatter.deleted_at)
+      .sort((left, right) => Date.parse(String(right.frontmatter.deleted_at)) - Date.parse(String(left.frontmatter.deleted_at)));
+  }
+
+  /**
+   * Keyword search over the in-memory index (PB-025): a note matches when every word of `query`
+   * appears in its title or body, ignoring case and accents. It never touches the filesystem, so
+   * cost depends on the notes already loaded, not on the folder. A blank query returns the whole tab.
+   */
+  searchNotes(query: string, state: "open" | "deleted" = "open") {
+    const notes = state === "deleted" ? this.deletedNotes() : this.notes();
+    const words = foldForSearch(query).split(/\s+/).filter(Boolean);
+    if (!words.length) return notes;
+    return notes.filter((note) => {
+      const text = foldForSearch(`${note.frontmatter.title}\n${note.body}`);
+      return words.every((word) => text.includes(word));
+    });
   }
 
   object(id: string) {
@@ -554,6 +581,26 @@ export class LifeOSApplication {
     const now = new Date().toISOString();
     const updated = await this.objects.write({ relativePath: current.relativePath, expectedHash, frontmatter: { ...current.frontmatter, deleted_at: now, revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId }, body: current.body });
     await this.writeAudit("note.deleted", id, now, { type: current.frontmatter.type, meeting_id: current.frontmatter.meeting_id });
+    await this.rebuildIndex();
+    return updated;
+  }
+
+  /**
+   * Brings a deleted note back by clearing its tombstone (PB-025). Idempotent. A meeting shows one
+   * note, so if the event already got a newer note after this one was deleted, restoring would leave
+   * two; refuse and ask the user to delete the newer one first rather than guess which to keep.
+   */
+  async restoreNote(id: string, expectedHash: string) {
+    const current = this.required(id);
+    if (!["meeting-note", "knowledge-note"].includes(current.frontmatter.type)) throw new Error("Only notes can be restored here");
+    if (!current.frontmatter.deleted_at) return current;
+    const meetingId = current.frontmatter.meeting_id;
+    if (meetingId && this.index.all().some((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && !object.frontmatter.deleted_at)) {
+      throw new Error("This meeting already has a newer note. Delete that note first, then restore this one.");
+    }
+    const now = new Date().toISOString();
+    const updated = await this.objects.write({ relativePath: current.relativePath, expectedHash, frontmatter: { ...current.frontmatter, deleted_at: undefined, revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId }, body: current.body });
+    await this.writeAudit("note.restored", id, now, { type: current.frontmatter.type, meeting_id: meetingId });
     await this.rebuildIndex();
     return updated;
   }

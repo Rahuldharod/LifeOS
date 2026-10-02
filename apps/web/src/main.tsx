@@ -236,6 +236,12 @@ function App() {
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
   const [notes, setNotes] = useState<LifeObject[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
+  // PB-025: Open/Deleted tabs and keyword search over the notes list.
+  const [deletedNotes, setDeletedNotes] = useState<LifeObject[]>([]);
+  const [noteTab, setNoteTab] = useState<"open" | "deleted">("open");
+  const [noteQuery, setNoteQuery] = useState("");
+  const [noteResults, setNoteResults] = useState<LifeObject[]>();
+  const [selectedDeletedId, setSelectedDeletedId] = useState<string>();
   const [notesMode, setNotesMode] = useState<"visual" | "write" | "preview">("visual");
   const [capture, setCapture] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
@@ -334,11 +340,11 @@ function App() {
   const meetingOwner: EditorOwner | undefined = workspace?.note ? { id: workspace.note.frontmatter.id, relativePath: workspace.note.relativePath } : undefined;
 
   const loadCollections = async () => {
-    const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes] = await Promise.all([
+    const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes, nextDeletedNotes] = await Promise.all([
       api<Today>("/api/v1/today"), api<LifeObject[]>("/api/v1/tasks"),
-      api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes")
+      api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted")
     ]);
-    setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes);
+    setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes);
   };
 
   const refreshWorkspace = async (meetingId: string) => {
@@ -677,6 +683,31 @@ function App() {
     localStorage.setItem("lifeos.activeNoteId", note.frontmatter.id);
   }
 
+  // Debounced server-side search over the active tab. A blank query shows the full tab from state.
+  // `ignore` drops a response that arrives after the query or tab already changed.
+  useEffect(() => {
+    const query = noteQuery.trim();
+    if (!query) { setNoteResults(undefined); return; }
+    let ignore = false;
+    const timer = window.setTimeout(() => {
+      api<LifeObject[]>(`/api/v1/notes?${new URLSearchParams({ state: noteTab, q: query })}`)
+        .then((results) => { if (!ignore) setNoteResults(results); })
+        .catch((error: Error) => { if (!ignore) { setNoteResults([]); setMessage(error.message); } });
+    }, 200);
+    return () => { ignore = true; window.clearTimeout(timer); };
+  }, [noteQuery, noteTab, notes.length, deletedNotes.length]);
+
+  const tabNotes = noteTab === "open" ? notes : deletedNotes;
+  const visibleNotes = noteQuery.trim() ? (noteResults ?? []) : tabNotes;
+  const selectedDeleted = deletedNotes.find((note) => note.frontmatter.id === selectedDeletedId);
+
+  const restoreNote = (note: LifeObject) => run(async () => {
+    const restored = await api<LifeObject>(`/api/v1/notes/${note.frontmatter.id}/restore`, { method: "POST", body: JSON.stringify({ expectedHash: note.contentHash }) });
+    await loadCollections();
+    setSelectedDeletedId(undefined); setNoteTab("open"); setNoteQuery("");
+    openNote(restored);
+  }, "Note restored");
+
   // PB-021: deleting tombstones the note (the Markdown file stays on disk, marked deleted). Confirms
   // first, and says so when unsaved text would be discarded with it.
   const deleteNote = async (note: LifeObject, controller: NoteDraftController, afterDelete: () => void) => {
@@ -917,14 +948,25 @@ function App() {
         <PageHeader eyebrow="NOTES" title="Recent notes" description="Open the latest meeting and knowledge notes, edit the Markdown, and save changes back to the portable repository." />
         <div className="notes-layout">
           <article className="notes-list">
-            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{notes.length} total</small></div>
-            {!notes.length && <p className="muted">No notes have been created yet.</p>}
-            {notes.map((note) => <button className={note.frontmatter.id === selectedNoteId ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => openNote(note)}>
-              <b>{note.frontmatter.title}{conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {formatDate(note.frontmatter.updated_at)}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
+            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteQuery.trim() ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
+            <div className="notes-tabs" role="tablist" aria-label="Notes">
+              <button role="tab" aria-selected={noteTab === "open"} className={noteTab === "open" ? "selected" : ""} onClick={() => setNoteTab("open")}>Open <small>{notes.length}</small></button>
+              <button role="tab" aria-selected={noteTab === "deleted"} className={noteTab === "deleted" ? "selected" : ""} onClick={() => setNoteTab("deleted")}>Deleted <small>{deletedNotes.length}</small></button>
+            </div>
+            <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
+            {!visibleNotes.length && <p className="muted">{noteQuery.trim() ? `No ${noteTab} notes match “${noteQuery.trim()}”.` : noteTab === "open" ? "No notes have been created yet." : "No deleted notes."}</p>}
+            {visibleNotes.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => noteTab === "open" ? openNote(note) : setSelectedDeletedId(note.frontmatter.id)}>
+              <b>{note.frontmatter.title}{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatDate(note.frontmatter.updated_at) : `Deleted ${formatDate(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
             </button>)}
           </article>
           <div className="notes-main">
-            {selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :
+            {noteTab === "deleted" ? (!selectedDeleted ? <article className="empty-state"><h3>Select a deleted note</h3><p>Deleted notes are kept on disk. Choose one to read it or restore it.</p></article> : <article className="editor-card">
+              <div className="editor-heading"><div><span>DELETED {selectedDeleted.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedDeleted.frontmatter.title}</h3></div></div>
+              <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{selectedDeleted.body || "_Empty note._"}</ReactMarkdown></div>
+              <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
+              <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedDeleted.frontmatter.created_at)} /><Meta label="Deleted" value={formatDate(String(selectedDeleted.frontmatter.deleted_at))} /><Meta label="Revision" value={String(selectedDeleted.frontmatter.revision)} /><Meta label="File" value={selectedDeleted.relativePath} /></div>
+            </article>) :
+            selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :
             !selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <article className="editor-card">
               <div className="editor-heading"><div><span>{selectedNote.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedNote.frontmatter.title}</h3></div><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div></div>
               {notesMode === "write" ? <>

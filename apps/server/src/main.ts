@@ -56,7 +56,11 @@ server.addHook("onResponse", async (request, reply) => {
 server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh() }));
 server.post("/api/v1/session/take-over", async () => session.takeOver());
 server.get("/api/v1/objects", async () => application.listObjects());
-server.get("/api/v1/notes", async () => application.notes());
+server.get<{ Querystring: { q?: string; state?: string } }>("/api/v1/notes", async (request, reply) => {
+  const state = request.query.state ?? "open";
+  if (state !== "open" && state !== "deleted") return reply.status(400).send({ error: "state must be open or deleted" });
+  return application.searchNotes(request.query.q ?? "", state);
+});
 server.get<{ Params: { type: "task" | "project" | "client" | "product" | "person" } }>("/api/v1/entities/:type", async (request) => application.entities(request.params.type));
 server.post<{ Params: { type: "task" | "project" | "client" | "product" | "person" }; Body: { fields: Record<string, unknown> } }>("/api/v1/entities/:type", async (request) => application.createEntity(request.params.type, request.body.fields));
 server.patch<{ Params: { id: string }; Body: { fields: Record<string, unknown>; expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.updateEntity(request.params.id, request.body.fields, request.body.expectedHash));
@@ -141,6 +145,10 @@ server.get<{ Params: { "*": string } }>("/api/v1/assets/*", async (request, repl
   const mimeType = mimeTypes[extension];
   if (!mimeType) return reply.status(404).send({ error: "Unsupported asset" });
   return reply.type(mimeType).send(await assets.read(relativePath));
+});
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id/restore", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required to restore a note" });
+  return application.restoreNote(request.params.id, request.body.expectedHash);
 });
 server.delete<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id", async (request, reply) => {
   if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required to delete a note" });
