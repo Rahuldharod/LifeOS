@@ -120,6 +120,9 @@ export interface SecretStore {
 }
 
 export class LifeOSApplication {
+  /** In-flight `createMeetingFromEvent` calls, keyed by calendar event id (PB-004). */
+  private readonly meetingCreations = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly objects: ObjectStore,
     private readonly index: IndexStore,
@@ -160,14 +163,14 @@ export class LifeOSApplication {
 
   notes() {
     return this.index.all()
-      .filter((object) => ["meeting-note", "knowledge-note"].includes(object.frontmatter.type) && !object.frontmatter.deleted_at)
+      .filter((object) => ["meeting-note", "knowledge-note"].includes(object.frontmatter.type) && !object.frontmatter.deleted_at && !object.frontmatter.archived_at)
       .sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at));
   }
 
   /** Tombstoned notes (PB-021), most recently deleted first. */
   deletedNotes() {
     return this.index.all()
-      .filter((object) => ["meeting-note", "knowledge-note"].includes(object.frontmatter.type) && object.frontmatter.deleted_at)
+      .filter((object) => ["meeting-note", "knowledge-note"].includes(object.frontmatter.type) && object.frontmatter.deleted_at && !object.frontmatter.archived_at)
       .sort((left, right) => Date.parse(String(right.frontmatter.deleted_at)) - Date.parse(String(left.frontmatter.deleted_at)));
   }
 
@@ -339,15 +342,24 @@ export class LifeOSApplication {
    * recreates the note with the user's text rather than a placeholder.
    */
   async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
+    // PB-004: two near-simultaneous first edits both saw "no meeting yet" and each created one.
+    // Calls for the same event now run one after the other, so the second finds the first's meeting.
+    const previous = this.meetingCreations.get(externalId) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(() => this.createMeetingFromEventSerialized(externalId, from, to, calendarId, initialBody));
+    const settled = run.catch(() => undefined);
+    this.meetingCreations.set(externalId, settled);
+    void settled.then(() => { if (this.meetingCreations.get(externalId) === settled) this.meetingCreations.delete(externalId); });
+    return run;
+  }
+
+  private async createMeetingFromEventSerialized(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
     const events = await this.listCalendarEvents(from, to);
     const event = events.find((candidate) => candidate.externalId === externalId && (!calendarId || candidate.calendarId === calendarId));
     if (!event) throw new Error(`Calendar event not found: ${externalId}`);
     const now = new Date().toISOString();
     const context = await this.ensureEventContext(event, now);
     const pendingOperation = (await this.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === "create-meeting" && operation.payload.externalId === externalId);
-    const existing = this.index.all().find((object) => object.frontmatter.type === "meeting" &&
-      Array.isArray(object.frontmatter.external_refs) &&
-      object.frontmatter.external_refs.some((reference: unknown) => typeof reference === "object" && reference !== null && (reference as { external_id?: string }).external_id === externalId));
+    const existing = this.findMeetingForEvent(event.externalId, event.calendarId);
     if (existing) {
       const existingNote = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === existing.frontmatter.id && !object.frontmatter.deleted_at);
       if (!existingNote) {
@@ -414,9 +426,7 @@ export class LifeOSApplication {
     const events = await this.listCalendarEvents(from, to);
     const event = events.find((candidate) => candidate.externalId === externalId && (!calendarId || candidate.calendarId === calendarId));
     if (!event) throw new Error(`Calendar event not found: ${externalId}`);
-    const existing = this.index.all().find((object) => object.frontmatter.type === "meeting" && !object.frontmatter.deleted_at &&
-      Array.isArray(object.frontmatter.external_refs) &&
-      object.frontmatter.external_refs.some((reference: unknown) => typeof reference === "object" && reference !== null && (reference as { external_id?: string }).external_id === externalId));
+    const existing = this.findMeetingForEvent(event.externalId, event.calendarId);
     if (existing) return this.meetingWorkspace(existing.frontmatter.id);
     const now = new Date().toISOString();
     const synthetic = (type: ObjectEnvelope["type"], title: string): LifeOSObject => ({ frontmatter: { ...this.envelope(`preview:${type}:${externalId}:${title}`, type, title, now) }, body: "", relativePath: "", contentHash: "" });
@@ -440,9 +450,7 @@ export class LifeOSApplication {
   }
 
   async meetingFromEvent(externalId: string) {
-    const meeting = this.index.all().find((object) => object.frontmatter.type === "meeting" &&
-      Array.isArray(object.frontmatter.external_refs) &&
-      object.frontmatter.external_refs.some((reference: unknown) => typeof reference === "object" && reference !== null && (reference as { external_id?: string }).external_id === externalId));
+    const meeting = this.findMeetingForEvent(externalId);
     if (!meeting) throw new Error(`No LifeOS meeting exists for calendar event: ${externalId}`);
     return this.meetingWorkspace(meeting.frontmatter.id);
   }
@@ -685,6 +693,58 @@ export class LifeOSApplication {
     return updated;
   }
 
+  /**
+   * Finds live meetings that share one calendar event (PB-004) and, with `apply`, archives every
+   * copy but one together with its notes (`archived_at`, file kept, audited). The kept copy is the
+   * one whose note has the most text, then the highest revision. A group where a second copy's note
+   * also holds real text is reported for a manual merge and never archived automatically.
+   */
+  async reconcileDuplicateMeetings(options: { apply: boolean }) {
+    const live = (object: LifeOSObject) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
+    const all = this.index.all();
+    const notesOf = (meeting: LifeOSObject) => all.filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.archived_at);
+    const realText = (note: LifeOSObject) => note.body.trim() !== "" && note.body !== DEFAULT_NOTE_BODY && note.body.trim() !== DEFAULT_NOTE_BODY.trim() ? note.body.trim().length : 0;
+    const groups = new Map<string, LifeOSObject[]>();
+    for (const meeting of all.filter((object) => object.frontmatter.type === "meeting" && live(object))) {
+      const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<Record<string, unknown>> : [];
+      for (const ref of refs) {
+        if (typeof ref?.external_id !== "string") continue;
+        const key = `${typeof ref.provider === "string" ? ref.provider : "calendar"}:${ref.external_id}`;
+        const group = groups.get(key) ?? [];
+        if (!group.includes(meeting)) group.push(meeting);
+        groups.set(key, group);
+      }
+    }
+    const report: Array<{ eventKey: string; title: string; keep: { meetingId: string; relativePath: string; noteIds: string[] }; archive: Array<{ id: string; relativePath: string; type: string }>; needsManualMerge: boolean }> = [];
+    for (const [eventKey, meetings] of groups) {
+      if (meetings.length < 2) continue;
+      // Different calendars that both recorded their id are genuinely different meetings.
+      const calendars = new Set(meetings.map((meeting) => (meeting.frontmatter.external_refs as Array<Record<string, unknown>>).find((ref) => `${ref.provider ?? "calendar"}:${ref.external_id}` === eventKey)?.calendar_id).filter(Boolean));
+      if (calendars.size > 1) continue;
+      const ranked = meetings.map((meeting) => ({ meeting, notes: notesOf(meeting), text: Math.max(0, ...notesOf(meeting).map(realText)) }))
+        .sort((left, right) => right.text - left.text || right.meeting.frontmatter.revision - left.meeting.frontmatter.revision || Date.parse(left.meeting.frontmatter.created_at) - Date.parse(right.meeting.frontmatter.created_at));
+      const [keep, ...rest] = ranked;
+      const needsManualMerge = rest.some((candidate) => candidate.text > 0);
+      report.push({
+        eventKey, title: keep!.meeting.frontmatter.title, needsManualMerge,
+        keep: { meetingId: keep!.meeting.frontmatter.id, relativePath: keep!.meeting.relativePath, noteIds: keep!.notes.map((note) => note.frontmatter.id) },
+        archive: rest.flatMap(({ meeting, notes }) => [meeting, ...notes]).map((object) => ({ id: object.frontmatter.id, relativePath: object.relativePath, type: object.frontmatter.type }))
+      });
+    }
+    if (!options.apply) return { applied: false, groups: report };
+    const now = new Date().toISOString();
+    for (const group of report.filter((entry) => !entry.needsManualMerge)) {
+      for (const target of group.archive) {
+        const current = this.required(target.id);
+        if (current.frontmatter.archived_at) continue;
+        await this.objects.write({ relativePath: current.relativePath, expectedHash: current.contentHash, frontmatter: { ...current.frontmatter, archived_at: now, archived_reason: `Duplicate of meeting ${group.keep.meetingId} (PB-004)`, revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId }, body: current.body });
+        await this.writeAudit("object.archived", target.id, now, { reason: "duplicate-meeting", kept_meeting_id: group.keep.meetingId, event: group.eventKey });
+      }
+    }
+    await this.rebuildIndex();
+    return { applied: true, groups: report };
+  }
+
   async recordGoogleConnection() {
     const existing = this.index.all().find((object) => object.frontmatter.type === "connector-account" && object.frontmatter.provider === "google");
     if (existing) return existing;
@@ -772,13 +832,25 @@ export class LifeOSApplication {
     return { id, type, schema_version: 1, revision: 1, title, created_at: timestamp, updated_at: timestamp, updated_by_device: this.deviceId };
   }
 
+  /** The live meeting for a calendar event. Identity is provider + calendar + event id (PB-004);
+   * refs written before calendar_id or provider were recorded match on the fields they have. */
+  private findMeetingForEvent(externalId: string, calendarId?: string) {
+    const provider = this.calendar?.provider;
+    return this.index.all().find((object) => object.frontmatter.type === "meeting" && !object.frontmatter.deleted_at && !object.frontmatter.archived_at &&
+      Array.isArray(object.frontmatter.external_refs) &&
+      object.frontmatter.external_refs.some((reference: unknown) => {
+        if (typeof reference !== "object" || reference === null) return false;
+        const ref = reference as { provider?: string; external_id?: string; calendar_id?: string };
+        return ref.external_id === externalId &&
+          (!provider || !ref.provider || ref.provider === provider) &&
+          (!calendarId || !ref.calendar_id || ref.calendar_id === calendarId);
+      }));
+  }
+
   private withNoteLinks(events: CalendarEvent[]) {
     const objects = this.index.all();
     return events.map((event) => {
-      const meeting = objects.find((object) => object.frontmatter.type === "meeting" &&
-        Array.isArray(object.frontmatter.external_refs) &&
-        object.frontmatter.external_refs.some((reference: unknown) => typeof reference === "object" && reference !== null &&
-          (reference as { external_id?: string }).external_id === event.externalId));
+      const meeting = this.findMeetingForEvent(event.externalId, event.calendarId);
       const note = meeting ? objects.find((object) => object.frontmatter.type === "meeting-note" &&
         object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at) : undefined;
       return {

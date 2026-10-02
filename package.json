@@ -7,6 +7,7 @@
     "stop": "node scripts/lifeos.mjs stop",
     "status": "node scripts/lifeos.mjs status",
     "update-app": "node scripts/lifeos.mjs update",
+    "reconcile-meetings": "node --import tsx scripts/reconcile-meetings.mts",
     "dev": "node scripts/seed-dev-data.mjs && corepack pnpm --parallel --filter @lifeos/server --filter @lifeos/web dev",
     "build": "corepack pnpm -r build",
     "typecheck": "tsc --noEmit",

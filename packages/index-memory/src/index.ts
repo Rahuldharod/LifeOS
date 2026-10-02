@@ -36,7 +36,7 @@ export class MemoryIndex implements IndexStore {
 
     const notesByMeeting = new Map<string, string[]>();
     for (const object of all) {
-      if (object.frontmatter.type === "meeting-note" && typeof object.frontmatter.meeting_id === "string") {
+      if (object.frontmatter.type === "meeting-note" && typeof object.frontmatter.meeting_id === "string" && !object.frontmatter.archived_at) {
         const notes = notesByMeeting.get(object.frontmatter.meeting_id) ?? [];
         notes.push(object.frontmatter.id);
         notesByMeeting.set(object.frontmatter.meeting_id, notes);
@@ -47,7 +47,8 @@ export class MemoryIndex implements IndexStore {
       if (noteIds.length > 1) this.issues.push(`Meeting ${meetingId} has multiple canonical notes: ${noteIds.join(", ")}`);
     }
     const externalRefs = new Map<string, string>();
-    for (const object of all) {
+    // Archived objects (e.g. a reconciled duplicate meeting, PB-004) no longer claim their external id.
+    for (const object of all.filter((candidate) => !candidate.frontmatter.archived_at)) {
       const refs = Array.isArray(object.frontmatter.external_refs) ? object.frontmatter.external_refs : [];
       for (const raw of refs) {
         if (!raw || typeof raw !== "object") continue;
