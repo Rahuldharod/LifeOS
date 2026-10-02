@@ -89,6 +89,7 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-020 | Opening an event saves nothing until the first real edit | 2026-10-02 |
 | PB-022a | Google token failure is visible: Reconnect banner with last sync time, real error in the timeline, throttled failed Sync Runs | 2026-10-02 |
 | PB-021 | Delete a note as a tombstone (`deleted_at`, file kept, confirm first); no in-app restore yet | 2026-10-02 |
+| PB-025 | Notes: Open/Deleted tabs, keyword search (every word, ignoring case and accents) and restore; restore refused when the meeting has a newer note | 2026-10-02 |
 
 ## Decision log
 
@@ -98,3 +99,4 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-02 | Feedback is single-user and text-only, so the in-app button writes straight into this backlog's Inbox, not a separate feedback folder. | No new object type or schema needed; entries follow the backlog format. |
 | 2026-10-02 | Triaged PB-017 to PB-024. Order in Now: PB-017, PB-022, PB-020, PB-019, PB-021, PB-001, PB-004. PB-003 moved to Next, PB-002 marked complete. | Fix what blocks daily use first; keep Now to seven items. |
 | 2026-10-02 | Split PB-022 into 022a (Now), 022b and 022c (Next). | Diagnosis showed the root cause is an expired token shown as an empty day; fix visibility first, then resilience and cleanup. |
+| 2026-10-02 | Notes search starts as a keyword filter on the in-memory index (no new package); add MiniSearch only if results feel poorly ordered or typos matter. | The index already holds every note; at 87 files and about 44 KB a scan is instant, and the real scaling cost is the full re-read after each save, which is a separate item. |

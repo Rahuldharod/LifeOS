@@ -35,6 +35,11 @@ article small { color: #6c766f; }
 .notes-list { position: sticky; top: 24px; max-height: calc(100vh - 48px); padding: 12px; overflow-y: auto; }
 .notes-list-heading { display: flex; justify-content: space-between; align-items: center; padding: 8px 8px 5px; }
 .notes-list-heading span { color: #8a6e36; font-size: 11px; font-weight: 800; letter-spacing: .13em; }
+.notes-tabs { display: flex; margin: 6px 0 8px; padding: 3px; border-radius: 8px; background: #eceae1; }
+.notes-tabs button { flex: 1; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: #647269; font-size: 12px; font-weight: 700; }
+.notes-tabs button.selected { background: white; color: #23483c; box-shadow: 0 1px 4px #263d3420; }
+.notes-tabs small { margin-left: 4px; color: #8a948d; font-weight: 600; }
+.notes-search { width: 100%; padding: 9px 11px; border: 1px solid #cfd4cf; border-radius: 8px; background: white; font-size: 13px; }
 .note-list-item { display: block; width: 100%; margin-top: 7px; padding: 13px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #263a32; text-align: left; }
 .note-list-item:hover { background: #f5f2e9; }
 .note-list-item.selected { border-color: #b9cbbf; background: #edf3ee; }
