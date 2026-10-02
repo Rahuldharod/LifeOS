@@ -1,3 +1,3 @@
-# Claude Code instructions
+@AGENTS.md
 
-Read and follow [`AGENTS.md`](AGENTS.md) before changing this repository. `AGENTS.md` is the single maintained source for repository navigation, architecture rules, commands, safety constraints, and definition of done.
+<!-- AGENTS.md is the single maintained source for this repo. Add Claude-only notes below this line. -->

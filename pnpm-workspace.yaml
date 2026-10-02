@@ -5,6 +5,8 @@ packages:
 onlyBuiltDependencies:
   - esbuild
 
-confirmModulesPurge: false
 allowBuilds:
   esbuild: true
+
+packageImportMethod: copy
+nodeLinker: hoisted
