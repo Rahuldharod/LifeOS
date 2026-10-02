@@ -182,7 +182,8 @@ server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
 
 // Serves the production web build (PB-001): unknown non-API paths fall back to index.html.
-const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
+// The launcher points LIFEOS_WEB_ROOT at its own snapshot of the build, so a later `pnpm build` cannot change the running app.
+const webRoot = process.env.LIFEOS_WEB_ROOT ? path.join(path.resolve(process.env.LIFEOS_WEB_ROOT), path.sep) : fileURLToPath(new URL("../../web/dist/", import.meta.url));
 const webMimeTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".map": "application/json" };
 server.get("/*", async (request, reply) => {
   let requested: string;

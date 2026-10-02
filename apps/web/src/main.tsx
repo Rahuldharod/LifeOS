@@ -11,6 +11,8 @@ import { api, ApiError, useServerConnection } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
 import { enabledCalendars, noCalendarPrefs, reconcileFilter, resolveDefaultFilter, type CalendarOption, type CalendarPrefs } from "./calendarPrefs.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
+import { groupByDay } from "./noteGroups.js";
+import { useSplitPane } from "./splitPane.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -61,6 +63,14 @@ function formatDate(value: unknown) {
   const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   try { return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone }); }
   catch { return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); }
+}
+
+/** Time only, for list items whose day is already shown in a group header (PB-023). */
+function formatTime(value: unknown) {
+  if (typeof value !== "string") return "—";
+  const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  try { return new Date(value).toLocaleTimeString([], { timeStyle: "short", timeZone }); }
+  catch { return new Date(value).toLocaleTimeString([], { timeStyle: "short" }); }
 }
 
 function formatEventDate(event: Event) {
@@ -308,6 +318,8 @@ function App() {
   // when a first edit turns the preview into a persisted workspace.
   const [editorSession, setEditorSession] = useState(0);
   const server = useServerConnection();
+  const notesSplit = useSplitPane("lifeos.split.notes");
+  const calendarSplit = useSplitPane("lifeos.split.calendar");
   const notesController = useNoteDraftController({
     note: selectedNote,
     readOnly,
@@ -897,7 +909,7 @@ function App() {
         {googleConnection?.reason === "expired" && <article className="lease-warning" role="alert"><span>GOOGLE CALENDAR</span><h3>Reconnect Google Calendar</h3><p>Google no longer accepts the saved access, so events cannot sync. {googleConnection.lastSuccessfulSyncAt ? `Last successful sync: ${new Date(googleConnection.lastSuccessfulSyncAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: displayTimeZone })}.` : "No successful sync recorded yet."}</p><button className="takeover" disabled={busy} onClick={connectGoogle}>Reconnect</button></article>}
         {googleConnection && !googleConnection.connected && googleConnection.reason !== "expired" && <article className="lease-warning"><span>GOOGLE CALENDAR</span><h3>{googleConnection.configured ? "Ready to connect" : "Configuration required"}</h3><p>{googleConnection.configured ? "Authorize read-only access to replace the mock calendar with your upcoming events." : "Add the Google Calendar OAuth client under Settings, then return here to connect."}</p>{googleConnection.configured ? <button className="takeover" disabled={busy} onClick={connectGoogle}>Connect Google Calendar</button> : <button onClick={() => setView("Settings")}>Open Settings</button>}</article>}
         {googleConnection?.connected && <article className="connection-card"><span>GOOGLE CALENDAR CONNECTED</span><p className="muted">Read-only access is active. Each manual sync records a durable Sync Run.</p><button disabled={busy || readOnly} onClick={syncGoogle}>Sync now</button></article>}
-        <div className="meeting-layout">
+        <div className="meeting-layout split-layout" style={calendarSplit.style}>
           <article className="event-list">
             <div className="event-list-heading"><span>DAY TIMELINE</span><button onClick={() => setSelectedDate(dateInTimeZone(new Date(), displayTimeZone))}>Today</button></div>
             <div className="calendar-controls">
@@ -936,6 +948,7 @@ function App() {
               })}
             </div>
           </article>
+          <div {...calendarSplit.dividerProps} />
           <div className="meeting-main">
             {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
@@ -991,7 +1004,7 @@ function App() {
 
       {view === "Notes" && <>
         <PageHeader eyebrow="NOTES" title="Recent notes" description="Open the latest meeting and knowledge notes, edit the Markdown, and save changes back to the portable repository." />
-        <div className="notes-layout">
+        <div className="notes-layout split-layout" style={notesSplit.style}>
           <article className="notes-list">
             <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteQuery.trim() ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
             <div className="notes-tabs" role="tablist" aria-label="Notes">
@@ -1000,10 +1013,11 @@ function App() {
             </div>
             <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
             {!visibleNotes.length && <p className="muted">{noteQuery.trim() ? `No ${noteTab} notes match “${noteQuery.trim()}”.` : noteTab === "open" ? "No notes have been created yet." : "No deleted notes."}</p>}
-            {visibleNotes.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => noteTab === "open" ? openNote(note) : setSelectedDeletedId(note.frontmatter.id)}>
-              <b>{note.frontmatter.title}{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatDate(note.frontmatter.updated_at) : `Deleted ${formatDate(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
-            </button>)}
+            {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => noteTab === "open" ? openNote(note) : setSelectedDeletedId(note.frontmatter.id)}>
+              <b>{note.frontmatter.title}{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
+            </button>)}</div>)}
           </article>
+          <div {...notesSplit.dividerProps} />
           <div className="notes-main">
             {noteTab === "deleted" ? (!selectedDeleted ? <article className="empty-state"><h3>Select a deleted note</h3><p>Deleted notes are kept on disk. Choose one to read it or restore it.</p></article> : <article className="editor-card">
               <div className="editor-heading"><div><span>DELETED {selectedDeleted.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedDeleted.frontmatter.title}</h3></div></div>

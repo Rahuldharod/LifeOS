@@ -3,7 +3,7 @@
 //   node scripts/lifeos.mjs start | stop | status | update
 // The PID file and log are device-local (not in the synced Drive folder, not in Git).
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,8 @@ const runDir = process.env.LIFEOS_RUN_DIR ?? path.join(os.homedir(), "Library", 
 const logDir = process.env.LIFEOS_LOG_DIR ?? path.join(os.homedir(), "Library", "Logs", "LifeOS");
 const pidFile = path.join(runDir, "server.pid");
 const logFile = path.join(logDir, "server.log");
+// Snapshot of the web build served by the running app; refreshed only by start/update-app.
+const webSnapshot = path.join(runDir, "web");
 const serverEntry = "apps/server/src/main.ts";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -56,11 +58,13 @@ async function start() {
   if (!existsSync(path.join(codeRoot, "apps/web/dist/index.html")) && !build()) { console.error("Build failed; LifeOS was not started."); return false; }
   mkdirSync(runDir, { recursive: true });
   mkdirSync(logDir, { recursive: true });
+  rmSync(webSnapshot, { recursive: true, force: true });
+  cpSync(path.join(codeRoot, "apps/web/dist"), webSnapshot, { recursive: true });
   const log = openSync(logFile, "a");
   writeFileSync(log, `\n--- LifeOS start ${new Date().toISOString()} ---\n`);
   // `node --import tsx` (not the tsx binary) so the PID is the server itself and SIGTERM reaches it.
   const child = spawn(process.execPath, ["--import", "tsx", serverEntry], {
-    cwd: codeRoot, detached: true, stdio: ["ignore", log, log], env: { ...process.env, NODE_ENV: "production" }
+    cwd: codeRoot, detached: true, stdio: ["ignore", log, log], env: { ...process.env, NODE_ENV: "production", LIFEOS_WEB_ROOT: webSnapshot }
   });
   child.unref();
   writeFileSync(pidFile, String(child.pid));
