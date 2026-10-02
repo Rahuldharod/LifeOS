@@ -27,7 +27,7 @@ Items required to make the current version dependable for regular use.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-004 | Duplicate meeting reconciliation (absorbs PB-022c) | Stop the creation race that made two Product Weekly meetings 80 ms apart (per-event lock; identity = provider + calendar + event id), then a one-off dry-run → `--apply` cleanup that keeps the richest copy and archives the empty one, logged to audit. Out of scope: recreating notes for never-opened events (normal since PB-020) and Sync Run cleanup. | 4 | High | 3 | — | — |
+| PB-004 | Duplicate meeting reconciliation (absorbs PB-022c) | Stop the creation race that made two Product Weekly meetings 80 ms apart (per-event lock; identity = provider + calendar + event id), then a one-off dry-run → `--apply` cleanup that keeps the richest copy and archives the empty one, logged to audit. Out of scope: recreating notes for never-opened events (normal since PB-020) and Sync Run cleanup. **Status 2026-10-02:** race fix and `pnpm reconcile-meetings` shipped; dry run on real data matches the survey; `--apply` waits for Rahul. | 4 | High | 3 | — | — |
 
 ## Next
 
