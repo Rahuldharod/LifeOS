@@ -7,7 +7,7 @@ import "@milkdown/crepe/theme/frame.css";
 import "./styles.css";
 import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
-import { api, ApiError } from "./api.js";
+import { api, ApiError, useServerConnection } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
 import { enabledCalendars, noCalendarPrefs, reconcileFilter, resolveDefaultFilter, type CalendarOption, type CalendarPrefs } from "./calendarPrefs.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
@@ -307,6 +307,7 @@ function App() {
   // Bumped only when the user opens an event, so the visual editor keeps its instance (and cursor)
   // when a first edit turns the preview into a persisted workspace.
   const [editorSession, setEditorSession] = useState(0);
+  const server = useServerConnection();
   const notesController = useNoteDraftController({
     note: selectedNote,
     readOnly,
@@ -874,6 +875,7 @@ function App() {
     </aside>
 
     <section className={(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : undefined}>
+      {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       {view === "Today" && <>
         <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
         <div className="summary">

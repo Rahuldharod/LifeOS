@@ -25,32 +25,26 @@ corepack pnpm install
 cp .env.example .env
 ```
 
-Start LifeOS with:
+### Use LifeOS
+
+LifeOS runs in the background from the production build, so code changes never reload it while you are writing. Open `http://127.0.0.1:4310` once it has started.
+
+| Command | What it does |
+| --- | --- |
+| `corepack pnpm start` | Starts LifeOS in the background (builds first if there is no build yet) |
+| `corepack pnpm stop` | Stops LifeOS and releases the device lease |
+| `corepack pnpm status` | Shows whether LifeOS is running |
+| `corepack pnpm update-app` | Builds the latest code, then restarts LifeOS. If the build fails, the running app is left untouched |
+
+During a restart the page shows **Reconnecting…**; keep typing, the draft saves when the server is back. The log is at `~/Library/Logs/LifeOS/server.log`.
+
+### Develop LifeOS
 
 ```bash
 corepack pnpm dev
 ```
 
-Keep that Terminal window open while using the application. The web interface runs at `http://127.0.0.1:5173`; the API runs at `http://127.0.0.1:4310`.
-
-### Stop LifeOS
-
-In the Terminal window running LifeOS, press **Control+C**. This stops both the web interface and API.
-
-If that Terminal window is no longer available, identify the processes using the LifeOS ports:
-
-```bash
-lsof -nP -iTCP:5173 -sTCP:LISTEN
-lsof -nP -iTCP:4310 -sTCP:LISTEN
-```
-
-Stop each listed process using its numeric PID:
-
-```bash
-kill <PID>
-```
-
-Run the two `lsof` commands again. No output means both LifeOS servers are stopped.
+Development runs separately at `http://127.0.0.1:5174` (API on 4311) with live reload. It uses synthetic data in `.dev-data/` (created from `schemas/fixtures` on first run; delete the folder to reset) and the mock calendar, so it never touches the real `../data`. Press **Control+C** to stop it.
 
 ## Safety baseline
 

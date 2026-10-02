@@ -27,8 +27,7 @@ Items required to make the current version dependable for regular use.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-001 | Production application packaging | Running through the development server causes live reloads while code changes. Provide a stable production launcher that does not interrupt note-taking. | 5 | High | 3 | — | — |
-| PB-004 | Duplicate meeting reconciliation | Detect and merge or archive duplicate canonical meetings and meeting notes created during retries or earlier development. Re-check with PB-022c. | 4 | High | 3 | — | — |
+| PB-004 | Duplicate meeting reconciliation (absorbs PB-022c) | Stop the creation race that made two Product Weekly meetings 80 ms apart (per-event lock; identity = provider + calendar + event id), then a one-off dry-run → `--apply` cleanup that keeps the richest copy and archives the empty one, logged to audit. Out of scope: recreating notes for never-opened events (normal since PB-020) and Sync Run cleanup. | 4 | High | 3 | — | — |
 
 ## Next
 
@@ -41,7 +40,6 @@ High-value capabilities to address after the current version is stable.
 | PB-023 | Group Latest notes by date | In Notes → Latest notes, group by date shown as “day month-in-words” with a divider between days. | 3 | High | 1 | — | — |
 | PB-024 | Use more screen space | Content on all tabs fills the width and height of 13-inch Retina and 4K displays. Widen the Latest notes column so longer titles do not wrap. Build with PB-023, same column. | 3 | High | 2 | — | — |
 | PB-022b | Persist synced events locally | The Calendar tab depends on a live Google call, so a token or network failure leaves the day blank. Store the last synced events per day (derived, rebuildable) and show them, marked as stale, when Google is unreachable. Split from PB-022. | 4 | Medium | 3 | — | — |
-| PB-022c | Dedupe Sync Runs and recreate missing notes | After the Drive reload, check for duplicate Sync Run files and meetings whose note file went missing. Merge or archive duplicates and recreate missing notes idempotently, without silent deletes. Split from PB-022; overlaps PB-004. | 4 | Medium | 3 | — | — |
 | PB-005 | Note search, filtering, and sorting | Find notes by title, body, type, date, project, client, product, or person. | 4 | High | 3 | — | — |
 | PB-006 | Editable note titles and metadata | Change a note title and its relationships without manually editing YAML front matter. | 4 | High | 2 | — | — |
 | PB-007 | LifeOS link navigation | Clicking a `lifeos://object/...` link should open the linked object inside the application. | 4 | High | 2 | — | — |
@@ -89,6 +87,7 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-020 | Opening an event saves nothing until the first real edit | 2026-10-02 |
 | PB-022a | Google token failure is visible: Reconnect banner with last sync time, real error in the timeline, throttled failed Sync Runs | 2026-10-02 |
 | PB-021 | Delete a note as a tombstone (`deleted_at`, file kept, confirm first); no in-app restore yet | 2026-10-02 |
+| PB-001 | Stable launcher: `pnpm start/stop/status/update-app` runs the built app in the background on 4310 (no reloads), "Reconnecting…" banner with autosave retry, dev isolated on 5174/4311 with synthetic data and mock calendar | 2026-10-02 |
 | PB-025 | Notes: Open/Deleted tabs, keyword search (every word, ignoring case and accents) and restore; restore refused when the meeting has a newer note | 2026-10-02 |
 
 ## Decision log
@@ -100,3 +99,6 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-02 | Triaged PB-017 to PB-024. Order in Now: PB-017, PB-022, PB-020, PB-019, PB-021, PB-001, PB-004. PB-003 moved to Next, PB-002 marked complete. | Fix what blocks daily use first; keep Now to seven items. |
 | 2026-10-02 | Split PB-022 into 022a (Now), 022b and 022c (Next). | Diagnosis showed the root cause is an expired token shown as an empty day; fix visibility first, then resilience and cleanup. |
 | 2026-10-02 | Notes search starts as a keyword filter on the in-memory index (no new package); add MiniSearch only if results feel poorly ordered or typos matter. | The index already holds every note; at 87 files and about 44 KB a scan is instant, and the real scaling cost is the full re-read after each save, which is a separate item. |
+| 2026-10-02 | PB-001: terminal commands first (no macOS app yet); one process on 4310 serves UI and API; `update-app` builds before stopping so a failed build never takes the app down; PID file and log live on the device, not in Drive. | Confirm the stable build solves the reloads before investing in macOS packaging; a Drive-synced PID file would mislead the other device. |
+| 2026-10-02 | Dev mode never touches real data: ports 5174/4311, `.dev-data/` seeded from fixtures, mock calendar. | Two servers writing `../data` at once is not covered by the advisory lease. |
+| 2026-10-02 | PB-022c merged into PB-004. Survey: one duplicate (Product Weekly 2026-09-21), caused by a check-then-write race in `createMeetingFromEvent`; one missing note is a never-opened event, not a defect. | Avoid building the same duplicate detector twice; fix the cause, not just the symptom. |

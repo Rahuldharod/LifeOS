@@ -6,7 +6,7 @@
 // including the base-hash pinning U1 fixed for Notes (autosave and manual saves send the hash the
 // draft was opened with, never a hash a background refresh happened to pick up).
 import { useEffect, useRef, useState } from "react";
-import { ApiError, api } from "./api.js";
+import { ApiError, api, useServerConnection } from "./api.js";
 import { cacheDraft, clearCachedDraft, type CachedDraft } from "./draftStorage.js";
 import { noteDraftBase, noteSaveRequest, openNoteDraft, reconcileNoteDraft, type NoteDraftBase } from "./noteDraft.js";
 
@@ -79,6 +79,8 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
   const restoredId = useRef<string | undefined>(undefined);
   const [pendingKey, setPendingKey] = useState<string>();
   const pendingKeyRef = useRef<string | undefined>(undefined);
+  // A failed autosave is retried when the server comes back after a restart (PB-001).
+  const { reconnects } = useServerConnection();
 
   useEffect(() => { activeDraft.current = draft; }, [draft]);
 
@@ -194,7 +196,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
     const timer = window.setTimeout(() => void performSave(saveBase, bodyToSave), autosaveDelayMs);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note?.frontmatter.id, note?.contentHash, draft, base, readOnly, busy, conflict, autoSaving]);
+  }, [note?.frontmatter.id, note?.contentHash, draft, base, readOnly, busy, conflict, autoSaving, reconnects]);
 
   // Pending draft (no file yet): cache it, and create the note after the same debounce autosave
   // uses. Whitespace-only text is not an edit, so an untouched or cleared editor writes nothing.
@@ -208,7 +210,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
     const timer = window.setTimeout(() => void performCreate(key, bodyToSave), autosaveDelayMs);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note, pendingKey, draft, readOnly, busy, autoSaving]);
+  }, [note, pendingKey, draft, readOnly, busy, autoSaving, reconnects]);
 
   /** "Keep disk version": discard the browser draft and adopt the current Markdown file. Always
    * clears the conflict flag, even if the note is gone — otherwise a deleted-elsewhere note would

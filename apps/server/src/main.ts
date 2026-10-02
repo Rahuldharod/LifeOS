@@ -32,14 +32,17 @@ const index = new MemoryIndex();
 const secrets = new MacOSKeychainSecretStore();
 if (process.env.GOOGLE_CLIENT_SECRET) await secrets.set("google:default:client-secret", process.env.GOOGLE_CLIENT_SECRET);
 if (process.env.GOOGLE_CLIENT_ID) await secrets.set("google:default:client-id", process.env.GOOGLE_CLIENT_ID);
-const savedGoogleClientId = await secrets.get("google:default:client-id");
+// Dev mode (PB-001) forces the mock calendar: Google's OAuth callback belongs to the stable app on 4310.
+const mockCalendarOnly = process.env.LIFEOS_CALENDAR === "mock";
+const savedGoogleClientId = mockCalendarOnly ? undefined : await secrets.get("google:default:client-id");
 let google = savedGoogleClientId ? new GoogleCalendarConnector({ clientId: savedGoogleClientId, redirectUri: googleRedirectUri, secrets }) : undefined;
 const mockCalendar = new MockCalendarConnector();
 const calendar = { get provider() { return (google ?? mockCalendar).provider; }, listEvents: (from: Date, to: Date) => (google ?? mockCalendar).listEvents(from, to), listCalendars: () => (google ?? mockCalendar).listCalendars() };
 const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId);
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 
-await server.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
+// The stable app serves the UI itself (same origin); only the Vite dev UI needs CORS.
+await server.register(cors, { origin: ["http://127.0.0.1:5174", "http://localhost:5174"] });
 
 server.addHook("preHandler", async (request, reply) => {
   const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
@@ -116,7 +119,7 @@ server.get<{ Querystring: { code?: string; state?: string; error?: string } }>("
   if (!request.query.code || !request.query.state) return reply.status(400).type("text/html").send("<h1>Invalid OAuth callback</h1>");
   await google.completeAuthorization(request.query.code, request.query.state);
   await application.recordGoogleConnection();
-  return reply.type("text/html").send('<!doctype html><meta charset="utf-8"><title>LifeOS connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;color:#173f32}a{color:#173f32}</style><h1>Google Calendar connected</h1><p>Your tokens are stored in macOS Keychain. You can return to LifeOS.</p><a href="http://127.0.0.1:5173/">Return to LifeOS</a>');
+  return reply.type("text/html").send('<!doctype html><meta charset="utf-8"><title>LifeOS connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;color:#173f32}a{color:#173f32}</style><h1>Google Calendar connected</h1><p>Your tokens are stored in macOS Keychain. You can return to LifeOS.</p><a href="/">Return to LifeOS</a>');
 });
 // Opening an event is a pure read (PB-020): it returns the existing workspace or a non-persisted preview.
 server.get<{ Querystring: { externalId: string; calendarId?: string; from?: string; to?: string } }>("/api/v1/meetings/preview", async (request, reply) => {
@@ -178,15 +181,23 @@ server.get("/api/v1/backups", async () => backups.list());
 server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
 
+// Serves the production web build (PB-001): unknown non-API paths fall back to index.html.
 const webRoot = fileURLToPath(new URL("../../web/dist/", import.meta.url));
+const webMimeTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".map": "application/json" };
 server.get("/*", async (request, reply) => {
-  const requested = request.url === "/" ? "index.html" : request.url.replace(/^\//, "").split("?")[0]!;
+  let requested: string;
+  try { requested = decodeURIComponent(request.url.split("?")[0]!.replace(/^\//, "")) || "index.html"; }
+  catch { return reply.status(404).send({ error: "Not found" }); }
+  if (requested.startsWith("api/")) return reply.status(404).send({ error: "Not found" });
   const target = path.resolve(webRoot, requested);
   if (!target.startsWith(webRoot)) return reply.status(404).send({ error: "Not found" });
-  const content = await readFile(target).catch(() => requested === "index.html" ? undefined : readFile(path.join(webRoot, "index.html")).catch(() => undefined));
-  if (!content) return reply.status(404).send({ error: "Web build not found; run pnpm build" });
-  const contentType = target.endsWith(".js") ? "application/javascript" : target.endsWith(".css") ? "text/css" : "text/html";
-  return reply.type(contentType).send(content);
+  let served = target;
+  let content = await readFile(target).catch(() => undefined);
+  if (!content && !path.extname(requested)) { served = path.join(webRoot, "index.html"); content = await readFile(served).catch(() => undefined); }
+  if (!content) return reply.status(404).send({ error: requested === "index.html" ? "Web build not found; run pnpm build" : "Not found" });
+  // Vite fingerprints files under assets/, so they can be cached; index.html must always be fresh.
+  reply.header("cache-control", served.includes(`${path.sep}assets${path.sep}`) ? "public, max-age=31536000, immutable" : "no-cache");
+  return reply.type(webMimeTypes[path.extname(served).toLowerCase()] ?? "application/octet-stream").send(content);
 });
 
 server.setErrorHandler((error, _request, reply) => {

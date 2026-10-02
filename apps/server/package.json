@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "LIFEOS_PORT=4311 LIFEOS_DATA_ROOT=../../.dev-data LIFEOS_BACKUP_ROOT=../../.dev-backups LIFEOS_DEVICE_ID=development LIFEOS_CALENDAR=mock tsx watch src/main.ts",
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
