@@ -8,7 +8,7 @@ import "./styles.css";
 import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api } from "./api.js";
-import { readCachedDraft } from "./draftStorage.js";
+import { readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
 import { useNoteDraftController } from "./useNoteDraftController.js";
 
 type CrepeInstance = {
@@ -31,6 +31,8 @@ type Frontmatter = Record<string, unknown> & {
 type LifeObject = { frontmatter: Frontmatter; body: string; relativePath: string; contentHash: string };
 type Event = { externalId: string; calendarId?: string; calendarName?: string; calendarColor?: string; title: string; startsAt: string; endsAt: string; timezone: string; isAllDay?: boolean; attendees: string[]; projectName?: string; hasNote?: boolean; meetingId?: string; noteId?: string };
 type Workspace = {
+  /** False for the read-only preview of a calendar event with no meeting/note on disk yet (PB-020). */
+  persisted?: boolean;
   meeting: LifeObject;
   note?: LifeObject;
   reviews: LifeObject[];
@@ -144,20 +146,36 @@ function fileContentBase64(file: File) {
   });
 }
 
-function VisualMarkdownEditor({ note, markdown, readOnly, onChange }: { note: LifeObject; markdown: string; readOnly: boolean; onChange: (markdown: string) => void }) {
+/** The note a visual editor writes managed images against. For a calendar event with no note yet
+ * (PB-020), `ensureOwner` creates it on demand — inserting an image is a real edit. */
+type EditorOwner = { id: string; relativePath: string };
+
+function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnly, onChange }: { editorKey: string; owner: EditorOwner | undefined; ensureOwner?: () => Promise<EditorOwner | undefined>; markdown: string; readOnly: boolean; onChange: (markdown: string) => void }) {
   const root = useRef<HTMLDivElement>(null);
   const crepe = useRef<CrepeInstance | undefined>(undefined);
+  // Latest props for callbacks created once per mount. Reading these through refs matters: `readOnly`
+  // is true while an event is being opened (busy) and the editor finishes loading asynchronously, so
+  // a value captured at mount time would leave the editor — and its ribbon, which Crepe hides when
+  // read-only — locked until the next remount (PB-019).
+  const latest = useRef({ owner, ensureOwner, readOnly, onChange });
+  latest.current = { owner, ensureOwner, readOnly, onChange };
+  // Only changes made after the user has focused the editor count as edits. Crepe can re-emit
+  // normalized Markdown on its own after loading; that must never dirty the draft or trigger a save.
+  const engaged = useRef(false);
 
   useEffect(() => {
     if (!root.current) return;
     let active = true;
     let instance: CrepeInstance | undefined;
     const editorRoot = root.current;
+    engaged.current = false;
     void import("@milkdown/crepe").then(async (crepePackage) => {
       if (!active) return;
       const Crepe = (crepePackage as unknown as { Crepe: CrepeConstructor }).Crepe;
       const uploadManagedImage = async (file: File) => {
-        const stored = await api<StoredAsset>(`/api/v1/objects/${note.frontmatter.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64: await fileContentBase64(file) }) });
+        const target = latest.current.owner ?? await latest.current.ensureOwner?.();
+        if (!target) throw new Error("Could not create the note to attach this image to");
+        const stored = await api<StoredAsset>(`/api/v1/objects/${target.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64: await fileContentBase64(file) }) });
         return `/api/v1/assets/${encodeURIComponent(stored.relativePath.replace(/^assets\//, ""))}`;
       };
       instance = new Crepe({
@@ -167,15 +185,18 @@ function VisualMarkdownEditor({ note, markdown, readOnly, onChange }: { note: Li
         featureConfigs: { "image-block": { onUpload: uploadManagedImage, inlineOnUpload: uploadManagedImage, blockOnUpload: uploadManagedImage, proxyDomURL: imagePreviewSource } }
       });
       crepe.current = instance;
-      instance.on((listener) => listener.markdownUpdated((_context, nextMarkdown) => onChange(storedMarkdown(nextMarkdown, note.relativePath))));
+      instance.on((listener) => listener.markdownUpdated((_context, nextMarkdown) => {
+        if (!engaged.current) return;
+        latest.current.onChange(storedMarkdown(nextMarkdown, latest.current.owner?.relativePath ?? "meetings/pending.md"));
+      }));
       await instance.create();
-      if (active) instance.setReadonly(readOnly);
+      if (active) instance.setReadonly(latest.current.readOnly);
     });
     return () => { active = false; crepe.current = undefined; if (instance) void instance.destroy(); };
-  }, [note.frontmatter.id]);
+  }, [editorKey]);
 
   useEffect(() => { crepe.current?.setReadonly(readOnly); }, [readOnly]);
-  return <div className="visual-markdown-editor" ref={root} />;
+  return <div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} />;
 }
 
 function ReviewCard({ review, busy, onAccept, onReject, onSave }: {
@@ -257,7 +278,7 @@ function App() {
   // Same "soft" refetch shape as fetchLatestNote, for the Calendar meeting workspace. No-ops when
   // no workspace is open. Deliberately does NOT call meetingController.open() for the same reason.
   const fetchLatestWorkspace = useCallback(async () => {
-    if (!workspace) return undefined;
+    if (!workspace || workspace.persisted === false) return undefined;
     const next = await api<Workspace>(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/workspace`);
     setWorkspace(next);
     return next.note;
@@ -266,6 +287,12 @@ function App() {
   // One shared draft/conflict controller per editor (Notes, Calendar meeting workspace) — see
   // useNoteDraftController.ts. Each owns its own draft, base hash and conflict state, so switching
   // views can never leak one editor's conflict flag into the other.
+  // The calendar event whose note does not exist on disk yet, if the open workspace is a preview.
+  const createdWorkspace = useRef<Workspace | undefined>(undefined);
+  const previewTarget = useRef<{ externalId: string; calendarId?: string; date: string; timeZone: string } | undefined>(undefined);
+  // Bumped only when the user opens an event, so the visual editor keeps its instance (and cursor)
+  // when a first edit turns the preview into a persisted workspace.
+  const [editorSession, setEditorSession] = useState(0);
   const notesController = useNoteDraftController({
     note: selectedNote,
     readOnly,
@@ -280,8 +307,29 @@ function App() {
     busy,
     onMessage: setMessage,
     onSaved: (updated) => setWorkspace((current) => current?.note?.frontmatter.id === updated.frontmatter.id ? { ...current, note: updated as LifeObject } : current),
-    fetchLatest: fetchLatestWorkspace
+    fetchLatest: fetchLatestWorkspace,
+    createNote: async (body) => {
+      // The first real edit over an unsaved calendar event. The server call is idempotent (a retry
+      // returns the same meeting and note), so this is safe to repeat after a failure.
+      const target = previewTarget.current;
+      if (!target) return undefined;
+      const range = dayRange(target.date, target.timeZone);
+      const next = await api<Workspace>("/api/v1/meetings/from-event", { method: "POST", body: JSON.stringify({ externalId: target.externalId, calendarId: target.calendarId, ...range, body }) });
+      setWorkspace((current) => current && !current.note && (current.meeting.frontmatter.id === `preview:${target.externalId}` || current.meeting.frontmatter.id === next.meeting.frontmatter.id) ? next : current);
+      if (previewTarget.current === target) previewTarget.current = undefined;
+      localStorage.setItem("lifeos.activeMeetingId", next.meeting.frontmatter.id);
+      setEvents((current) => current.map((event) => event.externalId === target.externalId && event.calendarId === target.calendarId
+        ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
+        : event));
+      createdWorkspace.current = next;
+      void loadCollections();
+      return next.note;
+    }
   });
+
+  // An editor is shown for an existing note, or for an unsaved draft over a calendar event.
+  const editorReady = Boolean(workspace?.note) || meetingController.pending;
+  const meetingOwner: EditorOwner | undefined = workspace?.note ? { id: workspace.note.frontmatter.id, relativePath: workspace.note.relativePath } : undefined;
 
   const loadCollections = async () => {
     const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes] = await Promise.all([
@@ -294,7 +342,7 @@ function App() {
   const refreshWorkspace = async (meetingId: string) => {
     const next = await api<Workspace>(`/api/v1/meetings/${meetingId}/workspace`);
     setWorkspace(next);
-    if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else meetingController.reset();
+    if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else if (!previewTarget.current) meetingController.reset();
   };
 
   const loadCalendarDay = async (date = selectedDate) => {
@@ -383,29 +431,38 @@ function App() {
     } finally { setBusy(false); }
   }
 
+  // Opening an event is a read (PB-020): it shows the existing meeting note, or an editable draft
+  // over a non-persisted preview. Nothing is written until the user makes a real edit.
   const openEvent = (selectedEvent: Event) => run(async () => {
     const { externalId, calendarId } = selectedEvent;
     const range = dayRange(selectedDate, displayTimeZone);
-    const next = health?.session.writeAllowed === false
-      ? await api<Workspace>(`/api/v1/meetings/from-event/${encodeURIComponent(externalId)}`)
-      : await api<Workspace>("/api/v1/meetings/from-event", { method: "POST", body: JSON.stringify({ externalId, calendarId, ...range }) });
-    setWorkspace(next); setEditorMode("visual");
-    if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else meetingController.reset();
-    setEvents((current) => current.map((event) => event.externalId === externalId && event.calendarId === calendarId
-      ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
-      : event));
-    localStorage.setItem("lifeos.activeMeetingId", next.meeting.frontmatter.id);
-    await loadCollections();
-  }, "Canonical meeting note ready");
+    const next = await api<Workspace>(`/api/v1/meetings/preview?${new URLSearchParams({ externalId, ...(calendarId ? { calendarId } : {}), ...range })}`);
+    setWorkspace(next); setEditorMode("visual"); setEditorSession((current) => current + 1);
+    if (next.persisted !== false) {
+      localStorage.setItem("lifeos.activeMeetingId", next.meeting.frontmatter.id);
+      setEvents((current) => current.map((event) => event.externalId === externalId && event.calendarId === calendarId
+        ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
+        : event));
+    }
+    if (next.note) {
+      previewTarget.current = undefined;
+      meetingController.open(next.note, readCachedDraft(next.note));
+    } else {
+      // No note on disk (new event, or a meeting that never got one): editable draft, no file yet.
+      const key = `event:${calendarId ?? ""}:${externalId}`;
+      previewTarget.current = { externalId, calendarId, date: selectedDate, timeZone: displayTimeZone };
+      meetingController.openPending(key, readCachedPendingDraft(key));
+    }
+  }, "Event opened");
 
   // Not routed through run(): saveNow() already reports its own outcome (including a fresh
   // conflict) via onMessage, and run()'s blanket success/error message would stomp on that.
   const saveNote = async () => {
-    if (!workspace?.note) return false;
+    if (!workspace?.note && !meetingController.pending) return false;
     setBusy(true);
     try {
       if (!(await meetingController.saveNow())) return false;
-      await refreshWorkspace(workspace.meeting.frontmatter.id);
+      if (workspace?.persisted !== false) await refreshWorkspace(workspace!.meeting.frontmatter.id);
       setMessage("Note saved to Markdown");
       return true;
     } catch (error) {
@@ -419,8 +476,10 @@ function App() {
     setBusy(true);
     try {
       if (meetingController.dirty && !(await meetingController.saveNow())) return false;
-      await api(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/process`, { method: "POST" });
-      await refreshWorkspace(workspace.meeting.frontmatter.id); await loadCollections();
+      const meetingId = meetingController.pending || !workspace.note ? createdWorkspace.current?.meeting.frontmatter.id : workspace.meeting.frontmatter.id;
+      if (!meetingId) return false;
+      await api(`/api/v1/meetings/${meetingId}/process`, { method: "POST" });
+      await refreshWorkspace(meetingId); await loadCollections();
       setMessage("Mock AI proposal created");
       return true;
     } catch (error) {
@@ -560,8 +619,17 @@ function App() {
     insertMarkdown(`\n\n\`\`\`${language.trim()}\n`, "\n\`\`\`\n\n", selected || "code");
   }
 
+  // The meeting note, creating it first if the event has none yet (inserting an image is a real edit).
+  async function ensureMeetingNote(): Promise<EditorOwner | undefined> {
+    const existing = workspaceRef.current?.note ?? createdWorkspace.current?.note;
+    if (existing && !meetingController.pending) return { id: existing.frontmatter.id, relativePath: existing.relativePath };
+    if (!(await meetingController.saveNow({ allowEmpty: true }))) return undefined;
+    const created = createdWorkspace.current?.note;
+    return created ? { id: created.frontmatter.id, relativePath: created.relativePath } : undefined;
+  }
+
   async function uploadImage(file: File) {
-    if (!workspace?.note || !file.type.startsWith("image/")) return;
+    if (!workspace || !editorReady || !file.type.startsWith("image/")) return;
     const draft = meetingController.draft;
     const insertionStart = editor.current?.selectionStart ?? draft.length;
     const insertionEnd = editor.current?.selectionEnd ?? insertionStart;
@@ -576,7 +644,9 @@ function App() {
         reader.onerror = () => reject(reader.error ?? new Error("Could not read the image"));
         reader.readAsDataURL(file);
       });
-      const stored = await api<StoredAsset>(`/api/v1/objects/${workspace.note.frontmatter.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 }) });
+      const owner = await ensureMeetingNote();
+      if (!owner) throw new Error("Could not create the note to attach this image to");
+      const stored = await api<StoredAsset>(`/api/v1/objects/${owner.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 }) });
       const markdown = `![${altText.trim()}](${stored.markdownPath})`;
       meetingController.setDraft(`${draft.slice(0, insertionStart)}${markdown}${draft.slice(insertionEnd)}`);
       requestAnimationFrame(() => { editor.current?.focus(); editor.current?.setSelectionRange(insertionStart + markdown.length, insertionStart + markdown.length); });
@@ -677,9 +747,15 @@ function App() {
   return <main>
     <aside>
       <h1>LifeOS</h1>
-      {navigation.map((item) => <button className={item === view ? "active" : ""} key={item} onClick={() => setView(item)}>{item}{item === "Inbox" && pendingReviews.length > 0 ? <em>{pendingReviews.length}</em> : null}</button>)}
-      <button className={`settings-link ${view === "Settings" ? "active" : ""}`} onClick={() => setView("Settings")}>Settings</button>
-      <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? "Read-only · another device active" : message}</p>
+      <nav className="nav-main">
+        {navigation.map((item) => <button className={item === view ? "active" : ""} key={item} onClick={() => setView(item)}>{item}{item === "Inbox" && pendingReviews.length > 0 ? <em>{pendingReviews.length}</em> : null}</button>)}
+      </nav>
+      <div className="nav-footer">
+        <div className="nav-actions">
+          <button className={`settings-link ${view === "Settings" ? "active" : ""}`} onClick={() => setView("Settings")}>Settings</button>
+        </div>
+        <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? "Read-only · another device active" : message}</p>
+      </div>
     </aside>
 
     <section className={(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : undefined}>
@@ -741,7 +817,7 @@ function App() {
             </div>
           </article>
           <div className="meeting-main">
-            {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to create or resume its canonical note.</p></article> : <>
+            {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
                 <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3></div>
                 <div className="context-grid">
@@ -755,7 +831,7 @@ function App() {
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <article className="editor-card">
                 <div className="editor-heading">
-                  <div><span>CANONICAL NOTE</span><h3>{workspace.note?.frontmatter.title}</h3></div>
+                  <div><span>CANONICAL NOTE</span><h3>{workspace.note?.frontmatter.title ?? `${workspace.meeting.frontmatter.title} notes`}</h3></div>
                   <div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div>
                 </div>
                 {editorMode === "write" ? <>
@@ -776,11 +852,11 @@ function App() {
                     <button disabled={readOnly} title="Insert table" onClick={() => insertAtCursor("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>
                     <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertAtCursor(`[${object.frontmatter.title}](lifeos://object/${object.frontmatter.id})`); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
                   </div>
-                  <textarea ref={editor} disabled={!workspace.note || busy || readOnly} value={meetingController.draft} onChange={(event) => meetingController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} placeholder="Capture meeting notes… Paste or drop an image here." />
-                </> : editorMode === "visual" && workspace.note ? <VisualMarkdownEditor note={workspace.note} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+                  <textarea ref={editor} disabled={!editorReady || busy || readOnly} value={meetingController.draft} onChange={(event) => meetingController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} placeholder="Capture meeting notes… Paste or drop an image here." />
+                </> : editorMode === "visual" && editorReady ? <VisualMarkdownEditor editorKey={`meeting:${editorSession}`} owner={meetingOwner} ensureOwner={ensureMeetingNote} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
                 <div className="editor-footer">
-                  <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>
-                  <div className="actions"><button disabled={!workspace.note || busy || !meetingController.dirty || readOnly} onClick={saveNote}>Save Markdown</button><button className="primary" disabled={!workspace.note || busy || !meetingController.draft.trim() || readOnly} onClick={processMeeting}>Save & process</button></div>
+                  <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.pending && !meetingController.dirty ? "Not saved yet · nothing is written until you edit" : meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>
+                  <div className="actions"><button disabled={!editorReady || busy || !meetingController.dirty || readOnly} onClick={saveNote}>Save Markdown</button><button className="primary" disabled={!editorReady || busy || !meetingController.draft.trim() || readOnly} onClick={processMeeting}>Save & process</button></div>
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </article>}
@@ -818,7 +894,7 @@ function App() {
                   <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertNotes(`[${object.frontmatter.title}](lifeos://object/${object.frontmatter.id})`); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
                 </div>
                 <textarea ref={notesEditor} disabled={busy || readOnly} value={notesController.draft} onChange={(event) => notesController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
-              </> : notesMode === "visual" ? <VisualMarkdownEditor note={selectedNote} markdown={notesController.draft} readOnly={busy || readOnly} onChange={notesController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+              </> : notesMode === "visual" ? <VisualMarkdownEditor editorKey={selectedNote.frontmatter.id} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} markdown={notesController.draft} readOnly={busy || readOnly} onChange={notesController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
               <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </article>}
