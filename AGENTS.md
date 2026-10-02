@@ -59,7 +59,12 @@ corepack pnpm test
 corepack pnpm build
 ```
 
-The development UI uses `http://127.0.0.1:5173`; the API uses `http://127.0.0.1:4310`.
+Two separate runtimes (ADR 0006):
+
+- **Development** (`pnpm dev`): UI `http://127.0.0.1:5174`, API `http://127.0.0.1:4311`, synthetic data in `.dev-data/`, mock calendar. Use this for all coding and manual testing.
+- **Stable app** (the user's daily LifeOS): `http://127.0.0.1:4310`, real `../data`, managed with `pnpm start | stop | status | update-app` (see README). Never stop, restart or update it without asking the user; they may be mid-note. Never kill processes by name pattern: the stable server's command line looks like dev's.
+
+One-off maintenance: `pnpm reconcile-meetings` reports duplicate meetings; `--apply` (only with the user's OK, and with the stable app stopped) backs up, then archives extras.
 
 ## Change workflow
 
