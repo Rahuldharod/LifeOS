@@ -364,14 +364,14 @@ function App() {
     setCalendarCatalogLoaded(true);
   };
 
-  const updateCalendarPrefs = async (next: CalendarPrefs) => {
-    const previous = calendarPrefs;
-    setCalendarPrefs(next);
+  /** Saves to the synced settings file; resolves to an error message, or undefined on success. */
+  const saveCalendarPrefs = async (next: CalendarPrefs): Promise<string | undefined> => {
     try {
-      setCalendarPrefs(await api<CalendarPrefs>("/api/v1/settings/calendar-preferences", { method: "PUT", body: JSON.stringify({ ...next, expectedHash: previous.contentHash }) }));
+      setCalendarPrefs(await api<CalendarPrefs>("/api/v1/settings/calendar-preferences", { method: "PUT", body: JSON.stringify({ ...next, expectedHash: calendarPrefs.contentHash }) }));
+      return undefined;
     } catch (error) {
-      setMessage(error instanceof ApiError && error.status === 409 ? "Calendar preferences changed on another device. Reloaded the latest; try again." : error instanceof Error ? error.message : "Could not save calendar preferences");
       await loadCalendarCatalog();
+      return error instanceof ApiError && error.status === 409 ? "These preferences were changed on another device. The latest version is loaded; make your change again." : error instanceof Error ? error.message : "Could not save calendar preferences";
     }
   };
 
@@ -1027,7 +1027,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onChange={updateCalendarPrefs} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
     </section>
   </main>;
 }
@@ -1062,22 +1062,55 @@ function EntityCrudPage({ type, title, objects, people, busy, readOnly, embedded
   return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className="crud-card" key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{entityFields[type].map((field) => <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : field.kind === "person" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}><option value="">None</option>{people.map((person) => <option value={person.frontmatter.id} key={person.frontmatter.id}>{person.frontmatter.title}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions"><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button></div></div>; })}</div></article></>;
 }
 
-function CalendarListCard({ catalog, loaded, prefs, onChange }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; onChange: (prefs: CalendarPrefs) => Promise<void> }) {
-  const toggle = (id: string, enabled: boolean) => onChange({ ...prefs, disabledCalendarIds: enabled ? prefs.disabledCalendarIds.filter((item) => item !== id) : [...prefs.disabledCalendarIds, id] });
-  const defaultMissing = Boolean(prefs.defaultCalendarId) && loaded && !enabledCalendars(catalog, prefs).some((calendar) => calendar.id === prefs.defaultCalendarId);
+function CalendarListCard({ catalog, loaded, prefs, onSave }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; onSave: (prefs: CalendarPrefs) => Promise<string | undefined> }) {
+  // Edits stay in this draft until Save, so a half-finished change (for example, nothing ticked) is never stored.
+  const [disabled, setDisabled] = useState(prefs.disabledCalendarIds);
+  const [defaultId, setDefaultId] = useState(prefs.defaultCalendarId);
+  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDisabled(prefs.disabledCalendarIds); setDefaultId(prefs.defaultCalendarId); }, [prefs]);
+
+  const selectedCount = catalog.filter((calendar) => !disabled.includes(calendar.id)).length;
+  const allSelected = catalog.length > 0 && selectedCount === catalog.length;
+  const noneSelected = catalog.length > 0 && selectedCount === 0;
+  const dirty = defaultId !== prefs.defaultCalendarId || [...disabled].sort().join("|") !== [...prefs.disabledCalendarIds].sort().join("|");
+  const defaultOff = Boolean(defaultId) && disabled.includes(defaultId!);
+  const edit = <T,>(setter: (value: T) => void, value: T) => { setter(value); setStatus(undefined); };
+
+  const save = async () => {
+    setSaving(true);
+    const error = await onSave({ ...prefs, disabledCalendarIds: disabled, defaultCalendarId: defaultId });
+    setSaving(false);
+    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Your other devices will pick this up when the data folder syncs." });
+  };
+
   return <article className="calendar-list-setting"><span>CALENDARS</span><h3>Calendars in the Calendar view</h3>
-    <p className="muted">Tick the calendars to include. The default one is selected when you open the Calendar view.</p>
+    <p className="muted">Tick the calendars to include. Hover a calendar to make it the default; the Calendar view opens on it.</p>
     {!loaded && <p className="muted">Loading calendars…</p>}
     {loaded && !catalog.length && <p className="muted">No calendars available. Connect Google Calendar to choose from your calendars.</p>}
+    {catalog.length > 0 && <div className="calendar-toolbar">
+      <button type="button" onClick={() => edit(setDisabled, allSelected ? catalog.map((calendar) => calendar.id) : [])}>{allSelected ? "Unselect all" : "Select all"}</button>
+      <small className="muted">{selectedCount} of {catalog.length} selected</small>
+    </div>}
     {catalog.map((calendar) => {
-      const enabled = !prefs.disabledCalendarIds.includes(calendar.id);
+      const enabled = !disabled.includes(calendar.id);
+      const isDefault = defaultId === calendar.id;
       return <div className="calendar-row" key={calendar.id}>
-        <label><input type="checkbox" checked={enabled} onChange={(event) => toggle(calendar.id, event.target.checked)} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}</label>
-        <label className="calendar-default"><input type="radio" name="default-calendar" checked={prefs.defaultCalendarId === calendar.id} disabled={!enabled} onChange={() => onChange({ ...prefs, defaultCalendarId: calendar.id })} />Default</label>
+        <label><input type="checkbox" checked={enabled} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
+        {enabled && <span className="calendar-row-actions">
+          {isDefault
+            ? <button type="button" onClick={() => edit(setDefaultId, undefined)}>Remove default</button>
+            : <button type="button" onClick={() => edit(setDefaultId, calendar.id)}>Set as default</button>}
+        </span>}
       </div>;
     })}
-    {prefs.defaultCalendarId && <button onClick={() => onChange({ ...prefs, defaultCalendarId: undefined })}>Clear default</button>}
-    {defaultMissing && <p className="muted" role="status">Your default calendar is switched off or unavailable, so the Calendar view opens on All calendars.</p>}
+    {noneSelected && <p className="calendar-error" role="alert">Select at least one calendar. You can't save with none selected.</p>}
+    {defaultOff && !noneSelected && <p className="muted" role="status">The default calendar is unticked, so the Calendar view will open on All calendars.</p>}
+    {catalog.length > 0 && <div className="calendar-save">
+      <button type="button" disabled={!dirty || noneSelected || saving} onClick={save}>{saving ? "Saving…" : "Save"}</button>
+      {dirty && !status && !noneSelected && <small className="muted">Unsaved changes</small>}
+      {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
+    </div>}
   </article>;
 }
 
