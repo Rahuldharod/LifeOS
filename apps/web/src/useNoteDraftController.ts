@@ -23,14 +23,21 @@ export type NoteDraftController = {
    * imperatively by editors that already have the fresh note in hand (selecting a note, opening a
    * meeting), so the draft appears in the same tick rather than waiting for a reactive effect. */
   open: (note: DraftControllerNote, cached?: CachedDraft) => { conflict: boolean };
-  /** Clears the controller back to an empty, unopened state (e.g. a meeting with no canonical note yet). */
+  /** Opens an editable draft that has no file behind it yet (a calendar event with no canonical
+   * note). Nothing is written until the user makes a real edit; then `createNote` is called once
+   * and the controller adopts the created note. `key` identifies the pending draft in the browser
+   * cache so unsaved text survives a reload. */
+  openPending: (key: string, cached?: CachedDraft) => void;
+  /** True while a draft is open over a note that does not exist on disk yet. */
+  pending: boolean;
+  /** Clears the controller back to an empty, unopened state. */
   reset: () => void;
   /** Saves the current draft immediately (skipping the autosave debounce), pinned to the base hash
    * the draft was opened with — used by explicit "Save" buttons so they get the same U1 guarantee
    * as autosave, rather than saving against the note's live (possibly stale) hash. Resolves false
    * (without throwing) if the save was skipped or failed, including a fresh conflict — the conflict
    * panel takes over in that case, so callers should stop rather than report success. */
-  saveNow: () => Promise<boolean>;
+  saveNow: (options?: { allowEmpty?: boolean }) => Promise<boolean>;
   keepDiskVersion: () => Promise<void>;
   keepBrowserVersion: () => Promise<void>;
   /** True for a single, short-lived window right after "Keep disk version": the just-discarded
@@ -56,10 +63,13 @@ export type NoteDraftControllerOptions = {
   /** Refetch the freshest copy of the same note from the server, updating the caller's own
    * list/workspace state as a side effect, and return that note (or undefined if it's gone). */
   fetchLatest: () => Promise<DraftControllerNote | undefined>;
+  /** Creates the note on the server from the first real edit (see `openPending`). Must be
+   * idempotent server-side, since a failed attempt is retried with the same draft. */
+  createNote?: (body: string) => Promise<DraftControllerNote | undefined>;
   autosaveDelayMs?: number;
 };
 
-export function useNoteDraftController({ note, readOnly, busy, onMessage, onSaved, fetchLatest, autosaveDelayMs = 1800 }: NoteDraftControllerOptions): NoteDraftController {
+export function useNoteDraftController({ note, readOnly, busy, onMessage, onSaved, fetchLatest, createNote, autosaveDelayMs = 1800 }: NoteDraftControllerOptions): NoteDraftController {
   const [draft, setDraftState] = useState("");
   const [base, setBase] = useState<NoteDraftBase>();
   const [conflict, setConflict] = useState(false);
@@ -67,6 +77,8 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
   const [undoable, setUndoable] = useState<{ body: string; baseHash: string; noteId: string } | undefined>(undefined);
   const activeDraft = useRef("");
   const restoredId = useRef<string | undefined>(undefined);
+  const [pendingKey, setPendingKey] = useState<string>();
+  const pendingKeyRef = useRef<string | undefined>(undefined);
 
   useEffect(() => { activeDraft.current = draft; }, [draft]);
 
@@ -80,12 +92,20 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
   function open(target: DraftControllerNote, cached?: CachedDraft) {
     const opened = openNoteDraft(target, cached);
     restoredId.current = target.frontmatter.id;
+    pendingKeyRef.current = undefined; setPendingKey(undefined);
     setBase(opened.base); setDraftState(opened.draft); setConflict(opened.conflict); setUndoable(undefined);
     return { conflict: opened.conflict };
   }
 
+  function openPending(key: string, cached?: CachedDraft) {
+    restoredId.current = undefined;
+    pendingKeyRef.current = key; setPendingKey(key);
+    setBase(undefined); setDraftState(cached?.body ?? ""); setConflict(false); setUndoable(undefined);
+  }
+
   function reset() {
     restoredId.current = undefined;
+    pendingKeyRef.current = undefined; setPendingKey(undefined);
     setBase(undefined); setDraftState(""); setConflict(false); setUndoable(undefined);
   }
 
@@ -112,7 +132,37 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
     }
   }
 
-  async function saveNow(): Promise<boolean> {
+  /** First real edit over a pending draft: create the note with that text. Never throws. If the
+   * user has opened something else while the request was in flight, the server-side note still
+   * exists (creation is idempotent) but this controller's state is left alone. */
+  async function performCreate(key: string, bodyToSave: string): Promise<boolean> {
+    if (!createNote) return false;
+    setAutoSaving(true);
+    try {
+      const created = await createNote(bodyToSave);
+      if (!created) return false;
+      if (pendingKeyRef.current !== key) return true;
+      restoredId.current = created.frontmatter.id;
+      pendingKeyRef.current = undefined; setPendingKey(undefined);
+      setBase(noteDraftBase(created));
+      clearCachedDraft(key);
+      if (activeDraft.current !== created.body) cacheDraft(created.frontmatter.id, activeDraft.current, created.contentHash);
+      onMessage("Autosaved to Markdown");
+      return true;
+    } catch (error) {
+      onMessage(`Browser draft is safe; the note could not be created yet: ${error instanceof Error ? error.message : "unknown error"}`);
+      return false;
+    } finally {
+      setAutoSaving(false);
+    }
+  }
+
+  async function saveNow(options?: { allowEmpty?: boolean }): Promise<boolean> {
+    if (pendingKey && !note) {
+      // allowEmpty: an action that needs the note to exist (attaching an image) is itself the edit.
+      if (readOnly || busy || autoSaving || (draft.trim() === "" && !options?.allowEmpty)) return false;
+      return performCreate(pendingKey, draft);
+    }
     if (!note || restoredId.current !== note.frontmatter.id || !base || base.noteId !== note.frontmatter.id) return false;
     if (readOnly || busy || conflict || autoSaving) return false;
     return performSave(base, draft);
@@ -145,6 +195,20 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.frontmatter.id, note?.contentHash, draft, base, readOnly, busy, conflict, autoSaving]);
+
+  // Pending draft (no file yet): cache it, and create the note after the same debounce autosave
+  // uses. Whitespace-only text is not an edit, so an untouched or cleared editor writes nothing.
+  useEffect(() => {
+    if (note || !pendingKey) return;
+    if (draft.trim() === "") { clearCachedDraft(pendingKey); return; }
+    cacheDraft(pendingKey, draft, "");
+    if (readOnly || busy || autoSaving || !createNote) return;
+    const key = pendingKey;
+    const bodyToSave = draft;
+    const timer = window.setTimeout(() => void performCreate(key, bodyToSave), autosaveDelayMs);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note, pendingKey, draft, readOnly, busy, autoSaving]);
 
   /** "Keep disk version": discard the browser draft and adopt the current Markdown file. Always
    * clears the conflict flag, even if the note is gone — otherwise a deleted-elsewhere note would
@@ -224,7 +288,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
     }
   }
 
-  const dirty = Boolean(note && draft !== note.body);
+  const dirty = note ? draft !== note.body : Boolean(pendingKey && draft.trim() !== "");
 
-  return { draft, setDraft, base, conflict, autoSaving, dirty, open, reset, saveNow, keepDiskVersion, keepBrowserVersion, undoAvailable: undoable !== undefined, undoKeepDiskVersion };
+  return { draft, setDraft, base, conflict, autoSaving, dirty, open, openPending, pending: Boolean(pendingKey && !note), reset, saveNow, keepDiskVersion, keepBrowserVersion, undoAvailable: undoable !== undefined, undoKeepDiskVersion };
 }

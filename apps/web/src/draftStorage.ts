@@ -21,3 +21,12 @@ export function cacheDraft(id: string, body: string, baseHash: string) {
 export function clearCachedDraft(id: string) {
   try { localStorage.removeItem(draftKey(id)); } catch { /* ignored */ }
 }
+
+/** Draft typed over a calendar event that has no note on disk yet (PB-020). Keyed by an opaque
+ * string rather than a note id; `baseHash` is always "" because there is no file to conflict with. */
+export function readCachedPendingDraft(key: string): CachedDraft | undefined {
+  try {
+    const cached = JSON.parse(localStorage.getItem(draftKey(key)) ?? "null") as CachedDraft | null;
+    return cached && typeof cached.body === "string" && cached.body.trim() !== "" ? cached : undefined;
+  } catch { return undefined; }
+}

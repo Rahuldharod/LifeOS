@@ -5,13 +5,16 @@ button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 main { min-height: 100vh; display: grid; grid-template-columns: 230px 1fr; }
-aside { position: sticky; top: 0; height: 100vh; padding: 42px 24px; background: #18372d; color: #f8f4e8; }
-aside h1 { margin: 0 0 44px; font: 30px Georgia, serif; }
-aside > button { display: flex; justify-content: space-between; width: 100%; padding: 11px 12px; border: 0; border-radius: 8px; background: transparent; color: #dce7e0; text-align: left; font-size: 15px; }
-aside > button.active { background: #2c5144; color: white; }
-aside > button.settings-link { position: absolute; right: 24px; bottom: 68px; left: 24px; width: auto; padding-top: 16px; border-top: 1px solid #3d5b51; border-radius: 0 0 8px 8px; }
+aside { position: sticky; top: 0; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; padding: 42px 24px 24px; background: #18372d; color: #f8f4e8; }
+aside h1 { flex: none; margin: 0 0 44px; font: 30px Georgia, serif; }
+aside button { display: flex; justify-content: space-between; width: 100%; padding: 11px 12px; border: 0; border-radius: 8px; background: transparent; color: #dce7e0; text-align: left; font-size: 15px; }
+aside button.active { background: #2c5144; color: white; }
+.nav-main { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.nav-footer { flex: 0 0 auto; margin-top: 12px; }
+.nav-actions { display: flex; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #3d5b51; }
+.nav-actions > button { flex: 1 1 0; min-width: 0; }
 aside em { min-width: 20px; padding: 2px 6px; border-radius: 20px; background: #d4a94d; color: #18372d; font-size: 11px; font-style: normal; text-align: center; }
-.connection { position: absolute; bottom: 28px; left: 24px; right: 24px; color: #aec1b8; font-size: 12px; }
+.connection { margin: 12px 0 0; color: #aec1b8; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .connection > i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #9dcf9d; }
 .connection > i.warning-dot { background: #e0aa4c; }
 section { width: 100%; max-width: 1240px; padding: 58px 64px 80px; }
@@ -58,6 +61,7 @@ article small { color: #6c766f; }
 .timeline-gap .gap-rail { z-index: 1; padding: 3px 0; background: #fffdf7; color: #8a9991; font-size: 10px; letter-spacing: 1px; text-align: center; }
 .timeline-gap small { color: #8a958f; font-size: 10px; }
 .timeline-empty { display: grid; gap: 5px; margin-top: 18px; padding: 24px 12px; border: 1px dashed #cfd4cf; border-radius: 10px; color: #617068; text-align: center; }
+.timeline-error { border-color: #dfb978; background: #fff4df; color: #76552f; }
 .event { width: 100%; margin-top: 16px; padding: 15px; border: 1px solid #d7d5cb; border-radius: 10px; background: #f8f5ec; text-align: left; }
 .timeline .event { margin-top: 0; padding: 12px; }
 .event b, .event small { display: block; }
@@ -78,9 +82,15 @@ article small { color: #6c766f; }
 .mode-switch { display: flex; padding: 3px; border-radius: 8px; background: #eceae1; }
 .mode-switch button { padding: 6px 11px; border: 0; border-radius: 6px; background: transparent; color: #647269; font-size: 12px; font-weight: 700; }
 .mode-switch button.selected { background: white; color: #23483c; box-shadow: 0 1px 4px #263d3420; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 3px; padding: 8px 24px; border-top: 1px solid #e3e1d8; border-bottom: 1px solid #e3e1d8; background: #faf8f1; }
-.toolbar button, .toolbar select { min-width: 34px; padding: 6px 9px; border: 0; border-radius: 5px; background: transparent; color: #41534b; font-size: 12px; font-weight: 700; }
-.toolbar button:hover, .toolbar select:hover { background: #e8ece8; }
+/* One ribbon style for both editors (PB-019): the Markdown-mode .toolbar and the Visual-mode Crepe
+   top bar read the same tokens, so type, colour, hover and surface cannot drift apart. */
+:root { --ribbon-font: Inter, ui-sans-serif, system-ui, sans-serif; --ribbon-font-size: 13px; --ribbon-font-weight: 600; --ribbon-color: #41534b; --ribbon-bg: #faf8f1; --ribbon-hover: #e8ece8; --ribbon-border: #e3e1d8; --ribbon-control-height: 32px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-height: 44px; padding: 6px 12px; border-top: 1px solid var(--ribbon-border); border-bottom: 1px solid var(--ribbon-border); background: var(--ribbon-bg); }
+.toolbar button, .toolbar select { min-width: 34px; height: var(--ribbon-control-height); padding: 0 10px; border: 0; border-radius: 4px; background: transparent; color: var(--ribbon-color); font-family: var(--ribbon-font); font-size: var(--ribbon-font-size); font-weight: var(--ribbon-font-weight); line-height: 20px; letter-spacing: .1px; }
+.toolbar button:hover, .toolbar select:hover { background: var(--ribbon-hover); }
+.visual-markdown-editor .milkdown { --crepe-font-default: var(--ribbon-font); --crepe-color-hover: var(--ribbon-hover); --crepe-color-on-surface: var(--ribbon-color); --crepe-color-outline: #6a7a72; }
+.visual-markdown-editor .milkdown .milkdown-top-bar { background: var(--ribbon-bg); border-bottom-color: var(--ribbon-border); }
+.visual-markdown-editor .milkdown .milkdown-top-bar .top-bar-heading-label, .visual-markdown-editor .milkdown .milkdown-top-bar .top-bar-heading-option { font-family: var(--ribbon-font); font-size: var(--ribbon-font-size); font-weight: var(--ribbon-font-weight); color: var(--ribbon-color); }
 .hidden-input { display: none; }
 textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; resize: vertical; border: 0; outline: 0; background: #fff; color: #25352e; font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .markdown-preview { min-height: 330px; padding: 20px 32px; border-top: 1px solid #e3e1d8; background: white; line-height: 1.65; }
@@ -103,7 +113,7 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .actions, .review-actions { display: flex; gap: 8px; }
 .actions button, .review-actions button, .conflict button { padding: 8px 12px; border: 1px solid #b8c4bd; border-radius: 7px; background: white; color: #23483c; font-size: 12px; font-weight: 750; }
 .actions .primary, .review-actions .primary { border-color: #245646; background: #245646; color: white; }
-.review-actions .danger { border-color: #d5b5ab; color: #954b38; }
+.actions .danger, .review-actions .danger { border-color: #d5b5ab; color: #954b38; }
 .metadata-strip { display: grid; grid-template-columns: 1fr 1fr .6fr 2fr; gap: 18px; padding: 13px 24px 18px; border-top: 1px solid #ebe9e0; background: #faf8f1; }
 .conflict { display: flex; align-items: center; gap: 12px; padding: 12px 24px; background: #fff0db; color: #7a4519; font-size: 12px; }
 .conflict span { flex: 1; }
@@ -168,7 +178,7 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .crud-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; margin-top: 14px; }
 .crud-actions small { margin-right: auto; color: #77827d; }
 @media (max-width: 980px) { .meeting-layout, .notes-layout { grid-template-columns: 1fr; } .event-list, .notes-list { position: static; max-height: none; } .meeting-header { display: block; } .context-grid { margin-top: 20px; } }
-@media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { position: static; height: auto; } aside h1 { margin-bottom: 18px; } aside > button.settings-link { position: static; width: 100%; margin-top: 16px; } .connection { position: static; margin-top: 20px; } section { padding: 38px 20px; } .summary, .project-grid, .system-grid, .task-editor, .settings-grid, .crud-fields { grid-template-columns: 1fr; } .crud-fields label:first-child { grid-column: span 1; } .metadata-strip, .context-grid { grid-template-columns: 1fr 1fr; } h2 { font-size: 38px; } }
+@media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { position: static; height: auto; } aside h1 { margin-bottom: 18px; } aside { display: block; } .nav-main { overflow: visible; } section { padding: 38px 20px; } .summary, .project-grid, .system-grid, .task-editor, .settings-grid, .crud-fields { grid-template-columns: 1fr; } .crud-fields label:first-child { grid-column: span 1; } .metadata-strip, .context-grid { grid-template-columns: 1fr 1fr; } h2 { font-size: 38px; } }
 
 /* PB-002: Notes conflict resolution (NoteConflictPanel.tsx). Chosen after prototyping three
    directions on the prototype/pb-002-conflict-ui branch (inline banner, this split panel, a

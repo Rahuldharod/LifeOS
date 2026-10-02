@@ -13,6 +13,7 @@ import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connecto
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { MacOSKeychainSecretStore } from "@lifeos/secrets";
+import { httpError } from "./http-errors.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
@@ -73,9 +74,9 @@ server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/s
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   return application.syncCalendar(from, to);
 });
-server.get("/api/v1/connections/google", async () => google ? google.status() : ({ configured: false, connected: false, provider: "mock", missing: ["Google OAuth Desktop client credentials"] }));
+server.get("/api/v1/connections/google", async () => google ? ({ ...await google.status(), ...application.calendarSyncStatus() }) : ({ configured: false, connected: false, provider: "mock", missing: ["Google OAuth Desktop client credentials"] }));
 server.get("/api/v1/settings/connections", async () => ({
-  calendar: { configured: Boolean(await secrets.get("google:default:client-id")) && Boolean(await secrets.get("google:default:client-secret")), connected: google ? (await google.status()).connected : false },
+  calendar: { ...(google ? await google.status() : { connected: false }), configured: Boolean(await secrets.get("google:default:client-id")) && Boolean(await secrets.get("google:default:client-secret")), ...application.calendarSyncStatus() },
   drive: { configured: Boolean(await secrets.get("google-drive:default:client-id")) && Boolean(await secrets.get("google-drive:default:client-secret")), connected: false }
 }));
 server.post<{ Params: { provider: "calendar" | "drive" }; Body: { clientId: string; clientSecret: string } }>("/api/v1/settings/connections/google/:provider", async (request, reply) => {
@@ -107,11 +108,20 @@ server.get<{ Querystring: { code?: string; state?: string; error?: string } }>("
   await application.recordGoogleConnection();
   return reply.type("text/html").send('<!doctype html><meta charset="utf-8"><title>LifeOS connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;color:#173f32}a{color:#173f32}</style><h1>Google Calendar connected</h1><p>Your tokens are stored in macOS Keychain. You can return to LifeOS.</p><a href="http://127.0.0.1:5173/">Return to LifeOS</a>');
 });
-server.post<{ Body: { externalId: string; calendarId?: string; from?: string; to?: string } }>("/api/v1/meetings/from-event", async (request, reply) => {
+// Opening an event is a pure read (PB-020): it returns the existing workspace or a non-persisted preview.
+server.get<{ Querystring: { externalId: string; calendarId?: string; from?: string; to?: string } }>("/api/v1/meetings/preview", async (request, reply) => {
+  const from = request.query.from ? new Date(request.query.from) : undefined;
+  const to = request.query.to ? new Date(request.query.to) : undefined;
+  if (!request.query.externalId || (from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
+  return application.previewMeetingFromEvent(request.query.externalId, from, to, request.query.calendarId);
+});
+// Materializes the meeting + note; the web calls it only on the first real edit, with that text as `body`.
+server.post<{ Body: { externalId: string; calendarId?: string; from?: string; to?: string; body?: string } }>("/api/v1/meetings/from-event", async (request, reply) => {
   const from = request.body.from ? new Date(request.body.from) : undefined;
   const to = request.body.to ? new Date(request.body.to) : undefined;
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
-  return application.createMeetingFromEvent(request.body.externalId, from, to, request.body.calendarId);
+  if (request.body.body !== undefined && typeof request.body.body !== "string") return reply.status(400).send({ error: "Note body must be text" });
+  return application.createMeetingFromEvent(request.body.externalId, from, to, request.body.calendarId, request.body.body);
 });
 server.get<{ Params: { externalId: string } }>("/api/v1/meetings/from-event/:externalId", async (request) => application.meetingFromEvent(request.params.externalId));
 server.get<{ Params: { id: string } }>("/api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
@@ -131,6 +141,10 @@ server.get<{ Params: { "*": string } }>("/api/v1/assets/*", async (request, repl
   const mimeType = mimeTypes[extension];
   if (!mimeType) return reply.status(404).send({ error: "Unsupported asset" });
   return reply.type(mimeType).send(await assets.read(relativePath));
+});
+server.delete<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required to delete a note" });
+  return application.deleteNote(request.params.id, request.body.expectedHash);
 });
 server.post<{ Params: { id: string }; Body: { expectedHash: string } }>("/api/v1/objects/:id/archive", async (request) => application.archiveObject(request.params.id, request.body.expectedHash));
 server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (request) => application.processMeeting(request.params.id));
@@ -162,9 +176,8 @@ server.get("/*", async (request, reply) => {
 });
 
 server.setErrorHandler((error, _request, reply) => {
-  const failure = error instanceof Error ? error : new Error("Unknown server error");
-  const statusCode = failure.name === "ObjectConflictError" ? 409 : 400;
-  reply.status(statusCode).send({ error: failure.message });
+  const { statusCode, body } = httpError(error);
+  reply.status(statusCode).send(body);
 });
 
 try {

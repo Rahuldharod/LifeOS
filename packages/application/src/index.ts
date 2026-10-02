@@ -1,5 +1,11 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 
+/** Body for a meeting note created without user text (legacy callers and crash recovery of old operations). */
+const DEFAULT_NOTE_BODY = "# Notes\n\n";
+
+/** An identical failed sync within this window does not write another Sync Run file (PB-022a). */
+const FAILED_SYNC_RUN_THROTTLE_MS = 60 * 60 * 1000;
+
 function slugify(value: string) {
   return value
     .normalize("NFKD")
@@ -209,12 +215,32 @@ export class LifeOSApplication {
       if (this.calendar.provider === "google") await this.writeSyncRun("succeeded", started, events.length);
       return this.withNoteLinks(events);
     } catch (error) {
-      if (this.calendar.provider === "google") await this.writeSyncRun("failed", started, 0, error instanceof Error ? error.message : "Unknown error");
+      // Recording the failure must never mask the connector error the user needs to see.
+      if (this.calendar.provider === "google") await this.writeSyncRun("failed", started, 0, error instanceof Error ? error.message : "Unknown error").catch(() => undefined);
       throw error;
     }
   }
 
-  async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) {
+  /** Last Google Calendar sync outcomes, derived from Sync Run files, for the reconnect banner (PB-022a). */
+  calendarSyncStatus() {
+    const runs = this.googleSyncRuns();
+    const lastSuccess = runs.find((run) => run.frontmatter.status === "succeeded");
+    const last = runs[0];
+    return {
+      lastSuccessfulSyncAt: lastSuccess ? String(lastSuccess.frontmatter.completed_at) : undefined,
+      lastError: last?.frontmatter.status === "failed" ? String(last.frontmatter.error ?? "Unknown error") : undefined
+    };
+  }
+
+  /**
+   * Materializes the canonical meeting + note for a calendar event. The web UI calls this only on
+   * the first real edit (PB-020), passing that edit as `initialBody`; merely opening an event goes
+   * through `previewMeetingFromEvent` and writes nothing. Idempotent: a retry finds the meeting and
+   * note by external id (or finishes a pending create-meeting operation) and never overwrites an
+   * existing note body. `initialBody` is recorded in the operation payload so crash recovery
+   * recreates the note with the user's text rather than a placeholder.
+   */
+  async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
     const events = await this.listCalendarEvents(from, to);
     const event = events.find((candidate) => candidate.externalId === externalId && (!calendarId || candidate.calendarId === calendarId));
     if (!event) throw new Error(`Calendar event not found: ${externalId}`);
@@ -225,9 +251,13 @@ export class LifeOSApplication {
       Array.isArray(object.frontmatter.external_refs) &&
       object.frontmatter.external_refs.some((reference: unknown) => typeof reference === "object" && reference !== null && (reference as { external_id?: string }).external_id === externalId));
     if (existing) {
-      const existingNote = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === existing.frontmatter.id);
-      if (!existingNote && pendingOperation && typeof pendingOperation.payload.noteId === "string") {
-        await this.objects.write({ relativePath: `meetings/${markdownFileName(`${event.title} notes`, pendingOperation.payload.noteId, event.startsAt, event.timezone)}`, frontmatter: { ...this.envelope(pendingOperation.payload.noteId, "meeting-note", `${event.title} notes`, now), meeting_id: existing.frontmatter.id, people_ids: context.people.map((person) => person.frontmatter.id), primary_client_id: context.client?.frontmatter.id, primary_product_id: context.product?.frontmatter.id, primary_project_id: context.project?.frontmatter.id }, body: "# Notes\n\n" });
+      const existingNote = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === existing.frontmatter.id && !object.frontmatter.deleted_at);
+      if (!existingNote) {
+        // Either finishing an interrupted create-meeting operation, or a meeting that has no note
+        // yet (the PB-020 flow, or a meeting created before it): create the note now.
+        const recoveredNoteId = pendingOperation && typeof pendingOperation.payload.noteId === "string" ? pendingOperation.payload.noteId : uuidV7();
+        const recoveredBody = initialBody ?? (typeof pendingOperation?.payload.body === "string" ? pendingOperation.payload.body : DEFAULT_NOTE_BODY);
+        await this.objects.write({ relativePath: `meetings/${markdownFileName(`${event.title} notes`, recoveredNoteId, event.startsAt, event.timezone)}`, frontmatter: { ...this.envelope(recoveredNoteId, "meeting-note", `${event.title} notes`, now), meeting_id: existing.frontmatter.id, people_ids: context.people.map((person) => person.frontmatter.id), primary_client_id: context.client?.frontmatter.id, primary_product_id: context.product?.frontmatter.id, primary_project_id: context.project?.frontmatter.id }, body: recoveredBody });
       }
       await this.enrichMeetingContext(existing, context, now);
       if (pendingOperation) await this.objects.completeOperation?.(pendingOperation.id);
@@ -236,9 +266,10 @@ export class LifeOSApplication {
     }
 
     const operationId = pendingOperation?.id ?? uuidV7();
-    const operation = pendingOperation ?? await this.objects.prepareOperation?.("create-meeting", { externalId, meetingId: uuidV7(), noteId: uuidV7() }, operationId);
+    const operation = pendingOperation ?? await this.objects.prepareOperation?.("create-meeting", { externalId, meetingId: uuidV7(), noteId: uuidV7(), body: initialBody ?? DEFAULT_NOTE_BODY }, operationId);
     const meetingId = typeof operation?.payload.meetingId === "string" ? operation.payload.meetingId : uuidV7();
     const noteId = typeof operation?.payload.noteId === "string" ? operation.payload.noteId : uuidV7();
+    const noteBody = initialBody ?? (typeof operation?.payload.body === "string" ? operation.payload.body : DEFAULT_NOTE_BODY);
     await this.objects.write({
       relativePath: `meetings/${markdownFileName(event.title, meetingId, event.startsAt, event.timezone)}`,
       frontmatter: {
@@ -266,12 +297,48 @@ export class LifeOSApplication {
         primary_product_id: context.product?.frontmatter.id,
         primary_project_id: context.project?.frontmatter.id
       },
-      body: "# Notes\n\n"
+      body: noteBody
     });
     await this.writeAudit("meeting.created", meetingId, now, { external_id: externalId });
     await this.objects.completeOperation?.(operationId);
     await this.rebuildIndex();
     return this.meetingWorkspace(meetingId);
+  }
+
+  /**
+   * Read-only view of what opening a calendar event shows. If LifeOS already has the meeting it
+   * returns the real workspace; otherwise a synthetic, non-persisted one (`persisted: false`, no
+   * note, ids prefixed `preview:`). Writes nothing — not the meeting, the note, or the
+   * client/project/person objects `createMeetingFromEvent` would add. The UI shows an editable
+   * draft over it and calls `createMeetingFromEvent` on the first real edit.
+   */
+  async previewMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) {
+    const events = await this.listCalendarEvents(from, to);
+    const event = events.find((candidate) => candidate.externalId === externalId && (!calendarId || candidate.calendarId === calendarId));
+    if (!event) throw new Error(`Calendar event not found: ${externalId}`);
+    const existing = this.index.all().find((object) => object.frontmatter.type === "meeting" && !object.frontmatter.deleted_at &&
+      Array.isArray(object.frontmatter.external_refs) &&
+      object.frontmatter.external_refs.some((reference: unknown) => typeof reference === "object" && reference !== null && (reference as { external_id?: string }).external_id === externalId));
+    if (existing) return this.meetingWorkspace(existing.frontmatter.id);
+    const now = new Date().toISOString();
+    const synthetic = (type: ObjectEnvelope["type"], title: string): LifeOSObject => ({ frontmatter: { ...this.envelope(`preview:${type}:${externalId}:${title}`, type, title, now) }, body: "", relativePath: "", contentHash: "" });
+    const meeting: LifeOSObject = {
+      frontmatter: { ...this.envelope(`preview:${externalId}`, "meeting", event.title, now), status: "scheduled", starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone, is_all_day: event.isAllDay ?? false },
+      body: "", relativePath: "", contentHash: ""
+    };
+    return {
+      persisted: false as const,
+      meeting,
+      note: undefined,
+      reviews: [] as LifeOSObject[],
+      tasks: [] as LifeOSObject[],
+      context: {
+        project: event.projectName ? synthetic("project", event.projectName) : undefined,
+        client: event.clientName ? synthetic("client", event.clientName) : undefined,
+        product: event.productName ? synthetic("product", event.productName) : undefined,
+        people: event.attendees.map((name) => synthetic("person", name))
+      }
+    };
   }
 
   async meetingFromEvent(externalId: string) {
@@ -284,12 +351,13 @@ export class LifeOSApplication {
 
   async meetingWorkspace(meetingId: string) {
     const meeting = this.required(meetingId, "meeting");
-    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId);
+    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && !object.frontmatter.deleted_at);
     const reviews = this.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === meetingId);
     const tasks = this.index.all().filter((object) => object.frontmatter.type === "task" && object.frontmatter.source_meeting_id === meetingId);
     const resolve = (value: unknown) => typeof value === "string" ? this.index.get(value) : undefined;
     const attendeeIds = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids : [];
     return {
+      persisted: true as const,
       meeting,
       note,
       reviews,
@@ -305,6 +373,8 @@ export class LifeOSApplication {
 
   async updateBody(id: string, body: string, expectedHash: string) {
     const current = this.required(id);
+    // A stale tab or the other device must not keep autosaving into a deleted note.
+    if (current.frontmatter.deleted_at) throw new Error("This note was deleted; it can no longer be edited");
     const now = new Date().toISOString();
     const updated = await this.objects.write({
       relativePath: current.relativePath,
@@ -471,6 +541,23 @@ export class LifeOSApplication {
     return updated;
   }
 
+  /**
+   * Deletes a meeting or knowledge note as a tombstone (PB-021): `deleted_at` is set and the file
+   * stays on disk, so another device cannot resurrect it and it can be restored by hand. Physical
+   * removal is a separate maintenance step. The meeting itself is kept; opening its event again
+   * starts a fresh note. Idempotent: deleting an already-deleted note returns it unchanged.
+   */
+  async deleteNote(id: string, expectedHash: string) {
+    const current = this.required(id);
+    if (!["meeting-note", "knowledge-note"].includes(current.frontmatter.type)) throw new Error("Only notes can be deleted here");
+    if (current.frontmatter.deleted_at) return current;
+    const now = new Date().toISOString();
+    const updated = await this.objects.write({ relativePath: current.relativePath, expectedHash, frontmatter: { ...current.frontmatter, deleted_at: now, revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId }, body: current.body });
+    await this.writeAudit("note.deleted", id, now, { type: current.frontmatter.type, meeting_id: current.frontmatter.meeting_id });
+    await this.rebuildIndex();
+    return updated;
+  }
+
   async archiveObject(id: string, expectedHash: string) {
     const object = this.required(id);
     const now = new Date().toISOString();
@@ -594,9 +681,20 @@ export class LifeOSApplication {
     const account = this.index.all().find((object) => object.frontmatter.type === "connector-account" && object.frontmatter.provider === "google");
     if (!account) return;
     const completedAt = new Date().toISOString();
+    // Throttle: repeating the same failure within the window adds no information, only another file.
+    const previous = this.googleSyncRuns()[0];
+    if (status === "failed" && previous?.frontmatter.status === "failed" && previous.frontmatter.error === error &&
+      Date.parse(completedAt) - Date.parse(String(previous.frontmatter.completed_at)) < FAILED_SYNC_RUN_THROTTLE_MS) return;
     const id = uuidV7();
     await this.objects.write({ relativePath: `sync-runs/${markdownFileName("Google Calendar sync", id, completedAt)}`, frontmatter: { ...this.envelope(id, "sync-run", "Google Calendar sync", completedAt), connector_account_id: account.frontmatter.id, resource_type: "calendar-events", status, started_at: startedAt, completed_at: completedAt, record_count: recordCount, error }, body: `# Google Calendar sync\n\n${status}: ${recordCount} events.\n` });
     await this.rebuildIndex();
+  }
+
+  /** Google Calendar Sync Runs, newest first. */
+  private googleSyncRuns() {
+    return this.index.all()
+      .filter((object) => object.frontmatter.type === "sync-run" && object.frontmatter.resource_type === "calendar-events")
+      .sort((left, right) => Date.parse(String(right.frontmatter.completed_at)) - Date.parse(String(left.frontmatter.completed_at)));
   }
 
   private required(id: string, type?: ObjectEnvelope["type"]) {
@@ -659,7 +757,7 @@ export class LifeOSApplication {
         body: meeting.body
       });
     }
-    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id);
+    const note = this.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
     if (note && !note.frontmatter.primary_project_id) {
       await this.objects.write({
         relativePath: note.relativePath,
