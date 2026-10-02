@@ -7,7 +7,7 @@ import "@milkdown/crepe/theme/frame.css";
 import "./styles.css";
 import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
-import { api } from "./api.js";
+import { api, ApiError } from "./api.js";
 import { readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
 import { useNoteDraftController } from "./useNoteDraftController.js";
 
@@ -46,7 +46,7 @@ type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedA
 type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus };
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
-type GoogleConnection = { configured: boolean; connected: boolean; provider: string; missing?: string[] };
+type GoogleConnection = { configured: boolean; connected: boolean; provider: string; missing?: string[]; reason?: "expired"; lastSuccessfulSyncAt?: string; lastError?: string };
 type ConnectionSettings = { calendar: { configured: boolean; connected: boolean }; drive: { configured: boolean; connected: boolean } };
 type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
@@ -244,6 +244,8 @@ function App() {
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
+  // PB-022a: a failed load or sync is shown in the timeline instead of an "empty day".
+  const [calendarError, setCalendarError] = useState<string>();
   const [connectionSettings, setConnectionSettings] = useState<ConnectionSettings>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
   const [displayTimeZone, setDisplayTimeZone] = useState(() => localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -349,6 +351,7 @@ function App() {
     const range = dayRange(date, displayTimeZone);
     const nextEvents = await api<Event[]>(`/api/v1/calendar/events?${new URLSearchParams(range)}`);
     setEvents(nextEvents);
+    setCalendarError(undefined);
     setCalendarSources((current) => {
       const next = { ...current };
       for (const event of nextEvents) if (event.calendarId) next[event.calendarId] = { name: event.calendarName ?? event.calendarId, color: event.calendarColor };
@@ -367,8 +370,17 @@ function App() {
       .catch((error: Error) => setMessage(error.message));
   }, []);
 
+  const calendarFailed = (error: unknown) => {
+    const text = error instanceof Error ? error.message : "Calendar could not be loaded";
+    setEvents([]);
+    setCalendarError(text);
+    // A 401 means Google rejected the tokens; refresh status so the Reconnect banner appears.
+    if (error instanceof ApiError && error.status === 401) void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
+    return text;
+  };
+
   useEffect(() => {
-    loadCalendarDay().catch((error: Error) => { setEvents([]); setMessage(error.message); });
+    loadCalendarDay().catch((error: Error) => setMessage(calendarFailed(error)));
   }, [selectedDate, displayTimeZone]);
 
   useEffect(() => { localStorage.setItem("lifeos.activeView", view); }, [view]);
@@ -544,7 +556,9 @@ function App() {
 
   const syncGoogle = () => run(async () => {
     const range = dayRange(selectedDate, displayTimeZone);
-    setEvents(await api<Event[]>(`/api/v1/calendar/sync?${new URLSearchParams(range)}`, { method: "POST" }));
+    try { setEvents(await api<Event[]>(`/api/v1/calendar/sync?${new URLSearchParams(range)}`, { method: "POST" })); }
+    catch (error) { calendarFailed(error); throw error; }
+    setCalendarError(undefined);
     await loadCollections();
   }, "Google Calendar synchronized");
 
@@ -772,12 +786,13 @@ function App() {
         <ObjectList title="Due today" objects={today.dueToday} empty="Nothing due today." />
         <ObjectList title="Upcoming priority work" objects={today.upcoming.length ? today.upcoming : today.tasks.filter((task) => task.frontmatter.priority === "High")} empty="No upcoming dated or high-priority work." />
         <ObjectList title="Waiting" objects={today.waiting} empty="Nothing waiting on someone else." />
-        <article><span>TODAY'S EVENTS</span>{!events.length && <p className="muted">No events today.</p>}{events.slice(0, 5).map((event) => <div className="object-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}><i /><div><b>{event.title}</b><small>{formatEventDate(event)} · {event.calendarName ?? "Calendar"}</small></div></div>)}</article>
+        <article><span>TODAY'S EVENTS</span>{calendarError ? <p className="muted">Calendar could not be loaded: {calendarError}</p> : !events.length && <p className="muted">No events today.</p>}{events.slice(0, 5).map((event) => <div className="object-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}><i /><div><b>{event.title}</b><small>{formatEventDate(event)} · {event.calendarName ?? "Calendar"}</small></div></div>)}</article>
       </>}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
-        {googleConnection && !googleConnection.connected && <article className="lease-warning"><span>GOOGLE CALENDAR</span><h3>{googleConnection.configured ? "Ready to connect" : "Configuration required"}</h3><p>{googleConnection.configured ? "Authorize read-only access to replace the mock calendar with your upcoming events." : "Add the Google Calendar OAuth client under Settings, then return here to connect."}</p>{googleConnection.configured ? <button className="takeover" disabled={busy} onClick={connectGoogle}>Connect Google Calendar</button> : <button onClick={() => setView("Settings")}>Open Settings</button>}</article>}
+        {googleConnection?.reason === "expired" && <article className="lease-warning" role="alert"><span>GOOGLE CALENDAR</span><h3>Reconnect Google Calendar</h3><p>Google no longer accepts the saved access, so events cannot sync. {googleConnection.lastSuccessfulSyncAt ? `Last successful sync: ${new Date(googleConnection.lastSuccessfulSyncAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: displayTimeZone })}.` : "No successful sync recorded yet."}</p><button className="takeover" disabled={busy} onClick={connectGoogle}>Reconnect</button></article>}
+        {googleConnection && !googleConnection.connected && googleConnection.reason !== "expired" && <article className="lease-warning"><span>GOOGLE CALENDAR</span><h3>{googleConnection.configured ? "Ready to connect" : "Configuration required"}</h3><p>{googleConnection.configured ? "Authorize read-only access to replace the mock calendar with your upcoming events." : "Add the Google Calendar OAuth client under Settings, then return here to connect."}</p>{googleConnection.configured ? <button className="takeover" disabled={busy} onClick={connectGoogle}>Connect Google Calendar</button> : <button onClick={() => setView("Settings")}>Open Settings</button>}</article>}
         {googleConnection?.connected && <article className="connection-card"><span>GOOGLE CALENDAR CONNECTED</span><p className="muted">Read-only access is active. Each manual sync records a durable Sync Run.</p><button disabled={busy || readOnly} onClick={syncGoogle}>Sync now</button></article>}
         <div className="meeting-layout">
           <article className="event-list">
@@ -790,7 +805,9 @@ function App() {
               </select></label>
             </div>
             <h3 className="timeline-date">{new Date(`${selectedDate}T12:00:00.000Z`).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone })}</h3>
-            {!filteredEvents.length && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
+            {calendarError
+              ? <div className="timeline-empty timeline-error" role="alert"><b>Calendar could not be loaded</b><small>{calendarError}</small></div>
+              : !filteredEvents.length && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
             <div className="timeline">
               {allDayEvents.map((event) => <div className="timeline-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
                 <span className="timeline-time">All day</span><span className="timeline-rail"><i style={{ background: event.calendarColor ?? "#5f8b7c" }} /></span>

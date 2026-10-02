@@ -13,6 +13,7 @@ import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connecto
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { MacOSKeychainSecretStore } from "@lifeos/secrets";
+import { httpError } from "./http-errors.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
@@ -73,9 +74,9 @@ server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/s
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   return application.syncCalendar(from, to);
 });
-server.get("/api/v1/connections/google", async () => google ? google.status() : ({ configured: false, connected: false, provider: "mock", missing: ["Google OAuth Desktop client credentials"] }));
+server.get("/api/v1/connections/google", async () => google ? ({ ...await google.status(), ...application.calendarSyncStatus() }) : ({ configured: false, connected: false, provider: "mock", missing: ["Google OAuth Desktop client credentials"] }));
 server.get("/api/v1/settings/connections", async () => ({
-  calendar: { configured: Boolean(await secrets.get("google:default:client-id")) && Boolean(await secrets.get("google:default:client-secret")), connected: google ? (await google.status()).connected : false },
+  calendar: { ...(google ? await google.status() : { connected: false }), configured: Boolean(await secrets.get("google:default:client-id")) && Boolean(await secrets.get("google:default:client-secret")), ...application.calendarSyncStatus() },
   drive: { configured: Boolean(await secrets.get("google-drive:default:client-id")) && Boolean(await secrets.get("google-drive:default:client-secret")), connected: false }
 }));
 server.post<{ Params: { provider: "calendar" | "drive" }; Body: { clientId: string; clientSecret: string } }>("/api/v1/settings/connections/google/:provider", async (request, reply) => {
@@ -171,9 +172,8 @@ server.get("/*", async (request, reply) => {
 });
 
 server.setErrorHandler((error, _request, reply) => {
-  const failure = error instanceof Error ? error : new Error("Unknown server error");
-  const statusCode = failure.name === "ObjectConflictError" ? 409 : 400;
-  reply.status(statusCode).send({ error: failure.message });
+  const { statusCode, body } = httpError(error);
+  reply.status(statusCode).send(body);
 });
 
 try {

@@ -3,6 +3,9 @@ import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 /** Body for a meeting note created without user text (legacy callers and crash recovery of old operations). */
 const DEFAULT_NOTE_BODY = "# Notes\n\n";
 
+/** An identical failed sync within this window does not write another Sync Run file (PB-022a). */
+const FAILED_SYNC_RUN_THROTTLE_MS = 60 * 60 * 1000;
+
 function slugify(value: string) {
   return value
     .normalize("NFKD")
@@ -212,9 +215,21 @@ export class LifeOSApplication {
       if (this.calendar.provider === "google") await this.writeSyncRun("succeeded", started, events.length);
       return this.withNoteLinks(events);
     } catch (error) {
-      if (this.calendar.provider === "google") await this.writeSyncRun("failed", started, 0, error instanceof Error ? error.message : "Unknown error");
+      // Recording the failure must never mask the connector error the user needs to see.
+      if (this.calendar.provider === "google") await this.writeSyncRun("failed", started, 0, error instanceof Error ? error.message : "Unknown error").catch(() => undefined);
       throw error;
     }
+  }
+
+  /** Last Google Calendar sync outcomes, derived from Sync Run files, for the reconnect banner (PB-022a). */
+  calendarSyncStatus() {
+    const runs = this.googleSyncRuns();
+    const lastSuccess = runs.find((run) => run.frontmatter.status === "succeeded");
+    const last = runs[0];
+    return {
+      lastSuccessfulSyncAt: lastSuccess ? String(lastSuccess.frontmatter.completed_at) : undefined,
+      lastError: last?.frontmatter.status === "failed" ? String(last.frontmatter.error ?? "Unknown error") : undefined
+    };
   }
 
   /**
@@ -647,9 +662,20 @@ export class LifeOSApplication {
     const account = this.index.all().find((object) => object.frontmatter.type === "connector-account" && object.frontmatter.provider === "google");
     if (!account) return;
     const completedAt = new Date().toISOString();
+    // Throttle: repeating the same failure within the window adds no information, only another file.
+    const previous = this.googleSyncRuns()[0];
+    if (status === "failed" && previous?.frontmatter.status === "failed" && previous.frontmatter.error === error &&
+      Date.parse(completedAt) - Date.parse(String(previous.frontmatter.completed_at)) < FAILED_SYNC_RUN_THROTTLE_MS) return;
     const id = uuidV7();
     await this.objects.write({ relativePath: `sync-runs/${markdownFileName("Google Calendar sync", id, completedAt)}`, frontmatter: { ...this.envelope(id, "sync-run", "Google Calendar sync", completedAt), connector_account_id: account.frontmatter.id, resource_type: "calendar-events", status, started_at: startedAt, completed_at: completedAt, record_count: recordCount, error }, body: `# Google Calendar sync\n\n${status}: ${recordCount} events.\n` });
     await this.rebuildIndex();
+  }
+
+  /** Google Calendar Sync Runs, newest first. */
+  private googleSyncRuns() {
+    return this.index.all()
+      .filter((object) => object.frontmatter.type === "sync-run" && object.frontmatter.resource_type === "calendar-events")
+      .sort((left, right) => Date.parse(String(right.frontmatter.completed_at)) - Date.parse(String(left.frontmatter.completed_at)));
   }
 
   private required(id: string, type?: ObjectEnvelope["type"]) {
