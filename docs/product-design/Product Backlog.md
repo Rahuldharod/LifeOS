@@ -67,6 +67,8 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 | --- | --- | --- |
 | 2026-09-21 | Add accessibility labels and tooltips to every visual-editor formatting control. | Visual editor usability |
 | 2026-09-21 | Add configurable autosave timing and a visible “browser draft recovered” history. | Note reliability |
+| 2026-10-03 | CI: bump `actions/checkout`, `actions/setup-node` and `pnpm/action-setup` to versions that target Node 24; GitHub is retiring Node 20 for actions. Warning only, CI still passes. | CI run 37099945764 annotation |
+| 2026-10-03 | CI: on or after **19 Oct 2026**, check the first CI run on Ubuntu 26 (`ubuntu-latest` migrates that day); pin `ubuntu-24.04` if anything breaks. | CI run 37099945764 annotation |
 
 ## Completed
 
