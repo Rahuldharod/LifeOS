@@ -1,6 +1,6 @@
 # LifeOS Product Backlog
 
-Last reviewed: 2026-10-02
+Last reviewed: 2026-10-03
 
 This file is the durable product-level backlog for LifeOS. It captures problems and opportunities before they are detailed enough to become implementation work.
 
@@ -38,7 +38,6 @@ High-value capabilities to address after the current version is stable.
 | PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Submitting appends a formatted row to the Inbox of this Product Backlog (Captured date, Idea with Bug/Feature label and next PB ID, Source/context with the current page). Supersedes the 2026-09-21 feedback idea. Needs a decision on writing into the code repo at runtime, see ADR 0001. | 3 | High | 2 | — | — |
 | PB-022b | Persist synced events locally | The Calendar tab depends on a live Google call, so a token or network failure leaves the day blank. Store the last synced events per day (derived, rebuildable) and show them, marked as stale, when Google is unreachable. Split from PB-022. | 4 | Medium | 3 | — | — |
 | PB-005 | Note search, filtering, and sorting | Find notes by title, body, type, date, project, client, product, or person. | 4 | High | 3 | — | — |
-| PB-006 | Editable note titles and metadata | Change a note title and its relationships without manually editing YAML front matter. | 4 | High | 2 | — | — |
 | PB-007 | LifeOS link navigation | Clicking a `lifeos://object/...` link should open the linked object inside the application. | 4 | High | 2 | — | — |
 | PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
@@ -92,6 +91,7 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-024 | Tabs fill the window; note text stops at ~90 characters per line; list, timeline and editor fill the height; Notes and Calendar side column grows with the screen (320–480px) and has a draggable divider remembered per device (double-click resets) | 2026-10-02 |
 | PB-024b | Feedback fixes: Notes and Calendar fit the window with no page scroll; editor text left-aligned; Notes editor 70% wide by default (640px floor) with a bottom-right handle to resize freely (remembered per device, double-click resets); top margin trimmed and logo aligned with the page title | 2026-10-03 |
 | PB-025 | Notes: Open/Deleted tabs, keyword search (every word, ignoring case and accents) and restore; restore refused when the meeting has a newer note | 2026-10-02 |
+| PB-006 | Note header: click the title to rename; searchable dropdowns under it for project, client, product and (meeting notes) people. Each pick saves on its own, in Notes and in the Calendar editor. For a note not yet created, choices are held and applied right after the first edit creates it | 2026-10-03 |
 
 ## Decision log
 

@@ -14,6 +14,8 @@ import { useNoteDraftController, type NoteDraftController } from "./useNoteDraft
 import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
 import { useResizableBox } from "./resizableBox.js";
+import { NoteHeader } from "./NoteHeader.js";
+import { foldText } from "./searchOptions.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -314,6 +316,9 @@ function App() {
   // views can never leak one editor's conflict flag into the other.
   // The calendar event whose note does not exist on disk yet, if the open workspace is a preview.
   const createdWorkspace = useRef<Workspace | undefined>(undefined);
+  // Title and relationship changes made before a calendar note exists. They wait here and are applied
+  // right after the first edit creates the note (PB-006), so opening an event still writes nothing.
+  const pendingDetails = useRef<Record<string, unknown>>({});
   const previewTarget = useRef<{ externalId: string; calendarId?: string; date: string; timeZone: string } | undefined>(undefined);
   // Bumped only when the user opens an event, so the visual editor keeps its instance (and cursor)
   // when a first edit turns the preview into a persisted workspace.
@@ -343,7 +348,22 @@ function App() {
       const target = previewTarget.current;
       if (!target) return undefined;
       const range = dayRange(target.date, target.timeZone);
-      const next = await api<Workspace>("/api/v1/meetings/from-event", { method: "POST", body: JSON.stringify({ externalId: target.externalId, calendarId: target.calendarId, ...range, body }) });
+      let next = await api<Workspace>("/api/v1/meetings/from-event", { method: "POST", body: JSON.stringify({ externalId: target.externalId, calendarId: target.calendarId, ...range, body }) });
+      const held = { ...pendingDetails.current };
+      if (next.note && Array.isArray(held.people_ids)) {
+        // Attendees the header could not show (LifeOS had no matching person yet) were just created from the
+        // event; keep them when the user adds people, rather than replacing the whole list.
+        const defaults = Array.isArray(next.note.frontmatter.people_ids) ? next.note.frontmatter.people_ids as string[] : [];
+        held.people_ids = [...new Set([...(held.people_ids as string[]), ...defaults.filter((id) => !headerOptions.people.some((option) => option.id === id))])];
+      }
+      if (next.note && Object.keys(held).length) {
+        // A failure here leaves a valid note with the calendar's defaults; say so rather than lose it silently.
+        try {
+          await api(`/api/v1/notes/${next.note.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes: held, expectedHash: next.note.contentHash }) });
+          next = await api<Workspace>(`/api/v1/meetings/${next.meeting.frontmatter.id}/workspace`);
+          pendingDetails.current = {};
+        } catch (error) { setMessage(`Note created, but your title and links could not be applied: ${error instanceof Error ? error.message : "unknown error"}`); }
+      }
       setWorkspace((current) => current && !current.note && (current.meeting.frontmatter.id === `preview:${target.externalId}` || current.meeting.frontmatter.id === next.meeting.frontmatter.id) ? next : current);
       if (previewTarget.current === target) previewTarget.current = undefined;
       localStorage.setItem("lifeos.activeMeetingId", next.meeting.frontmatter.id);
@@ -513,6 +533,7 @@ function App() {
       // No note on disk (new event, or a meeting that never got one): editable draft, no file yet.
       const key = `event:${calendarId ?? ""}:${externalId}`;
       previewTarget.current = { externalId, calendarId, date: selectedDate, timeZone: displayTimeZone };
+      pendingDetails.current = {};
       meetingController.openPending(key, readCachedPendingDraft(key));
     }
   }, "Event opened");
@@ -793,6 +814,39 @@ function App() {
     } finally { setBusy(false); }
   };
 
+  // PB-006: title and relationships save on their own, apart from the body. Unsaved text is saved
+  // first, so the metadata write sees the body's newest hash and the editor never mistakes it for
+  // an outside edit. `busy` blocks typing while the request is in flight for the same reason.
+  const saveDetails = async (controller: NoteDraftController, fetchLatest: () => Promise<{ frontmatter: { id: string }; contentHash: string } | undefined>, changes: Record<string, unknown>) => {
+    if (controller.dirty && !(await controller.saveNow())) return false;
+    return run(async () => {
+      const latest = await fetchLatest();
+      if (!latest) throw new Error("This note no longer exists");
+      await api(`/api/v1/notes/${latest.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes, expectedHash: latest.contentHash }) });
+      await fetchLatest();
+      await loadCollections();
+    }, "Note details saved");
+  };
+  const saveNotesDetails = (changes: Record<string, unknown>) => saveDetails(notesController, fetchLatestNote, changes);
+  const saveMeetingNoteDetails = (changes: Record<string, unknown>) => saveDetails(meetingController, fetchLatestWorkspace, changes);
+  const optionsOf = (objects: LifeObject[]) => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));
+  const headerOptions = { projects: optionsOf(projects.map(({ project }) => project)), clients: optionsOf(clients.map(({ entity }) => entity)), products: optionsOf(products.map(({ entity }) => entity)), people: optionsOf(people.map(({ entity }) => entity)) };
+
+  // The header of a note that does not exist yet: the event's own project, client, product and
+  // attendees are shown when they match an object LifeOS already has (by name), and the rest stay
+  // blank until the first edit creates them. The id and hash are fixed so the form is not re-seeded.
+  const pendingHeaderNote = (current: Workspace) => {
+    const match = (options: { id: string; title: string }[], object?: LifeObject) => object ? options.find((option) => foldText(option.title) === foldText(object.frontmatter.title))?.id ?? "" : "";
+    return {
+      contentHash: "pending",
+      frontmatter: {
+        id: current.meeting.frontmatter.id, type: "meeting-note", title: `${current.meeting.frontmatter.title} notes`,
+        primary_project_id: match(headerOptions.projects, current.context.project), primary_client_id: match(headerOptions.clients, current.context.client), primary_product_id: match(headerOptions.products, current.context.product),
+        people_ids: current.context.people.map((person) => match(headerOptions.people, person)).filter(Boolean)
+      }
+    };
+  };
+
   function editNotes(before: string, after = "", placeholder = "text") {
     const area = notesEditor.current;
     if (!area) return;
@@ -965,10 +1019,9 @@ function App() {
               </article>
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <article className="editor-card">
-                <div className="editor-heading">
-                  <div><span>CANONICAL NOTE</span><h3>{workspace.note?.frontmatter.title ?? `${workspace.meeting.frontmatter.title} notes`}</h3></div>
-                  <div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div>
-                </div>
+                {workspace.note
+                  ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div></NoteHeader>
+                  : <NoteHeader note={pendingHeaderNote(workspace)} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div></NoteHeader>}
                 {editorMode === "write" ? <>
                   <div className="toolbar">
                     <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { applyHeading(event.target.value); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
@@ -1029,7 +1082,7 @@ function App() {
             </article>) :
             selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :
             !selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <article className={notesEditorBox.resized ? "editor-card notes-editor resized" : "editor-card notes-editor"} style={notesEditorBox.style}>
-              <div className="editor-heading"><div><span>{selectedNote.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedNote.frontmatter.title}</h3></div><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div></div>
+              <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div></NoteHeader>
               {notesMode === "write" ? <>
                 <div className="toolbar">
                   <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { if (event.target.value) transformNoteLines((line) => `${"#".repeat(Number(event.target.value))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading"); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>

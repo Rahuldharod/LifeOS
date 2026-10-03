@@ -648,6 +648,50 @@ export class LifeOSApplication {
   }
 
   /**
+   * Edits a note's title and relationships without touching its body (PB-006). Only the fields in
+   * `changes` move; `null` or an empty string clears a link. Links must point at a live object of
+   * the right type, so a stale picker cannot write a dangling id. The file name is kept: paths and
+   * titles may change without changing identity (ADR 0002). A change that alters nothing writes
+   * nothing, so a retry does not add revisions.
+   */
+  async updateNoteMetadata(id: string, changes: Record<string, unknown>, expectedHash: string) {
+    const current = this.required(id);
+    if (!["meeting-note", "knowledge-note"].includes(current.frontmatter.type)) throw new Error("Only notes can be edited here");
+    if (current.frontmatter.deleted_at) throw new Error("This note was deleted; it can no longer be edited");
+    const selected: Record<string, unknown> = {};
+    if ("title" in changes) {
+      if (typeof changes.title !== "string" || !changes.title.trim()) throw new Error("Title is required");
+      selected.title = changes.title.trim();
+    }
+    const live = (linkId: string, type: ObjectEnvelope["type"], label: string) => {
+      const target = this.index.get(linkId);
+      if (!target || target.frontmatter.type !== type || target.frontmatter.deleted_at || target.frontmatter.archived_at) throw new Error(`${label} not found`);
+    };
+    for (const [field, type, label] of [["primary_project_id", "project", "Project"], ["primary_client_id", "client", "Client"], ["primary_product_id", "product", "Product"]] as const) {
+      if (!(field in changes)) continue;
+      const value = changes[field];
+      if (value === null || value === "") { selected[field] = undefined; continue; }
+      if (typeof value !== "string") throw new Error(`${label} must be an id`);
+      live(value, type, label);
+      selected[field] = value;
+    }
+    if (current.frontmatter.type === "meeting-note" && "people_ids" in changes) {
+      const value = changes.people_ids;
+      if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) throw new Error("People must be a list of ids");
+      const people = [...new Set(value as string[])];
+      people.forEach((personId) => live(personId, "person", "Person"));
+      selected.people_ids = people;
+    }
+    const unchanged = Object.entries(selected).every(([key, value]) => JSON.stringify(current.frontmatter[key] ?? null) === JSON.stringify(value ?? null));
+    if (unchanged) return current;
+    const now = new Date().toISOString();
+    const updated = await this.objects.write({ relativePath: current.relativePath, expectedHash, frontmatter: { ...current.frontmatter, ...selected, revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.deviceId }, body: current.body });
+    await this.writeAudit("note.metadata-updated", id, now, { fields: Object.keys(selected) });
+    await this.rebuildIndex();
+    return updated;
+  }
+
+  /**
    * Deletes a meeting or knowledge note as a tombstone (PB-021): `deleted_at` is set and the file
    * stays on disk, so another device cannot resurrect it and it can be restored by hand. Physical
    * removal is a separate maintenance step. The meeting itself is kept; opening its event again
