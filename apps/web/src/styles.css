@@ -92,6 +92,30 @@ article small { color: #6c766f; }
 .editor-card { padding: 0; overflow: hidden; }
 .editor-heading { display: flex; justify-content: space-between; align-items: start; padding: 22px 24px 14px; }
 .editor-heading h3 { margin-bottom: 0; }
+.note-header { padding: 18px 24px 12px; }
+.note-header-top { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.note-header-title { min-width: 0; flex: 1; }
+.note-header-title > span { color: #8a6e36; font-size: 11px; font-weight: 800; letter-spacing: .13em; }
+.note-header h3 { margin: 4px 0 0; }
+.title-button { display: inline-flex; align-items: baseline; gap: 8px; max-width: 100%; padding: 2px 6px; margin: 0 -6px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; }
+.title-button:hover:not(:disabled) { border-color: #d9d6c9; background: #faf8f1; }
+.title-button i { color: #8a9a92; font-size: 13px; font-style: normal; opacity: 0; }
+.title-button:hover i, .title-button:focus-visible i { opacity: 1; }
+.title-input { width: 100%; margin-top: 4px; padding: 3px 8px; border: 1px solid #245646; border-radius: 6px; background: white; font: inherit; font-size: 1.17em; font-weight: 700; }
+.note-header-links { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px 12px; margin-top: 10px; }
+.note-header-links .multi { grid-column: 1 / -1; }
+.search-select { position: relative; display: grid; gap: 3px; min-width: 0; }
+.search-select small { color: #66756e; font-weight: 750; }
+.search-select-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 32px; padding: 2px 6px; border: 1px solid #d9d6c9; border-radius: 6px; background: white; }
+.search-select-box:focus-within { border-color: #245646; box-shadow: 0 0 0 2px #24564622; }
+.search-select-box input { flex: 1 1 80px; min-width: 60px; border: 0; outline: 0; background: transparent; font-size: 13px; }
+.search-select .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border-radius: 999px; background: #e8ece8; color: #23483c; font-size: 12px; font-weight: 650; }
+.search-select .chip button { border: 0; background: transparent; padding: 0 3px; color: #647269; line-height: 1; }
+.search-select-list { position: absolute; top: 100%; left: 0; z-index: 20; min-width: 100%; max-height: 220px; margin: 2px 0 0; padding: 4px; overflow: auto; list-style: none; border: 1px solid #d7d5cb; border-radius: 8px; background: #fffdf7; box-shadow: 0 10px 28px #1b352d22; }
+.search-select-list li { padding: 6px 8px; border-radius: 5px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.search-select-list li.active { background: #e8ece8; }
+.search-select-list li[aria-selected="true"] { font-weight: 750; }
+.search-select-list li.empty { color: #758078; cursor: default; }
 .mode-switch { display: flex; padding: 3px; border-radius: 8px; background: #eceae1; }
 .mode-switch button { padding: 6px 11px; border: 0; border-radius: 6px; background: transparent; color: #647269; font-size: 12px; font-weight: 700; }
 .mode-switch button.selected { background: white; color: #23483c; box-shadow: 0 1px 4px #263d3420; }
@@ -191,7 +215,7 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .crud-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; margin-top: 14px; }
 .crud-actions small { margin-right: auto; color: #77827d; }
 @media (max-width: 980px) { .meeting-layout, .notes-layout { grid-template-columns: 1fr; } .event-list, .notes-list { position: static; max-height: none; } .meeting-header { display: block; } .context-grid { margin-top: 20px; } }
-@media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { position: static; height: auto; } aside h1 { margin-bottom: 18px; } aside { display: block; } .nav-main { overflow: visible; } section { padding: 38px 20px; } .summary, .project-grid, .system-grid, .task-editor, .settings-grid, .crud-fields { grid-template-columns: 1fr; } .crud-fields label:first-child { grid-column: span 1; } .metadata-strip, .context-grid { grid-template-columns: 1fr 1fr; } h2 { font-size: 38px; } }
+@media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { position: static; height: auto; } aside h1 { margin-bottom: 18px; } aside { display: block; } .nav-main { overflow: visible; } section { padding: 38px 20px; } .summary, .project-grid, .system-grid, .task-editor, .settings-grid, .crud-fields { grid-template-columns: 1fr; } .crud-fields label:first-child { grid-column: span 1; } .metadata-strip, .context-grid { grid-template-columns: 1fr 1fr; } .note-header-links { grid-template-columns: 1fr 1fr; } h2 { font-size: 38px; } }
 
 /* PB-002: Notes conflict resolution (NoteConflictPanel.tsx). Chosen after prototyping three
    directions on the prototype/pb-002-conflict-ui branch (inline banner, this split panel, a

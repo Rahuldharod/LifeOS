@@ -155,6 +155,11 @@ server.get<{ Params: { "*": string } }>("/api/v1/assets/*", async (request, repl
   if (!mimeType) return reply.status(404).send({ error: "Unsupported asset" });
   return reply.type(mimeType).send(await assets.read(relativePath));
 });
+server.patch<{ Params: { id: string }; Body: { changes?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/notes/:id", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required to edit a note" });
+  if (!request.body.changes || typeof request.body.changes !== "object") return reply.status(400).send({ error: "changes are required" });
+  return application.updateNoteMetadata(request.params.id, request.body.changes, request.body.expectedHash);
+});
 server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id/restore", async (request, reply) => {
   if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required to restore a note" });
   return application.restoreNote(request.params.id, request.body.expectedHash);
