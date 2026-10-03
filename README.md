@@ -66,7 +66,8 @@ Documentation is intentionally lean during the MVP:
 - [`docs/architecture/README.md`](docs/architecture/README.md) explains system boundaries and responsibilities.
 - [`docs/decisions/`](docs/decisions/) records durable architectural decisions.
 - [`docs/architecture/mvp-gap-analysis.md`](docs/architecture/mvp-gap-analysis.md) preserves the solution-design audit and deferred scope.
-- [`docs/product-design/LifeOS_Solution_Design_v0.4.md`](docs/product-design/LifeOS_Solution_Design_v0.4.md) is the current versioned solution baseline.
+- [`docs/product-design/LifeOS_Solution_Design_v0.6.md`](docs/product-design/LifeOS_Solution_Design_v0.6.md) is the current versioned solution baseline. v0.4 is kept for history.
+- [`docs/product-design/LifeOS_PRD_Phase-A_v1.0.md`](docs/product-design/LifeOS_PRD_Phase-A_v1.0.md) is the Phase A spec (also GitHub issue #21).
 - [`docs/product-design/Product Backlog.md`](docs/product-design/Product%20Backlog.md) captures product intent and prioritization before work becomes a GitHub Issue.
 - [`AGENTS.md`](AGENTS.md) tells coding agents how to navigate and safely change the repository.
 - [`CLAUDE.md`](CLAUDE.md) points Claude Code to the shared agent instructions without duplicating them.

@@ -7,7 +7,7 @@ This file is the repository-level operating guide for coding agents. Keep it too
 Read these sources in order, loading only what the task needs:
 
 1. `README.md` for setup, repository layout, and connection prerequisites.
-2. `docs/product-design/LifeOS_Solution_Design_v0.4.md` for the current product and solution baseline.
+2. `docs/product-design/LifeOS_Solution_Design_v0.6.md` for the current product and solution baseline, and `docs/product-design/LifeOS_PRD_Phase-A_v1.0.md` (spec issue #21) for the Phase A build. v0.4 is kept for history only.
 3. `docs/architecture/README.md` for system boundaries and current architecture.
 4. The relevant file in `docs/decisions/` for decisions that must not be silently reversed.
 5. `docs/architecture/mvp-gap-analysis.md` for the original MVP audit and remaining deferred scope.
