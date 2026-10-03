@@ -88,6 +88,7 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-004 | Duplicate meetings: creation serialized per event, `pnpm reconcile-meetings` (dry run, `--apply` with backup); the empty Product Weekly copy and its note archived (absorbs PB-022c) | 2026-10-02 |
 | PB-023 | Latest notes grouped by last-edited day ("Today", "Yesterday", "Thursday 1 October", year only if not this year); items show the time only; Deleted tab groups by deletion day | 2026-10-02 |
 | PB-024 | Tabs fill the window; note text stops at ~90 characters per line; list, timeline and editor fill the height; Notes and Calendar side column grows with the screen (320–480px) and has a draggable divider remembered per device (double-click resets) | 2026-10-02 |
+| PB-024b | Feedback fixes: Notes and Calendar fit the window with no page scroll; editor text left-aligned; Notes editor 70% wide by default (640px floor) with a bottom-right handle to resize freely (remembered per device, double-click resets); top margin trimmed and logo aligned with the page title | 2026-10-03 |
 | PB-025 | Notes: Open/Deleted tabs, keyword search (every word, ignoring case and accents) and restore; restore refused when the meeting has a newer note | 2026-10-02 |
 
 ## Decision log
