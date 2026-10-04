@@ -1,6 +1,7 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
 import type { InboxDocument, InboxFile, InboxStore } from "./ports.js";
+import { ReferenceResolver } from "./resolution.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -108,7 +109,9 @@ export class AdoptionModule {
   /** Batches run one at a time, so startup, the watcher and "Adopt now" can never adopt one draft twice. */
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore) {}
+  private readonly resolver: ReferenceResolver;
+
+  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore) { this.resolver = new ReferenceResolver(ctx); }
 
   adoptDrafts(options: { now?: Date } = {}): Promise<AdoptionBatch> {
     const next = this.queue.then(() => this.runBatch(options.now ?? new Date()));
@@ -281,16 +284,24 @@ export class AdoptionModule {
     // Envelope extras pass through; their values are validated by the envelope rules when the object is written.
     for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) extra[key] = fields[key];
     for (const key of ["subjects", "tags"]) if (fields[key] !== undefined) { if (stringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
+    if (Array.isArray(extra.subjects)) extra.subjects = this.resolver.normaliseSubjects(extra.subjects as string[]);
+    // References by name or ID (#33): resolved ones become links; the rest become link-resolution Review Items.
+    const references = this.resolver.resolveDraft(fields);
+    issues.push(...references.issues);
+    if (fields.waiting_for !== undefined && status !== "Waiting") issues.push(`waiting_for: needs status Waiting (got ${status})`);
     if (issues.length) throw new DraftError(issues);
 
-    const owner = await run.self();
+    // Context not named explicitly is inherited from the referenced meeting.
+    const meeting = typeof references.links.source_meeting_id === "string" ? this.ctx.index.get(references.links.source_meeting_id) : undefined;
+    const inherited = Object.fromEntries(["primary_client_id", "primary_product_id", "primary_project_id"].filter((key) => typeof meeting?.frontmatter[key] === "string").map((key) => [key, meeting!.frontmatter[key]]));
+    const ownerId = typeof references.links.owner_person_id === "string" ? references.links.owner_person_id : (await run.self()).frontmatter.id;
     const id = uuidV7();
     const narrative = draft.body.trim();
-    await this.ctx.objects.write({
+    const task = await this.ctx.objects.write({
       relativePath: `tasks/${markdownFileName(draft.title, id, run.now)}`,
-      frontmatter: { ...this.ctx.envelope(id, "task", draft.title, run.now, draft.origin), status, owner_person_id: owner.frontmatter.id, captured_at: draft.capturedAt, source_ids: [], ...extra },
+      frontmatter: { ...this.ctx.envelope(id, "task", draft.title, run.now, draft.origin), status, captured_at: draft.capturedAt, source_ids: [], ...inherited, ...references.links, owner_person_id: ownerId, ...extra },
       body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
     });
-    return [id];
+    return [id, ...await this.resolver.raiseLinkReviews(task.frontmatter, references.unresolved, { now: run.now, origin: draft.origin, agentRunId: run.id })];
   }
 }

@@ -16,6 +16,8 @@ export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS } from 
 export type { AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
+export { ReferenceResolver, referenceFields, foldName, foldSubject, personEmails } from "./resolution.js";
+export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -96,7 +98,7 @@ export class LifeOSApplication {
   // Review
   reviews() { return this.review.reviews(); }
   processMeeting(meetingId: string) { return this.review.processMeeting(meetingId); }
-  acceptReviewItem(reviewId: string) { return this.review.acceptReviewItem(reviewId); }
+  acceptReviewItem(reviewId: string, options?: { linkTo?: string }) { return this.review.acceptReviewItem(reviewId, options); }
   updateReviewTitle(reviewId: string, title: string) { return this.review.updateReviewTitle(reviewId, title); }
   rejectReviewItem(reviewId: string) { return this.review.rejectReviewItem(reviewId); }
 
