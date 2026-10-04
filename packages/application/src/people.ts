@@ -101,7 +101,7 @@ export function externalStatus(person: Pick<LifeOSObject, "frontmatter">, intern
  * The display-label read model (#39), used by badges, pickers and the Agent Index (#43).
  * `name` is the short, unambiguous name; `label` is the text to show: `name` plus `suffix` for External people.
  */
-export type PersonLabel = { id: string; name: string; label: string; suffix?: typeof EXTERNAL_SUFFIX; isExternal: boolean; externalSource: ExternalSource };
+export type PersonLabel = { id: string; name: string; label: string; suffix?: typeof EXTERNAL_SUFFIX; isExternal: boolean; externalSource: ExternalSource; unreviewed: boolean };
 
 const isActivePerson = (person: Pick<LifeOSObject, "frontmatter">) => person.frontmatter.type === "person" && isLive(person);
 const cleanText = (value: unknown) => typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
@@ -151,9 +151,12 @@ export function personDisplayLabels(objects: ReadonlyArray<Pick<LifeOSObject, "f
     // Without a family name, the title is the best longer name there is (it may equal the first name).
     const name = !shared ? first : family ? `${first} ${family}` : cleanText(person.frontmatter.title) || first;
     const { isExternal, source } = externalStatus(person, internalDomains);
-    return { id: person.frontmatter.id, name, label: isExternal ? name + EXTERNAL_SUFFIX : name, ...(isExternal ? { suffix: EXTERNAL_SUFFIX } : {}), isExternal, externalSource: source };
+    return { id: person.frontmatter.id, name, label: isExternal ? name + EXTERNAL_SUFFIX : name, ...(isExternal ? { suffix: EXTERNAL_SUFFIX } : {}), isExternal, externalSource: source, unreviewed: isUnreviewed(person) };
   });
 }
+
+/** #87: created automatically (calendar, adoption) and not yet saved or confirmed by the user (PRD story 72). */
+export const isUnreviewed = (person: Pick<LifeOSObject, "frontmatter">) => person.frontmatter.review_state === "unreviewed";
 
 /** One attendee as the matcher sees it. Name-only connectors give strings; a bare address counts as an email. */
 function attendeesOf(event: CalendarEvent): CalendarAttendee[] {
@@ -262,6 +265,18 @@ export class PeopleModule {
     const now = new Date().toISOString();
     const updated = await ctx.update(person, { is_external_override: override, is_external: isExternal }, { expectedHash, now });
     await ctx.writeAudit("person.external-changed", id, now, { from: before, to: value, is_external: isExternal });
+    await ctx.rebuildIndex();
+    return updated;
+  }
+
+  /** #87: the user confirms an automatically created person. Guarded by the content hash; repeating it writes nothing. */
+  async confirmReviewed(id: string, expectedHash: string) {
+    const { ctx } = this;
+    const person = ctx.required(id, "person");
+    if (!isUnreviewed(person)) return person;
+    const now = new Date().toISOString();
+    const updated = await ctx.update(person, { review_state: "reviewed" }, { expectedHash, now });
+    await ctx.writeAudit("person.reviewed", id, now, { from: "unreviewed" });
     await ctx.rebuildIndex();
     return updated;
   }

@@ -66,6 +66,8 @@ export class EntitiesModule {
       if (selected.status === "Cancelled") selected.cancelled_at = now; else if (selected.status) selected.cancelled_at = undefined;
       if (selected.status && selected.status !== "Waiting") selected.waiting_for_person_id = undefined;
     }
+    // #87: saving an automatically created person counts as reviewing it.
+    if (type === "person" && current.frontmatter.review_state === "unreviewed") selected.review_state = "reviewed";
     const updated = await this.ctx.update(current, selected, { expectedHash, now });
     await this.ctx.writeAudit(`${type}.updated`, id, now, { fields: Object.keys(selected) });
     await this.ctx.rebuildIndex();

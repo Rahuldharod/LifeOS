@@ -334,6 +334,9 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 @media (max-width: 980px) { .decisions-layout, .decision-filter-grid { grid-template-columns: 1fr; } }
 /* #39: External people. The " - ext" text is always present; red only reinforces it (about 6:1 contrast on white). */
 .ext-suffix { color: #b3261e; font-weight: 700; white-space: pre; }
+.unreviewed-marker { font-style: italic; white-space: pre; }
+.person-review { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.meeting-enrichment { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-top: 12px; }
 .person-external { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .person-external label { display: inline-flex; align-items: center; gap: 4px; }
 .internal-domains-setting { margin-bottom: 18px; }
