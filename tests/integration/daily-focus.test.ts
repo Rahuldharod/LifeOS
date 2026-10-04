@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
-import { LifeOSApplication } from "@lifeos/application";
+import { LifeOSApplication, type ObjectStore } from "@lifeos/application";
 import { uuidV7 } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemInboxStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
@@ -175,6 +175,89 @@ describe("adopting a daily-focus draft", () => {
     expect(again).toMatchObject({ outcome: "duplicate", objectIds: first!.objectIds });
     expect(await briefs(application)).toHaveLength(1);
     expect(application.object(first!.objectIds[0]!).frontmatter.archived_at).toBeUndefined();
+  });
+});
+
+describe("Daily Focus crash replay (#60)", () => {
+  /** A store that "crashes" (throws) on the first write matching `when`, as if the process died at that point. */
+  function crashingWrites(target: MarkdownObjectStore, when: (input: { frontmatter: Record<string, unknown> }) => boolean) {
+    let crashed = false;
+    const store: ObjectStore = new Proxy(target, {
+      get(object, property, receiver) {
+        const value = Reflect.get(object, property, receiver) as unknown;
+        if (typeof value !== "function") return value;
+        return (...args: never[]) => {
+          if (property === "write" && !crashed && when(args[0] as unknown as { frontmatter: Record<string, unknown> })) { crashed = true; return Promise.reject(new Error("simulated crash in write")); }
+          return (value as (...input: never[]) => unknown).apply(object, args);
+        };
+      }
+    });
+    return { store, crashed: () => crashed };
+  }
+  const open = async (root: string, store: ObjectStore = new MarkdownObjectStore(root)) => {
+    const application = new LifeOSApplication(store, new MemoryIndex(), undefined, undefined, "test", new FilesystemInboxStore(root));
+    await application.rebuildIndex();
+    return application;
+  };
+  const supersededAudits = (application: LifeOSApplication) => application.listObjects().then((objects) => objects.filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === "daily-focus.superseded"));
+  /** Adopts an earlier brief for the date, then drops a newer one whose adoption will crash. */
+  async function withOlderBrief() {
+    const { root, application } = await vault();
+    await dropDraft(root, "first.md", brief());
+    const [first] = (await application.adoptDrafts({ now })).drafts;
+    await dropDraft(root, "second.md", brief({ draft_key: "focus-2026-10-05-1100", generated_at: "2026-10-05T11:00:00+02:00" }), "Re-planned after the 10:00 call.\n");
+    return { root, olderId: first!.objectIds[0]! };
+  }
+  async function crashThenRestart(root: string, when: (input: { frontmatter: Record<string, unknown> }) => boolean) {
+    // A crash inside the handler leaves the draft journalled ("will retry"); one after it aborts the batch. Either way a restart replays it.
+    const crashing = crashingWrites(new MarkdownObjectStore(root), when);
+    await (await open(root, crashing.store)).adoptDrafts({ now }).catch(() => undefined);
+    expect(crashing.crashed()).toBe(true);
+    const restarted = await open(root);
+    const [result] = (await restarted.adoptDrafts({ now })).drafts;
+    return { restarted, result: result! };
+  }
+  const adoptionAudit = (input: { frontmatter: Record<string, unknown> }) => input.frontmatter.type === "audit-event" && input.frontmatter.action === "draft.adopted";
+
+  it("GIVEN a crash after the only brief is written WHEN replayed THEN it stays live and Today shows it", async () => {
+    const { root } = await vault();
+    await dropDraft(root, "focus.md", brief());
+    const { restarted, result } = await crashThenRestart(root, adoptionAudit);
+    expect(result.outcome).toBe("adopted");
+    const all = await briefs(restarted);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.frontmatter.archived_at).toBeUndefined();
+    expect(all[0]!.frontmatter.superseded_by_id).toBeUndefined();
+    expect(restarted.today({ date, now }).focus.brief).toMatchObject({ id: all[0]!.frontmatter.id });
+    expect(await supersededAudits(restarted)).toHaveLength(0);
+  });
+
+  it("GIVEN a crash after the newer brief is written but before the older is archived WHEN replayed THEN only the older is superseded, audited once", async () => {
+    const { root, olderId } = await withOlderBrief();
+    const { restarted, result } = await crashThenRestart(root, (input) => input.frontmatter.id === olderId && input.frontmatter.superseded_by_id !== undefined);
+    const newerId = result.objectIds[0]!;
+    expect(restarted.object(newerId).frontmatter.archived_at).toBeUndefined();
+    expect(restarted.object(newerId).frontmatter.superseded_by_id).toBeUndefined();
+    expect(restarted.object(olderId).frontmatter).toMatchObject({ archived_at: now.toISOString(), superseded_by_id: newerId });
+    expect(restarted.today({ date, now }).focus.brief).toMatchObject({ id: newerId });
+    expect((await supersededAudits(restarted)).map((audit) => audit.frontmatter.object_id)).toEqual([olderId]);
+  });
+
+  it("GIVEN a crash after the older brief is archived but before its audit WHEN replayed THEN the audit exists exactly once", async () => {
+    const { root, olderId } = await withOlderBrief();
+    const { restarted, result } = await crashThenRestart(root, (input) => input.frontmatter.type === "audit-event" && input.frontmatter.action === "daily-focus.superseded");
+    const newerId = result.objectIds[0]!;
+    expect(restarted.object(olderId).frontmatter).toMatchObject({ archived_at: now.toISOString(), superseded_by_id: newerId, revision: 2 });
+    expect(restarted.today({ date, now }).focus.brief).toMatchObject({ id: newerId });
+    const audits = await supersededAudits(restarted);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.frontmatter).toMatchObject({ object_id: olderId, metadata: { superseded_by: newerId, focus_on: date } });
+  });
+
+  it("GIVEN a crash after the superseded audit WHEN replayed THEN the audit is not written again", async () => {
+    const { root, olderId } = await withOlderBrief();
+    const { restarted } = await crashThenRestart(root, adoptionAudit);
+    expect((await supersededAudits(restarted)).map((audit) => audit.frontmatter.object_id)).toEqual([olderId]);
   });
 });
 
