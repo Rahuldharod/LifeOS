@@ -68,3 +68,40 @@ export interface SecretStore {
   get(reference: string): Promise<string | undefined>;
   set(reference: string, value: string): Promise<void>;
 }
+
+/** The `_inbox/` subfolders (ADR 0007). Agents write drafts, patches and requests; the application files outcomes. */
+export const inboxFolders = ["drafts", "patches", "requests", "processed", "failed"] as const;
+export type InboxFolder = typeof inboxFolders[number];
+
+export interface InboxFile {
+  name: string;
+  /** Data-root relative path, e.g. `_inbox/drafts/x.md`, for path-aware messages. */
+  relativePath: string;
+  /** Last modification time in epoch milliseconds (used to skip files still being written). */
+  modifiedAt: number;
+}
+
+/** A Markdown file split into front matter and body. `error` says why the front matter could not be read; nothing is validated here. */
+export interface InboxDocument extends InboxFile {
+  content: string;
+  contentHash: string;
+  frontmatter?: Record<string, unknown>;
+  body: string;
+  error?: string;
+}
+
+/**
+ * Raw access to `_inbox/` and `_agent/`. These files are not objects: the object scan ignores them
+ * and only adoption reads them. Contract rules (what makes a draft valid) live in the application.
+ */
+export interface InboxStore {
+  /** Creates the `_inbox/` subfolders and `_agent/` when missing. */
+  ensureFolders(): Promise<void>;
+  /** Markdown files directly inside the folder, sorted by name; hidden and temporary files are left out. */
+  list(folder: InboxFolder): Promise<InboxFile[]>;
+  read(folder: InboxFolder, name: string): Promise<InboxDocument>;
+  /** Moves a file between inbox folders without overwriting; a `-2`, `-3`… suffix avoids clashes. Returns where it was filed. */
+  move(from: InboxFolder, name: string, to: InboxFolder): Promise<InboxFile>;
+  /** Atomically writes a Markdown file with YAML front matter, replacing any file of that name. */
+  writeDocument(folder: InboxFolder, name: string, frontmatter: Record<string, unknown>, body: string): Promise<InboxFile>;
+}

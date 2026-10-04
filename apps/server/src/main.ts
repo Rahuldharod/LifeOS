@@ -11,7 +11,7 @@ import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
 import { MemoryIndex } from "@lifeos/index-memory";
-import { FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import { FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { MacOSKeychainSecretStore } from "@lifeos/secrets";
 import { httpError } from "./http-errors.js";
 
@@ -38,7 +38,7 @@ const savedGoogleClientId = mockCalendarOnly ? undefined : await secrets.get("go
 let google = savedGoogleClientId ? new GoogleCalendarConnector({ clientId: savedGoogleClientId, redirectUri: googleRedirectUri, secrets }) : undefined;
 const mockCalendar = new MockCalendarConnector();
 const calendar = { get provider() { return (google ?? mockCalendar).provider; }, listEvents: (from: Date, to: Date) => (google ?? mockCalendar).listEvents(from, to), listCalendars: () => (google ?? mockCalendar).listCalendars() };
-const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId);
+const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId, new FilesystemInboxStore(dataRoot));
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 
 // The stable app serves the UI itself (same origin); only the Vite dev UI needs CORS.
@@ -182,6 +182,8 @@ server.post<{ Body: { title: string; text: string } }>("/api/v1/sources/text", a
 server.get<{ Params: { type: "client" | "product" | "person" } }>("/api/v1/rollups/:type", async (request) => application.rollups(request.params.type));
 server.get("/api/v1/projects", async () => application.projects());
 server.get("/api/v1/review-items", async () => application.reviews());
+server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());
+server.post("/api/v1/inbox/adopt", async () => application.adoptDrafts());
 server.get("/api/v1/backups", async () => backups.list());
 server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
@@ -216,10 +218,24 @@ try {
   await application.rebuildIndex();
   await application.recoverOperations();
   await application.rebuildIndex();
+  // Inbox Drafts (ADR 0007) are adopted at startup and shortly after one lands, but only while this device holds the lease.
+  let adoptTimer: NodeJS.Timeout | undefined;
+  const adopt = async () => {
+    if (!session.status().writeAllowed) return;
+    const batch = await application.adoptDrafts();
+    // Drafts still being written are skipped; look again once the 2-second grace period has passed.
+    if (batch.retrySoon) scheduleAdoption();
+  };
+  const scheduleAdoption = () => {
+    clearTimeout(adoptTimer);
+    adoptTimer = setTimeout(() => void adopt().catch((error) => server.log.error(error)), 2500);
+  };
+  await adopt().catch((error) => server.log.error(error));
   await server.listen({ host, port });
   let reconcileTimer: NodeJS.Timeout | undefined;
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
-    if (!filename || filename.startsWith(".lifeos/")) return;
+    if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
+    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/")) scheduleAdoption(); return; }
     clearTimeout(reconcileTimer);
     reconcileTimer = setTimeout(() => void application.rebuildIndex().catch((error) => server.log.error(error)), 250);
   });
@@ -228,6 +244,7 @@ try {
   const shutdown = async () => {
     clearInterval(heartbeat);
     clearTimeout(reconcileTimer);
+    clearTimeout(adoptTimer);
     watcher.close();
     await session.close();
     await server.close();

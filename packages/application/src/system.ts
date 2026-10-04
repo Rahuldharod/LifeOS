@@ -1,10 +1,11 @@
+import type { AdoptionModule } from "./adoption.js";
 import type { AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { ReviewModule } from "./review.js";
 
 /** Index, health, crash recovery and generic object access. */
 export class SystemModule {
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule) {}
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly adoption: AdoptionModule) {}
 
   rebuildIndex() {
     return this.ctx.rebuildIndex();
@@ -12,7 +13,9 @@ export class SystemModule {
 
   async health() {
     const { index } = this.ctx;
-    return { status: index.diagnostics().length ? "attention" : "healthy", objectCount: index.all().length, diagnostics: index.diagnostics() };
+    // Failed Inbox Drafts stay listed until the user deals with them; they are never deleted automatically.
+    const diagnostics = [...index.diagnostics(), ...await this.adoption.diagnostics()];
+    return { status: diagnostics.length ? "attention" : "healthy", objectCount: index.all().length, diagnostics };
   }
 
   async recoverOperations() {
