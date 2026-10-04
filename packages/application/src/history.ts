@@ -57,7 +57,10 @@ export class HistoryModule {
       const stored = info ? await ctx.objects.read(info.relativePath).catch(() => undefined) : await ctx.objects.latestVersion?.(id);
       if (firstLook && !stored) await this.persist(known);
       // While waiting for another device's version, the in-memory copy is that unchecked file: compare with the store.
-      const last = stored && (this.awaitingVersion.has(id) || stored.frontmatter.revision >= known.frontmatter.revision) ? stored : known;
+      // #80: on first look the in-memory copy is just the file found at start. If it is newer than the store, it is an
+      // unchecked write, so compare with the store: that waits for another device's version, or persists our own write.
+      const aheadOfStore = firstLook && current && stored && current.frontmatter.revision > stored.frontmatter.revision;
+      const last = stored && (aheadOfStore || this.awaitingVersion.has(id) || stored.frontmatter.revision >= known.frontmatter.revision) ? stored : known;
       if (current) {
         ctx.known.set(id, current);
         if (sameContent(current, last)) { this.awaitingVersion.delete(id); continue; }

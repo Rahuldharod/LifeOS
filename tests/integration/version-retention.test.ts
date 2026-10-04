@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -155,6 +155,84 @@ describe("another device's write whose version has not synced yet (#72)", () => 
     const { application } = await open();
     expect(await application.recordExternalChanges()).toEqual([]);
     await writeFile(file, task("Saved here", 2, "this-mac"));
+    expect(await application.recordExternalChanges()).toEqual([]);
+    expect(await revisions(root)).toContain(2);
+  });
+});
+
+// Issue #80: two devices share one data root. The other device's version copy is withheld (not synced yet) while this
+// device restarts, and dropped in later in the same session.
+describe("a restart while waiting for another device's version (#80)", () => {
+  const twoDevices = async () => {
+    const { root, open, file } = await vault();
+    expect(await (await open()).application.recordExternalChanges()).toEqual([]);
+    // The other Mac saves through LifeOS; its version copy has not synced to this Mac yet.
+    const before = await versions(root);
+    const otherMac = (await open("other-mac")).application;
+    await otherMac.updateTask(taskId, { title: "From the other Mac" }, otherMac.object(taskId).contentHash);
+    const withheld = (await versions(root)).filter((name) => !before.includes(name));
+    expect(withheld).toHaveLength(1);
+    const versionFile = path.join(root, ".lifeos", "versions", taskId, withheld[0]!);
+    const held = path.join(await mkdtemp(path.join(tmpdir(), "lifeos-held-")), "version.md"); // outside the data root
+    roots.push(path.dirname(held));
+    await rename(versionFile, held);
+    return { root, open, file, versionArrives: () => rename(held, versionFile) };
+  };
+  const obsidianEdit = async (file: string) => writeFile(file, (await readFile(file, "utf8")).replace("title: From the other Mac", "title: Then edited in Obsidian"));
+  const expectRecordedAgainstOtherMac = async (application: LifeOSApplication, root: string) => {
+    const [recorded, ...rest] = await application.recordExternalChanges();
+    expect(rest).toEqual([]);
+    expect(recorded).toMatchObject({ objectId: taskId, change: "changed" });
+    expect(await readFile(path.join(root, recorded!.versionPath!), "utf8")).toContain("title: From the other Mac");
+    expect(await application.recordExternalChanges()).toEqual([]);
+  };
+
+  it("restart, then the version arrives, then an Obsidian edit on top: recorded as external", async () => {
+    const { root, open, file, versionArrives } = await twoDevices();
+    const { application } = await open(); // restart
+    expect(await application.recordExternalChanges()).toEqual([]);
+    await versionArrives();
+    expect(await application.recordExternalChanges()).toEqual([]); // the other Mac's write, unchanged: accepted
+    await obsidianEdit(file);
+    await expectRecordedAgainstOtherMac(application, root);
+  });
+
+  it("an Obsidian edit made before the restart is recorded once the version arrives in the same session", async () => {
+    const { root, open, file, versionArrives } = await twoDevices();
+    await obsidianEdit(file);
+    const { application } = await open(); // restart
+    expect(await application.recordExternalChanges()).toEqual([]);
+    await versionArrives();
+    await expectRecordedAgainstOtherMac(application, root);
+  });
+
+  it("an Obsidian edit after the restart but before the version arrives is recorded against the other Mac's copy", async () => {
+    const { root, open, file, versionArrives } = await twoDevices();
+    const { application } = await open(); // restart
+    expect(await application.recordExternalChanges()).toEqual([]);
+    await obsidianEdit(file);
+    expect(await application.recordExternalChanges()).toEqual([]); // still waiting
+    await versionArrives();
+    await expectRecordedAgainstOtherMac(application, root);
+  });
+
+  it("never reports this device's own write made while waiting", async () => {
+    const { open, versionArrives } = await twoDevices();
+    const { application } = await open(); // restart
+    expect(await application.recordExternalChanges()).toEqual([]);
+    await application.updateTask(taskId, { title: "Saved here" }, application.object(taskId).contentHash);
+    expect(await application.recordExternalChanges()).toEqual([]);
+    await versionArrives();
+    expect(await application.recordExternalChanges()).toEqual([]);
+    const restarted = (await open()).application;
+    expect(await restarted.recordExternalChanges()).toEqual([]);
+  });
+
+  it("does not wait on this device's own newer write after a restart", async () => {
+    const { root, open, file } = await vault();
+    expect(await (await open()).application.recordExternalChanges()).toEqual([]);
+    await writeFile(file, task("Saved here", 2, "this-mac")); // stopped before its version was saved
+    const { application } = await open(); // restart
     expect(await application.recordExternalChanges()).toEqual([]);
     expect(await revisions(root)).toContain(2);
   });
