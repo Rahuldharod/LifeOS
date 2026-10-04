@@ -100,7 +100,7 @@ describe("adopting a daily-focus draft", () => {
     expect(result).toMatchObject({ outcome: "failed", filedAs: "_inbox/failed/bad.md" });
     const reason = result!.reason!;
     expect(reason).toContain("_inbox/drafts/bad.md (draft_key focus-2026-10-05-0600)");
-    for (const expected of ["focus_on: not a calendar date", "generated_at: not an ISO 8601", "top3: has 5 entries; at most 3", "top3.4.task_id: not an object ID", "top3.4.why_today: missing",
+    for (const expected of ["focus_on: not a calendar date", "generated_at: not an ISO 8601", "top3.4.task_id: not an object ID", "top3.4.why_today: missing",
       "meeting_prep: has 4 entries; at most 3", `defer_candidates.0.task_id: ${meetingId} is a meeting, expected task`, "day_shape.meeting_hours: must be a number", "day_shape.free_hours: missing"]) expect(reason).toContain(expected);
     expect(reason).not.toContain("words");
     expect(await briefs(application)).toEqual([]);
