@@ -18,7 +18,8 @@
       "@lifeos/index-memory": ["packages/index-memory/src/index.ts"],
       "@lifeos/connectors": ["packages/connectors/src/index.ts"],
       "@lifeos/ai": ["packages/ai/src/index.ts"],
-      "@lifeos/secrets": ["packages/secrets/src/index.ts"]
+      "@lifeos/secrets": ["packages/secrets/src/index.ts"],
+      "@lifeos/shared": ["packages/shared/src/index.ts"]
     }
   }
 }

@@ -250,6 +250,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@lifeos/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@milkdown/crepe':
         specifier: ^7.22.1
         version: 7.22.2(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6)(typescript@5.9.3)
@@ -293,6 +296,9 @@ importers:
       '@lifeos/domain':
         specifier: workspace:*
         version: link:../domain
+      '@lifeos/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/assets-filesystem: {}
 

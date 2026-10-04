@@ -7,6 +7,7 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@lifeos/shared": "workspace:*",
     "@milkdown/crepe": "^7.22.1",
     "@vitejs/plugin-react": "^5.0.0",
     "react": "^19.0.0",

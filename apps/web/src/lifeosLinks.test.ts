@@ -3,7 +3,7 @@ import { lifeosLinkId, resolveLifeosLink, type LinkedObject } from "./lifeosLink
 
 const id = (n: number) => `01a10000-0000-7000-8000-${String(n).padStart(12, "0")}`;
 const object = (n: number, type: string, extra: Record<string, unknown> = {}): LinkedObject => ({ frontmatter: { id: id(n), type, title: `Object ${n}`, ...extra } });
-const objects = [object(1, "meeting-note"), object(2, "knowledge-note", { deleted_at: "2026-10-01T00:00:00Z" }), object(3, "task"), object(4, "person"), object(5, "meeting"), object(6, "decision"), object(7, "project", { archived_at: "2026-10-01T00:00:00Z" }), object(8, "review-item")];
+const objects = [object(1, "meeting-note"), object(2, "knowledge-note", { deleted_at: "2026-10-01T00:00:00Z" }), object(3, "task"), object(4, "person"), object(5, "meeting"), object(6, "decision"), object(7, "project", { archived_at: "2026-10-01T00:00:00Z" }), object(8, "review-item"), object(9, "source"), object(10, "open-point")];
 const link = (n: number) => `lifeos://object/${id(n)}`;
 
 describe("lifeos links", () => {
@@ -26,9 +26,11 @@ describe("lifeos links", () => {
     expect(resolveLifeosLink(link(4), objects)).toEqual({ kind: "entity", id: id(4), view: "People" });
     expect(resolveLifeosLink(link(5), objects)).toEqual({ kind: "meeting", id: id(5) });
     expect(resolveLifeosLink(link(8), objects)).toEqual({ kind: "inbox", id: id(8) });
+    expect(resolveLifeosLink(link(6), objects)).toEqual({ kind: "entity", id: id(6), view: "Decisions" });
+    expect(resolveLifeosLink(link(10), objects)).toEqual({ kind: "entity", id: id(10), view: "Open Points" });
   });
   it("explains what cannot be opened", () => {
-    expect(resolveLifeosLink(link(6), objects)).toEqual({ kind: "unsupported", id: id(6), type: "decision" });
+    expect(resolveLifeosLink(link(9), objects)).toEqual({ kind: "unsupported", id: id(9), type: "source" });
     expect(resolveLifeosLink(link(7), objects)).toEqual({ kind: "missing", id: id(7) });
     expect(resolveLifeosLink(link(99), objects)).toEqual({ kind: "missing", id: id(99) });
   });

@@ -41,7 +41,7 @@ High-value capabilities to address after the current version is stable.
 | PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
 | PB-010 | Relationship pickers in the other forms | Use the searchable dropdown from PB-006 for project, client, product and people fields in the Tasks, Projects, Clients, Products and People forms. Notes are done (PB-006). Re-scoped 2026-10-03. | 4 | High | 2 | — | — |
-| PB-011 | Note history and restoration | Browse prior Markdown revisions and restore an earlier version without using the filesystem manually. | 4 | High | 3 | — | — |
+| PB-011 | Note history and restoration | Browse prior Markdown revisions and restore an earlier version without using the filesystem manually. Update 2026-10-04: the last 10 copies per object are kept (ADR 0012) and a restore API exists for copies named by an external-edit audit (#79); there is no button yet (PRD *Known gaps*). | 4 | High | 3 | — | — |
 
 ## Later
 
@@ -111,4 +111,5 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-02 | PB-022c merged into PB-004. Survey: one duplicate (Product Weekly 2026-09-21), caused by a check-then-write race in `createMeetingFromEvent`; one missing note is a never-opened event, not a defect. | Avoid building the same duplicate detector twice; fix the cause, not just the symptom. |
 | 2026-10-02 | Archive means `archived_at` in place, not a move to `data/archive/` (ADR 0006). | Moving files would bypass ObjectStore hash checks, and the scan reads every folder, so a moved duplicate would still be flagged. |
 | 2026-10-04 | PB-007: one click on a LifeOS link opens the object in every mode, including the Visual editor. | Tried plain-click-edits / Cmd+click-opens first; it was not discoverable. LifeOS links are for navigation and their wording is rarely edited (arrow keys or Markdown mode still work). |
+| 2026-10-04 | Phase A build decisions and known gaps are recorded in the PRD (*Decisions made during the build*, *Known gaps*) and Solution Design v0.7 (13.10, 13.11), not duplicated here. | One place per decision; the backlog keeps intent and priority only. |
 | 2026-10-02 | PB-023/024: group by last-edited date (matches the sort); the divider width is a per-device browser preference (ADR 0005); the stable app now serves a snapshot of the build. | Headers must follow the list order; 13-inch and 4K screens need different widths; a plain `pnpm build` was silently changing the running app. |

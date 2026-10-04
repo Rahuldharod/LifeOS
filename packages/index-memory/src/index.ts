@@ -3,18 +3,29 @@ import type { LifeOSObject } from "@lifeos/domain";
 
 export class MemoryIndex implements IndexStore {
   private objects = new Map<string, LifeOSObject>();
+  private duplicates = new Map<string, string[]>();
   private issues: string[] = [];
 
   rebuild(objects: LifeOSObject[], diagnostics: string[] = []) {
     this.objects.clear();
+    this.duplicates.clear();
     this.issues = [...diagnostics];
-    for (const object of objects) {
+    // U3: when two files share an ID, the oldest created_at wins, then path order, so the winner is stable across restarts.
+    const ordered = [...objects].sort((left, right) =>
+      Date.parse(left.frontmatter.created_at) - Date.parse(right.frontmatter.created_at) || left.relativePath.localeCompare(right.relativePath));
+    for (const object of ordered) {
       const id = object.frontmatter.id;
-      if (this.objects.has(id)) this.issues.push(`Duplicate object ID: ${id}`);
-      else this.objects.set(id, object);
+      const winner = this.objects.get(id);
+      if (!winner) { this.objects.set(id, object); continue; }
+      this.duplicates.set(id, [...(this.duplicates.get(id) ?? [winner.relativePath]), object.relativePath]);
+    }
+    for (const [id, paths] of this.duplicates) {
+      this.issues.push(`Duplicate object ID ${id}: ${paths.join(", ")}. Reading ${paths[0]}; writes are blocked until one copy is removed or given a new ID.`);
     }
     this.validateGraph();
   }
+
+  duplicatePaths(id: string) { return this.duplicates.get(id); }
 
   all() { return [...this.objects.values()]; }
   get(id: string) { return this.objects.get(id); }
@@ -32,7 +43,8 @@ export class MemoryIndex implements IndexStore {
   private validateGraph() {
     const all = [...this.objects.values()];
     const selfPeople = all.filter((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true);
-    if (selfPeople.length > 1) this.issues.push(`Multiple self people configured: ${selfPeople.map((person) => person.frontmatter.id).join(", ")}`);
+    const located = (id: string) => `${this.objects.get(id)?.relativePath ?? "?"} (id ${id})`;
+    if (selfPeople.length > 1) this.issues.push(`Multiple self people configured: ${selfPeople.map((person) => located(person.frontmatter.id)).join(", ")}`);
 
     const notesByMeeting = new Map<string, string[]>();
     for (const object of all) {
@@ -44,7 +56,7 @@ export class MemoryIndex implements IndexStore {
       this.validateReferences(object);
     }
     for (const [meetingId, noteIds] of notesByMeeting) {
-      if (noteIds.length > 1) this.issues.push(`Meeting ${meetingId} has multiple canonical notes: ${noteIds.join(", ")}`);
+      if (noteIds.length > 1) this.issues.push(`Meeting ${meetingId} has multiple canonical notes: ${noteIds.map(located).join(", ")}`);
     }
     const externalRefs = new Map<string, string>();
     // Archived objects (e.g. a reconciled duplicate meeting, PB-004) no longer claim their external id.
@@ -56,7 +68,7 @@ export class MemoryIndex implements IndexStore {
         if (typeof reference.provider !== "string" || typeof reference.external_id !== "string") continue;
         const key = `${reference.provider}:${reference.external_id}`;
         const prior = externalRefs.get(key);
-        if (prior && prior !== object.frontmatter.id) this.issues.push(`Duplicate external reference ${key}: ${prior}, ${object.frontmatter.id}`);
+        if (prior && prior !== object.frontmatter.id) this.issues.push(`Duplicate external reference ${key}: ${located(prior)}, ${located(object.frontmatter.id)}`);
         else externalRefs.set(key, object.frontmatter.id);
       }
     }
@@ -86,11 +98,11 @@ export class MemoryIndex implements IndexStore {
   private validateReference(source: LifeOSObject, field: string, targetId: string, expectedType?: string) {
     const target = this.objects.get(targetId);
     if (!target) {
-      this.issues.push(`${source.relativePath}: ${field} references missing object ${targetId}`);
+      this.issues.push(`${source.relativePath} (id ${source.frontmatter.id}): ${field} references missing object ${targetId}`);
       return;
     }
     if (expectedType && target.frontmatter.type !== expectedType) {
-      this.issues.push(`${source.relativePath}: ${field} expects ${expectedType}, found ${target.frontmatter.type}`);
+      this.issues.push(`${source.relativePath} (id ${source.frontmatter.id}): ${field} expects ${expectedType}, found ${target.frontmatter.type} (${target.relativePath})`);
     }
   }
 }

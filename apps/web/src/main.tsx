@@ -15,8 +15,26 @@ import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
 import { useResizableBox } from "./resizableBox.js";
 import { NoteHeader } from "./NoteHeader.js";
+import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
+import { areaOptions } from "./envelope.js";
 import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
+import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
+import { DecisionsPage } from "./DecisionsPage.js";
+import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
+import { PersonName } from "./PersonName.js";
+import { OpenPointsPage } from "./OpenPointsPage.js";
+import { awaitingAdoptionLabel } from "./todayPanels.js";
+import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
+import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
+import { reviewInFlight } from "./reviewInFlight.js";
+import { displayTimeZone as storedDisplayTimeZone, formatDate, formatTime } from "./dateFormat.js";
+import { contextLinkFields } from "@lifeos/shared";
+import { PageHeader, Summary, objectRow } from "./pageParts.js";
+import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, type Today, type TodayPanels } from "./TodayPage.js";
+import { SettingsPage } from "./SettingsPage.js";
+import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
+import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -47,40 +65,26 @@ type Workspace = {
   tasks: LifeObject[];
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
-type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[]; upcoming: LifeObject[]; waiting: LifeObject[]; topThree: Array<{ task: LifeObject; reason: string }>; reviewCount: number };
 type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
-type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus };
+type InboxDrafts = { awaiting: number; drafts?: number; patches?: number; failed: Array<{ path: string; reason: string }> };
+type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "review" | "duplicate" | "failed" | "skipped" }> };
+type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
+type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; setupWarning?: SetupWarning };
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
 type GoogleConnection = { configured: boolean; connected: boolean; provider: string; missing?: string[]; reason?: "expired"; lastSuccessfulSyncAt?: string; lastError?: string };
-type ConnectionSettings = { calendar: { configured: boolean; connected: boolean }; drive: { configured: boolean; connected: boolean } };
 type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
-type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
+type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Open Points" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
 
-const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
-
-function formatDate(value: unknown) {
-  if (typeof value !== "string") return "—";
-  const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  try { return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone }); }
-  catch { return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); }
-}
-
-/** Time only, for list items whose day is already shown in a group header (PB-023). */
-function formatTime(value: unknown) {
-  if (typeof value !== "string") return "—";
-  const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  try { return new Date(value).toLocaleTimeString([], { timeStyle: "short", timeZone }); }
-  catch { return new Date(value).toLocaleTimeString([], { timeStyle: "short" }); }
-}
+const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
 
 function formatEventDate(event: Event) {
   if (!event.isAllDay) return formatDate(event.startsAt);
-  const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timeZone = storedDisplayTimeZone();
   const safeMidday = `${event.startsAt.slice(0, 10)}T12:00:00.000Z`;
   return `${new Date(safeMidday).toLocaleDateString([], { dateStyle: "medium", timeZone })} · All day`;
 }
@@ -89,25 +93,6 @@ function dateInTimeZone(value: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value;
   return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function addCalendarDays(date: string, days: number) {
-  const value = new Date(`${date}T12:00:00.000Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-function zonedMidnight(date: string, timeZone: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  const target = Date.UTC(year!, month! - 1, day!, 0, 0, 0);
-  let guess = target;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(guess));
-    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((candidate) => candidate.type === type)?.value);
-    const represented = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
-    guess += target - represented;
-  }
-  return new Date(guess);
 }
 
 function dayRange(date: string, timeZone: string) {
@@ -124,11 +109,6 @@ function formatGap(milliseconds: number) {
   const remainder = minutes % 60;
   return hours ? `${hours}h${remainder ? ` ${remainder}m` : ""} free` : `${minutes}m free`;
 }
-
-const availableTimeZones = (() => {
-  const supportedValuesOf = (Intl as unknown as { supportedValuesOf?: (key: "timeZone") => string[] }).supportedValuesOf;
-  return supportedValuesOf ? supportedValuesOf("timeZone") : ["Europe/Paris", "UTC", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
-})();
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -221,21 +201,115 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
   return <div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} />;
 }
 
-function ReviewCard({ review, busy, onAccept, onReject, onSave }: {
+type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };
+type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
+type ReviewEdits = Record<string, string | null>;
+/** Which proposal fields the user may edit before accepting, per target type (#34). */
+const reviewEditable: Record<string, string[]> = {
+  task: ["owner_person_id", "due_on", "priority", ...contextLinkFields],
+  decision: [...contextLinkFields],
+  "open-point": ["owner_person_id", ...contextLinkFields]
+};
+
+/**
+ * The text of the Summary section of a meeting body (written by accepting a summary Review Item, #45): between
+ * the #66 markers, so the summary's own headings are shown; an older unmarked one ends at the next heading.
+ */
+function meetingSummary(body: string | undefined) {
+  const marked = body?.match(/^<!-- lifeos:summary:start -->\s*\n##\s+Summary[^\n]*\n([\s\S]*?)^<!-- lifeos:summary:end -->/m);
+  const match = marked ?? body?.match(/^##\s+Summary\s*\n([\s\S]*?)(?=^#{1,2}\s|(?![\s\S]))/m);
+  return match?.[1]?.trim() || undefined;
+}
+
+function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choices, labels, linkActions }: {
   review: LifeObject;
   busy: boolean;
   onAccept: () => void;
   onReject: () => void;
-  onSave: (title: string) => void;
+  onSave: (changes: ReviewEdits) => void;
+  /** Evidence per proposed field; a source that cannot be found is shown as unresolved. */
+  evidence?: Record<string, ReviewEvidence[]>;
+  choices?: ReviewChoices;
+  /** #57: display labels and actions for the link-resolution card. */
+  labels: Map<string, PersonLabel>;
+  linkActions: LinkCardActions;
 }) {
+  const proposed = (review.frontmatter.proposed_fields ?? {}) as Record<string, unknown>;
+  const target = String(review.frontmatter.target_object_type ?? "task");
+  const current = (key: string) => String((key.startsWith("primary_") ? review.frontmatter[key] : proposed[key]) ?? "");
+  const editable = review.frontmatter.review_type === "create" ? reviewEditable[target] ?? [] : [];
+  const unresolvedNames = Array.isArray(review.frontmatter.unresolved_references) ? review.frontmatter.unresolved_references as Array<{ field: string; reference: string; problem: string }> : [];
   const [title, setTitle] = useState(review.frontmatter.title);
+  const [fields, setFields] = useState<Record<string, string>>(() => Object.fromEntries(editable.map((key) => [key, current(key)])));
   const pending = review.frontmatter.status === "pending";
-  return <div className="review-card">
-    {pending ? <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Proposed task title" /> : <b>{review.frontmatter.title}</b>}
-    <small>{String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}</small>
+  if (review.frontmatter.review_type === "link-resolution") return <LinkResolutionCard review={review} labels={labels} busy={busy} actions={linkActions} />;
+  // #37: a change to an existing object (from a Patch Draft) shows current vs proposed per field; it cannot be renamed.
+  if (review.frontmatter.review_type === "update") {
+    const proposal = review.frontmatter.proposed_fields as { changes?: Array<{ field: string; current: unknown; proposed: unknown }>; append_note?: string; reasons?: string[] };
+    const show = (value: unknown) => value === null || value === undefined ? "(none)" : typeof value === "string" ? value : JSON.stringify(value);
+    return <div className="review-card">
+      <b>{review.frontmatter.title}</b>
+      <small>{(proposal.reasons ?? []).join(" · ")} · {review.frontmatter.status}</small>
+      <table className="review-changes"><thead><tr><th>Field</th><th>Current</th><th>Proposed</th></tr></thead><tbody>
+        {(proposal.changes ?? []).map((change) => <tr key={change.field}><td>{change.field}</td><td>{show(change.current)}</td><td>{show(change.proposed)}</td></tr>)}
+        {proposal.append_note && <tr><td>note</td><td>(none)</td><td>{proposal.append_note}</td></tr>}
+      </tbody></table>
+      {pending && <div className="review-actions">
+        <button className="primary" disabled={busy} onClick={onAccept}>Apply change</button>
+        <button className="danger" disabled={busy} onClick={onReject}>Reject</button>
+      </div>}
+    </div>;
+  }
+  // #40: a merge suggestion has nothing to edit; it shows why it was proposed and what accepting does.
+  if (review.frontmatter.review_type === "person-merge") return <div className="review-card">
+    <b>{review.frontmatter.title}</b>
+    <small>{String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}{typeof review.frontmatter.merge_problem === "string" ? ` · ${review.frontmatter.merge_problem}` : ""}</small>
+    <p>{review.body.replace(/^# .*\n+/, "").trim()}</p>
     {pending && <div className="review-actions">
-      <button disabled={busy || title.trim() === review.frontmatter.title} onClick={() => onSave(title)}>Save edit</button>
-      <button className="primary" disabled={busy} onClick={onAccept}>Accept task</button>
+      <button className="primary" disabled={busy} onClick={onAccept}>Merge</button>
+      <button className="danger" disabled={busy} onClick={onReject}>Keep separate</button>
+    </div>}
+  </div>;
+  // #45: an AI meeting summary; accepting writes the Summary section of the meeting, never the user's note.
+  if (review.frontmatter.review_type === "summary") return <div className="review-card">
+    <b>{review.frontmatter.title}</b>
+    <small>meeting summary · {String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}</small>
+    <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{String(proposed.summary ?? "")}</ReactMarkdown></div>
+    {pending && <div className="review-actions">
+      <button className="primary" disabled={busy} onClick={onAccept}>Accept summary</button>
+      <button className="danger" disabled={busy} onClick={onReject}>Reject</button>
+    </div>}
+  </div>;
+  const changes: ReviewEdits = Object.fromEntries([
+    ...(title.trim() !== review.frontmatter.title ? [["title", title]] : []),
+    ...editable.filter((key) => fields[key] !== current(key)).map((key) => [key, fields[key] || null])
+  ]);
+  const select = (key: string, label: string, options: Array<{ id: string; title: string }>) => <label key={key}>{label}
+    <select value={fields[key] ?? ""} disabled={!pending || busy} onChange={(event) => setFields({ ...fields, [key]: event.target.value })}>
+      <option value="">{key === "owner_person_id" ? "Me" : "None"}</option>
+      {options.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+    </select></label>;
+  const evidenceEntries = Object.values(evidence ?? {}).flat();
+  return <div className="review-card">
+    {pending ? <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Proposed title" /> : <b>{review.frontmatter.title}</b>}
+    <small>{target} · {String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}{review.frontmatter.origin === "agent-extracted" ? " · agent-extracted" : ""}{review.frontmatter.missed_in_notes === true ? <> · <strong>Not in your notes</strong></> : null}</small>
+    {pending && editable.length > 0 && <div className="review-fields">
+      {editable.includes("owner_person_id") && select("owner_person_id", "Owner", choices?.people ?? [])}
+      {editable.includes("due_on") && <label>Due<input type="date" value={fields.due_on ?? ""} disabled={busy} onChange={(event) => setFields({ ...fields, due_on: event.target.value })} /></label>}
+      {editable.includes("priority") && select("priority", "Priority", ["High", "Medium", "Low"].map((value) => ({ id: value, title: value })))}
+      {select("primary_project_id", "Project", choices?.projects ?? [])}
+      {select("primary_client_id", "Client", choices?.clients ?? [])}
+      {select("primary_product_id", "Product", choices?.products ?? [])}
+    </div>}
+    {unresolvedNames.length > 0 && <p className="review-evidence unresolved">Not linked yet: {unresolvedNames.map((entry) => `${entry.field} "${entry.reference}" (${entry.problem})`).join(", ")}</p>}
+    {evidenceEntries.length > 0 && <ul className="review-evidence">
+      {evidenceEntries.map((entry, index) => <li key={index}><em>{entry.field}</em>{" "}
+        {entry.resolved ? <span>{entry.source_title}</span> : <span className="unresolved">Unresolved source: {entry.source_ref ?? entry.source_id}</span>}
+        {entry.locator ? ` · ${entry.locator}` : ""}{entry.quote ? <q>{entry.quote}</q> : null}</li>)}
+    </ul>}
+    {pending && <div className="review-actions">
+      <button disabled={busy || !Object.keys(changes).length} onClick={() => onSave(changes)}>Save edit</button>
+      <button className="primary" disabled={busy || Object.keys(changes).length > 0} title={Object.keys(changes).length ? "Save your edits first" : undefined} onClick={onAccept}>Accept {target}</button>
       <button className="danger" disabled={busy} onClick={onReject}>Reject</button>
     </div>}
   </div>;
@@ -249,12 +323,15 @@ function App() {
   const [events, setEvents] = useState<Event[]>([]);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [today, setToday] = useState<Today>({ tasks: [], overdue: [], dueToday: [], upcoming: [], waiting: [], topThree: [], reviewCount: 0 });
+  const [todayPanels, setTodayPanels] = useState<TodayPanels>();
   const [tasks, setTasks] = useState<LifeObject[]>([]);
   const [projects, setProjects] = useState<ProjectRollup[]>([]);
   const [clients, setClients] = useState<EntityRollup[]>([]);
   const [products, setProducts] = useState<EntityRollup[]>([]);
   const [people, setPeople] = useState<EntityRollup[]>([]);
-  const [reviews, setReviews] = useState<LifeObject[]>([]);
+  // #39: short, unambiguous names; recomputed by the server on every load.
+  const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
+  const [reviews, setReviews] = useState<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>([]);
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
   const [notes, setNotes] = useState<LifeObject[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
@@ -270,15 +347,18 @@ function App() {
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceText, setSourceText] = useState("");
   const [health, setHealth] = useState<SystemHealth>();
+  const [inboxDrafts, setInboxDrafts] = useState<InboxDrafts>({ awaiting: 0, failed: [] });
+  const [enrichment, setEnrichment] = useState<EnrichmentStatus>({ proposedGaveUp: [], staleWorkOrders: [] });
+  const [appliedPatches, setAppliedPatches] = useState<AppliedPatch[]>([]);
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   // PB-022a: a failed load or sync is shown in the timeline instead of an "empty day".
   const [calendarError, setCalendarError] = useState<string>();
-  const [connectionSettings, setConnectionSettings] = useState<ConnectionSettings>();
+  const [connections, setConnections] = useState<ConnectionsState>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
-  const [displayTimeZone, setDisplayTimeZone] = useState(() => localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone));
+  const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
+  const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), storedDisplayTimeZone()));
   const [calendarFilter, setCalendarFilter] = useState("all");
   const [calendarSources, setCalendarSources] = useState<Record<string, { name: string; color?: string }>>({});
   // Every calendar the account can view; empty until loaded, or when the calendar connection is unavailable.
@@ -390,11 +470,21 @@ function App() {
   const meetingOwner: EditorOwner | undefined = workspace?.note ? { id: workspace.note.frontmatter.id, relativePath: workspace.note.relativePath } : undefined;
 
   const loadCollections = async () => {
-    const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes, nextDeletedNotes] = await Promise.all([
-      api<Today>("/api/v1/today"), api<LifeObject[]>("/api/v1/tasks"),
-      api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted")
+    // Without labels, badges fall back to full titles rather than failing the whole load.
+    const labelsRequest = api<PersonLabel[]>("/api/v1/people/labels").catch(() => [] as PersonLabel[]);
+    const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
+      api<Today>(`/api/v1/today?date=${dateInTimeZone(new Date(), displayTimeZone)}`), api<LifeObject[]>("/api/v1/tasks"),
+      api<ProjectRollup[]>("/api/v1/projects"), api<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
-    setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes);
+    setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
+    setAppliedPatches(await api<AppliedPatch[]>("/api/v1/inbox/patches"));
+    // #77: loaded on its own; a Keychain problem only shows on the Connections card, never fails a load or a save.
+    void loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections"), connections?.settings).then(setConnections);
+    // #44: loaded on its own so a failure here never blanks the other panels.
+    void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
+    // #48: likewise; it may wait on the calendar, so it never holds up the rest of the page.
+    void api<TodayPanels>(`/api/v1/today/panels?date=${dateInTimeZone(new Date(), displayTimeZone)}&timeZone=${encodeURIComponent(displayTimeZone)}`).then(setTodayPanels).catch(() => undefined);
+    setPersonLabels(await labelsRequest);
   };
 
   const refreshWorkspace = async (meetingId: string) => {
@@ -415,7 +505,7 @@ function App() {
   };
 
   /** Saves to the synced settings file; resolves to an error message, or undefined on success. */
-  const saveCalendarPrefs = async (next: CalendarPrefs): Promise<string | undefined> => {
+  const saveCalendarPrefs =async (next: CalendarPrefs): Promise<string | undefined> => {
     try {
       setCalendarPrefs(await api<CalendarPrefs>("/api/v1/settings/calendar-preferences", { method: "PUT", body: JSON.stringify({ ...next, expectedHash: calendarPrefs.contentHash }) }));
       return undefined;
@@ -440,7 +530,7 @@ function App() {
 
   useEffect(() => {
     void loadCalendarCatalog();
-    Promise.all([api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection), loadCollections()])
+    Promise.all([api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), loadCollections()])
       .then(async () => {
         const meetingId = localStorage.getItem("lifeos.activeMeetingId");
         if (view === "Calendar" && meetingId) await refreshWorkspace(meetingId).catch(() => localStorage.removeItem("lifeos.activeMeetingId"));
@@ -580,20 +670,38 @@ function App() {
     } finally { setBusy(false); }
   };
 
-  const accept = (reviewId: string) => run(async () => {
-    await api(`/api/v1/review-items/${reviewId}/accept`, { method: "POST" });
+  // #62: one accept or reject per Review Item at a time, even for clicks faster than a re-render.
+  const reviewRequests = useRef(reviewInFlight()).current;
+  const accept = (review: LifeObject) => reviewRequests.run(review.frontmatter.id, () => run(async () => {
+    await api(`/api/v1/review-items/${review.frontmatter.id}/accept`, { method: "POST" });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
-  }, "Task accepted and published");
+  }, acceptToast(review.frontmatter)));
 
-  const reject = (reviewId: string) => run(async () => {
+  /** #57: like `run`, but rethrows so the link card shows the server's error itself (role=alert). */
+  const reviewStep = (reviewId: string, action: () => Promise<unknown>, success: string) => reviewRequests.run(reviewId, async () => {
+    setBusy(true);
+    try {
+      await action();
+      if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
+      await loadCollections();
+      setMessage(success);
+    } finally { setBusy(false); }
+  }).then(() => undefined);
+  const linkActionsFor = (reviewId: string): LinkCardActions => ({
+    onLink: (linkTo) => reviewStep(reviewId, () => acceptLink(api, reviewId, linkTo), "Link saved"),
+    onCreate: async (type, title) => { setBusy(true); try { return await createLinkTarget(api, type, title); } finally { setBusy(false); } },
+    onReject: () => reviewStep(reviewId, () => api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" }), "Proposal rejected")
+  });
+
+  const reject = (reviewId: string) => reviewRequests.run(reviewId, () => run(async () => {
     await api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
-  }, "Proposal rejected");
+  }, "Proposal rejected"));
 
-  const editReview = (reviewId: string, title: string) => run(async () => {
-    await api(`/api/v1/review-items/${reviewId}`, { method: "PATCH", body: JSON.stringify({ title }) });
+  const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
+    await api(`/api/v1/review-items/${reviewId}`, { method: "PATCH", body: JSON.stringify(changes) });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
   }, "Proposal updated");
@@ -618,6 +726,66 @@ function App() {
     await api("/api/v1/capture", { method: "POST", body: JSON.stringify({ text: capture }) });
     setCapture(""); await loadCollections();
   }, "Captured as an Inbox task");
+
+  const adoptDrafts = async () => {
+    setBusy(true);
+    try {
+      const batch = await api<AdoptionBatch>("/api/v1/inbox/adopt", { method: "POST" });
+      const count = (outcome: string) => batch.drafts.filter((draft) => draft.outcome === outcome).length;
+      await loadCollections();
+      setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("applied")} patches applied, ${count("review")} sent to review, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Adoption failed"); }
+    finally { setBusy(false); }
+  };
+
+  // #44: "Enrich last 48h" writes a Work Order for Claude; the server's message says what happened.
+  const requestEnrichment = async () => {
+    setBusy(true);
+    try {
+      const result = await api<{ message: string }>("/api/v1/enrichment/work-orders", { method: "POST" });
+      await loadCollections();
+      setMessage(result.message);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Enrichment request failed"); }
+    finally { setBusy(false); }
+  };
+
+  // #46: "Refresh" asks Claude to re-plan today by writing a replan Work Order; the brief itself is never edited here.
+  const requestReplan = async () => {
+    setBusy(true);
+    try {
+      const result = await api<{ message: string }>("/api/v1/focus/replan", { method: "POST", body: JSON.stringify({ date: dateInTimeZone(new Date(), displayTimeZone) }) });
+      await loadCollections();
+      setMessage(result.message);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Re-plan request failed"); }
+    finally { setBusy(false); }
+  };
+
+  // #47: pin, replace, dismiss (and undo) on today's Top 3; saved to the app-owned Focus Override with the hash we last saw.
+  const changeFocus = async (change: FocusChange) => {
+    const focus = today.focus;
+    if (!focus) return;
+    setBusy(true);
+    try {
+      const next = await api<DailyFocus>("/api/v1/focus/overrides", { method: "POST", body: JSON.stringify({ date: focus.date, ...change, expectedHash: focus.override?.contentHash }) });
+      setToday((current) => ({ ...current, focus: next }));
+      setMessage({ pin: "Pinned to today's Top 3", unpin: "Unpinned", replace: "Replaced in today's Top 3", dismiss: "Dismissed for today", restore: "Restored to today's Top 3", reset: "Your Top 3 changes for today were cleared" }[change.action]);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) { await loadCollections(); setMessage("Today's Top 3 was changed on another device. The latest is loaded; make your change again."); }
+      else setMessage(error instanceof Error ? error.message : "Could not change the Top 3");
+    } finally { setBusy(false); }
+  };
+
+  const giveUpEnrichment = (meetingId: string) => run(async () => {
+    const meeting = objectLinks.find((object) => object.frontmatter.id === meetingId);
+    if (!meeting) throw new Error("Meeting not found; refresh and try again");
+    await api(`/api/v1/meetings/${meetingId}/enrichment/gave-up`, { method: "POST", body: JSON.stringify({ expectedHash: meeting.contentHash }) });
+    await loadCollections();
+  }, "Stopped waiting for material for this meeting");
+
+  const undoPatch = (patch: AppliedPatch) => run(async () => {
+    await api(`/api/v1/inbox/patches/${patch.auditEventId}/undo`, { method: "POST" });
+    await loadCollections();
+  }, `Undid the change to ${patch.title}`);
 
   const changeTask = (task: LifeObject, changes: Record<string, unknown>) => run(async () => {
     await api(`/api/v1/tasks/${task.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes, expectedHash: task.contentHash }) });
@@ -652,6 +820,11 @@ function App() {
     await loadCollections();
   }, `${object.frontmatter.type} updated`);
 
+  const setPersonExternal = (object: LifeObject, choice: ExternalChoice) => run(async () => {
+    await api(`/api/v1/people/${object.frontmatter.id}/external`, { method: "PUT", body: JSON.stringify({ isExternal: externalChoiceValue(choice), expectedHash: object.contentHash }) });
+    await loadCollections();
+  }, choice === "auto" ? "External flag follows the email domain again" : `Marked ${choice}`);
+
   const deleteEntity = (object: LifeObject) => run(async () => {
     await api(`/api/v1/entities/by-id/${object.frontmatter.id}`, { method: "DELETE", body: JSON.stringify({ expectedHash: object.contentHash }) });
     await loadCollections();
@@ -659,10 +832,15 @@ function App() {
 
   const saveGoogleSecrets = (provider: "calendar" | "drive", clientId: string, clientSecret: string) => run(async () => {
     await api(`/api/v1/settings/connections/google/${provider}`, { method: "POST", body: JSON.stringify({ clientId, clientSecret }) });
-    const settings = await api<ConnectionSettings>("/api/v1/settings/connections");
-    setConnectionSettings(settings);
+    setConnections(await loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections"), connections?.settings));
     if (provider === "calendar") setGoogleConnection(await api<GoogleConnection>("/api/v1/connections/google"));
   }, `Google ${provider} credentials saved to Keychain`);
+
+  /** #77: after a denied Keychain prompt; reads the secrets again, so macOS may ask once more. */
+  const retryConnections = async () => {
+    setConnections(await loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections/retry", { method: "POST" }), connections?.settings));
+    void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
+  };
 
   function insertMarkdown(before: string, after = "", placeholder = "text") {
     const area = editor.current;
@@ -880,6 +1058,11 @@ function App() {
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
   }, []);
+  /** #76: opens Settings and moves focus to the given card once it has rendered. */
+  const openSettingsCard = (cardId: string) => {
+    setView("Settings");
+    window.setTimeout(() => { const card = document.getElementById(cardId); card?.scrollIntoView({ block: "center", behavior: "smooth" }); card?.focus({ preventScroll: true }); }, 80);
+  };
   useEffect(() => {
     if (!highlightId) return;
     const scroll = window.setTimeout(() => document.getElementById(`object-${highlightId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
@@ -903,7 +1086,8 @@ function App() {
   const saveNotesDetails = (changes: Record<string, unknown>) => saveDetails(notesController, fetchLatestNote, changes);
   const saveMeetingNoteDetails = (changes: Record<string, unknown>) => saveDetails(meetingController, fetchLatestWorkspace, changes);
   const optionsOf = (objects: LifeObject[]) => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));
-  const headerOptions = { projects: optionsOf(projects.map(({ project }) => project)), clients: optionsOf(clients.map(({ entity }) => entity)), products: optionsOf(products.map(({ entity }) => entity)), people: optionsOf(people.map(({ entity }) => entity)) };
+  const labels = labelMap(personLabels);
+  const headerOptions = { projects: optionsOf(projects.map(({ project }) => project)), clients: optionsOf(clients.map(({ entity }) => entity)), products: optionsOf(products.map(({ entity }) => entity)), people: people.map(({ entity }) => personOption(labels, entity)) };
 
   // The header of a note that does not exist yet: the event's own project, client, product and
   // attendees are shown when they match an object LifeOS already has (by name), and the rest stay
@@ -987,9 +1171,8 @@ function App() {
       setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
     } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
-  useEffect(() => { if (view === "Settings") void loadCalendarCatalog(); }, [view]);
 
-  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
+  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
   const offeredCalendars: CalendarOption[] = calendarCatalog.length
     ? enabledCalendars(calendarCatalog, calendarPrefs)
@@ -1017,21 +1200,7 @@ function App() {
 
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
-      {view === "Today" && <>
-        <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
-        <div className="summary">
-          <Summary label="Active tasks" value={today.tasks.length} detail="across all contexts" />
-          <Summary label="Review inbox" value={today.reviewCount} detail="awaiting confirmation" />
-          <Summary label="Today's events" value={events.length} detail="across connected calendars" />
-        </div>
-        <article className="quick-capture"><span>QUICK CAPTURE</span><div className="capture-row"><input value={capture} onChange={(event) => setCapture(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) submitCapture(); }} placeholder="Capture a task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={submitCapture}>Capture</button></div></article>
-        <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>
-        <ObjectList title="Overdue" objects={today.overdue} empty="Nothing overdue." />
-        <ObjectList title="Due today" objects={today.dueToday} empty="Nothing due today." />
-        <ObjectList title="Upcoming priority work" objects={today.upcoming.length ? today.upcoming : today.tasks.filter((task) => task.frontmatter.priority === "High")} empty="No upcoming dated or high-priority work." />
-        <ObjectList title="Waiting" objects={today.waiting} empty="Nothing waiting on someone else." />
-        <article><span>TODAY'S EVENTS</span>{calendarError ? <p className="muted">Calendar could not be loaded: {calendarError}</p> : !events.length && <p className="muted">No events today.</p>}{events.slice(0, 5).map((event) => <div className="object-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}><i /><div><b>{event.title}</b><small>{formatEventDate(event)} · {event.calendarName ?? "Calendar"}</small></div></div>)}</article>
-      </>}
+      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} onOpenSettingsCard={openSettingsCard} />}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
@@ -1087,7 +1256,7 @@ function App() {
                   <Meta label="Project" value={workspace.context.project?.frontmatter.title ?? "Not linked"} />
                   <Meta label="Client" value={workspace.context.client?.frontmatter.title ?? "Not linked"} />
                   <Meta label="Product" value={workspace.context.product?.frontmatter.title ?? "Not linked"} />
-                  <Meta label="Attendees" value={workspace.context.people.map((person) => person.frontmatter.title).join(", ") || "None"} />
+                  <PeopleMeta label="Attendees" people={workspace.context.people} labels={labels} empty="None" />
                 </div>
               </article>
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
@@ -1121,9 +1290,11 @@ function App() {
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </article>}
+              {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
+              {meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
               <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
-                {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(title) => editReview(review.frontmatter.id, title)} />)}
+                {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
               </article>
             </>}
           </div>
@@ -1142,7 +1313,7 @@ function App() {
             <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
             {!visibleNotes.length && <p className="muted">{noteQuery.trim() ? `No ${noteTab} notes match “${noteQuery.trim()}”.` : noteTab === "open" ? "No notes have been created yet." : "No deleted notes."}</p>}
             {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => noteTab === "open" ? openNote(note) : setSelectedDeletedId(note.frontmatter.id)}>
-              <b>{note.frontmatter.title}{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
+              <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
             </button>)}</div>)}
           </article>
           <div {...notesSplit.dividerProps} />
@@ -1176,21 +1347,27 @@ function App() {
         </div>
       </>}
 
-      {view === "Tasks" && <EntityCrudPage highlightId={highlightId} type="task" title="Tasks" objects={tasks} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "Tasks" && <EntityCrudPage labels={labels} highlightId={highlightId} type="task" title="Tasks" objects={tasks} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
 
       {view === "Projects" && <><PageHeader eyebrow="PROJECTS" title="Project roll-ups" description="Meetings and tasks are computed from stable relationships, not copied lists." />
-        <EntityCrudPage highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />
-        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.map((person) => person.frontmatter.title).join(", ") || "None linked"}</p></article>)}</div>
+        <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />
+        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.filter((point) => point.frontmatter.status === "open").length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.length ? <PeopleList people={projectPeople} labels={labels} /> : "None linked"}</p></article>)}</div>
         {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
       </>}
 
-      {view === "Clients" && <EntityCrudPage highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
-      {view === "Products" && <EntityCrudPage highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
-      {view === "People" && <EntityCrudPage highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
+      {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
+
+      {view === "Clients" && <EntityCrudPage labels={labels} highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
 
       {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
+        <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p>{awaitingAdoptionLabel(inboxDrafts)}</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
+          {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
+        {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
-        {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(title) => editReview(review.frontmatter.id, title)} />)}
+        {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
       </>}
 
       {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text, then review a linked Knowledge Note before publishing it." /><article><span>ADD RAW TEXT SOURCE</span><div className="knowledge-form"><input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} placeholder="Source title" /><textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} placeholder="Paste source text or Markdown…" /><button className="primary" disabled={busy || readOnly || !sourceTitle.trim() || !sourceText.trim()} onClick={ingestSource}>Preserve & process</button></div></article><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
@@ -1201,6 +1378,7 @@ function App() {
           <Summary label="Write access" value={readOnly ? "Read-only" : "Enabled"} detail={readOnly ? "another device lease is active" : "revision checks remain active"} />
           <Summary label="Device" value={health?.session.currentDeviceId ?? "—"} detail="this installation" />
         </div>
+        <SelfEmailWarning warning={health?.setupWarning} onOpenSettings={openSettingsCard} />
         {readOnly && <article className="lease-warning"><span>DEVICE HANDOFF REQUIRED</span><h3>{health?.session.activeDeviceId} is still active</h3><p>{health?.session.warning}</p><p>Only take over after LifeOS is closed and Google Drive has finished synchronizing on the other computer.</p><button className="takeover" disabled={busy} onClick={takeOverSession}>Take over write access</button></article>}
         <div className="system-grid">
           <article><span>SESSION LEASE</span><div className="system-details"><Meta label="Active device" value={health?.session.activeDeviceId ?? "—"} /><Meta label="Started" value={formatDate(health?.session.startedAt)} /><Meta label="Last activity" value={formatDate(health?.session.lastActivityAt)} /><Meta label="Lease expires" value={formatDate(health?.session.leaseExpiresAt)} /></div></article>
@@ -1214,22 +1392,24 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendarCatalog} calendarCatalogLoaded={calendarCatalogLoaded} calendarPrefs={calendarPrefs} onLoadCalendars={loadCalendarCatalog} onSaveCalendarPrefs={saveCalendarPrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={loadCollections} />}
     </section>
   </main>;
 }
 
-function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <header><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p className="lede">{description}</p></header>;
-}
-function Summary({ label, value, detail }: { label: string; value: string | number; detail: string }) {
-  return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
-}
 function Meta({ label, value }: { label: string; value: string }) {
   return <div className="meta"><small>{label}</small><b title={value}>{value}</b></div>;
 }
+/** #39: comma-separated display labels, with the red " - ext" marker kept as text. */
+function PeopleList({ people, labels }: { people: LifeObject[]; labels: Map<string, PersonLabel> }) {
+  return <>{people.map((person, index) => <React.Fragment key={person.frontmatter.id}>{index > 0 && ", "}<PersonName {...personLabel(labels, person)} /></React.Fragment>)}</>;
+}
+function PeopleMeta({ label, people, labels, empty }: { label: string; people: LifeObject[]; labels: Map<string, PersonLabel>; empty: string }) {
+  const text = people.map((person) => personLabel(labels, person).label).join(", ") || empty;
+  return <div className="meta"><small>{label}</small><b title={text}>{people.length ? <PeopleList people={people} labels={labels} /> : empty}</b></div>;
+}
 function ObjectList({ title, objects, empty }: { title: string; objects: LifeObject[]; empty: string }) {
-  return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map((object) => <div className="object-row" key={object.frontmatter.id}><i /><div><b>{object.frontmatter.title}</b><small>{object.frontmatter.status ?? object.frontmatter.type} · Updated {formatDate(object.frontmatter.updated_at)}</small></div></div>)}</article>;
+  return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map(objectRow)}</article>;
 }
 
 const entityFields: Record<EntityType, Array<{ key: string; label: string; kind?: "select" | "date" | "person"; options?: string[] }>> = {
@@ -1240,78 +1420,27 @@ const entityFields: Record<EntityType, Array<{ key: string; label: string; kind?
   person: [{ key: "given_name", label: "Given name" }, { key: "family_name", label: "Family name" }, { key: "organization_name", label: "Organization" }, { key: "job_title", label: "Job title" }, { key: "timezone", label: "Timezone" }]
 };
 
-function EntityCrudPage({ type, title, objects, people, busy, readOnly, embedded = false, highlightId, onCreate, onUpdate, onDelete }: { type: EntityType; title: string; objects: LifeObject[]; people: LifeObject[]; busy: boolean; readOnly: boolean; embedded?: boolean; highlightId?: string; onCreate: (type: EntityType, fields: Record<string, unknown>) => void; onUpdate: (object: LifeObject, fields: Record<string, unknown>) => void; onDelete: (object: LifeObject) => void }) {
+// #30: every entity can carry an agreed Area and be marked restricted. A legacy Area shows as "None"
+// in the picker but is kept on save unless the user picks a new one (the server allows unchanged legacy values).
+const envelopeEntityFields = [{ key: "area", label: "Area", kind: "select" as const, options: ["", ...areaOptions] }, { key: "sensitivity", label: "Sensitivity", kind: "select" as const, options: ["normal", "restricted"] }];
+
+function EntityCrudPage({ type, title, objects, people, labels, onSetExternal, busy, readOnly, embedded = false, highlightId, onCreate, onUpdate, onDelete }: { type: EntityType; title: string; objects: LifeObject[]; people: LifeObject[]; labels: Map<string, PersonLabel>; onSetExternal?: (object: LifeObject, choice: ExternalChoice) => void; busy: boolean; readOnly: boolean; embedded?: boolean; highlightId?: string; onCreate: (type: EntityType, fields: Record<string, unknown>) => void; onUpdate: (object: LifeObject, fields: Record<string, unknown>) => void; onDelete: (object: LifeObject) => void }) {
   const [newTitle, setNewTitle] = useState("");
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
   useEffect(() => setDrafts(Object.fromEntries(objects.map((object) => [object.frontmatter.id, { ...object.frontmatter }]))), [objects]);
   const setField = (id: string, key: string, value: unknown) => setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
   const create = () => { onCreate(type, { title: newTitle }); setNewTitle(""); };
-  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{entityFields[type].map((field) => <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : field.kind === "person" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}><option value="">None</option>{people.map((person) => <option value={person.frontmatter.id} key={person.frontmatter.id}>{person.frontmatter.title}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions"><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button></div></div>; })}</div></article></>;
+  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{[...entityFields[type], ...envelopeEntityFields].map((field) => <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : field.kind === "person" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}><option value="">None</option>{people.map((person) => <option value={person.frontmatter.id} key={person.frontmatter.id}>{personLabel(labels, person).label}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions">{type === "person" && <PersonExternalControl person={object} labels={labels} disabled={busy || readOnly} onChange={onSetExternal} />}<EnvelopeBadges frontmatter={object.frontmatter} /><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button></div></div>; })}</div></article></>;
 }
 
-function CalendarListCard({ catalog, loaded, prefs, onSave }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; onSave: (prefs: CalendarPrefs) => Promise<string | undefined> }) {
-  // Edits stay in this draft until Save, so a half-finished change (for example, nothing ticked) is never stored.
-  const [disabled, setDisabled] = useState(prefs.disabledCalendarIds);
-  const [defaultId, setDefaultId] = useState(prefs.defaultCalendarId);
-  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { setDisabled(prefs.disabledCalendarIds); setDefaultId(prefs.defaultCalendarId); }, [prefs]);
-
-  const selectedCount = catalog.filter((calendar) => !disabled.includes(calendar.id)).length;
-  const allSelected = catalog.length > 0 && selectedCount === catalog.length;
-  const noneSelected = catalog.length > 0 && selectedCount === 0;
-  const dirty = defaultId !== prefs.defaultCalendarId || [...disabled].sort().join("|") !== [...prefs.disabledCalendarIds].sort().join("|");
-  const defaultOff = Boolean(defaultId) && disabled.includes(defaultId!);
-  const edit = <T,>(setter: (value: T) => void, value: T) => { setter(value); setStatus(undefined); };
-
-  const save = async () => {
-    setSaving(true);
-    const error = await onSave({ ...prefs, disabledCalendarIds: disabled, defaultCalendarId: defaultId });
-    setSaving(false);
-    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Your other devices will pick this up when the data folder syncs." });
-  };
-
-  return <article className="calendar-list-setting"><span>CALENDARS</span><h3>Calendars in the Calendar view</h3>
-    <p className="muted">Tick the calendars to include. Hover a calendar to make it the default; the Calendar view opens on it.</p>
-    {!loaded && <p className="muted">Loading calendars…</p>}
-    {loaded && !catalog.length && <p className="muted">No calendars available. Connect Google Calendar to choose from your calendars.</p>}
-    {catalog.length > 0 && <div className="calendar-toolbar">
-      <button type="button" onClick={() => edit(setDisabled, allSelected ? catalog.map((calendar) => calendar.id) : [])}>{allSelected ? "Unselect all" : "Select all"}</button>
-      <small className="muted">{selectedCount} of {catalog.length} selected</small>
-    </div>}
-    {catalog.map((calendar) => {
-      const enabled = !disabled.includes(calendar.id);
-      const isDefault = defaultId === calendar.id;
-      return <div className="calendar-row" key={calendar.id}>
-        <label><input type="checkbox" checked={enabled} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
-        {enabled && <span className="calendar-row-actions">
-          {isDefault
-            ? <button type="button" onClick={() => edit(setDefaultId, undefined)}>Remove default</button>
-            : <button type="button" onClick={() => edit(setDefaultId, calendar.id)}>Set as default</button>}
-        </span>}
-      </div>;
-    })}
-    {noneSelected && <p className="calendar-error" role="alert">Select at least one calendar. You can't save with none selected.</p>}
-    {defaultOff && !noneSelected && <p className="muted" role="status">The default calendar is unticked, so the Calendar view will open on All calendars.</p>}
-    {catalog.length > 0 && <div className="calendar-save">
-      <button type="button" disabled={!dirty || noneSelected || saving} onClick={save}>{saving ? "Saving…" : "Save"}</button>
-      {dirty && !status && !noneSelected && <small className="muted">Unsaved changes</small>}
-      {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
-    </div>}
-  </article>;
-}
-
-function GoogleSecretCard({ provider, title, status, busy, onSave }: { provider: "calendar" | "drive"; title: string; status?: { configured: boolean; connected: boolean }; busy: boolean; onSave: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean> }) {
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [saved, setSaved] = useState(false);
-  const save = async () => {
-    setSaved(false);
-    if (await onSave(provider, clientId, clientSecret)) {
-      setClientId(""); setClientSecret(""); setSaved(true);
-    }
-  };
-  return <article className="secret-card"><span>{title.toUpperCase()}</span><h3>{status?.configured ? "Credentials configured" : "Credentials required"}</h3><p className="muted">{status?.connected ? "Connected" : provider === "calendar" ? "Configure here, then authorize from Calendar." : "Stored for the upcoming Drive source connector."}</p>{saved && <div className="inline-success">Saved securely in macOS Keychain.</div>}<div className="knowledge-form"><input value={clientId} onChange={(event) => { setSaved(false); setClientId(event.target.value); }} placeholder="OAuth client ID" autoComplete="off" /><input type="password" value={clientSecret} onChange={(event) => { setSaved(false); setClientSecret(event.target.value); }} placeholder={status?.configured ? "Enter a new secret to replace it" : "OAuth client secret"} autoComplete="new-password" /><button className="primary" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={save}>{busy ? "Saving…" : status?.configured ? "Replace credentials" : "Save to Keychain"}</button></div></article>;
+/** #39: the person's badge label, and the External choice (Auto follows the email domain). Saves on change. */
+function PersonExternalControl({ person, labels, disabled, onChange }: { person: LifeObject; labels: Map<string, PersonLabel>; disabled: boolean; onChange?: (object: LifeObject, choice: ExternalChoice) => void }) {
+  const label = personLabel(labels, person);
+  const isSelf = person.frontmatter.is_self === true;
+  const derived = labels.get(person.frontmatter.id)?.isExternal ? "external" : "internal";
+  return <span className="person-external"><small>Shown as</small><b><PersonName {...label} /></b>{!isSelf && onChange && <label><small>External</small><select value={externalChoiceOf(person.frontmatter)} disabled={disabled} onChange={(event) => onChange(person, event.target.value as ExternalChoice)}>
+    <option value="auto">Auto (by email domain{externalChoiceOf(person.frontmatter) === "auto" ? `: ${derived}` : ""})</option><option value="external">External</option><option value="internal">Internal</option>
+  </select></label>}</span>;
 }
 
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);

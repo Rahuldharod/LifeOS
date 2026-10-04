@@ -7,7 +7,7 @@ This file is the repository-level operating guide for coding agents. Keep it too
 Read these sources in order, loading only what the task needs:
 
 1. `README.md` for setup, repository layout, and connection prerequisites.
-2. `docs/product-design/LifeOS_Solution_Design_v0.6.md` for the current product and solution baseline, and `docs/product-design/LifeOS_PRD_Phase-A_v1.0.md` (spec issue #21) for the Phase A build. v0.4 is kept for history only.
+2. `docs/product-design/LifeOS_Solution_Design_v0.7.md` for the current product and solution baseline, and `docs/product-design/LifeOS_PRD_Phase-A_v1.0.md` (spec issue #21) for the Phase A build, its build status, build decisions and known gaps. v0.4 and v0.6 are kept for history only.
 3. `docs/architecture/README.md` for system boundaries and current architecture.
 4. The relevant file in `docs/decisions/` for decisions that must not be silently reversed.
 5. `docs/architecture/mvp-gap-analysis.md` for the original MVP audit and remaining deferred scope.
@@ -28,6 +28,8 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - `packages/assets-filesystem`: managed local images and duplicate detection.
 - `packages/backup-filesystem`: versioned, checksummed snapshots.
 - `packages/secrets`: macOS Keychain and test secret stores.
+- `packages/contracts`: API request and response types.
+- `packages/shared`: rules both the server and the browser need (no Node dependencies).
 - `schemas`: portable schemas and fixtures.
 - `tests/integration`: cross-package acceptance tests.
 - `docs/product-design`: versioned solution baseline and product backlog.
@@ -38,10 +40,11 @@ There is intentionally no standalone user guide during the MVP. The interface an
 
 - Markdown files under `../data` are the source of truth. Browser caches and the in-memory index are derived and disposable.
 - Keep code, real user data, secrets, logs, and backups out of the same Git history.
-- Never place OAuth credentials or tokens in Markdown, source files, fixtures, logs, or commits. Use the `SecretStore` boundary.
+- Never place OAuth credentials or tokens in Markdown, source files, fixtures, logs, or commits. Use the `SecretStore` boundary. Status endpoints must not read secret values (each read can show a Keychain prompt).
+- Never put real email addresses or company domains in code, tests or docs. Use `example.com` style data; the user's own values live in the Settings cards.
 - Write domain objects through application use cases and `ObjectStore`; do not bypass revision and expected-content-hash checks.
 - Preserve unknown Markdown frontmatter and body content during round trips.
-- External workflows must be idempotent. Meeting creation, review acceptance, and recovery must tolerate retries.
+- External workflows must be idempotent. Meeting creation, review acceptance, and recovery must tolerate retries. Any step that writes more than one file follows the crash-recovery pattern in ADR 0013 and its helpers; do not hand-write another.
 - Store instants as ISO 8601 UTC. Preserve source timezone metadata and apply the user-selected timezone only when querying day boundaries or displaying values.
 - Managed image links must remain relative in persisted Markdown so the repository works on both devices.
 - Do not edit real files in `../data` merely to make a test pass. Tests must use temporary roots and synthetic records.
@@ -55,7 +58,7 @@ Use Corepack because a global `pnpm` installation is not assumed:
 corepack pnpm install
 corepack pnpm dev
 corepack pnpm typecheck
-corepack pnpm test
+corepack pnpm test --exclude '.claude/**'   # skip test copies inside agent worktrees
 corepack pnpm build
 ```
 
