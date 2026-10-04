@@ -35,6 +35,7 @@ import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, ty
 import { SettingsPage } from "./SettingsPage.js";
 import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
+import { CalendarOfflineBanner, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -55,7 +56,7 @@ type Frontmatter = Record<string, unknown> & {
   updated_at: string;
 };
 type LifeObject = { frontmatter: Frontmatter; body: string; relativePath: string; contentHash: string };
-type Event = { externalId: string; calendarId?: string; calendarName?: string; calendarColor?: string; title: string; startsAt: string; endsAt: string; timezone: string; isAllDay?: boolean; attendees: string[]; projectName?: string; hasNote?: boolean; meetingId?: string; noteId?: string };
+type Event = { externalId: string; calendarId?: string; calendarName?: string; calendarColor?: string; title: string; startsAt: string; endsAt: string; timezone: string; isAllDay?: boolean; attendees: string[]; projectName?: string; hasNote?: boolean; meetingId?: string; noteId?: string; stored?: true };
 type Workspace = {
   /** False for the read-only preview of a calendar event with no meeting/note on disk yet (PB-020). */
   persisted?: boolean;
@@ -355,6 +356,8 @@ function App() {
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   // PB-022a: a failed load or sync is shown in the timeline instead of an "empty day".
   const [calendarError, setCalendarError] = useState<string>();
+  // #88: the calendar could not be read; the timeline lists the meetings already in LifeOS under a banner.
+  const [calendarOffline, setCalendarOffline] = useState<CalendarOffline>();
   const [connections, setConnections] = useState<ConnectionsState>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
@@ -483,9 +486,11 @@ function App() {
     // #44: loaded on its own so a failure here never blanks the other panels.
     void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
     // #48: likewise; it may wait on the calendar, so it never holds up the rest of the page.
-    void api<TodayPanels>(`/api/v1/today/panels?date=${dateInTimeZone(new Date(), displayTimeZone)}&timeZone=${encodeURIComponent(displayTimeZone)}`).then(setTodayPanels).catch(() => undefined);
+    void loadTodayPanels();
     setPersonLabels(await labelsRequest);
   };
+
+  const loadTodayPanels = () => api<TodayPanels>(`/api/v1/today/panels?date=${dateInTimeZone(new Date(), displayTimeZone)}&timeZone=${encodeURIComponent(displayTimeZone)}`).then(setTodayPanels).catch(() => undefined);
 
   const refreshWorkspace = async (meetingId: string) => {
     const next = await api<Workspace>(`/api/v1/meetings/${meetingId}/workspace`);
@@ -515,14 +520,23 @@ function App() {
     }
   };
 
+  /** #88: an unreadable calendar answers with the meetings already in LifeOS and an offline state, not an error. */
+  const showCalendarDay = (day: CalendarDay<Event>) => {
+    setEvents(day.events);
+    setCalendarError(undefined);
+    setCalendarOffline(day.offline);
+    // Google rejected the tokens: refresh status so the Reconnect banner appears.
+    if (day.offline?.reason === "auth") void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
+  };
+
   const loadCalendarDay = async (date = selectedDate) => {
     const range = dayRange(date, displayTimeZone);
-    const nextEvents = await api<Event[]>(`/api/v1/calendar/events?${new URLSearchParams(range)}`);
-    setEvents(nextEvents);
-    setCalendarError(undefined);
+    const day = await api<CalendarDay<Event>>(`/api/v1/calendar/day?${new URLSearchParams(range)}`);
+    showCalendarDay(day);
+    const nextEvents = day.events;
     setCalendarSources((current) => {
       const next = { ...current };
-      for (const event of nextEvents) if (event.calendarId) next[event.calendarId] = { name: event.calendarName ?? event.calendarId, color: event.calendarColor };
+      if (!day.offline) for (const event of nextEvents) if (event.calendarId) next[event.calendarId] = { name: event.calendarName ?? event.calendarId, color: event.calendarColor };
       return next;
     });
     return nextEvents;
@@ -542,6 +556,7 @@ function App() {
   const calendarFailed = (error: unknown) => {
     const text = error instanceof Error ? error.message : "Calendar could not be loaded";
     setEvents([]);
+    setCalendarOffline(undefined);
     setCalendarError(text);
     // A 401 means Google rejected the tokens; refresh status so the Reconnect banner appears.
     if (error instanceof ApiError && error.status === 401) void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
@@ -615,6 +630,8 @@ function App() {
   // Opening an event is a read (PB-020): it shows the existing meeting note, or an editable draft
   // over a non-persisted preview. Nothing is written until the user makes a real edit.
   const openEvent = (selectedEvent: Event) => run(async () => {
+    // #88: offline, a stored meeting opens from LifeOS; the preview would need the calendar.
+    if (selectedEvent.stored && selectedEvent.meetingId) { await refreshWorkspace(selectedEvent.meetingId); localStorage.setItem("lifeos.activeMeetingId", selectedEvent.meetingId); return; }
     const { externalId, calendarId } = selectedEvent;
     const range = dayRange(selectedDate, displayTimeZone);
     const next = await api<Workspace>(`/api/v1/meetings/preview?${new URLSearchParams({ externalId, ...(calendarId ? { calendarId } : {}), ...range })}`);
@@ -804,11 +821,20 @@ function App() {
 
   const syncGoogle = () => run(async () => {
     const range = dayRange(selectedDate, displayTimeZone);
-    try { setEvents(await api<Event[]>(`/api/v1/calendar/sync?${new URLSearchParams(range)}`, { method: "POST" })); }
+    let day: CalendarDay<Event>;
+    try { day = await api<CalendarDay<Event>>(`/api/v1/calendar/day/sync?${new URLSearchParams(range)}`, { method: "POST" }); }
     catch (error) { calendarFailed(error); throw error; }
-    setCalendarError(undefined);
+    showCalendarDay(day);
     await loadCollections();
+    if (day.offline) throw new Error(`Google Calendar could not be synchronized: ${day.offline.error}`);
   }, "Google Calendar synchronized");
+
+  // #88: Retry on the offline banner (Today and Calendar) reads the calendar again, without a page reload.
+  const retryCalendar = () => run(async () => {
+    try { await loadCalendarDay(); }
+    catch (error) { calendarFailed(error); throw error; }
+    await loadTodayPanels();
+  }, "Calendar reloaded");
 
   const createEntity = (type: EntityType, fields: Record<string, unknown>) => run(async () => {
     await api(`/api/v1/entities/${type}`, { method: "POST", body: JSON.stringify({ fields }) });
@@ -1200,7 +1226,7 @@ function App() {
 
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
-      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} onOpenSettingsCard={openSettingsCard} />}
+      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} onOpenSettingsCard={openSettingsCard} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} />}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
@@ -1218,9 +1244,10 @@ function App() {
               </select></label>
             </div>
             <h3 className="timeline-date">{new Date(`${selectedDate}T12:00:00.000Z`).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone })}</h3>
+            <CalendarOfflineBanner offline={calendarOffline} timeZone={displayTimeZone} busy={busy} onRetry={() => void retryCalendar()} />
             {calendarError
               ? <div className="timeline-empty timeline-error" role="alert"><b>Calendar could not be loaded</b><small>{calendarError}</small></div>
-              : !filteredEvents.length && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
+              : !filteredEvents.length && !calendarOffline && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
             <div className="timeline">
               {allDayEvents.map((event) => <div className="timeline-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
                 <span className="timeline-time">All day</span><span className="timeline-rail"><i style={{ background: event.calendarColor ?? "#5f8b7c" }} /></span>

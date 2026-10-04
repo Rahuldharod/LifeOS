@@ -7,6 +7,7 @@ import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import type { TodaySettings } from "./SettingsPage.js";
 import { awaitingAdoptionLabel, daysBetween } from "./todayPanels.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
+import { CalendarOfflineBanner, type CalendarOffline } from "./CalendarOffline.js";
 import { CappedRows, GiveUpRow, LivePanel, WaitingGroupRow, type WaitingGroup } from "./TodayLists.js";
 
 type LifeObject = { frontmatter: Record<string, unknown> & { id: string; title: string; type: string; status?: string; revision: number; created_at: string; updated_at: string }; body: string; relativePath: string; contentHash: string };
@@ -20,6 +21,8 @@ export type TodayPanels = {
   waitingByPerson: Array<WaitingGroup & { tasks: LifeObject[] }>;
   nextMeetings: Array<{ title: string; startsAt: string; endsAt: string; inProgress: boolean; meetingId?: string; noteId?: string; calendarEventId?: string; calendarName?: string; restricted: boolean }>;
   meetingHours: number; meetingHeavy: boolean; calendarError?: string;
+  /** #88: set when the calendar could not be read; Next meetings then lists the meetings already in LifeOS. */
+  calendarOffline?: CalendarOffline;
   openPointsForMeetings: Array<{ openPoint: LifeObject; meetingId: string; meetingTitle: string; link: "raised-in" | "project" | "client" | "people" }>;
   reviewCount: number; inbox: { awaiting: number; drafts: number; patches: number }; failedDrafts: Array<{ path: string; reason: string }>;
   staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }>; settings: TodaySettings;
@@ -32,9 +35,11 @@ type Props = {
   today: Today; panels?: TodayPanels; enrichment: EnrichmentStatus; eventCount: number; capture: string; busy: boolean; readOnly: boolean;
   onCaptureChange: (text: string) => void; onCapture: () => void; onReplan: () => Promise<void>; onChangeFocus: (change: FocusChange) => Promise<void>;
   onEnrich: () => Promise<void>; onGiveUp: (meetingId: string) => Promise<boolean>; onOpenInbox: () => void; onOpenSettingsCard: (cardId: string) => void;
+  /** #88: display time zone for the offline banner's last-synced time, and its Retry. */
+  timeZone?: string; onRetryCalendar?: () => void;
 };
 
-export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, capture, busy, readOnly, onCaptureChange, onCapture, onReplan, onChangeFocus, onEnrich, onGiveUp, onOpenInbox, onOpenSettingsCard }: Props) {
+export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, capture, busy, readOnly, onCaptureChange, onCapture, onReplan, onChangeFocus, onEnrich, onGiveUp, onOpenInbox, onOpenSettingsCard, timeZone, onRetryCalendar }: Props) {
   return <>
     <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
     <SelfEmailWarning warning={todayPanels?.setupWarning} onOpenSettings={onOpenSettingsCard} />
@@ -49,7 +54,7 @@ export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, 
     <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void onEnrich()}>Enrich last 48h</button></div>
       {/* #48: stale Work Orders moved to the "Inbox and agents" live panel. */}
       <CappedRows items={enrichment.proposedGaveUp} row={(meeting) => <GiveUpRow key={meeting.meetingId} meeting={meeting} disabled={busy || readOnly} onGiveUp={(meetingId) => void onGiveUp(meetingId)} />} /></article>
-    {todayPanels ? <TodayLivePanels panels={todayPanels} onOpenInbox={onOpenInbox} /> : <>
+    {todayPanels ? <TodayLivePanels panels={todayPanels} onOpenInbox={onOpenInbox} calendar={{ timeZone, busy, onRetry: onRetryCalendar ?? (() => undefined) }} /> : <>
       {/* Until the live panels load (or if they fail), the basic lists from /today stand in. */}
       <LivePanel title="Overdue" items={today.overdue} empty="Nothing overdue." row={objectRow} />
       <LivePanel title="Due today" items={today.dueToday} empty="Nothing due today." row={objectRow} />
@@ -128,7 +133,7 @@ const dueText = (task: LifeObject) => typeof task.frontmatter.due_on === "string
 const openPointLinkText = { "raised-in": "Raised in", project: "Same project as", client: "Same client as", people: "Same people as" } as const;
 
 /** #48: Today's live panels, in the PRD's order. Status is always said in words, never by colour alone. */
-function TodayLivePanels({ panels, onOpenInbox }: { panels: TodayPanels; onOpenInbox: () => void }) {
+function TodayLivePanels({ panels, onOpenInbox, calendar }: { panels: TodayPanels; onOpenInbox: () => void; calendar: { timeZone?: string; busy: boolean; onRetry: () => void } }) {
   const taskRow = (detail: (task: LifeObject) => string) => (task: LifeObject) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}<LockBadge frontmatter={task.frontmatter} /></b><small>{detail(task)}</small></div></div>;
   const overdueBy = (task: LifeObject) => { const due = dueText(task); const days = due ? daysBetween(due, panels.date) : 0; return `Overdue by ${days} ${days === 1 ? "day" : "days"} · due ${due}`; };
   const meetingTime = (meeting: TodayPanels["nextMeetings"][number]) => `${formatTime(meeting.startsAt)}–${formatTime(meeting.endsAt)}`;
@@ -144,7 +149,8 @@ function TodayLivePanels({ panels, onOpenInbox }: { panels: TodayPanels; onOpenI
     <LivePanel title="Upcoming high priority" items={panels.upcomingHighPriority} empty="No upcoming high-priority work." row={taskRow((task) => `High priority · ${dueText(task) ? `due ${dueText(task)}` : "no due date"}`)} />
     <LivePanel title="Waiting by person" items={panels.waitingByPerson} empty="Nothing waiting on someone else." row={(group) => <WaitingGroupRow key={group.personId ?? "unknown"} group={group} />} />
     <LivePanel title="Next meetings" items={panels.nextMeetings} empty={panels.calendarError ? "No meetings found in LifeOS for the rest of today." : "No more meetings today."}
-      note={<>{panels.calendarError && <p className="muted" role="status">Calendar could not be read ({panels.calendarError}); showing meetings already in LifeOS.</p>}<p className="muted">{panels.meetingHours} h of meetings today{panels.meetingHeavy ? ` · Meeting-heavy day (${panels.settings.meetingHoursThreshold} h or more)` : ""}</p></>}
+      note={<>{panels.calendarOffline ? <CalendarOfflineBanner offline={panels.calendarOffline} timeZone={calendar.timeZone} busy={calendar.busy} onRetry={calendar.onRetry} />
+        : panels.calendarError && <p className="muted" role="status">Calendar could not be read ({panels.calendarError}); showing meetings already in LifeOS.</p>}<p className="muted">{panels.meetingHours} h of meetings today{panels.meetingHeavy ? ` · Meeting-heavy day (${panels.settings.meetingHoursThreshold} h or more)` : ""}</p></>}
       row={(meeting) => <div className="object-row" key={meeting.meetingId ?? meeting.calendarEventId}><i /><div><b>{meeting.title}{meeting.restricted && <LockBadge frontmatter={{ sensitivity: "restricted" }} />}</b><small>{[meeting.inProgress ? "Now" : undefined, meetingTime(meeting), meeting.calendarName, meeting.noteId ? "Has notes" : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
     <LivePanel title="Open points for today's meetings" items={panels.openPointsForMeetings} empty="No open points linked to today's meetings."
       row={(entry) => <div className="object-row" key={entry.openPoint.frontmatter.id}><i /><div><b>{entry.openPoint.frontmatter.title}<LockBadge frontmatter={entry.openPoint.frontmatter} /></b><small>{[`${openPointLinkText[entry.link]} ${entry.meetingTitle}`, entry.openPoint.frontmatter.importance ? `${String(entry.openPoint.frontmatter.importance)} importance` : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
