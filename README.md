@@ -15,6 +15,7 @@ Local-first personal knowledge and work management, backed by typed Markdown fil
 - `packages/assets-filesystem`, `packages/backup-filesystem`, `packages/secrets`: managed images, checksummed backups and the macOS Keychain store.
 - `packages/contracts`, `packages/shared`: API types and rules shared by the server and the browser.
 - `schemas`: versioned object contracts and synthetic fixtures.
+- `skills`: the Claude skills pack (Object Contract, capture, ask); its examples are tested against adoption. Install and dry-run: `skills/INSTALL.md`.
 - `../data`: synchronized user Markdown and assets; intentionally outside this Git repository.
 - `../backups`: read-only, checksummed data snapshots; also outside Git.
 

@@ -31,6 +31,7 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - `packages/contracts`: API request and response types.
 - `packages/shared`: rules both the server and the browser need (no Node dependencies).
 - `schemas`: portable schemas and fixtures.
+- `skills`: the Claude skills pack and its Object Contract. Every example draft and patch in it is a CI fixture (`tests/integration/skill-fixtures.test.ts`); change skill text and adoption code together.
 - `tests/integration`: cross-package acceptance tests.
 - `docs/product-design`: versioned solution baseline and product backlog.
 - `../data`: real user Markdown and assets; outside Git and authoritative.
