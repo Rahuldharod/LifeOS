@@ -189,6 +189,23 @@ describe("Agent Index (#43)", () => {
     for (const leaked of ["Board prep", hushMeeting.id, hidden.id]) expect(all).not.toContain(leaked);
   });
 
+  it("leaves out a meeting marked restricted itself, exactly as when its note is restricted (#86)", async () => {
+    const { root, application, ids } = await populated();
+    const hushMeeting = await seed(root, "meetings", "meeting", "Board prep", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [ids.me.id] });
+    const note = await seed(root, "meetings", "meeting-note", "Board prep notes", { meeting_id: hushMeeting.id });
+    await seed(root, "tasks", "task", "Follow up from board prep", { status: "Next", owner_person_id: ids.me.id, source_meeting_id: hushMeeting.id });
+    await application.rebuildIndex();
+    // The toggle on the meeting page writes through this guarded use case.
+    await application.setSensitivity(hushMeeting.id, "restricted", application.object(hushMeeting.id).contentHash);
+    await application.writeAgentIndex({ now });
+
+    const meetings = await read(root, "meetings.md");
+    expect(meetings).toContain("1 restricted not listed");
+    expect(await read(root, "tasks.md")).toContain("meeting: (restricted)");
+    const all = (await Promise.all(files.map((name) => read(root, name)))).join("\n");
+    for (const leaked of ["Board prep", hushMeeting.id, note.relativePath]) expect(all).not.toContain(leaked);
+  });
+
   it("lists pending drafts and patches as \"pending adoption\", restricted drafts counted only", async () => {
     const { root, application } = await populated();
     await mkdir(path.join(root, "_inbox", "drafts"), { recursive: true });
