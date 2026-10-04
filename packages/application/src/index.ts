@@ -22,7 +22,7 @@ import { TodayModule, type TodaySettings } from "./today.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
-export type { ExternalChange, HistoryEntry } from "./history.js";
+export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
@@ -114,7 +114,8 @@ export class LifeOSApplication {
   /** #79: restores the version copy an external-change audit event names. */
   restoreVersion(auditEventId: string) { return this.history.restoreVersion(auditEventId); }
   objectHistory(objectId: string) { return this.history.objectHistory(objectId); }
-  restoreKeptVersion(objectId: string, versionPath: string) { return this.history.restoreKeptVersion(objectId, versionPath); }
+  historyPanel(objectId: string) { return this.history.historyPanel(objectId); }
+  restoreKeptVersion(objectId: string, versionPath: string, expectedHash: string) { return this.history.restoreKeptVersion(objectId, versionPath, expectedHash); }
   setSensitivity(id: string, sensitivity: Sensitivity, expectedHash: string) { return this.system.setSensitivity(id, sensitivity, expectedHash); }
 
   // Notes

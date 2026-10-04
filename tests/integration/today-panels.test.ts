@@ -159,6 +159,21 @@ describe("Today meetings panels", () => {
     expect(view.calendarError).toBeUndefined();
   });
 
+  it("#92: shows a meeting as restricted when only its note is restricted (#63), from the calendar and from the index", async () => {
+    const calendar = new FakeCalendar([event("synced", at("13:00"), at("14:00"), { title: "Synced 1:1" })]);
+    const { store, application } = await vault(calendar);
+    await application.createMeetingFromEvent("synced", new Date(at("00:00")), new Date(at("23:00")), "work");
+    const synced = (await application.listObjects()).find((object) => object.frontmatter.type === "meeting")!.frontmatter.id;
+    const manual = await meeting(store, "Manual 1:1", at("15:00"), at("16:00"));
+    const note = (meetingId: string, title: string) => store.write({ relativePath: `meetings/${title}.md`, frontmatter: { id: uuidV7(), type: "meeting-note", schema_version: 1, revision: 1, title, created_at: at("08:00"), updated_at: at("08:00"), updated_by_device: "test", meeting_id: meetingId, sensitivity: "restricted" }, body: "Private\n" });
+    await note(synced, "synced-note");
+    await note(manual, "manual-note");
+    await application.rebuildIndex();
+    const view = await panels(application);
+    expect(view.nextMeetings.find((entry) => entry.meetingId === synced)!.restricted).toBe(true);
+    expect(view.nextMeetings.find((entry) => entry.meetingId === manual)!.restricted).toBe(true);
+  });
+
   it("flags a meeting-heavy day at the configured threshold (default 5 hours)", async () => {
     const calendar = new FakeCalendar([event("long", at("06:00"), at("11:00"))]);
     const { application } = await vault(calendar);

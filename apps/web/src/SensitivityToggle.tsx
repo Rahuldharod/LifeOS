@@ -20,12 +20,24 @@ export async function changeSensitivity(object: SensitivityObject, noun: string,
   }
 }
 
-export function SensitivityToggle({ object, noun, note, disabled, run, onChanged }: {
+/**
+ * The toast after a change. #92: a meeting whose note is restricted stays excluded after 'Mark normal' (#63),
+ * so the message says so instead of promising it can be shared again.
+ */
+export function sensitivityToast(restricted: boolean, noun: string, restrictedByNote = false) {
+  if (!restricted) return `Marked restricted: this ${noun} is kept away from Agents`;
+  if (restrictedByNote) return `Marked normal, but this ${noun} stays kept away from Agents and Work Orders because its note is restricted`;
+  return `Marked normal: this ${noun} can be shared with Agents again`;
+}
+
+export function SensitivityToggle({ object, noun, note, restrictedByNote, disabled, run, onChanged }: {
   object: SensitivityObject;
   /** What the object is called in messages, e.g. "decision". */
   noun: string;
   /** Extra words shown beside the state, e.g. why a meeting is restricted by its note. */
   note?: string;
+  /** #92: a meeting whose note is restricted, so it stays excluded even when marked normal. */
+  restrictedByNote?: boolean;
   disabled: boolean;
   run: (action: () => Promise<void>, success: string) => Promise<boolean>;
   /** Reloads what is on disk, after success or failure (a conflict means someone else saved first). */
@@ -33,7 +45,7 @@ export function SensitivityToggle({ object, noun, note, disabled, run, onChanged
 }) {
   const restricted = isRestricted(object.frontmatter);
   const toggle = async () => {
-    await run(() => changeSensitivity(object, noun), restricted ? `Marked normal: this ${noun} can be shared with Agents again` : `Marked restricted: this ${noun} is kept away from Agents`);
+    await run(() => changeSensitivity(object, noun), sensitivityToast(restricted, noun, restrictedByNote));
     await onChanged();
   };
   return <span className="sensitivity-control" role="group" aria-label={`Sensitivity of this ${noun}`}>
