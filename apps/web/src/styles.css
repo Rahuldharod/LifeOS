@@ -338,7 +338,11 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .person-external label { display: inline-flex; align-items: center; gap: 4px; }
 .internal-domains-setting { margin-bottom: 18px; }
 /* #48: Today live panels and Today settings */
-.live-panel .show-more { margin-top: 8px; }
+.show-more { margin-top: 8px; }
+.waiting-group { padding-top: 10px; }
+.waiting-group h4 { margin: 0; font-size: 14px; }
+.waiting-group h4 small { color: #5d665f; font-weight: 600; }
+.waiting-group .object-row { padding: 8px 0 8px 12px; }
 .today-setting { margin-bottom: 18px; display: grid; gap: 8px; justify-items: start; }
 .today-setting fieldset { display: flex; flex-wrap: wrap; gap: 10px; border: 0; padding: 0; margin: 0; }
 .today-setting fieldset label { display: inline-flex; align-items: center; gap: 4px; }
