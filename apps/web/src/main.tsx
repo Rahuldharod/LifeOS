@@ -19,6 +19,8 @@ import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions } from "./envelope.js";
 import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
+import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
+import { PersonName } from "./PersonName.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -258,6 +260,9 @@ function App() {
   const [clients, setClients] = useState<EntityRollup[]>([]);
   const [products, setProducts] = useState<EntityRollup[]>([]);
   const [people, setPeople] = useState<EntityRollup[]>([]);
+  // #39: short, unambiguous names; recomputed by the server on every load.
+  const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
+  const [internalDomains, setInternalDomains] = useState<{ domains: string[]; contentHash?: string }>();
   const [reviews, setReviews] = useState<LifeObject[]>([]);
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
   const [notes, setNotes] = useState<LifeObject[]>([]);
@@ -395,11 +400,14 @@ function App() {
   const meetingOwner: EditorOwner | undefined = workspace?.note ? { id: workspace.note.frontmatter.id, relativePath: workspace.note.relativePath } : undefined;
 
   const loadCollections = async () => {
+    // Without labels, badges fall back to full titles rather than failing the whole load.
+    const labelsRequest = api<PersonLabel[]>("/api/v1/people/labels").catch(() => [] as PersonLabel[]);
     const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
       api<Today>("/api/v1/today"), api<LifeObject[]>("/api/v1/tasks"),
       api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
+    setPersonLabels(await labelsRequest);
   };
 
   const refreshWorkspace = async (meetingId: string) => {
@@ -419,8 +427,22 @@ function App() {
     setCalendarCatalogLoaded(true);
   };
 
+  const loadInternalDomains = async () => setInternalDomains(await api<{ domains: string[]; contentHash?: string }>("/api/v1/settings/internal-domains").catch(() => undefined));
+
+  /** #39: saves the synced internal-domains setting; resolves to an error message, or undefined on success. */
+  const saveInternalDomains = async (domains: string[]): Promise<string | undefined> => {
+    try {
+      setInternalDomains(await api<{ domains: string[]; contentHash?: string }>("/api/v1/settings/internal-domains", { method: "PUT", body: JSON.stringify({ domains, expectedHash: internalDomains?.contentHash }) }));
+      await loadCollections();
+      return undefined;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) { await loadInternalDomains(); return "The internal domains were changed on another device. The latest version is loaded; make your change again."; }
+      return error instanceof Error ? error.message : "Could not save internal domains";
+    }
+  };
+
   /** Saves to the synced settings file; resolves to an error message, or undefined on success. */
-  const saveCalendarPrefs = async (next: CalendarPrefs): Promise<string | undefined> => {
+  const saveCalendarPrefs =async (next: CalendarPrefs): Promise<string | undefined> => {
     try {
       setCalendarPrefs(await api<CalendarPrefs>("/api/v1/settings/calendar-preferences", { method: "PUT", body: JSON.stringify({ ...next, expectedHash: calendarPrefs.contentHash }) }));
       return undefined;
@@ -667,6 +689,11 @@ function App() {
     await api(`/api/v1/entities/by-id/${object.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ fields, expectedHash: object.contentHash }) });
     await loadCollections();
   }, `${object.frontmatter.type} updated`);
+
+  const setPersonExternal = (object: LifeObject, choice: ExternalChoice) => run(async () => {
+    await api(`/api/v1/people/${object.frontmatter.id}/external`, { method: "PUT", body: JSON.stringify({ isExternal: externalChoiceValue(choice), expectedHash: object.contentHash }) });
+    await loadCollections();
+  }, choice === "auto" ? "External flag follows the email domain again" : `Marked ${choice}`);
 
   const deleteEntity = (object: LifeObject) => run(async () => {
     await api(`/api/v1/entities/by-id/${object.frontmatter.id}`, { method: "DELETE", body: JSON.stringify({ expectedHash: object.contentHash }) });
@@ -919,7 +946,8 @@ function App() {
   const saveNotesDetails = (changes: Record<string, unknown>) => saveDetails(notesController, fetchLatestNote, changes);
   const saveMeetingNoteDetails = (changes: Record<string, unknown>) => saveDetails(meetingController, fetchLatestWorkspace, changes);
   const optionsOf = (objects: LifeObject[]) => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));
-  const headerOptions = { projects: optionsOf(projects.map(({ project }) => project)), clients: optionsOf(clients.map(({ entity }) => entity)), products: optionsOf(products.map(({ entity }) => entity)), people: optionsOf(people.map(({ entity }) => entity)) };
+  const labels = labelMap(personLabels);
+  const headerOptions = { projects: optionsOf(projects.map(({ project }) => project)), clients: optionsOf(clients.map(({ entity }) => entity)), products: optionsOf(products.map(({ entity }) => entity)), people: people.map(({ entity }) => personOption(labels, entity)) };
 
   // The header of a note that does not exist yet: the event's own project, client, product and
   // attendees are shown when they match an object LifeOS already has (by name), and the rest stay
@@ -1003,7 +1031,7 @@ function App() {
       setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
     } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
-  useEffect(() => { if (view === "Settings") void loadCalendarCatalog(); }, [view]);
+  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); } }, [view]);
 
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
@@ -1103,7 +1131,7 @@ function App() {
                   <Meta label="Project" value={workspace.context.project?.frontmatter.title ?? "Not linked"} />
                   <Meta label="Client" value={workspace.context.client?.frontmatter.title ?? "Not linked"} />
                   <Meta label="Product" value={workspace.context.product?.frontmatter.title ?? "Not linked"} />
-                  <Meta label="Attendees" value={workspace.context.people.map((person) => person.frontmatter.title).join(", ") || "None"} />
+                  <PeopleMeta label="Attendees" people={workspace.context.people} labels={labels} empty="None" />
                 </div>
               </article>
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
@@ -1192,17 +1220,17 @@ function App() {
         </div>
       </>}
 
-      {view === "Tasks" && <EntityCrudPage highlightId={highlightId} type="task" title="Tasks" objects={tasks} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "Tasks" && <EntityCrudPage labels={labels} highlightId={highlightId} type="task" title="Tasks" objects={tasks} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
 
       {view === "Projects" && <><PageHeader eyebrow="PROJECTS" title="Project roll-ups" description="Meetings and tasks are computed from stable relationships, not copied lists." />
-        <EntityCrudPage highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />
-        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.map((person) => person.frontmatter.title).join(", ") || "None linked"}</p></article>)}</div>
+        <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />
+        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.length ? <PeopleList people={projectPeople} labels={labels} /> : "None linked"}</p></article>)}</div>
         {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
       </>}
 
-      {view === "Clients" && <EntityCrudPage highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
-      {view === "Products" && <EntityCrudPage highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
-      {view === "People" && <EntityCrudPage highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "Clients" && <EntityCrudPage labels={labels} highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
+      {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
 
       {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p><b>{inboxDrafts.awaiting}</b> {inboxDrafts.awaiting === 1 ? "draft" : "drafts"} awaiting adoption</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
@@ -1232,7 +1260,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
     </section>
   </main>;
 }
@@ -1245,6 +1273,14 @@ function Summary({ label, value, detail }: { label: string; value: string | numb
 }
 function Meta({ label, value }: { label: string; value: string }) {
   return <div className="meta"><small>{label}</small><b title={value}>{value}</b></div>;
+}
+/** #39: comma-separated display labels, with the red " - ext" marker kept as text. */
+function PeopleList({ people, labels }: { people: LifeObject[]; labels: Map<string, PersonLabel> }) {
+  return <>{people.map((person, index) => <React.Fragment key={person.frontmatter.id}>{index > 0 && ", "}<PersonName {...personLabel(labels, person)} /></React.Fragment>)}</>;
+}
+function PeopleMeta({ label, people, labels, empty }: { label: string; people: LifeObject[]; labels: Map<string, PersonLabel>; empty: string }) {
+  const text = people.map((person) => personLabel(labels, person).label).join(", ") || empty;
+  return <div className="meta"><small>{label}</small><b title={text}>{people.length ? <PeopleList people={people} labels={labels} /> : empty}</b></div>;
 }
 function ObjectList({ title, objects, empty }: { title: string; objects: LifeObject[]; empty: string }) {
   return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map((object) => <div className="object-row" key={object.frontmatter.id}><i /><div><b>{object.frontmatter.title}<LockBadge frontmatter={object.frontmatter} /></b><small>{object.frontmatter.status ?? object.frontmatter.type} · Updated {formatDate(object.frontmatter.updated_at)}</small></div></div>)}</article>;
@@ -1262,13 +1298,46 @@ const entityFields: Record<EntityType, Array<{ key: string; label: string; kind?
 // in the picker but is kept on save unless the user picks a new one (the server allows unchanged legacy values).
 const envelopeEntityFields = [{ key: "area", label: "Area", kind: "select" as const, options: ["", ...areaOptions] }, { key: "sensitivity", label: "Sensitivity", kind: "select" as const, options: ["normal", "restricted"] }];
 
-function EntityCrudPage({ type, title, objects, people, busy, readOnly, embedded = false, highlightId, onCreate, onUpdate, onDelete }: { type: EntityType; title: string; objects: LifeObject[]; people: LifeObject[]; busy: boolean; readOnly: boolean; embedded?: boolean; highlightId?: string; onCreate: (type: EntityType, fields: Record<string, unknown>) => void; onUpdate: (object: LifeObject, fields: Record<string, unknown>) => void; onDelete: (object: LifeObject) => void }) {
+function EntityCrudPage({ type, title, objects, people, labels, onSetExternal, busy, readOnly, embedded = false, highlightId, onCreate, onUpdate, onDelete }: { type: EntityType; title: string; objects: LifeObject[]; people: LifeObject[]; labels: Map<string, PersonLabel>; onSetExternal?: (object: LifeObject, choice: ExternalChoice) => void; busy: boolean; readOnly: boolean; embedded?: boolean; highlightId?: string; onCreate: (type: EntityType, fields: Record<string, unknown>) => void; onUpdate: (object: LifeObject, fields: Record<string, unknown>) => void; onDelete: (object: LifeObject) => void }) {
   const [newTitle, setNewTitle] = useState("");
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
   useEffect(() => setDrafts(Object.fromEntries(objects.map((object) => [object.frontmatter.id, { ...object.frontmatter }]))), [objects]);
   const setField = (id: string, key: string, value: unknown) => setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
   const create = () => { onCreate(type, { title: newTitle }); setNewTitle(""); };
-  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{[...entityFields[type], ...envelopeEntityFields].map((field) => <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : field.kind === "person" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}><option value="">None</option>{people.map((person) => <option value={person.frontmatter.id} key={person.frontmatter.id}>{person.frontmatter.title}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions"><EnvelopeBadges frontmatter={object.frontmatter} /><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button></div></div>; })}</div></article></>;
+  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{[...entityFields[type], ...envelopeEntityFields].map((field) => <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : field.kind === "person" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}><option value="">None</option>{people.map((person) => <option value={person.frontmatter.id} key={person.frontmatter.id}>{personLabel(labels, person).label}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions">{type === "person" && <PersonExternalControl person={object} labels={labels} disabled={busy || readOnly} onChange={onSetExternal} />}<EnvelopeBadges frontmatter={object.frontmatter} /><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button></div></div>; })}</div></article></>;
+}
+
+/** #39: the person's badge label, and the External choice (Auto follows the email domain). Saves on change. */
+function PersonExternalControl({ person, labels, disabled, onChange }: { person: LifeObject; labels: Map<string, PersonLabel>; disabled: boolean; onChange?: (object: LifeObject, choice: ExternalChoice) => void }) {
+  const label = personLabel(labels, person);
+  const isSelf = person.frontmatter.is_self === true;
+  const derived = labels.get(person.frontmatter.id)?.isExternal ? "external" : "internal";
+  return <span className="person-external"><small>Shown as</small><b><PersonName {...label} /></b>{!isSelf && onChange && <label><small>External</small><select value={externalChoiceOf(person.frontmatter)} disabled={disabled} onChange={(event) => onChange(person, event.target.value as ExternalChoice)}>
+    <option value="auto">Auto (by email domain{externalChoiceOf(person.frontmatter) === "auto" ? `: ${derived}` : ""})</option><option value="external">External</option><option value="internal">Internal</option>
+  </select></label>}</span>;
+}
+
+/** #39: the synced internal-domains setting. People with addresses only on other domains are shown as External. */
+function InternalDomainsCard({ setting, disabled, onSave }: { setting?: { domains: string[]; contentHash?: string }; disabled: boolean; onSave: (domains: string[]) => Promise<string | undefined> }) {
+  const saved = setting?.domains.join(", ") ?? "";
+  const [text, setText] = useState(saved);
+  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setText(saved), [saved]);
+  const domains = parseDomains(text);
+  const dirty = domains.join("|") !== (setting?.domains ?? []).join("|");
+  const save = async () => {
+    setSaving(true);
+    const error = await onSave(domains);
+    setSaving(false);
+    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. People labels now use these domains." });
+  };
+  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>Internal domains</h3>
+    <p className="muted">Email domains of your own organisations, separated by commas. Anyone with addresses only on other domains is shown as "Name<span className="ext-suffix"> - ext</span>". You can override this on each person.</p>
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Internal domains" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="eagleeye.com, untienots.com" /><button type="button" disabled={disabled || saving || !dirty || !domains.length} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
+    {setting && !domains.length && <p className="calendar-error" role="alert">Enter at least one domain.</p>}
+    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
+  </article>;
 }
 
 function CalendarListCard({ catalog, loaded, prefs, onSave }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; onSave: (prefs: CalendarPrefs) => Promise<string | undefined> }) {

@@ -2,6 +2,7 @@
 // multi mode builds a list of chips. Follows the ARIA combobox pattern: arrow keys move, Enter
 // picks, Escape closes, typing filters.
 import React, { useEffect, useId, useRef, useState } from "react";
+import { ExtSuffix } from "./PersonName.js";
 import { searchOptions, type SearchOption } from "./searchOptions.js";
 
 type Common = { label: string; options: SearchOption[]; disabled?: boolean; placeholder?: string };
@@ -18,7 +19,10 @@ export function SearchSelect(props: SearchSelectProps) {
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const titleOf = (id: string) => options.find((option) => option.id === id)?.title ?? "Unknown (removed)";
+  const optionOf = (id: string) => options.find((option) => option.id === id);
+  const titleOf = (id: string) => optionOf(id)?.title ?? "Unknown (removed)";
+  /** Full text, suffix included, where styling is impossible (input value, aria-label). */
+  const textOf = (id: string) => titleOf(id) + (optionOf(id)?.suffix ?? "");
   const matches = searchOptions(options, query, props.multi ? selected : []);
   // Single mode offers "Not linked" first, so a link can be cleared from the same list.
   const rows: SearchOption[] = props.multi || query.trim() ? matches : [{ id: "", title: "Not linked" }, ...matches];
@@ -45,12 +49,12 @@ export function SearchSelect(props: SearchSelectProps) {
     else if (event.key === "Backspace" && props.multi && !query && props.value.length) props.onChange(props.value.slice(0, -1));
   }
 
-  const shown = open ? query : props.multi ? "" : selected[0] ? titleOf(selected[0]) : "";
+  const shown = open ? query : props.multi ? "" : selected[0] ? textOf(selected[0]) : "";
   return (
     <div className={`search-select${props.multi ? " multi" : ""}`} ref={root}>
       <small>{label}</small>
       <div className="search-select-box">
-        {props.multi && props.value.map((id) => <span className="chip" key={id}>{titleOf(id)}<button type="button" disabled={disabled} aria-label={`Remove ${titleOf(id)}`} onClick={() => props.onChange(props.value.filter((candidate) => candidate !== id))}>×</button></span>)}
+        {props.multi && props.value.map((id) => <span className="chip" key={id}>{titleOf(id)}<ExtSuffix suffix={optionOf(id)?.suffix} /><button type="button" disabled={disabled} aria-label={`Remove ${textOf(id)}`} onClick={() => props.onChange(props.value.filter((candidate) => candidate !== id))}>×</button></span>)}
         <input
           role="combobox" aria-label={label} aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-activedescendant={open && rows[active] ? `${listId}-${active}` : undefined}
           disabled={disabled} value={shown} placeholder={props.multi ? (props.value.length ? "Add…" : placeholder ?? "Add…") : selected[0] ? "" : placeholder ?? "Not linked"}
@@ -61,7 +65,7 @@ export function SearchSelect(props: SearchSelectProps) {
       </div>
       {open && <ul className="search-select-list" role="listbox" id={listId}>
         {rows.length === 0 && <li className="empty" role="presentation">No match</li>}
-        {rows.map((option, index) => <li key={option.id || "none"} id={`${listId}-${index}`} role="option" aria-selected={selected.includes(option.id) || (!props.multi && !props.value && option.id === "")} className={index === active ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); pick(option); }} onMouseEnter={() => setActive(index)}>{option.title}</li>)}
+        {rows.map((option, index) => <li key={option.id || "none"} id={`${listId}-${index}`} role="option" aria-selected={selected.includes(option.id) || (!props.multi && !props.value && option.id === "")} className={index === active ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); pick(option); }} onMouseEnter={() => setActive(index)}>{option.title}<ExtSuffix suffix={option.suffix} /></li>)}
       </ul>}
     </div>
   );

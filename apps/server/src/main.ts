@@ -68,6 +68,14 @@ server.get<{ Params: { type: "task" | "project" | "client" | "product" | "person
 server.post<{ Params: { type: "task" | "project" | "client" | "product" | "person" }; Body: { fields: Record<string, unknown> } }>("/api/v1/entities/:type", async (request) => application.createEntity(request.params.type, request.body.fields));
 server.patch<{ Params: { id: string }; Body: { fields: Record<string, unknown>; expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.updateEntity(request.params.id, request.body.fields, request.body.expectedHash));
 server.delete<{ Params: { id: string }; Body: { expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.deleteEntity(request.params.id, request.body.expectedHash));
+// #39: display labels for badges and pickers, and the manual External override (null = back to the email rule).
+server.get("/api/v1/people/labels", async () => application.personLabels());
+server.put<{ Params: { id: string }; Body: { isExternal?: boolean | null; expectedHash?: string } }>("/api/v1/people/:id/external", async (request, reply) => {
+  const { isExternal, expectedHash } = request.body ?? {};
+  if (isExternal !== true && isExternal !== false && isExternal !== null) return reply.status(400).send({ error: "isExternal must be true, false or null" });
+  if (typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.setPersonExternal(request.params.id, isExternal, expectedHash);
+});
 server.post("/api/v1/index/rebuild", async () => application.rebuildIndex());
 server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/events", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
@@ -80,6 +88,12 @@ server.get("/api/v1/settings/calendar-preferences", async () => application.getC
 server.put<{ Body: { disabledCalendarIds?: string[]; defaultCalendarId?: string; expectedHash?: string } }>("/api/v1/settings/calendar-preferences", async (request) => {
   const { disabledCalendarIds = [], defaultCalendarId, expectedHash } = request.body ?? {};
   return application.saveCalendarPreferences({ disabledCalendarIds, defaultCalendarId }, expectedHash);
+});
+server.get("/api/v1/settings/internal-domains", async () => application.getInternalDomains());
+server.put<{ Body: { domains?: unknown[]; expectedHash?: string } }>("/api/v1/settings/internal-domains", async (request, reply) => {
+  const { domains, expectedHash } = request.body ?? {};
+  if (!Array.isArray(domains)) return reply.status(400).send({ error: "domains must be a list" });
+  return application.saveInternalDomains(domains, expectedHash);
 });
 server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/sync", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
