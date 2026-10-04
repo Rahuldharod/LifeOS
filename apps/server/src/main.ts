@@ -285,6 +285,7 @@ server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v
 });
 server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
 server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
+server.post<{ Params: { id: string } }>("/api/v1/history/:id/restore", async (request) => application.restoreVersion(request.params.id));
 server.get("/api/v1/backups", async () => backups.list());
 server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
