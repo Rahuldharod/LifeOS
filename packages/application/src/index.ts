@@ -11,7 +11,8 @@ import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
 
 export type { ExternalChange } from "./history.js";
-export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, ObjectStore, SecretStore } from "./ports.js";
+export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS } from "./people.js";
+export type { AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, ObjectStore, SecretStore } from "./ports.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature

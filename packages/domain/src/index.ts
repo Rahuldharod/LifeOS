@@ -64,7 +64,8 @@ const ids = z.array(id);
 const contextFields = { primary_project_id: id.optional(), primary_client_id: id.optional(), primary_product_id: id.optional() };
 const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
   "app-setting": envelopeSchema.extend({ type: z.literal("app-setting"), setting_key: z.string().min(1) }),
-  person: envelopeSchema.extend({ type: z.literal("person"), given_name: z.string().min(1), is_self: z.boolean().optional() }),
+  // #38: `identifiers` holds email addresses ({ kind: email, value }); plain strings from hand edits are tolerated.
+  person: envelopeSchema.extend({ type: z.literal("person"), given_name: z.string().min(1), family_name: z.string().optional(), is_self: z.boolean().optional(), identifiers: z.array(z.union([z.string(), z.object({ kind: z.string().min(1), value: z.string().min(1) }).loose()])).optional(), review_state: z.enum(["unreviewed", "reviewed"]).optional(), is_external: z.boolean().optional() }),
   client: envelopeSchema.extend({ type: z.literal("client"), status: z.string().min(1), primary_contact_person_id: id.optional() }),
   product: envelopeSchema.extend({ type: z.literal("product"), status: z.string().min(1), owner_person_id: id.optional() }),
   project: envelopeSchema.extend({ type: z.literal("project"), status: z.string().min(1), owner_person_id: id.optional(), ...contextFields }),
