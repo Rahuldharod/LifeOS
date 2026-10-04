@@ -1,4 +1,4 @@
-import { AdoptionModule } from "./adoption.js";
+import { AdoptionModule, type AutoAdoptionOptions } from "./adoption.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
@@ -14,7 +14,7 @@ import { SystemModule } from "./system.js";
 export type { ExternalChange } from "./history.js";
 export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
-export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
+export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -107,4 +107,6 @@ export class LifeOSApplication {
   // Inbox Drafts (ADR 0007)
   adoptDrafts(options?: { now?: Date }) { return this.adoption.adoptDrafts(options); }
   inboxStatus() { return this.adoption.inboxStatus(); }
+  /** #32: debounced adoption on `_inbox/drafts/` watcher events, retries for half-written drafts, and a periodic sweep. */
+  startAutoAdoption(options?: AutoAdoptionOptions) { return this.adoption.startAutoAdoption(options); }
 }

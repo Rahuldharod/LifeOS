@@ -222,24 +222,15 @@ try {
   await application.rebuildIndex();
   await application.recoverOperations();
   await application.rebuildIndex();
-  // Inbox Drafts (ADR 0007) are adopted at startup and shortly after one lands, but only while this device holds the lease.
-  let adoptTimer: NodeJS.Timeout | undefined;
-  const adopt = async () => {
-    if (!session.status().writeAllowed) return;
-    const batch = await application.adoptDrafts();
-    // Drafts still being written are skipped; look again once the 2-second grace period has passed.
-    if (batch.retrySoon) scheduleAdoption();
-  };
-  const scheduleAdoption = () => {
-    clearTimeout(adoptTimer);
-    adoptTimer = setTimeout(() => void adopt().catch((error) => server.log.error(error)), 2500);
-  };
-  await adopt().catch((error) => server.log.error(error));
+  // Inbox Drafts (ADR 0007, #32) are adopted at startup (which also finishes a batch a crash interrupted), shortly after
+  // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease.
+  const autoAdoption = application.startAutoAdoption({ canWrite: () => session.status().writeAllowed, onError: (error) => server.log.error(error) });
+  await autoAdoption.runNow();
   await server.listen({ host, port });
   let reconcileTimer: NodeJS.Timeout | undefined;
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
     if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
-    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/")) scheduleAdoption(); return; }
+    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/")) autoAdoption.notify(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
     const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();
@@ -250,7 +241,7 @@ try {
   const shutdown = async () => {
     clearInterval(heartbeat);
     clearTimeout(reconcileTimer);
-    clearTimeout(adoptTimer);
+    autoAdoption.stop();
     watcher.close();
     await session.close();
     await server.close();
