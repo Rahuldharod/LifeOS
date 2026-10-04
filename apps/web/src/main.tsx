@@ -19,6 +19,8 @@ import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions } from "./envelope.js";
 import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
+import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
+import { DecisionsPage } from "./DecisionsPage.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -54,7 +56,9 @@ type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeO
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
 type InboxDrafts = { awaiting: number; failed: Array<{ path: string; reason: string }> };
-type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "duplicate" | "failed" | "skipped" }> };
+type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "duplicate" | "failed" | "skipped" }> };
+type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
+type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
 type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus };
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
@@ -63,9 +67,9 @@ type ConnectionSettings = { calendar: { configured: boolean; connected: boolean 
 type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
-type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
+type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
 
-const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
+const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
 
 function formatDate(value: unknown) {
   if (typeof value !== "string") return "—";
@@ -93,25 +97,6 @@ function dateInTimeZone(value: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value;
   return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function addCalendarDays(date: string, days: number) {
-  const value = new Date(`${date}T12:00:00.000Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-function zonedMidnight(date: string, timeZone: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  const target = Date.UTC(year!, month! - 1, day!, 0, 0, 0);
-  let guess = target;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(guess));
-    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((candidate) => candidate.type === type)?.value);
-    const represented = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
-    guess += target - represented;
-  }
-  return new Date(guess);
 }
 
 function dayRange(date: string, timeZone: string) {
@@ -248,7 +233,8 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
   const proposed = (review.frontmatter.proposed_fields ?? {}) as Record<string, unknown>;
   const target = String(review.frontmatter.target_object_type ?? "task");
   const current = (key: string) => String((key.startsWith("primary_") ? review.frontmatter[key] : proposed[key]) ?? "");
-  const editable = reviewEditable[target] ?? [];
+  const editable = review.frontmatter.review_type === "create" ? reviewEditable[target] ?? [] : [];
+  const unresolvedNames = Array.isArray(review.frontmatter.unresolved_references) ? review.frontmatter.unresolved_references as Array<{ field: string; reference: string; problem: string }> : [];
   const [title, setTitle] = useState(review.frontmatter.title);
   const [fields, setFields] = useState<Record<string, string>>(() => Object.fromEntries(editable.map((key) => [key, current(key)])));
   const pending = review.frontmatter.status === "pending";
@@ -273,6 +259,7 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
       {select("primary_client_id", "Client", choices?.clients ?? [])}
       {select("primary_product_id", "Product", choices?.products ?? [])}
     </div>}
+    {unresolvedNames.length > 0 && <p className="review-evidence unresolved">Not linked yet: {unresolvedNames.map((entry) => `${entry.field} "${entry.reference}" (${entry.problem})`).join(", ")}</p>}
     {evidenceEntries.length > 0 && <ul className="review-evidence">
       {evidenceEntries.map((entry, index) => <li key={index}><em>{entry.field}</em>{" "}
         {entry.resolved ? <span>{entry.source_title}</span> : <span className="unresolved">Unresolved source: {entry.source_ref ?? entry.source_id}</span>}
@@ -316,6 +303,8 @@ function App() {
   const [sourceText, setSourceText] = useState("");
   const [health, setHealth] = useState<SystemHealth>();
   const [inboxDrafts, setInboxDrafts] = useState<InboxDrafts>({ awaiting: 0, failed: [] });
+  const [enrichment, setEnrichment] = useState<EnrichmentStatus>({ proposedGaveUp: [], staleWorkOrders: [] });
+  const [appliedPatches, setAppliedPatches] = useState<AppliedPatch[]>([]);
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
@@ -441,6 +430,9 @@ function App() {
       api<ProjectRollup[]>("/api/v1/projects"), api<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
+    setAppliedPatches(await api<AppliedPatch[]>("/api/v1/inbox/patches"));
+    // #44: loaded on its own so a failure here never blanks the other panels.
+    void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
   };
 
   const refreshWorkspace = async (meetingId: string) => {
@@ -671,10 +663,33 @@ function App() {
       const batch = await api<AdoptionBatch>("/api/v1/inbox/adopt", { method: "POST" });
       const count = (outcome: string) => batch.drafts.filter((draft) => draft.outcome === outcome).length;
       await loadCollections();
-      setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
+      setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("applied")} patches applied, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Adoption failed"); }
     finally { setBusy(false); }
   };
+
+  // #44: "Enrich last 48h" writes a Work Order for Claude; the server's message says what happened.
+  const requestEnrichment = async () => {
+    setBusy(true);
+    try {
+      const result = await api<{ message: string }>("/api/v1/enrichment/work-orders", { method: "POST" });
+      await loadCollections();
+      setMessage(result.message);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Enrichment request failed"); }
+    finally { setBusy(false); }
+  };
+
+  const giveUpEnrichment = (meetingId: string) => run(async () => {
+    const meeting = objectLinks.find((object) => object.frontmatter.id === meetingId);
+    if (!meeting) throw new Error("Meeting not found; refresh and try again");
+    await api(`/api/v1/meetings/${meetingId}/enrichment/gave-up`, { method: "POST", body: JSON.stringify({ expectedHash: meeting.contentHash }) });
+    await loadCollections();
+  }, "Stopped waiting for material for this meeting");
+
+  const undoPatch = (patch: AppliedPatch) => run(async () => {
+    await api(`/api/v1/inbox/patches/${patch.auditEventId}/undo`, { method: "POST" });
+    await loadCollections();
+  }, `Undid the change to ${patch.title}`);
 
   const changeTask = (task: LifeObject, changes: Record<string, unknown>) => run(async () => {
     await api(`/api/v1/tasks/${task.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes, expectedHash: task.contentHash }) });
@@ -1046,7 +1061,7 @@ function App() {
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
   useEffect(() => { if (view === "Settings") void loadCalendarCatalog(); }, [view]);
 
-  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
+  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
   const offeredCalendars: CalendarOption[] = calendarCatalog.length
     ? enabledCalendars(calendarCatalog, calendarPrefs)
@@ -1083,6 +1098,9 @@ function App() {
         </div>
         <article className="quick-capture"><span>QUICK CAPTURE</span><div className="capture-row"><input value={capture} onChange={(event) => setCapture(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) submitCapture(); }} placeholder="Capture a task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={submitCapture}>Capture</button></div></article>
         <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>
+        <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void requestEnrichment()}>Enrich last 48h</button></div>
+          {enrichment.staleWorkOrders.length > 0 && <ul className="diagnostics">{enrichment.staleWorkOrders.map((order) => <li key={order.path}>Work Order not processed for {order.ageDays} days: <code>{order.path}</code></li>)}</ul>}
+          {enrichment.proposedGaveUp.map((meeting) => <div className="object-row" key={meeting.meetingId}><i /><div><b>{meeting.title}</b><small>No material 48 hours after the request</small></div><button disabled={busy || readOnly} onClick={() => void giveUpEnrichment(meeting.meetingId)}>Give up</button></div>)}</article>
         <ObjectList title="Overdue" objects={today.overdue} empty="Nothing overdue." />
         <ObjectList title="Due today" objects={today.dueToday} empty="Nothing due today." />
         <ObjectList title="Upcoming priority work" objects={today.upcoming.length ? today.upcoming : today.tasks.filter((task) => task.frontmatter.priority === "High")} empty="No upcoming dated or high-priority work." />
@@ -1241,6 +1259,8 @@ function App() {
         {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
       </>}
 
+      {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
+
       {view === "Clients" && <EntityCrudPage highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
       {view === "Products" && <EntityCrudPage highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
       {view === "People" && <EntityCrudPage highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
@@ -1248,6 +1268,7 @@ function App() {
       {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p><b>{inboxDrafts.awaiting}</b> {inboxDrafts.awaiting === 1 ? "draft" : "drafts"} awaiting adoption</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
+        {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
         {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
       </>}

@@ -322,3 +322,68 @@ describe("dictated decisions and open points", () => {
     expect(await ofType(application, "decision")).toHaveLength(0);
   });
 });
+
+describe("name references on dictated and extracted drafts (#33 resolver)", () => {
+  it("links resolved names on a dictated decision and open point, and raises link-resolution items for the rest", async () => {
+    const { root, application } = await vault();
+    const project = await application.createEntity("project", { title: "Retail media pilot" });
+    const joel = await application.createEntity("person", { title: "Joel" });
+    await dropDraft(root, "decision.md", draft("kind: decision\ndraft_key: rd-1\norigin: user-dictated\ntitle: Pause the pilot\nproject: retail MEDIA pilot\nclient: Unknown Client\npeople:\n  - Joel"));
+    await dropDraft(root, "open.md", draft("kind: open-point\ndraft_key: ro-1\norigin: user-dictated\ntitle: Who signs off?\nowner: Joel"));
+    const batch = await application.adoptDrafts();
+    expect(batch.drafts.map((result) => result.outcome)).toEqual(["adopted", "adopted"]);
+
+    const [decision] = await ofType(application, "decision");
+    expect(decision!.frontmatter).toMatchObject({ status: "active", primary_project_id: project.frontmatter.id, people_ids: [joel.frontmatter.id] });
+    expect(decision!.frontmatter.primary_client_id).toBeUndefined();
+    const linkReviews = application.reviews().filter((review) => review.frontmatter.review_type === "link-resolution");
+    expect(linkReviews).toHaveLength(1);
+    expect(linkReviews[0]!.frontmatter).toMatchObject({ target_object_id: decision!.frontmatter.id, origin: "user-dictated" });
+    expect(batch.drafts[0]!.objectIds).toEqual([decision!.frontmatter.id, linkReviews[0]!.frontmatter.id]);
+
+    // Accepting the link-resolution item links the client through a guarded write; the decision stays active.
+    const client = await application.createEntity("client", { title: "Carrefour" });
+    const linked = await application.acceptReviewItem(linkReviews[0]!.frontmatter.id, { linkTo: client.frontmatter.id });
+    expect(linked.frontmatter).toMatchObject({ primary_client_id: client.frontmatter.id, status: "active" });
+
+    const [open] = await ofType(application, "open-point");
+    expect(open!.frontmatter).toMatchObject({ owner_person_id: joel.frontmatter.id, status: "open" });
+  });
+
+  it("refuses a reference the kind cannot carry", async () => {
+    const { root, application } = await vault();
+    await dropDraft(root, "decision.md", draft("kind: decision\ndraft_key: rd-2\norigin: user-dictated\ntitle: Pause\nowner: Joel"));
+    const [result] = (await application.adoptDrafts()).drafts;
+    expect(result).toMatchObject({ outcome: "failed" });
+    expect(result!.reason).toMatch(/owner: not used on a decision/);
+  });
+
+  it("puts resolved links on an extracted proposal and keeps unresolved names visible, without link-resolution items", async () => {
+    const { root, application } = await vault();
+    const project = await application.createEntity("project", { title: "Retail media pilot" });
+    const joel = await application.createEntity("person", { title: "Joel" });
+    const anne = await application.createEntity("person", { title: "Anne" });
+    await dropDraft(root, "task.md", draft("kind: task\ndraft_key: rx-1\norigin: agent-extracted\ntitle: Send the deck\nconfidence: High\nstatus: Waiting\nproject: Retail media pilot\nowner: Joel\nwaiting_for: Anne\nclient: Unknown Client\nevidence:\n  - field: owner\n    source: Transcript\n    locator: \"00:01:00\""));
+    expect((await application.adoptDrafts()).drafts[0]!.outcome).toBe("adopted");
+    expect(application.reviews().filter((review) => review.frontmatter.review_type === "link-resolution")).toHaveLength(0);
+    const [review] = application.reviews();
+    expect(review!.frontmatter).toMatchObject({ primary_project_id: project.frontmatter.id, unresolved_references: [expect.objectContaining({ field: "client", reference: "Unknown Client", problem: "unknown" })] });
+    expect(review!.frontmatter.proposed_fields).toMatchObject({ owner_person_id: joel.frontmatter.id, waiting_for_person_id: anne.frontmatter.id });
+    expect(application.reviewEvidence(review!.frontmatter.id).owner).toEqual([expect.objectContaining({ resolved: false, source_ref: "Transcript" })]);
+
+    const client = await application.createEntity("client", { title: "Carrefour" });
+    const edited = await application.updateReviewFields(review!.frontmatter.id, { primary_client_id: client.frontmatter.id });
+    expect(edited.frontmatter.unresolved_references).toEqual([]);
+
+    const task = await application.acceptReviewItem(review!.frontmatter.id);
+    expect(task.frontmatter).toMatchObject({ origin: "agent-extracted", status: "Waiting", owner_person_id: joel.frontmatter.id, waiting_for_person_id: anne.frontmatter.id, primary_project_id: project.frontmatter.id, primary_client_id: client.frontmatter.id });
+  });
+
+  it("refuses field edits on a link-resolution item", async () => {
+    const { root, application } = await vault();
+    await dropDraft(root, "task.md", draft("kind: task\ndraft_key: rl-1\norigin: user-dictated\ntitle: Call\nproject: Nowhere"));
+    await application.adoptDrafts();
+    const linkReview = application.reviews().find((review) => review.frontmatter.review_type === "link-resolution");
+    await expect(application.updateReviewFields(linkReview!.frontmatter.id, { priority: "High" })).rejects.toThrow(/priority: cannot be edited/);
+  });
+});

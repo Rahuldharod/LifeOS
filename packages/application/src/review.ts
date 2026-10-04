@@ -54,9 +54,11 @@ export class ReviewModule {
     return created;
   }
 
-  async acceptReviewItem(reviewId: string) {
+  /** `linkTo` is the object chosen for a `link-resolution` item; other review types ignore it. */
+  async acceptReviewItem(reviewId: string, options: { linkTo?: string } = {}) {
     const { ctx } = this;
     const review = ctx.required(reviewId, "review-item");
+    if (review.frontmatter.review_type === "link-resolution") return this.acceptLinkResolution(review, options.linkTo);
     if (review.frontmatter.status === "accepted" && typeof review.frontmatter.resolved_object_id === "string") {
       if (typeof review.frontmatter.operation_id === "string") await ctx.objects.completeOperation?.(review.frontmatter.operation_id);
       return ctx.required(review.frontmatter.resolved_object_id);
@@ -74,11 +76,11 @@ export class ReviewModule {
     if (!folder) throw new Error(`Unsupported review target: ${targetType}`);
     // Proposed fields carried over as they stand after the user's edits.
     const pick = (keys: string[]) => Object.fromEntries(keys.filter((key) => proposed[key] !== undefined).map((key) => [key, proposed[key]]));
-    const extras = pick(["area", "sensitivity", "subjects", "tags", "captured_at"]);
+    const extras = pick(["area", "sensitivity", "subjects", "tags", "captured_at", "people_ids"]);
     const ownerId = typeof proposed.owner_person_id === "string" ? proposed.owner_person_id : owner.frontmatter.id;
     const common = { source_meeting_id: review.frontmatter.source_meeting_id, source_ids: review.frontmatter.source_ids ?? [], primary_client_id: review.frontmatter.primary_client_id, primary_product_id: review.frontmatter.primary_product_id, primary_project_id: review.frontmatter.primary_project_id };
     const fields = targetType === "task"
-      ? { status: proposed.status ?? "Inbox", owner_person_id: ownerId, ...pick(["priority", "due_on", "due_at", "due_timezone", "expected_output", "completed_at", "cancelled_at"]), ...extras, ...common }
+      ? { status: proposed.status ?? "Inbox", owner_person_id: ownerId, ...pick(["priority", "due_on", "due_at", "due_timezone", "expected_output", "completed_at", "cancelled_at", "waiting_for_person_id"]), ...extras, ...common }
       : targetType === "decision"
         ? { status: "active", decision_text: proposed.decision_text ?? title, decided_at: proposed.decided_at ?? now, ...extras, ...common }
         : targetType === "open-point"
@@ -96,6 +98,34 @@ export class ReviewModule {
     return created;
   }
 
+  /**
+   * Sets the chosen link on the target through a guarded write (revision + content hash of the version
+   * just read), appending for list fields. Idempotent: an accepted item returns the target unchanged.
+   */
+  private async acceptLinkResolution(review: LifeOSObject, linkTo: string | undefined) {
+    const { ctx } = this;
+    const targetId = String(review.frontmatter.target_object_id);
+    if (review.frontmatter.status === "accepted") return ctx.required(targetId);
+    if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
+    const proposed = review.frontmatter.proposed_fields as { link_field: string; list?: boolean; candidate_type: ObjectEnvelope["type"]; candidates?: Array<{ id: string }> };
+    const candidates = proposed.candidates ?? [];
+    const chosenId = linkTo ?? (candidates.length === 1 ? candidates[0]!.id : undefined);
+    if (!chosenId) throw new Error(`Choose the ${proposed.candidate_type} to link`);
+    const chosen = ctx.index.get(chosenId);
+    if (!chosen || chosen.frontmatter.type !== proposed.candidate_type || chosen.frontmatter.deleted_at) throw new Error(`Choose an existing ${proposed.candidate_type} to link`);
+    const target = ctx.required(targetId);
+    if (target.frontmatter.deleted_at) throw new Error("The object to link was deleted");
+    const current = target.frontmatter[proposed.link_field];
+    const value = proposed.list ? [...(Array.isArray(current) ? current as string[] : []).filter((id) => id !== chosenId), chosenId] : chosenId;
+    const now = new Date().toISOString();
+    const unchanged = proposed.list ? Array.isArray(current) && current.includes(chosenId) : current === chosenId;
+    const updated = unchanged ? target : await ctx.update(target, { [proposed.link_field]: value }, { expectedHash: target.contentHash, now });
+    await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, chosen_object_id: chosenId }, { expectedHash: review.contentHash, now });
+    await ctx.writeAudit("review.accepted", targetId, now, { review_id: review.frontmatter.id, link_field: proposed.link_field, linked_object_id: chosenId });
+    await ctx.rebuildIndex();
+    return updated;
+  }
+
   updateReviewTitle(reviewId: string, title: string) {
     return this.updateReviewFields(reviewId, { title });
   }
@@ -109,7 +139,8 @@ export class ReviewModule {
     const review = ctx.required(reviewId, "review-item");
     if (review.frontmatter.status !== "pending") throw new Error("Only pending review items can be edited");
     const target = String(review.frontmatter.target_object_type);
-    const allowed = editableFields[target] ?? ["title"];
+    // Only create proposals have fields to edit; other review types (link-resolution, …) keep just the title.
+    const allowed = review.frontmatter.review_type === "create" ? editableFields[target] ?? ["title"] : ["title"];
     const proposed = { ...review.frontmatter.proposed_fields as Record<string, unknown> };
     const links: Record<string, unknown> = {};
     const issues: string[] = [];
@@ -144,7 +175,12 @@ export class ReviewModule {
     const title = String(proposed.title ?? review.frontmatter.title);
     const titleChanged = title !== review.frontmatter.title;
     const now = new Date().toISOString();
-    const updated = await ctx.update(review, { title, proposed_fields: proposed, ...links }, { expectedHash: review.contentHash, now, ...(titleChanged ? { body: proposalBody(title, target === "knowledge-note" ? undefined : proposed.body) } : {}) });
+    // A name the adopter could not resolve is settled once the user sets (or clears) the field it was meant for.
+    const settled: Record<string, string> = { owner_person_id: "owner", primary_project_id: "project", primary_client_id: "client", primary_product_id: "product" };
+    const edited = new Set(Object.keys(changes).map((key) => settled[key]).filter(Boolean));
+    const pendingNames = Array.isArray(review.frontmatter.unresolved_references) ? (review.frontmatter.unresolved_references as Array<{ field?: string }>) : undefined;
+    const remaining = pendingNames && edited.size ? { unresolved_references: pendingNames.filter((entry) => !edited.has(String(entry.field))) } : {};
+    const updated = await ctx.update(review, { title, proposed_fields: proposed, ...links, ...remaining }, { expectedHash: review.contentHash, now, ...(titleChanged ? { body: proposalBody(title, target === "knowledge-note" ? undefined : proposed.body) } : {}) });
     await ctx.rebuildIndex();
     return updated;
   }

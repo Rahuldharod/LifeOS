@@ -174,7 +174,7 @@ server.post<{ Params: { id: string }; Body: { sensitivity?: "normal" | "restrict
   return application.setSensitivity(request.params.id, request.body.sensitivity, request.body.expectedHash);
 });
 server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (request) => application.processMeeting(request.params.id));
-server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id));
+server.post<{ Params: { id: string }; Body: { linkTo?: string } | undefined }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
 // Edits a pending proposal: title, owner, due, priority and context links (#34); `null` clears a field.
 server.patch<{ Params: { id: string }; Body: ReviewEdits }>("/api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));
 server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/reject", async (request) => application.rejectReviewItem(request.params.id));
@@ -186,10 +186,33 @@ server.get<{ Querystring: { q?: string } }>("/api/v1/knowledge", async (request)
 server.post<{ Body: { title: string; text: string } }>("/api/v1/sources/text", async (request) => application.ingestTextSource(request.body.title, request.body.text));
 server.get<{ Params: { type: "client" | "product" | "person" } }>("/api/v1/rollups/:type", async (request) => application.rollups(request.params.type));
 server.get("/api/v1/projects", async () => application.projects());
+// #41 Decisions workspace. Filters: projectId, clientId, productId, personId, status, from/to (ISO instants on decided_at).
+server.get<{ Querystring: { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string } }>("/api/v1/decisions", async (request) => application.decisions(request.query));
+server.get<{ Params: { id: string } }>("/api/v1/decisions/:id", async (request) => application.decision(request.params.id));
+server.post<{ Body: { fields?: Record<string, unknown> } }>("/api/v1/decisions", async (request, reply) => {
+  if (!request.body?.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields are required" });
+  return application.createDecision(request.body.fields);
+});
+server.patch<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/decisions/:id", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
+  return application.updateDecision(request.params.id, request.body.fields, request.body.expectedHash);
+});
+server.post<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/decisions/:id/supersede", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
+  return application.supersedeDecision(request.params.id, request.body.fields, request.body.expectedHash);
+});
 // Each item carries its evidence per field, with sources looked up now (missing ones come back unresolved).
 server.get("/api/v1/review-items", async () => application.reviews().map((review) => ({ ...review, evidence: application.reviewEvidence(review.frontmatter.id) })));
 server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());
 server.post("/api/v1/inbox/adopt", async () => application.adoptDrafts());
+server.get("/api/v1/enrichment", async () => application.enrichmentStatus());
+server.post("/api/v1/enrichment/work-orders", async () => application.requestEnrichment());
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/meetings/:id/enrichment/gave-up", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.markEnrichmentGaveUp(request.params.id, request.body.expectedHash);
+});
+server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
+server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
 server.get("/api/v1/backups", async () => backups.list());
 server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
@@ -224,7 +247,7 @@ try {
   await application.rebuildIndex();
   await application.recoverOperations();
   await application.rebuildIndex();
-  // Inbox Drafts (ADR 0007) are adopted at startup and shortly after one lands, but only while this device holds the lease.
+  // Inbox Drafts and Patch Drafts (ADR 0007) are adopted at startup and shortly after one lands, but only while this device holds the lease.
   let adoptTimer: NodeJS.Timeout | undefined;
   const adopt = async () => {
     if (!session.status().writeAllowed) return;
@@ -241,7 +264,7 @@ try {
   let reconcileTimer: NodeJS.Timeout | undefined;
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
     if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
-    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/")) scheduleAdoption(); return; }
+    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/") || filename.startsWith("_inbox/patches/")) scheduleAdoption(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
     const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();

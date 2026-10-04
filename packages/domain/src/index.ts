@@ -59,6 +59,10 @@ export const taskSchema = envelopeSchema.extend({
   if (task.dependency_ids?.includes(task.id)) context.addIssue({ code: "custom", message: "A task cannot depend on itself" });
 });
 
+/** Decision lifecycle (#41): `active` → `superseded` (via Supersede) or `reversed`; both are final. */
+export const decisionStatuses = ["active", "superseded", "reversed"] as const;
+export type DecisionStatus = typeof decisionStatuses[number];
+
 const id = z.uuid();
 const ids = z.array(id);
 const contextFields = { primary_project_id: id.optional(), primary_client_id: id.optional(), primary_product_id: id.optional() };
@@ -67,7 +71,8 @@ const evidenceSchema = z.object({ source_id: id.optional(), source_ref: z.string
   .refine((entry) => entry.source_id !== undefined || entry.source_ref !== undefined, "evidence needs a source_id or a source_ref");
 const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
   "app-setting": envelopeSchema.extend({ type: z.literal("app-setting"), setting_key: z.string().min(1) }),
-  person: envelopeSchema.extend({ type: z.literal("person"), given_name: z.string().min(1), is_self: z.boolean().optional() }),
+  // #38: `identifiers` holds email addresses ({ kind: email, value }); plain strings from hand edits are tolerated.
+  person: envelopeSchema.extend({ type: z.literal("person"), given_name: z.string().min(1), family_name: z.string().optional(), is_self: z.boolean().optional(), identifiers: z.array(z.union([z.string(), z.object({ kind: z.string().min(1), value: z.string().min(1) }).loose()])).optional(), review_state: z.enum(["unreviewed", "reviewed"]).optional(), is_external: z.boolean().optional() }),
   client: envelopeSchema.extend({ type: z.literal("client"), status: z.string().min(1), primary_contact_person_id: id.optional() }),
   product: envelopeSchema.extend({ type: z.literal("product"), status: z.string().min(1), owner_person_id: id.optional() }),
   project: envelopeSchema.extend({ type: z.literal("project"), status: z.string().min(1), owner_person_id: id.optional(), ...contextFields }),
@@ -75,7 +80,10 @@ const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
   "meeting-note": envelopeSchema.extend({ type: z.literal("meeting-note"), meeting_id: id, people_ids: ids.optional(), source_ids: ids.optional(), asset_ids: ids.optional(), ...contextFields }),
   "knowledge-note": envelopeSchema.extend({ type: z.literal("knowledge-note"), source_ids: ids.min(1), related_object_ids: ids.optional() }),
   source: envelopeSchema.extend({ type: z.literal("source"), source_type: z.string().min(1), captured_at: z.iso.datetime(), ingestion_status: z.enum(["captured", "processed", "failed"]), fragments: z.array(z.object({ id: z.string().min(1), text: z.string(), locator: z.record(z.string(), z.unknown()).optional() })).optional() }),
-  decision: envelopeSchema.extend({ type: z.literal("decision"), status: z.enum(["active", "superseded", "reversed"]), decision_text: z.string().min(1), decided_at: z.iso.datetime(), supersedes_decision_id: id.optional(), source_ids: ids.optional(), ...contextFields }).refine((value) => value.supersedes_decision_id !== value.id, "A decision cannot supersede itself"),
+  decision: envelopeSchema.extend({ type: z.literal("decision"), status: z.enum(decisionStatuses), decision_text: z.string().min(1), rationale: z.string().optional(), decided_at: z.iso.datetime(), supersedes_decision_id: id.optional(), superseded_by_decision_id: id.optional(), source_meeting_id: id.optional(), source_ids: ids.optional(), people_ids: ids.optional(), ...contextFields }).superRefine((value, context) => {
+    if (value.supersedes_decision_id === value.id || value.superseded_by_decision_id === value.id) context.addIssue({ code: "custom", message: "A decision cannot supersede itself" });
+    if (value.superseded_by_decision_id && value.status !== "superseded") context.addIssue({ code: "custom", message: "superseded_by_decision_id is allowed only for superseded decisions" });
+  }),
   "open-point": envelopeSchema.extend({ type: z.literal("open-point"), status: z.enum(["open", "resolved", "closed"]), source_ids: ids.optional(), ...contextFields }),
   "review-item": envelopeSchema.extend({ type: z.literal("review-item"), review_type: z.string().min(1), target_object_type: z.enum(objectTypes), proposed_fields: z.record(z.string(), z.unknown()), field_evidence: z.record(z.string(), z.array(evidenceSchema)).optional(), confidence_label: z.enum(["High", "Medium", "Low"]), status: z.enum(["pending", "accepted", "rejected"]), operation_id: id }),
   "agent-run": envelopeSchema.extend({ type: z.literal("agent-run"), operation: z.string().min(1), provider: z.string().min(1), model: z.string().min(1), prompt_version: z.string().min(1), status: z.enum(["running", "succeeded", "failed"]), started_at: z.iso.datetime(), completed_at: z.iso.datetime().optional(), related_object_ids: ids.optional() }),
@@ -113,6 +121,21 @@ export function envelopeWriteProblem(next: { origin?: unknown; sensitivity?: unk
   if (previous && originOf(next) !== originOf(previous)) return `Origin cannot change (was ${originOf(previous)}, got ${String(next.origin)})`;
   if (next.sensitivity !== undefined && !sensitivities.includes(next.sensitivity as Sensitivity)) return `Sensitivity must be normal or restricted, got "${String(next.sensitivity)}"`;
   if (next.area !== undefined && !isArea(next.area) && next.area !== previous?.area) return areaProblem(next.area);
+  return undefined;
+}
+
+/**
+ * Lifecycle rules for an app write, given the previous front matter (`undefined` when new), which a
+ * single-file schema cannot check. Decisions start `active`; only `active` may move, to `superseded`
+ * or `reversed`; the supersede links, once written, never change. Open points (#42) belong here too.
+ */
+export function lifecycleWriteProblem(next: Record<string, unknown>, previous?: Record<string, unknown>): string | undefined {
+  if (next.type !== "decision") return undefined;
+  if (!previous) return next.status === "active" ? undefined : `A new decision must be active, got "${String(next.status)}"`;
+  if (next.status !== previous.status && previous.status !== "active") return `A ${String(previous.status)} decision is final and cannot become ${String(next.status)}`;
+  if (previous.supersedes_decision_id !== undefined && next.supersedes_decision_id !== previous.supersedes_decision_id) return "supersedes_decision_id cannot change once set";
+  if (previous.supersedes_decision_id === undefined && next.supersedes_decision_id !== undefined) return "supersedes_decision_id can only be set when the decision is created";
+  if (previous.superseded_by_decision_id !== undefined && next.superseded_by_decision_id !== previous.superseded_by_decision_id) return "superseded_by_decision_id cannot change once set";
   return undefined;
 }
 
