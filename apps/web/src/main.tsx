@@ -33,6 +33,7 @@ import { contextLinkFields } from "@lifeos/shared";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, type Today, type TodayPanels } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
+import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
 
 type CrepeInstance = {
@@ -74,7 +75,6 @@ type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diag
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
 type GoogleConnection = { configured: boolean; connected: boolean; provider: string; missing?: string[]; reason?: "expired"; lastSuccessfulSyncAt?: string; lastError?: string };
-type ConnectionSettings = { calendar: { configured: boolean; connected: boolean }; drive: { configured: boolean; connected: boolean } };
 type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
@@ -355,7 +355,7 @@ function App() {
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   // PB-022a: a failed load or sync is shown in the timeline instead of an "empty day".
   const [calendarError, setCalendarError] = useState<string>();
-  const [connectionSettings, setConnectionSettings] = useState<ConnectionSettings>();
+  const [connections, setConnections] = useState<ConnectionsState>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
   const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), storedDisplayTimeZone()));
@@ -472,12 +472,14 @@ function App() {
   const loadCollections = async () => {
     // Without labels, badges fall back to full titles rather than failing the whole load.
     const labelsRequest = api<PersonLabel[]>("/api/v1/people/labels").catch(() => [] as PersonLabel[]);
-    const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
+    const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
       api<Today>(`/api/v1/today?date=${dateInTimeZone(new Date(), displayTimeZone)}`), api<LifeObject[]>("/api/v1/tasks"),
-      api<ProjectRollup[]>("/api/v1/projects"), api<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
+      api<ProjectRollup[]>("/api/v1/projects"), api<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
-    setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
+    setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
     setAppliedPatches(await api<AppliedPatch[]>("/api/v1/inbox/patches"));
+    // #77: loaded on its own; a Keychain problem only shows on the Connections card, never fails a load or a save.
+    void loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections"), connections?.settings).then(setConnections);
     // #44: loaded on its own so a failure here never blanks the other panels.
     void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
     // #48: likewise; it may wait on the calendar, so it never holds up the rest of the page.
@@ -528,7 +530,7 @@ function App() {
 
   useEffect(() => {
     void loadCalendarCatalog();
-    Promise.all([api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection), loadCollections()])
+    Promise.all([api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), loadCollections()])
       .then(async () => {
         const meetingId = localStorage.getItem("lifeos.activeMeetingId");
         if (view === "Calendar" && meetingId) await refreshWorkspace(meetingId).catch(() => localStorage.removeItem("lifeos.activeMeetingId"));
@@ -830,10 +832,15 @@ function App() {
 
   const saveGoogleSecrets = (provider: "calendar" | "drive", clientId: string, clientSecret: string) => run(async () => {
     await api(`/api/v1/settings/connections/google/${provider}`, { method: "POST", body: JSON.stringify({ clientId, clientSecret }) });
-    const settings = await api<ConnectionSettings>("/api/v1/settings/connections");
-    setConnectionSettings(settings);
+    setConnections(await loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections"), connections?.settings));
     if (provider === "calendar") setGoogleConnection(await api<GoogleConnection>("/api/v1/connections/google"));
   }, `Google ${provider} credentials saved to Keychain`);
+
+  /** #77: after a denied Keychain prompt; reads the secrets again, so macOS may ask once more. */
+  const retryConnections = async () => {
+    setConnections(await loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections/retry", { method: "POST" }), connections?.settings));
+    void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
+  };
 
   function insertMarkdown(before: string, after = "", placeholder = "text") {
     const area = editor.current;
@@ -1385,7 +1392,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendarCatalog} calendarCatalogLoaded={calendarCatalogLoaded} calendarPrefs={calendarPrefs} onLoadCalendars={loadCalendarCatalog} onSaveCalendarPrefs={saveCalendarPrefs} connectionSettings={connectionSettings} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={loadCollections} />}
+      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendarCatalog} calendarCatalogLoaded={calendarCatalogLoaded} calendarPrefs={calendarPrefs} onLoadCalendars={loadCalendarCatalog} onSaveCalendarPrefs={saveCalendarPrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={loadCollections} />}
     </section>
   </main>;
 }

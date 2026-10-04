@@ -58,6 +58,9 @@ export class GoogleCalendarConnector implements CalendarConnector {
     this.clientSecretReference = options.clientSecretReference ?? `google:${this.accountKey}:client-secret`;
   }
 
+  /** True after Google rejected the stored tokens; lets status be answered without reading them (#77). */
+  get authExpired() { return this.authFailure?.reason === "expired"; }
+
   async status(): Promise<{ configured: boolean; connected: boolean; provider: string; reason?: "expired" }> {
     const hasTokens = Boolean(await this.options.secrets.get(this.ref("tokens")));
     if (hasTokens && this.authFailure?.reason === "expired") return { configured: true, connected: false, provider: "google", reason: "expired" };

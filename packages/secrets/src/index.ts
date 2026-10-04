@@ -15,6 +15,59 @@ export class MemorySecretStore implements SecretStore {
   async set(reference: string, value: string) { this.values.set(reference, value); }
 }
 
+/**
+ * The user clicked Deny on a macOS Keychain prompt (errSecUserCanceled, -128). Not a crash: the server shows
+ * "Keychain access denied" with a Retry on the Connections card and answers 403 to the action that needed it (#77).
+ */
+export class KeychainAccessDeniedError extends Error {
+  override readonly name = "KeychainAccessDeniedError";
+  constructor() { super("Keychain access denied"); }
+}
+
+/** Matched by name, so callers need no adapter classes (as `httpError` does). */
+export const isKeychainAccessDenied = (error: unknown) => error instanceof Error && error.name === "KeychainAccessDeniedError";
+
+/**
+ * A SecretStore that remembers which secrets exist, as last seen through it, so status can be answered
+ * without reading a secret value (each read may show a Keychain prompt) (#77).
+ * Presence comes from the startup probe and from every later read or write; the values are not kept.
+ */
+export class KnownSecrets implements SecretStore {
+  private readonly present = new Map<string, boolean>();
+  private denied = false;
+  constructor(private readonly inner: SecretStore) {}
+
+  /** Whether the secret exists; undefined when it was never read or written in this process. Never touches the Keychain. */
+  has(reference: string) { return this.present.get(reference); }
+  /** True after a denied Keychain prompt, until a later read or write succeeds. */
+  get keychainDenied() { return this.denied; }
+
+  async get(reference: string) {
+    const value = await this.track(() => this.inner.get(reference));
+    this.present.set(reference, Boolean(value));
+    return value;
+  }
+
+  async set(reference: string, value: string) {
+    await this.track(() => this.inner.set(reference, value));
+    this.present.set(reference, true);
+  }
+
+  private async track<T>(operation: () => Promise<T>) {
+    try {
+      const result = await operation();
+      this.denied = false;
+      return result;
+    } catch (error) {
+      if (isKeychainAccessDenied(error)) this.denied = true;
+      throw error;
+    }
+  }
+}
+
+/** The helper reports Keychain failures as "... failed (<OSStatus>)"; -128 is errSecUserCanceled. */
+const userCanceled = (output: string) => /\(-128\)/.test(output);
+
 export interface KeychainHelperOptions {
   /** Defaults to the current user's home; tests pass a temporary folder. */
   homeDir?: string;
@@ -104,6 +157,7 @@ export class MacOSKeychainSecretStore implements SecretStore {
     } catch (error) {
       const code = (error as { code?: number }).code;
       if (code === 44) return undefined;
+      if (userCanceled(String((error as { stderr?: unknown }).stderr ?? ""))) throw new KeychainAccessDeniedError();
       throw error;
     }
   }
@@ -116,7 +170,7 @@ export class MacOSKeychainSecretStore implements SecretStore {
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk) => { errorOutput += chunk; });
       child.once("error", reject);
-      child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`Keychain write failed (${code}): ${errorOutput.trim()}`)));
+      child.once("close", (code) => code === 0 ? resolve() : reject(userCanceled(errorOutput) ? new KeychainAccessDeniedError() : new Error(`Keychain write failed (${code}): ${errorOutput.trim()}`)));
       child.stdin.end(value);
     });
   }
