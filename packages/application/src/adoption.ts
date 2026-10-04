@@ -1,5 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
+import type { MeetingsModule } from "./meetings.js";
+import { MeetingMaterialModule } from "./meeting-material.js";
 import type { PatchModule } from "./patches.js";
 import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
 import { internalDomainsOf, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
@@ -43,6 +45,9 @@ export interface AdoptionRun {
   now: string;
   self(): Promise<LifeOSObject>;
 }
+
+/** Options for `proposeExtracted` when another handler reuses it (#45): extra Review Item fields, its ID, or validation only. */
+export interface ProposeOptions { extra?: Record<string, unknown>; newId?: () => string; dryRun?: boolean }
 
 /** Writes the objects for one draft and returns their IDs. Throw `DraftError` for anything the Agent must fix. */
 export type DraftHandler = (draft: ParsedDraft, run: AdoptionRun) => Promise<string[]>;
@@ -132,7 +137,8 @@ export class AdoptionModule {
     "decision:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
     "open-point:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
     "person:user-dictated": (draft, run) => this.adoptPerson(draft, run),
-    "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run)
+    "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run),
+    "meeting-material:agent-extracted": (draft, run) => this.material.adopt(draft, run)
   };
   private personMerges?: PersonMergeModule;
   /** Unparsable drafts by name → content hash: the first sighting may be a partial sync, so it is skipped once. */
@@ -141,8 +147,13 @@ export class AdoptionModule {
   private queue: Promise<unknown> = Promise.resolve();
 
   private readonly resolver: ReferenceResolver;
+  /** #45: `meeting-material` drafts; its proposals go through `proposeExtracted` like any extracted draft. */
+  private readonly material: MeetingMaterialModule;
 
-  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore, private readonly patches?: PatchModule) { this.resolver = new ReferenceResolver(ctx); }
+  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore, private readonly patches?: PatchModule, meetings?: MeetingsModule) {
+    this.resolver = new ReferenceResolver(ctx);
+    this.material = new MeetingMaterialModule(ctx, this.resolver, (draft, run, options) => this.proposeExtracted(draft, run, options), meetings);
+  }
 
   adoptDrafts(options: { now?: Date } = {}): Promise<AdoptionBatch> {
     const next = this.queue.then(() => this.runBatch(options.now ?? new Date()));
@@ -380,7 +391,7 @@ export class AdoptionModule {
    * `agent-extracted` task, decision or open point: a pending create-type Review Item, never the object itself
    * (PRD story 3). Proposed fields keep the Agent's wording and language verbatim; nothing is translated.
    */
-  private async proposeExtracted(draft: ParsedDraft, run: AdoptionRun) {
+  private async proposeExtracted(draft: ParsedDraft, run: AdoptionRun, options: ProposeOptions = {}) {
     const { fields: raw } = draft;
     const { issues, fields, links, unresolved } = this.kindFields(draft);
     const confidence = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === text(raw.confidence).toLowerCase());
@@ -394,8 +405,9 @@ export class AdoptionModule {
     const proposed: Record<string, unknown> = { title: draft.title, ...fields, ...personLinks, ...(narrative ? { body: narrative } : {}) };
     const evidence = this.evidence(raw.evidence, proposed, issues);
     if (issues.length) throw new DraftError(issues);
+    if (options.dryRun) return [];
 
-    const id = uuidV7();
+    const id = options.newId?.() ?? uuidV7();
     const sourceIds = [...new Set(Object.values(evidence).flat().flatMap((entry) => entry.source_id ? [entry.source_id] : []))];
     await this.ctx.objects.write({
       relativePath: `review-items/${markdownFileName(draft.title, id, run.now)}`,
@@ -407,6 +419,7 @@ export class AdoptionModule {
         // Names that matched nothing or several objects stay visible here; the user picks the link while editing
         // the proposal, so no separate link-resolution item is raised for an object that does not exist yet.
         ...(unresolved.length ? { unresolved_references: unresolved } : {}),
+        ...options.extra,
         // U7: generated here, at adoption, never taken from the draft.
         operation_id: uuidV7()
       },
@@ -443,13 +456,13 @@ export class AdoptionModule {
     return evidence;
   }
 
-  /** An exact match only (ID, folded title, or URL); none or several matches stay unresolved rather than guessed. */
+  /** An exact match only (ID, folded title, URL, or a source's external ID); none or several matches stay unresolved rather than guessed. */
   private resolveSource(reference: string) {
     const byId = this.ctx.index.get(reference);
     if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id;
     const folded = foldForSearch(reference);
     const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
-      && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference));
+      && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference || (object.frontmatter.type === "source" && object.frontmatter.external_id === reference)));
     return matches.length === 1 ? matches[0]!.frontmatter.id : undefined;
   }
 

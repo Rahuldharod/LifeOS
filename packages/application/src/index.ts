@@ -52,9 +52,9 @@ export class LifeOSApplication {
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.patches = new PatchModule(ctx);
-    this.adoption = new AdoptionModule(ctx, inbox, this.patches);
     this.people = new PeopleModule(ctx);
     this.meetings = new MeetingsModule(ctx, this.people);
+    this.adoption = new AdoptionModule(ctx, inbox, this.patches, this.meetings);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
     this.decisionsModule = new DecisionsModule(ctx);

@@ -1,6 +1,7 @@
 import { originOf, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { isCalendarDate, proposalBody, toUtc } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
+import { acceptSummary, summaryReviewType } from "./meeting-material.js";
 import type { MeetingsModule } from "./meetings.js";
 import { PersonMergeModule, personMergeReviewType } from "./person-merge.js";
 
@@ -63,6 +64,7 @@ export class ReviewModule {
     const review = ctx.required(reviewId, "review-item");
     if (review.frontmatter.review_type === personMergeReviewType) return this.merges.accept(review);
     if (review.frontmatter.review_type === "link-resolution") return this.acceptLinkResolution(review, options.linkTo);
+    if (review.frontmatter.review_type === summaryReviewType) return acceptSummary(ctx, review);
     if (review.frontmatter.status === "accepted" && typeof review.frontmatter.resolved_object_id === "string") {
       if (typeof review.frontmatter.operation_id === "string") await ctx.objects.completeOperation?.(review.frontmatter.operation_id);
       return ctx.required(review.frontmatter.resolved_object_id);
