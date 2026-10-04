@@ -28,6 +28,7 @@ import { awaitingAdoptionLabel, daysBetween } from "./todayPanels.js";
 import { CappedRows, GiveUpRow, LivePanel, WaitingGroupRow, type WaitingGroup } from "./TodayLists.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
+import { reviewInFlight } from "./reviewInFlight.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -739,14 +740,16 @@ function App() {
     } finally { setBusy(false); }
   };
 
-  const accept = (review: LifeObject) => run(async () => {
+  // #62: one accept or reject per Review Item at a time, even for clicks faster than a re-render.
+  const reviewRequests = useRef(reviewInFlight()).current;
+  const accept = (review: LifeObject) => reviewRequests.run(review.frontmatter.id, () => run(async () => {
     await api(`/api/v1/review-items/${review.frontmatter.id}/accept`, { method: "POST" });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
-  }, acceptToast(review.frontmatter));
+  }, acceptToast(review.frontmatter)));
 
   /** #57: like `run`, but rethrows so the link card shows the server's error itself (role=alert). */
-  const reviewStep = async (action: () => Promise<unknown>, success: string) => {
+  const reviewStep = (reviewId: string, action: () => Promise<unknown>, success: string) => reviewRequests.run(reviewId, async () => {
     setBusy(true);
     try {
       await action();
@@ -754,18 +757,18 @@ function App() {
       await loadCollections();
       setMessage(success);
     } finally { setBusy(false); }
-  };
+  }).then(() => undefined);
   const linkActionsFor = (reviewId: string): LinkCardActions => ({
-    onLink: (linkTo) => reviewStep(() => acceptLink(api, reviewId, linkTo), "Link saved"),
+    onLink: (linkTo) => reviewStep(reviewId, () => acceptLink(api, reviewId, linkTo), "Link saved"),
     onCreate: async (type, title) => { setBusy(true); try { return await createLinkTarget(api, type, title); } finally { setBusy(false); } },
-    onReject: () => reviewStep(() => api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" }), "Proposal rejected")
+    onReject: () => reviewStep(reviewId, () => api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" }), "Proposal rejected")
   });
 
-  const reject = (reviewId: string) => run(async () => {
+  const reject = (reviewId: string) => reviewRequests.run(reviewId, () => run(async () => {
     await api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
-  }, "Proposal rejected");
+  }, "Proposal rejected"));
 
   const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
     await api(`/api/v1/review-items/${reviewId}`, { method: "PATCH", body: JSON.stringify(changes) });
