@@ -89,7 +89,7 @@ export class ReviewModule {
         ? { status: "active", decision_text: proposed.decision_text ?? title, decided_at: proposed.decided_at ?? now, ...extras, ...common }
         : targetType === "open-point"
           ? { status: proposed.status ?? "open", owner_person_id: ownerId, ...extras, ...common }
-          : { source_ids: review.frontmatter.source_ids ?? [], related_object_ids: [] };
+          : { ...extras, source_ids: review.frontmatter.source_ids ?? [], related_object_ids: [] };
     const narrative = typeof proposed.body === "string" ? proposed.body.trim() : "";
     const body = targetType === "knowledge-note" && typeof proposed.body === "string" ? proposed.body : `# ${title}\n${narrative ? `\n${narrative}\n` : ""}`;
     // The created object keeps where the proposal came from: agent-extracted proposals stay agent-extracted (ADR 0010).
