@@ -14,7 +14,7 @@
   ],
   "$defs": {
     "base": { "allOf": [{ "$ref": "common.schema.json" }], "type": "object" },
-    "person": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "person" }, "given_name": { "type": "string" }, "is_self": { "type": "boolean" } }, "required": ["given_name"] },
+    "person": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "person" }, "given_name": { "type": "string" }, "family_name": { "type": "string" }, "is_self": { "type": "boolean" }, "identifiers": { "type": "array", "items": { "oneOf": [{ "type": "string" }, { "type": "object", "properties": { "kind": { "type": "string" }, "value": { "type": "string" } }, "required": ["kind", "value"] }] } }, "review_state": { "enum": ["unreviewed", "reviewed"] }, "is_external": { "type": "boolean" } }, "required": ["given_name"] },
     "client": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "client" }, "status": { "type": "string" } }, "required": ["status"] },
     "product": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "product" }, "status": { "type": "string" } }, "required": ["status"] },
     "project": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "project" }, "status": { "type": "string" }, "objective": { "type": "string" } }, "required": ["status"] },

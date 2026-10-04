@@ -3,6 +3,8 @@ import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./p
 
 /** Body for a meeting note created without user text (legacy callers and crash recovery of old operations). */
 export const DEFAULT_NOTE_BODY = "# Notes\n\n";
+/** Every address of the user. All of them resolve to the single self person (PRD story 73). */
+export const DEFAULT_SELF_EMAILS = ["rahul.dharod@eagleeye.com", "rahul.dharod@untienots.com", "baloo.rahul@gmail.com"];
 
 function slugify(value: string) {
   return value
@@ -149,7 +151,7 @@ export class AppContext {
     const id = uuidV7();
     const created = await this.objects.write({
       relativePath: `people/${markdownFileName("You", id, timestamp)}`,
-      frontmatter: { ...this.envelope(id, "person", "You", timestamp), given_name: "You", is_self: true },
+      frontmatter: { ...this.envelope(id, "person", "You", timestamp), given_name: "You", is_self: true, identifiers: DEFAULT_SELF_EMAILS.map((value) => ({ kind: "email", value })) },
       body: "# You\n"
     });
     return created;
