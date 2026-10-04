@@ -1,5 +1,6 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
+import { adoptDailyFocus } from "./focus.js";
 import type { PatchModule } from "./patches.js";
 import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
 import { internalDomainsOf, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
@@ -132,7 +133,10 @@ export class AdoptionModule {
     "decision:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
     "open-point:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
     "person:user-dictated": (draft, run) => this.adoptPerson(draft, run),
-    "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run)
+    "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run),
+    // #46: the morning brief is written straight to a daily-focus object (ADR 0011), whatever the origin.
+    "daily-focus:agent-extracted": (draft, run) => adoptDailyFocus(this.ctx, draft, run),
+    "daily-focus:user-dictated": (draft, run) => adoptDailyFocus(this.ctx, draft, run)
   };
   private personMerges?: PersonMergeModule;
   /** Unparsable drafts by name → content hash: the first sighting may be a partial sync, so it is skipped once. */

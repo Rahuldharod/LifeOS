@@ -30,7 +30,7 @@
     "connector-account": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "connector-account" }, "provider": { "type": "string" }, "secret_ref": { "type": "string" }, "scopes": { "type": "array", "items": { "type": "string" } } }, "required": ["provider", "account_label", "external_account_id", "status", "secret_ref", "scopes"] },
     "app-setting": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "app-setting" }, "setting_key": { "type": "string", "minLength": 1 } }, "required": ["setting_key"] },
     "sync-run": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "sync-run" }, "connector_account_id": { "type": "string", "format": "uuid" }, "status": { "enum": ["running", "succeeded", "failed"] } }, "required": ["connector_account_id", "resource_type", "status", "started_at"] },
-    "daily-focus": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "daily-focus" }, "focus_on": { "type": "string", "format": "date" } }, "required": ["focus_on"] },
+    "daily-focus": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "daily-focus" }, "focus_on": { "type": "string", "format": "date" }, "generated_at": { "type": "string", "format": "date-time" }, "top3": { "type": "array", "maxItems": 3 }, "meeting_prep": { "type": "array", "maxItems": 3 }, "defer_candidates": { "type": "array", "maxItems": 3 } }, "required": ["focus_on"] },
     "recurring-item": { "allOf": [{ "$ref": "#/$defs/base" }], "properties": { "type": { "const": "recurring-item" }, "status": { "type": "string" } }, "required": ["status"] }
   }
 }

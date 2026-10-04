@@ -335,3 +335,13 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .person-external { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .person-external label { display: inline-flex; align-items: center; gap: 4px; }
 .internal-domains-setting { margin-bottom: 18px; }
+
+/* #46 Daily Focus: finished items struck through, past meetings and missing references muted. */
+.daily-focus .capture-row { align-items: center; justify-content: space-between; }
+.focus-section { margin-top: 18px; }
+.focus-section h4 { margin: 0 0 4px; color: #245646; font-size: 14px; }
+.focus-item.done b, .focus-item.cancelled b { text-decoration: line-through; color: #758078; }
+.focus-item.done > i, .focus-item.cancelled > i { background: #5f8b7c; }
+.focus-item.past b, .focus-item.missing b { color: #758078; }
+.focus-item.missing b { font-style: italic; }
+.focus-narrative { margin-top: 18px; white-space: pre-wrap; color: #3d4a44; }
