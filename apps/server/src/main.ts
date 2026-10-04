@@ -84,6 +84,11 @@ server.put<{ Params: { id: string }; Body: { isExternal?: boolean | null; expect
   if (typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
   return application.setPersonExternal(request.params.id, isExternal, expectedHash);
 });
+// #87: the user confirms an automatically created ("unreviewed") person.
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/people/:id/reviewed", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.confirmPersonReviewed(request.params.id, request.body.expectedHash);
+});
 server.post("/api/v1/index/rebuild", async () => application.rebuildIndex());
 server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/events", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
