@@ -2,7 +2,13 @@
 
 > **Status:** ready-for-agent · **Date:** 3 October 2026 · **Baseline:** Solution Design v0.5 + GitHub `main` @ `e981138` · **Source:** grilling session of 3 October 2026 (Q1–Q41, C1–C5)
 >
-> **Build status (updated 4 October 2026):** the app side is built on branch `feature/phase-a-21` (tickets #23–#48 and fixes #53–#82, not yet merged to `main`). The agent side (skills pack, morning routine, Slack DM) and the backup/runtime epic are not built. See *Build status*, *Decisions made during the build* and *Known gaps* below. Current design: Solution Design v0.7.
+> **Build status (final Phase A build, 4 October 2026):** built on branch `feature/phase-a-close-21` (tickets #23–#51, fixes #53–#82 and the close-out batch #84–#89, #91–#96; not yet merged to `main`).
+>
+> - **App side:** built, including automatic backups, the History panel, the calendar offline fallback and the editor round-trip suite.
+> - **Agent side:** the skills pack (`skills/`) is built and its examples are tested in CI. Installing it in Claude and running the dry-runs is still to do (Rahul).
+> - **Moved out:** launcher, dyslexia-friendly font, dark theme, Playwright tests and the performance fixture moved to Phase B on 4 October 2026 (#90). Cleanup #97 (no behaviour change) is open.
+>
+> See *Build status*, *Decisions made during the build* and *Known gaps* below. Current design: Solution Design v0.8.
 >
 > This spec supersedes the following charting decisions on map #1: direct agent writes (now Inbox Drafts + Adoption), the in-app Claude API provider (now deferred; agents do the AI work), and the `actions.md` import (fresh start for work; personal rows stay Phase B). Vocabulary follows `CONTEXT.md`; new terms are defined in *Further Notes → Glossary additions*.
 
@@ -276,7 +282,7 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
 - **`focus-override`** (a new app-owned type): one per date, holding pinned, replaced (old → new) and dismissed task IDs. The effective Top 3 is the brief's `top3` with overrides applied. With no brief, the existing deterministic rule (priority, then due date) applies, with its visible reason.
 - **Live overlay:** Today renders the brief using live index state. Completed or cancelled tasks are struck through and sink. Past meetings are marked. "Generated at HH:MM" is shown. Refresh writes a `replan` Work Order to `_inbox/requests/`.
 - **Live panels** stay computed by the app: overdue, due today, upcoming high priority, waiting by person, next meetings, open points linked to today's meetings, review count, drafts awaiting adoption, failed drafts, stale work orders.
-- **Settings** (synced app-setting): max must-dos (default 3), meeting-hours information threshold (default 5), brief time (default 06:00 Europe/Paris on workdays, confirmed by Rahul 2026-10-03), internal domains (no default: set in Settings → **Internal domains**, e.g. `example.com`), the user's own addresses (no default: Settings → **My email addresses**), weekly off-Drive backup folder (Settings → **Off-Drive backup folder**, #84).
+- **Settings** (synced app-setting): max must-dos (default 3), meeting-hours information threshold (default 5), brief time (default 06:00 Europe/Paris on workdays, confirmed by Rahul 2026-10-03), internal domains (no default: set in Settings → **Internal domains**, e.g. `example.com`), the user's own addresses (no default: Settings → **My email addresses**), weekly off-Drive backup folder (Settings → **Off-Drive backup folder**, #84; set per Mac, #95).
 - **The morning routine** (a cloud routine; a desktop scheduled task is the fallback) reads the Agent Index, calendar and pending drafts, writes the `daily-focus` draft, and sends a read-only Slack DM to self. The DM has 5 lines: Top 3, the I-owe count with the overdue count, day shape, and a path or link to the brief. The order is I owe → Top 3 → waiting/decisions → meeting prep → day shape. Restricted objects are never included. Inbox triage stays in Steve's separate brief.
 
 ### Decisions and Open Points workspace
@@ -392,32 +398,38 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
 - Goals and Habits. Running finance, investing or health in LifeOS.
 - Todoist (parked). Jira coexists and is never written from LifeOS.
 
-## Build status (4 October 2026)
+## Build status (4 October 2026, final Phase A build)
 
-Status of the user stories on branch `feature/phase-a-21` (head `897c0e1`). **Built** means the app side works and has integration tests. The agent side (skills, routines) is listed separately because it is not code in this repository yet.
+Status of the user stories on branch `feature/phase-a-close-21` (head `00d2306`).
+
+- **Built** means the app side works and has integration tests.
+- **Skill built** means the Claude skill is in `skills/` and its examples pass CI, but Rahul has not yet installed it or run its dry-run (`skills/INSTALL.md`). Skills are prompts, so the dry-run is their only real test.
 
 | **Stories** | **Topic** | **Status** | **Notes** |
 | --- | --- | --- | --- |
-| 1–16 | Capture and agent writes | **Built** (app side) | Adoption, auto-adopt, name resolution, routing by origin, Knowledge Note and Source drafts (#31–#35). Phone dictation and the language rule depend on the skills pack (not built). |
+| 1–16 | Capture and agent writes | **Built** (app side); **skill built** | Adoption, auto-adopt, name resolution, routing by origin, Knowledge Note and Source drafts (#31–#35). Phone dictation and the language rule are in `lifeos-capture` (#49). Whether the phone's Drive connector can write drafts is `[TBD — check in the phone dry-run]`. |
 | 17–22 | Patch drafts | **Built** | Auto-apply, review routing, conflict rule, undo (#36, #37, #61, #71, #81). See *Known gaps* for undo limits. |
-| 23–27 | Agent Index | **Built** | `_agent/` files, freshness stamp, pending drafts, restricted counted only (#43, #63). |
-| 28–41 | Post-meeting enrichment | **Built** (app side) | Work Order, enrichment state (shown on the meeting page with missing and unavailable material), Give up, stale Work Orders, meeting-material adoption, summary between markers (#44, #45, #66, #87). The enrichment skill is built (`skills/lifeos-enrichment`, #50); client meetings stay blocked until IT/legal sign-off, and the dry-run (`skills/INSTALL.md`) is not yet run. |
+| 23–27 | Agent Index | **Built**; **skill built** | `_agent/` files, freshness stamp, pending drafts, restricted counted only (#43, #63). `lifeos-ask` answers from the index, warns when it is over 24 hours old and never opens restricted files (#49). |
+| 28–41 | Post-meeting enrichment | **Built** (app side); **skill built** | Work Order, enrichment state shown on the meeting page in text (Not requested, Requested, Enriched, Partial, Gave up) with missing and unavailable material, Give up, stale Work Orders, meeting-material adoption, summary between markers (#44, #45, #66, #87). `lifeos-enrichment` (#50, #93): client meetings are refused until IT/legal sign-off; with no internal domains set, every non-synthetic meeting is refused. |
 | 42–44 | Review | **Built** | Editable proposals; `update`, `link-resolution` (with candidate picker), `person-merge` and `summary` types; atomic, double-click-safe accept (#57, #62). |
-| 45–57 | Today and the Daily Focus brief | **Built** (app side) | Brief with live overlay, Refresh writes a `replan` Work Order, Focus Overrides, live panels, settings (#46–#48, #64). |
-| 58–59 | Slack DM | **Not built** | Part of the morning routine (agent side). |
-| 60 | Inbox triage stays in Steve | No build needed | — |
+| 45–57 | Today and the Daily Focus brief | **Built** (app side); **skill built** | Brief with live overlay, Refresh writes a `replan` Work Order, Focus Overrides, live panels, settings (#46–#48, #64). `lifeos-morning` writes the brief each workday and on replan (#51). |
+| 58–59 | Slack DM | **Skill built** | `lifeos-morning` sends a 5-line, read-only DM to Rahul only (#51). Not on replan. If Slack fails, the brief still counts. Whether a cloud routine can use Slack is `[TBD — verify]`. |
+| 60 | Inbox triage stays in Steve | No build needed | The morning skill reads no email, Slack or Jira. |
 | 61–66 | Decisions and Open Points | **Built** | Lists, filters, create/edit, supersede, resolve/close (#41, #42, #67). |
-| 67–73 | People | **Built** | Email matching, names, labels, external marker, "unreviewed" marker cleared by Confirm or Save, merge suggestions, self addresses in Settings (#38–#40, #54, #65, #76, #87). |
-| 74–80 | Safety, sensitivity and data integrity | **Built** | Path diagnostics, duplicate-ID blocking, revision check, external-edit history, Origin/Sensitivity/Area, subject normalisation (#26–#30, #58, #63, #69, #72, #79, #80). |
-| 81–83 | Automatic backups, off-Drive copy, failure banner | **Built** | At start, clean stop and daily; weekly checksum-verified off-Drive copy (4 kept); banner on Today and System Health (#84). |
+| 67–73 | People | **Built** | Email matching, names, labels, external marker, "unreviewed" marker (text) cleared by Confirm or Save, merge suggestions, self addresses in Settings (#38–#40, #54, #65, #76, #87). Restoring an old version never makes a confirmed person unreviewed again (#92). |
+| 74–80 | Safety, sensitivity and data integrity | **Built** | Path diagnostics, duplicate-ID blocking, revision check, external-edit history, Origin/Sensitivity/Area, subject normalisation (#26–#30, #58, #63, #69, #72, #79, #80). **Mark restricted / Mark normal** on Decisions, Open Points and meetings (#86). History panel with **Restore this version** on every object (#85); a restore keeps the current sensitivity and review state (#92). |
+| 81–83 | Automatic backups, off-Drive copy, failure banner | **Built** | At start, clean stop and daily; weekly checksum-verified off-Drive copy (4 kept), folder set per Mac; banner with **Back up now** on Today and System Health (#84, #95). Safe stop sequence and one queue shared with adoption (#95, ADR 0004). |
 | 84 | Exit plan | Documented only | See *Further Notes*. |
-| 85 | macOS launcher, start at login | **Not built** | Terminal commands only (ADR 0006). |
-| 86 | Calendar offline fallback (PB-022b) | **Not built** | — |
+| 85 | macOS launcher, start at login | **Moved to Phase B** (#90) | Terminal commands only (ADR 0006). |
+| 86 | Calendar offline fallback (PB-022b) | **Built** | When Google Calendar fails (network, sign-in or Keychain denied), Today and the calendar view list the meetings already stored in LifeOS under the banner "Offline: showing meetings already in LifeOS (last synced …)", with **Retry** (#88). A Keychain denial at start never shows demo meetings (#94). See *Decisions* for how this differs from the spec. |
 | 87 | Editor round-trip suite (PB-003) | **Built** | Fixture suite runs the real visual editor in CI; constructs it rewrites are listed as known failures, and Visual mode shows an "Unproven formatting" label on any note that does not round-trip byte-for-byte (#89). Images (untitled, titled, managed, special-character paths, uploaded or pasted in Visual mode) now round-trip; if a save would still drop one, Visual mode turns read-only and says why (#91). LifeOS's own Summary section round-trips; empty lines made in Visual mode no longer save as `<br />` (existing ones are kept); HTML `<img>` tags are covered by the image-loss guard (#96). |
-| 88–91 | Accessibility and interface | **Partial** | Built: lists capped with "Show N more", lock badges with text, keyboard-reachable warnings and pickers. Not built: optional dyslexia-friendly font, dark theme. |
-| 92–95 | Steve and the skills pack | **Not built** | No skills pack or skill-fixture CI job yet. |
+| 88–91 | Accessibility and interface | **Partial** | Built: lists capped with "Show N more", lock badges with text, keyboard-reachable warnings and pickers, state in text (enrichment, unreviewed, offline, backup). **Moved to Phase B** (#90): optional dyslexia-friendly font, dark theme. |
+| 92–93 | Steve reads from and writes to LifeOS | **Not built** | The Steve skill lives outside this repository and has not been changed. Point Steve at the data root only after the skills dry-run passes. |
+| 94–95 | Skills pack, tested examples | **Built** | Five skills in `skills/`: `lifeos-object-contract`, `lifeos-capture`, `lifeos-ask`, `lifeos-enrichment`, `lifeos-morning` (#49–#51). Every example draft and patch is adopted by the real code in `tests/integration/skill-fixtures.test.ts`, which runs in CI. Install and dry-run steps: `skills/INSTALL.md` (Rahul). |
 
-Also built, outside the stories: the Keychain helper now lives in an owner-only folder (#23); a single crash-recovery pattern (#74, ADR 0013); bounded version history (#72, ADR 0012). Not built from *Testing Decisions*: Playwright browser tests (S2), the 10,000-object performance fixture, and the skill-fixture CI job.
+Also built, outside the stories: the Keychain helper now lives in an owner-only folder (#23); a single crash-recovery pattern (#74, ADR 0013); bounded version history (#72, ADR 0012).
+
+From *Testing Decisions*: the skill-fixture tests and the editor round-trip suite run in CI as part of the normal test step (no separate job). Playwright browser tests (S2) and the 10,000-object performance fixture moved to Phase B (#90).
 
 ## Decisions made during the build
 
@@ -439,6 +451,20 @@ Product decisions taken while building, not in the original spec. Each is now ho
 | Link-resolution card | A link-resolution Review Item has its own card: the unresolved text, a keyboard-operable candidate picker (display labels with the external marker), and a **Create "<name>" and link** button that creates the missing object (person, project, client or product) from the unresolved text and links it. The toast after accept names the item type. | #57 |
 | Meeting summary | The accepted summary is written into the **meeting** body between `<!-- lifeos:summary:start -->` and `<!-- lifeos:summary:end -->` markers. A retry writes it once; a newer summary replaces the old one whole; text outside the markers and the meeting note are never changed. Markers, heading and text are separated by blank lines so the visual editor keeps the section byte-for-byte; a section in the older unspaced form is still read and is respaced when next replaced (#96). | #66, #96 |
 | Long lists | Lists show up to 7 rows. Longer lists show the first 6 and a keyboard-operable "Show N more" button. | #48, #64 |
+| Restore keeps sensitivity and review state | **Restore this version** brings back an old copy's content, but never its sensitivity or review state. A restricted object stays restricted (the toast says so); a confirmed person stays confirmed. The History panel sends the version it was opened with; if the object changed since, nothing is restored and the user is asked to reload. | #85, #92 |
+| Today's lock follows the note | Today shows the lock badge when a meeting **or its note** is restricted. **Mark normal** on a meeting whose note is restricted says the meeting stays excluded because of its note. | #92 |
+| Calendar offline: stored meetings, not a cache | The spec asked for a cache of the last synced events. The build shows the meetings already stored in LifeOS instead, under an "Offline" banner with the last sync time, and never changes or deletes them while offline. No second store to keep in step. | #88 |
+| Mock calendar only in mock mode | If a Google client is set up but the Keychain is denied, the calendar is **offline** (reason: Keychain denied). The demo calendar is used only in explicit dev/mock mode. Retry says the calendar is back only when it really is. | #94 |
+| Unproven formatting | Visual mode shows an **Unproven formatting** label (text) when a note holds Markdown the editor would rewrite, and names those constructs. Markdown mode keeps the note exactly as written. | #89 |
+| No image is ever lost | If a Visual-mode save would drop an image (Markdown or HTML `<img>`), Visual mode turns read-only for that note and says why. | #91, #96 |
+| Slack DM is sent, to Rahul only | The morning routine **sends** (does not draft) the DM, and only to Rahul himself, as the spec says (story 58). It is read-only, never retried to another channel or person, and not sent on replan. Line 1 is the date, then Top 3, "I owe: N (M overdue)", day shape and the path to the brief. | #51 |
+| Working hours for day shape | Free hours are counted from a working day of **09:00–18:00** in the brief time zone, minus meetings. `[TBD — confirm Rahul's working hours]` | #51 |
+| Client-content gate | `lifeos-enrichment` refuses client meetings while its gate says `blocked`. Only an edit to the skill file opens it, together with the sign-off record; CI refuses `approved` while the TBD line is still there. `[TBD — Eagle Eye IT/legal sign-off]` | #50 |
+| No internal domains, no enrichment | A meeting counts as client unless every attendee's domain is a configured internal domain. With no internal domains set, the skill refuses every non-synthetic meeting and says why. | #93 |
+| Work Order filing rule | Agents never write into `_inbox/processed/`, with one exception: when an agent finishes a Work Order, it moves that file from `_inbox/requests/` to `_inbox/processed/`. A Work Order still in `requests/` counts as not done. | #93 |
+| Off-Drive folder per Mac | Each Mac sets its own off-Drive backup folder. It is stored in the synced backup setting, keyed by device ID; the card says it applies to this Mac only. The folder must exist and must not be inside Google Drive, the data folder or the backup folder (checked after resolving links). | #95, ADR 0005 |
+| Stop sequence | `pnpm stop` (1) refuses new writes with "LifeOS is stopping", (2) closes HTTP and waits for adoption to finish, (3) takes the stop backup (gives up after 35 s), (4) releases the device lease. Every wait is bounded below the stop script's 60 s force-stop. Backups and adoption share one queue, so a backup never catches half an adoption. | #95, ADR 0004 |
+| Phase B scope | Moved out of Phase A on 4 October 2026 so Phase A can close on the core: the macOS launcher and start at login (story 85), the dyslexia-friendly font and dark theme (88–91), Playwright tests and the 10,000-object performance fixture. Each needs its own ticket. | #90 |
 
 ## Known gaps
 
@@ -446,11 +472,17 @@ Known limits of the current build. Each needs a decision or a ticket.
 
 | **Gap** | **Effect today** | **Source** |
 | --- | --- | --- |
-| No restore button for version copies | Restoring a version copy named by an external-edit audit works only through the API (`POST /api/v1/history/:id/restore`). There is no button in the app. Deleted notes do have a Restore button. | #79 |
+| Skills not yet installed or dry-run | The five skills are built and their examples pass CI, but none is installed in Claude and no dry-run has been run. Steve is not yet pointed at LifeOS (stories 92–93). **Next step for Rahul:** `skills/INSTALL.md`. | #49–#51 |
+| Connector questions open | Can a cloud routine use the Slack and Gong connectors, and write files into Drive? Can the phone's Drive connector write drafts? `[TBD — verify in the dry-runs]` Gong must be connected in Claude (Rahul). | #49, #50, #51 |
+| Client meetings not enriched | Blocked until IT/legal sign-off (see *Decisions*). Until then only internal meetings are enriched, and only once internal domains are set. | #50, #93 |
+| Offline calendar shows only stored meetings | Calendar events never opened in LifeOS (so with no meeting object) do not appear while offline. | #88 |
 | Undo is refused if text was added below the note | Undo removes exactly the note a patch appended. If the user has typed anything after it, Undo is refused ("change it by hand"), so it never deletes the user's text. | #61, #81 |
 | Calendar sync still reads the Keychain each time | Loading and saving no longer prompt, but each calendar sync or connect reads the Google tokens and client secret, which can show a Keychain prompt if access was not set to "Always Allow". | #77 |
-| Visual editor rewrites other Markdown | Editing in Visual mode reformats untouched parts of the note: `-` bullets become `*`, the Summary markers and blocks written without blank lines get blank lines, `---` becomes `***`, tables are re-padded, image titles in single quotes become double quotes, and more (full list: `KNOWN_FAILURES` in `tests/integration/editor-round-trip.test.ts`). Meaning is kept; the bytes change. The label warns before the user edits. | #89 |
-| Two-device limits | If another device's version copy never arrives over Drive, edits made on top of it are not flagged as external. A version copy pruned after 10 saves can no longer be restored or used by the patch conflict rule (then only audit events decide). | ADR 0012, #80, #81 |
+| Visual editor rewrites other Markdown | Editing in Visual mode reformats untouched parts of the note: `-` bullets become `*`, blocks written without blank lines get blank lines (including Summary sections in the older unspaced form), `---` becomes `***`, tables are re-padded, image titles in single quotes become double quotes, and more (full list: `KNOWN_FAILURES` in `tests/integration/editor-round-trip.test.ts`). Meaning and images are kept; the bytes change. The **Unproven formatting** label warns before the user edits. | #89, #91, #96 |
+| Off-Drive folder paths are visible in the synced file | Each Mac's folder path sits in `settings/backups.md`. Saving it on one Mac can give "changed on another device" on the other until it reloads. | ADR 0005, #95 |
+| Writes during a stop are refused | While LifeOS stops (up to 60 s), a save answers "LifeOS is stopping; your change was not saved". Make the change again once LifeOS is back. | #95 |
+| Two-device limits | If another device's version copy never arrives over Drive, edits made on top of it are not flagged as external. A version copy pruned after 10 saves can no longer be restored (the History panel says so) or used by the patch conflict rule (then only audit events decide). | ADR 0012, #80, #81 |
+| Code duplication | Five copies of the settings save helper, two calendar mappings and several banner components. No behaviour effect. | #97 |
 
 ## Further Notes
 
@@ -469,8 +501,9 @@ Known limits of the current build. Each needs a decision or a ticket.
 - **Policy assumption:** sending work meeting content to Claude is acceptable because the provider does not train on company data (the user's statement). Whether client contracts allow third-party processing of client meeting content is `[TBD - confirm with employer IT/legal]`.
 - **To verify:**
   - whether cloud routines can use the Gong and Slack connectors `[TBD - verify]`
+  - Rahul's working hours for the day shape (the morning skill assumes 09:00–18:00) `[TBD - confirm]`
   - whether macOS file-watch events fire reliably for Drive-synced files (restart and full rescan is the fallback) `[TBD - verify on Rahul's Mac]`
 - **Exit plan:** copy the data folder and the latest verified backup to a personal location, re-enter OAuth credentials in Settings on the new machine, and point the data root there. This is part of the 31 October 2026 data-root review.
-- **Dated reminders:** data-root and employer-account review by **31 Oct 2026**. CI check on or after **19 Oct 2026** (the `ubuntu-latest` move to Ubuntu 26). The user still needs to connect the Gong and Slack connectors in Claude.
+- **Dated reminders:** data-root and employer-account review by **31 Oct 2026**. CI check on or after **19 Oct 2026** (the `ubuntu-latest` move to Ubuntu 26). The user still needs to connect the Gong and Slack connectors in Claude, install the skills, run the dry-runs in `skills/INSTALL.md`, and set the off-Drive backup folder on each Mac.
 - **Superseded charting decisions (map #1):** direct agent writes, the in-app Claude API, and the Markor/FolderSync Android capture. Resolved here: #4 (Object Contract), #5 (deferred), #7 (Phase A sources: Calendar, Meet/Drive, Gong, Gmail summaries; Slack is output only; Jira, Confluence and Aha! stay outside), #8 (exit gate plus quality gate).
-- **Design document:** Solution Design v0.6 reflected this spec; v0.7 (4 October 2026) records the build.
+- **Design document:** Solution Design v0.6 reflected this spec; v0.7 (4 October 2026) records the build; v0.8 (4 October 2026) records the final Phase A build.

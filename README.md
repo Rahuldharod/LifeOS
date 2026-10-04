@@ -15,7 +15,7 @@ Local-first personal knowledge and work management, backed by typed Markdown fil
 - `packages/assets-filesystem`, `packages/backup-filesystem`, `packages/secrets`: managed images, checksummed backups and the macOS Keychain store.
 - `packages/contracts`, `packages/shared`: API types and rules shared by the server and the browser.
 - `schemas`: versioned object contracts and synthetic fixtures.
-- `skills`: the Claude skills pack (Object Contract, capture, ask); its examples are tested against adoption. Install and dry-run: `skills/INSTALL.md`.
+- `skills`: the Claude skills pack (Object Contract, capture, ask, enrichment, morning); its examples are tested against adoption in CI. Install and dry-run: `skills/INSTALL.md`.
 - `../data`: synchronized user Markdown and assets; intentionally outside this Git repository.
 - `../backups`: read-only, checksummed data snapshots; also outside Git.
 
@@ -35,11 +35,20 @@ LifeOS runs in the background from the production build, so code changes never r
 | Command | What it does |
 | --- | --- |
 | `corepack pnpm start` | Starts LifeOS in the background (builds first if there is no build yet) |
-| `corepack pnpm stop` | Stops LifeOS and releases the device lease |
+| `corepack pnpm stop` | Stops LifeOS safely: takes a last backup, then releases the device lease (can take up to a minute) |
 | `corepack pnpm status` | Shows whether LifeOS is running |
 | `corepack pnpm update-app` | Builds the latest code, then restarts LifeOS. If the build fails, the running app is left untouched |
 
 During a restart the page shows **Reconnecting…**; keep typing, the draft saves when the server is back. The log is at `~/Library/Logs/LifeOS/server.log`.
+
+**What `stop` does, in order:**
+
+1. New saves are refused with "LifeOS is stopping; your change was not saved". Make the change again once LifeOS is back.
+2. LifeOS finishes any draft adoption already running.
+3. It takes the stop backup (it gives up after 35 seconds).
+4. It releases the device lease, so the other Mac can take over.
+
+If all this takes longer than 60 seconds, the script force-stops LifeOS. A half-made backup is cleaned up at the next start.
 
 ### Develop LifeOS
 
@@ -71,9 +80,18 @@ Open **Settings** after the first start and fill these cards. Each saves on its 
 | **Max must-dos** | How many items Today's Top 3 shows (1–5) | Defaults to 3 |
 | **Meetings and morning brief** | Meeting-heavy threshold (hours), brief time, time zone and workdays | Defaults: 5 hours, 06:00 Europe/Paris, Monday to Friday |
 | **Calendars in the Calendar view** | Which Google calendars to show | All are shown |
+| **Off-Drive backup folder** | **On each Mac**, a folder outside Google Drive, such as an external disk (e.g. `/Volumes/Backup/LifeOS`). The folder must already exist. A weekly copy of the latest backup goes there; 4 are kept | Backups stay only inside the Google Drive folder. This setting applies to this Mac only, so set it on both |
 | **Google Calendar** / **Google Drive** | OAuth client ID and secret (see below) | Calendar uses the mock calendar; Drive is not used yet |
 
-These settings are synced files in `../data/settings/` (ADR 0005), so both computers share them.
+These settings are synced files in `../data/settings/` (ADR 0005), so both computers share them. The off-Drive folder is the exception: each Mac keeps its own (stored per device in `settings/backups.md`).
+
+### Backups
+
+LifeOS backs up by itself: at start, once a day while running, and at `stop`. If a backup or the off-Drive copy fails, or none has worked for 26 hours, Today and System Health show a **Backup problem** banner with a **Back up now** button.
+
+### Claude skills
+
+The skills that let Claude capture, answer questions, enrich meetings and write the morning brief are in `skills/`. Install them and run the dry-run on fake data first: see [`skills/INSTALL.md`](skills/INSTALL.md).
 
 ### Maintenance
 
@@ -94,9 +112,10 @@ Documentation is intentionally lean during the MVP:
 - [`docs/decisions/`](docs/decisions/) records durable architectural decisions (ADRs 0001–0013).
 - [`CONTEXT.md`](CONTEXT.md) is the domain glossary.
 - [`docs/architecture/mvp-gap-analysis.md`](docs/architecture/mvp-gap-analysis.md) preserves the solution-design audit and deferred scope.
-- [`docs/product-design/LifeOS_Solution_Design_v0.7.md`](docs/product-design/LifeOS_Solution_Design_v0.7.md) is the current versioned solution baseline. v0.4 and v0.6 are kept for history.
+- [`docs/product-design/LifeOS_Solution_Design_v0.8.md`](docs/product-design/LifeOS_Solution_Design_v0.8.md) is the current versioned solution baseline. v0.4, v0.6 and v0.7 are kept for history.
 - [`docs/product-design/LifeOS_PRD_Phase-A_v1.0.md`](docs/product-design/LifeOS_PRD_Phase-A_v1.0.md) is the Phase A spec (also GitHub issue #21), with its build status, build decisions and known gaps.
 - [`docs/product-design/Product Backlog.md`](docs/product-design/Product%20Backlog.md) captures product intent and prioritization before work becomes a GitHub Issue.
+- [`skills/INSTALL.md`](skills/INSTALL.md) explains how to install the Claude skills and run their dry-runs.
 - [`AGENTS.md`](AGENTS.md) tells coding agents how to navigate and safely change the repository.
 - [`CLAUDE.md`](CLAUDE.md) points Claude Code to the shared agent instructions without duplicating them.
 

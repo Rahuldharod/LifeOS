@@ -60,6 +60,13 @@ An Inbox Draft that changes an existing object rather than creating one.
 An app-written request in `_inbox/requests/` for an Agent run, such as Enrichment or a replan.
 _Avoid_: Job, task (a Task is a user commitment)
 
+**Work Order filing rule**:
+The one exception to "Agents never write into `_inbox/processed/`": when an Agent finishes a Work Order, it moves that file from `_inbox/requests/` to `_inbox/processed/`, and nothing else. A Work Order still in `requests/` counts as not done.
+
+**Skills pack**:
+The Claude skills in `skills/` (Object Contract, capture, ask, enrichment, morning) that Agents follow. Every example in them is adopted by the real code in CI, so skill text and code cannot drift.
+_Avoid_: Prompts, plugins
+
 **Enrichment**:
 Collecting post-meeting material (transcripts, recordings, Gong calls, emailed summaries) and the proposals drawn from it.
 
@@ -108,13 +115,25 @@ _Avoid_: Me, owner (owner is a task field)
 **Internal domains**:
 The synced setting listing the email domains of the user's own organisations. With none set, nobody is marked External.
 
+**Unreviewed person**:
+A Person LifeOS created automatically (from a calendar invite or an adopted draft) that the user has not yet confirmed. Shown with the text "unreviewed" until the user confirms or saves it. A merge suggestion always involves at least one unreviewed person.
+_Avoid_: New contact, pending person
+
 **Display label**:
 How a Person is shown everywhere: first name, or full name when another live person shares the first name, plus " - ext" for an External person.
 
 ### Meetings and enrichment
 
 **Enrichment state**:
-Where a meeting is in Enrichment: none, requested, enriched, partial or gave up.
+Where a meeting is in Enrichment: none, requested, enriched, partial or gave up. The meeting page shows it in text as **Not requested**, **Requested**, **Enriched**, **Partial** or **Gave up**, with the material still missing or found unavailable.
+
+**Client-content gate**:
+The switch at the top of the enrichment skill that decides whether client meetings may be enriched. It stays `blocked` until IT/legal sign-off; only an edit to the skill file opens it. A meeting counts as client unless every attendee's domain is an Internal domain; with no Internal domains set, every real meeting counts as client.
+_Avoid_: Client filter, policy flag
+
+**Offline calendar**:
+What Today and the calendar view show when Google Calendar cannot be reached (network, sign-in or Keychain denied): the meetings already stored in LifeOS, under an "Offline" banner with the last sync time and a Retry. Not a separate cache, and never demo meetings.
+_Avoid_: Stale cache, cached events
 
 **Meeting material**:
 The Inbox Draft kind an Agent writes after Enrichment: Sources, an optional summary, proposals with evidence, and material checked and found `unavailable`.
@@ -137,5 +156,18 @@ The record in `.lifeos/operations/` written before the first file of a multi-fil
 **Replay-safe**:
 A step that ends in the same files whether it runs once, twice at once, or again after a crash.
 
+**Off-Drive copy**:
+The weekly copy of the newest verified Backup to a folder outside Google Drive (an external disk, say); four are kept. Each Mac sets its own folder.
+_Avoid_: Second backup, sync
+
+**Clean stop**:
+How LifeOS stops: refuse new writes, let adoption finish, take the stop Backup, then release the device lease, all within 60 seconds.
+
 **Recorded intent**:
 A user choice (such as rejecting a Review Item) journalled before any undo write. Recovery honours it over the operation it undoes.
+
+### Editor
+
+**Unproven formatting**:
+The text label Visual mode shows on a note that holds Markdown the editor would rewrite when saved (for example `-` bullets or `---` rules). Meaning is kept but the bytes may change; Markdown mode keeps the note exactly as written.
+_Avoid_: Broken formatting, unsupported Markdown

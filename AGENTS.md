@@ -7,7 +7,7 @@ This file is the repository-level operating guide for coding agents. Keep it too
 Read these sources in order, loading only what the task needs:
 
 1. `README.md` for setup, repository layout, and connection prerequisites.
-2. `docs/product-design/LifeOS_Solution_Design_v0.7.md` for the current product and solution baseline, and `docs/product-design/LifeOS_PRD_Phase-A_v1.0.md` (spec issue #21) for the Phase A build, its build status, build decisions and known gaps. v0.4 and v0.6 are kept for history only.
+2. `docs/product-design/LifeOS_Solution_Design_v0.8.md` for the current product and solution baseline, and `docs/product-design/LifeOS_PRD_Phase-A_v1.0.md` (spec issue #21) for the Phase A build, its build status, build decisions and known gaps. v0.4, v0.6 and v0.7 are kept for history only.
 3. `docs/architecture/README.md` for system boundaries and current architecture.
 4. The relevant file in `docs/decisions/` for decisions that must not be silently reversed.
 5. `docs/architecture/mvp-gap-analysis.md` for the original MVP audit and remaining deferred scope.
@@ -31,7 +31,7 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - `packages/contracts`: API request and response types.
 - `packages/shared`: rules both the server and the browser need (no Node dependencies).
 - `schemas`: portable schemas and fixtures.
-- `skills`: the Claude skills pack and its Object Contract. Every example draft and patch in it is a CI fixture (`tests/integration/skill-fixtures.test.ts`); change skill text and adoption code together.
+- `skills`: the Claude skills pack (`lifeos-object-contract`, `lifeos-capture`, `lifeos-ask`, `lifeos-enrichment`, `lifeos-morning`) and `INSTALL.md` (install and dry-run steps for the user). Every example draft, patch, brief and gate case in it is a CI fixture (`tests/integration/skill-fixtures.test.ts`, run by plain `pnpm test`); change skill text and adoption code together. Never open the enrichment skill's client-content gate: only the user does that, with the IT/legal sign-off record.
 - `tests/integration`: cross-package acceptance tests.
 - `docs/product-design`: versioned solution baseline and product backlog.
 - `../data`: real user Markdown and assets; outside Git and authoritative.
@@ -80,7 +80,8 @@ One-off maintenance: `pnpm reconcile-meetings` reports duplicate meetings; `--ap
    - setup or top-level capabilities: `README.md`;
    - boundaries or component responsibilities: architecture README;
    - durable architectural decision: a new ADR;
-   - ideas and prioritization: `docs/product-design/Product Backlog.md`.
+   - ideas and prioritization: `docs/product-design/Product Backlog.md`;
+   - the draft, patch or Work Order contract: the matching `skills/*/SKILL.md` (its examples are tests).
 
 Do not create feature-by-feature documentation pages or duplicate implementation details that are already clear from tests and code.
 
