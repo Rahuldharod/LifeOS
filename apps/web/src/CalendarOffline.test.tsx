@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CalendarOfflineBanner, calendarOfflineText, type CalendarOffline } from "./CalendarOffline.js";
+import { CalendarOfflineBanner, calendarOfflineText, retryCalendarDay, type CalendarOffline } from "./CalendarOffline.js";
 import { TodayPage, type TodayPanels } from "./TodayPage.js";
 
 const offline: CalendarOffline = { reason: "network", error: "fetch failed", lastSuccessfulSyncAt: "2026-10-05T07:00:00.000Z" };
@@ -43,5 +43,34 @@ describe("calendar offline banner (#88)", () => {
     expect(html).toContain("Offline: showing meetings already in LifeOS (last synced");
     expect(html).toContain(">Retry</button>");
     expect(html.indexOf("Offline:")).toBeLessThan(html.indexOf("Client review"));
+  });
+});
+
+describe("Retry on the offline banner (#94)", () => {
+  const denied: CalendarOffline = { reason: "keychain-denied", error: "Keychain access denied" };
+
+  it("asks the Keychain again first, then fails while the calendar is still offline (no success message)", async () => {
+    const calls: string[] = [];
+    const retry = retryCalendarDay(denied, {
+      reprobeKeychain: async () => { calls.push("reprobe"); },
+      loadDay: async () => { calls.push("load"); return { events: [], offline: denied }; }
+    });
+    await expect(retry).rejects.toThrow("Calendar is still offline: Keychain access was denied, so LifeOS cannot read the Google Calendar sign-in");
+    expect(calls).toEqual(["reprobe", "load"]);
+  });
+
+  it("succeeds only when the calendar is back, and re-asks the Keychain only after a Keychain denial", async () => {
+    const calls: string[] = [];
+    const day = await retryCalendarDay(offline, {
+      reprobeKeychain: async () => { calls.push("reprobe"); },
+      loadDay: async () => { calls.push("load"); return { events: [{ title: "Standup" }] }; }
+    });
+    expect(day.events).toEqual([{ title: "Standup" }]);
+    expect(calls).toEqual(["load"]);
+  });
+
+  it("still loads the day when re-asking the Keychain is denied again", async () => {
+    const retry = retryCalendarDay(denied, { reprobeKeychain: async () => { throw new Error("Keychain access denied"); }, loadDay: async () => ({ events: [], offline: denied }) });
+    await expect(retry).rejects.toThrow("Calendar is still offline");
   });
 });

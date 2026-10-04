@@ -43,7 +43,7 @@ import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
 import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
-import { CalendarOfflineBanner, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
+import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -553,7 +553,7 @@ function App() {
       if (!day.offline) for (const event of nextEvents) if (event.calendarId) next[event.calendarId] = { name: event.calendarName ?? event.calendarId, color: event.calendarColor };
       return next;
     });
-    return nextEvents;
+    return day;
   };
 
   useEffect(() => {
@@ -844,9 +844,18 @@ function App() {
   }, "Google Calendar synchronized");
 
   // #88: Retry on the offline banner (Today and Calendar) reads the calendar again, without a page reload.
+  // #94: success only when the calendar is back; after a Keychain denial it asks the Keychain again first.
   const retryCalendar = () => run(async () => {
-    try { await loadCalendarDay(); }
-    catch (error) { calendarFailed(error); throw error; }
+    try {
+      await retryCalendarDay(calendarOffline, {
+        reprobeKeychain: () => retryConnections(),
+        loadDay: () => loadCalendarDay()
+      });
+    } catch (error) {
+      if (!(error instanceof CalendarStillOfflineError)) calendarFailed(error);
+      await loadTodayPanels().catch(() => undefined);
+      throw error;
+    }
     await loadTodayPanels();
   }, "Calendar reloaded");
 
