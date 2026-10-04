@@ -43,7 +43,11 @@ export function storedMarkdown(markdown: string, ownerRelativePath: string, orig
 /** An image in a note, as `alt → target`, for checking that saving did not lose any. */
 const imageReference = /!\[((?:\\.|[^\]\\])*)\](?:\(\s*(<[^>]*>|(?:\\.|\([^\s()]*\)|[^\s()\\])*)|\[([^\]]*)\])?/g;
 
-/** Images in `markdown` (outside code), normalised so escaping, `<…>` wrapping, reference style and formatting inside the description do not matter. */
+/** An HTML `<img>` tag (#96) and one attribute of it (quoted either way, or bare). */
+const htmlImage = /<img\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+const htmlAttribute = /([a-zA-Z_:][-\w:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+
+/** Images in `markdown` (outside code), normalised so escaping, `<…>` wrapping, reference style and formatting inside the description do not matter. HTML `<img>` tags count too (#96). */
 export function imagesIn(markdown: string): string[] {
   const prose = markdown
     .replace(/\r/g, "")
@@ -65,6 +69,14 @@ export function imagesIn(markdown: string): string[] {
     let decoded = target;
     try { decoded = decodeURI(target); } catch { /* keep as written */ }
     images.push(`${plain(alt)} → ${decoded}`);
+  }
+  for (const [, attributes] of prose.matchAll(htmlImage)) {
+    const values = new Map<string, string>();
+    for (const [, name, double, single, bare] of attributes!.matchAll(htmlAttribute)) {
+      const key = name!.toLowerCase();
+      if (!values.has(key)) values.set(key, double ?? single ?? bare ?? "");
+    }
+    images.push(`${plain(values.get("alt") ?? "")} → ${values.get("src") ?? ""}`);
   }
   return images;
 }
@@ -136,7 +148,7 @@ export function unprovenConstructs(markdown: string): string[] {
     if (/!\[[^\]]*\]\((?!<)[^\s)]*\(/.test(text)) add("brackets in image paths");
     if (/^ {0,3}\|/.test(text) && text.includes("![")) add("images inside tables");
     if (/^ {0,3}\[(?!\^)[^\]]+\]:/.test(text)) add("reference-style links");
-    if (/(?<![<(])\bhttps?:\/\//.test(text)) add("bare web addresses");
+    if (/(?<![<("'=])\bhttps?:\/\//.test(text)) add("bare web addresses"); // not an HTML attribute value
     if (/&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);/.test(text)) add("HTML entities such as &amp;amp;");
     if (/\\[!-/:-@[-`{-~]/.test(text)) add("backslash escapes");
     if (/(^|\s)[*_](\s|$)/.test(text.replace(listItem, ""))) add("a literal * or _ on its own");

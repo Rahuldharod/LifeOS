@@ -12,7 +12,7 @@ const headed = "Vendor B chosen.\n\n## Risks\n\n- Budget\n\n# Appendix\n\nTimeli
 describe("withSummarySection (#66)", () => {
   it("appends a marked section after the user's text", () => {
     const body = withSummarySection(userTop, "Joel confirmed vendor B.");
-    expect(body).toBe(`${userTop}\n${start}\n## Summary\n\nJoel confirmed vendor B.\n${end}\n`);
+    expect(body).toBe(`${userTop}\n${start}\n\n## Summary\n\nJoel confirmed vendor B.\n\n${end}\n`);
   });
 
   it("writes a summary containing ## and # headings once, however often it is retried", () => {
@@ -35,25 +35,25 @@ describe("withSummarySection (#66)", () => {
     const written = withSummarySection(userTop, headed);
     const edited = `${written}${userBottom}\n`;
     const replaced = withSummarySection(edited, "Short.");
-    expect(replaced.startsWith(`${userTop}\n${start}\n`)).toBe(true);
+    expect(replaced.startsWith(`${userTop}\n${start}\n\n`)).toBe(true);
     expect(replaced.endsWith(`${end}\n${userBottom}\n`)).toBe(true);
-    expect(replaced).toBe(`${userTop}\n${start}\n## Summary\n\nShort.\n${end}\n${userBottom}\n`);
+    expect(replaced).toBe(`${userTop}\n${start}\n\n## Summary\n\nShort.\n\n${end}\n${userBottom}\n`);
   });
 
   it("migrates an unmarked summary written before #66, keeping the user's sections after it", () => {
     const legacy = `${userTop}\n## Summary\n\nOld summary.\n\n## Decisions\n\nMine.\n`;
     const migrated = withSummarySection(legacy, "New summary.");
-    expect(migrated).toBe(`${userTop}\n${start}\n## Summary\n\nNew summary.\n${end}\n\n## Decisions\n\nMine.\n`);
+    expect(migrated).toBe(`${userTop}\n${start}\n\n## Summary\n\nNew summary.\n\n${end}\n\n## Decisions\n\nMine.\n`);
     expect(withSummarySection(migrated, "New summary.")).toBe(migrated);
   });
 
   it("migrates an unmarked summary at the very start or the very end of the body", () => {
-    expect(withSummarySection("## Summary\n\nOld.\n", "New.")).toBe(`${start}\n## Summary\n\nNew.\n${end}\n`);
-    expect(withSummarySection(`${userTop}\n## Summary\n\nOld.\n`, "New.")).toBe(`${userTop}\n${start}\n## Summary\n\nNew.\n${end}\n`);
+    expect(withSummarySection("## Summary\n\nOld.\n", "New.")).toBe(`${start}\n\n## Summary\n\nNew.\n\n${end}\n`);
+    expect(withSummarySection(`${userTop}\n## Summary\n\nOld.\n`, "New.")).toBe(`${userTop}\n${start}\n\n## Summary\n\nNew.\n\n${end}\n`);
   });
 
   it("writes into an empty body", () => {
-    expect(withSummarySection("", "Only this.")).toBe(`${start}\n## Summary\n\nOnly this.\n${end}\n`);
+    expect(withSummarySection("", "Only this.")).toBe(`${start}\n\n## Summary\n\nOnly this.\n\n${end}\n`);
   });
 
   it("a summary that contains the boundary markers cannot move the boundaries", () => {
@@ -67,7 +67,7 @@ describe("withSummarySection (#66)", () => {
   it("a start marker whose end marker the user deleted is treated like an unmarked summary", () => {
     const broken = `${userTop}\n${start}\n## Summary\n\nOld.\n\n## Mine\n\nKeep me.\n`;
     const fixed = withSummarySection(broken, "New.");
-    expect(fixed).toBe(`${userTop}\n${start}\n## Summary\n\nNew.\n${end}\n\n## Mine\n\nKeep me.\n`);
+    expect(fixed).toBe(`${userTop}\n${start}\n\n## Summary\n\nNew.\n\n${end}\n\n## Mine\n\nKeep me.\n`);
   });
 
   it("keeps Windows line endings in the user's text untouched", () => {
@@ -78,10 +78,28 @@ describe("withSummarySection (#66)", () => {
   });
 });
 
+describe("withSummarySection writes the form the visual editor keeps byte-for-byte (#96)", () => {
+  it("separates the markers, the heading and the text with blank lines", () => {
+    expect(withSummarySection("# Sync\n", "Agreed.")).toBe(`# Sync\n\n${start}\n\n## Summary\n\nAgreed.\n\n${end}\n`);
+  });
+
+  it("migrates a section written in the older, unspaced form and leaves the user's text around it alone", () => {
+    const userBottom = "## Mine\nno blank line above me\n";
+    const older = `${userTop}\n${start}\n## Summary\n\nOld.\n${end}\n${userBottom}`;
+    const migrated = withSummarySection(older, "New.");
+    expect(migrated).toBe(`${userTop}\n${start}\n\n## Summary\n\nNew.\n\n${end}\n${userBottom}`);
+    expect(withSummarySection(migrated, "New.")).toBe(migrated);
+  });
+
+  it("an empty summary still writes a well-formed section", () => {
+    expect(withSummarySection("", "  ")).toBe(`${start}\n\n## Summary\n\n${end}\n`);
+  });
+});
+
 describe("withSummarySection with a stray start marker (#66)", () => {
   it("never reaches past the user's text to a later ## Summary heading of their own", () => {
     const broken = `${start}\nOld.\n\n## Mine\n\nKeep me.\n\n## Summary\n\nMy own summary.\n`;
     const fixed = withSummarySection(broken, "New.");
-    expect(fixed).toBe(`${start}\n## Summary\n\nNew.\n${end}\n\n## Mine\n\nKeep me.\n\n## Summary\n\nMy own summary.\n`);
+    expect(fixed).toBe(`${start}\n\n## Summary\n\nNew.\n\n${end}\n\n## Mine\n\nKeep me.\n\n## Summary\n\nMy own summary.\n`);
   });
 });

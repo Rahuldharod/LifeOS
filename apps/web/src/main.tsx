@@ -176,7 +176,7 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
     blocked.current = false;
     setRoundTrip(undefined);
     setLost(undefined);
-    void Promise.all([import("@milkdown/crepe"), import("./visualEditorImages.js")]).then(async ([crepePackage, { preserveImages }]) => {
+    void Promise.all([import("@milkdown/crepe"), import("./visualEditorImages.js")]).then(async ([crepePackage, { prepareVisualEditor }]) => {
       if (!active) return;
       const Crepe = (crepePackage as unknown as { Crepe: CrepeConstructor }).Crepe;
       const uploadManagedImage = async (file: File) => {
@@ -192,7 +192,7 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
         featureConfigs: { "image-block": { onUpload: uploadManagedImage, inlineOnUpload: uploadManagedImage, blockOnUpload: uploadManagedImage, proxyDomURL: imagePreviewSource } }
       });
       crepe.current = instance;
-      preserveImages(instance);
+      prepareVisualEditor(instance);
       // Milkdown blanks the href of links it does not consider safe, which includes lifeos://. Keep the
       // target on a data attribute so the app's click handler can still follow it (PB-007).
       instance.editor.config((ctx) => ctx.set("linkAttr", (mark: { attrs: { href?: string } }) => (lifeosLinkId(mark.attrs.href) ? { "data-lifeos-href": mark.attrs.href } : {})));
