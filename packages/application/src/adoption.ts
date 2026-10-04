@@ -136,6 +136,11 @@ type Reader = (document: InboxDocument) => Promise<DraftResult>;
 const replayWindow = 64;
 
 /** UUIDv7 `index` of the journalled draft `seed`: the same inputs always give the same ID. */
+/** Every ID an operation's creates can take on a replay. */
+function replayIds(seed: string, now: string) {
+  return Array.from({ length: replayWindow }, (_, index) => replayableId(seed, index, now));
+}
+
 function replayableId(seed: string, index: number, now: string) {
   const bytes = createHash("sha256").update(`${seed}:${index}`).digest().subarray(0, 16);
   let timestamp = BigInt(Date.parse(now));
@@ -338,7 +343,8 @@ export class AdoptionModule {
       if (!replay) await this.ctx.objects.prepareOperation?.(operation.kind, operation.payload, operation.id);
       // A patch that raises an update Review Item gets replayable IDs too, so a crash never doubles the item.
       let next = 0;
-      const result = await this.patchReader({ ...run, newId: () => replayableId(operation.id, next++, run.now) })(document);
+      const read = () => this.patchReader({ ...run, newId: () => replayableId(operation.id, next++, run.now) })(document);
+      const result = await (replay ? this.ctx.replaying(replayIds(operation.id, run.now), read) : read());
       if (result.outcome !== "skipped") await this.ctx.objects.completeOperation?.(operation.id);
       return result;
     };
@@ -477,7 +483,9 @@ export class AdoptionModule {
     const complete = () => this.ctx.objects.completeOperation?.(operation.id);
     let next = 0;
     let objectIds: string[];
-    try { objectIds = await handler(draft, { ...run, newId: () => replayableId(operation.id, next++, run.now) }); }
+    // A replay may meet objects its interrupted first attempt already wrote: those are reused, never rewritten (#58).
+    const create = () => handler(draft, { ...run, newId: () => replayableId(operation.id, next++, run.now) });
+    try { objectIds = await (replay ? this.ctx.replaying(replayIds(operation.id, run.now), create) : create()); }
     catch (error) {
       const issues = validationIssues(error);
       if (issues) { await complete(); return fail(issues); }

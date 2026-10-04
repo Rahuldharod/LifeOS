@@ -67,6 +67,11 @@ export class AppContext {
       write: async (input) => {
         const id = input.frontmatter.id;
         this.assertWritable(id);
+        if (!input.expectedHash) {
+          const replayed = await this.replayedCreate(input.relativePath, id, store);
+          if (replayed) return replayed;
+          this.assertNewId(id);
+        }
         this.assertEnvelope(input.frontmatter);
         this.trackWrite(id, 1);
         try {
@@ -86,6 +91,35 @@ export class AppContext {
   assertWritable(id: string) {
     const paths = this.index.duplicatePaths?.(id);
     if (paths) throw new ObjectConflictError(`Duplicate object ID ${id} in ${paths.join(" and ")}; remove or re-ID one copy, then try again`);
+  }
+
+  /** #58: a create (no expected hash) must use an ID nothing in the index has, whatever its path. */
+  assertNewId(id: string) {
+    const existing = this.index.get(id);
+    if (existing) throw new ObjectConflictError(`Duplicate object ID ${id}: already used by ${existing.relativePath}; nothing was written`);
+  }
+
+  /** IDs a crash replay may find already written by its own interrupted first attempt (see `replaying`). */
+  private readonly replayIds = new Set<string>();
+
+  /**
+   * Runs `work` as the replay of an interrupted operation whose creates use the deterministic `ids`. A create
+   * of one of these IDs at the path where it already exists returns the file the first attempt wrote (writes
+   * are atomic, so it is complete) instead of being refused as a duplicate. Nothing is ever rewritten.
+   */
+  async replaying<T>(ids: Iterable<string>, work: () => Promise<T>): Promise<T> {
+    const added = [...ids].filter((id) => !this.replayIds.has(id));
+    for (const id of added) this.replayIds.add(id);
+    try { return await work(); }
+    finally { for (const id of added) this.replayIds.delete(id); }
+  }
+
+  private async replayedCreate(relativePath: string, id: string, store: ObjectStore) {
+    if (!this.replayIds.has(id)) return undefined;
+    const existing = await store.read(relativePath).catch(() => undefined);
+    if (existing?.frontmatter.id !== id) return undefined;
+    this.known.set(id, existing);
+    return existing;
   }
 
   private trackWrite(id: string, delta: 1 | -1) {
