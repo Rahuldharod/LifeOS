@@ -1,3 +1,4 @@
+import { AdoptionModule } from "./adoption.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
@@ -6,12 +7,14 @@ import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
 import type { Sensitivity } from "@lifeos/domain";
-import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
+import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
 import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
 
 export type { ExternalChange } from "./history.js";
-export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, ObjectStore, SecretStore } from "./ports.js";
+export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
+export { inboxFolders } from "./ports.js";
+export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -26,13 +29,16 @@ export class LifeOSApplication {
   private readonly review: ReviewModule;
   private readonly capture: CaptureModule;
   private readonly history: HistoryModule;
+  private readonly adoption: AdoptionModule;
 
-  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development") {
+  /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
+  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
+    this.adoption = new AdoptionModule(ctx, inbox);
     this.meetings = new MeetingsModule(ctx);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
-    this.system = new SystemModule(ctx, this.meetings, this.review);
+    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption);
     this.entitiesModule = new EntitiesModule(ctx);
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
@@ -97,4 +103,8 @@ export class LifeOSApplication {
   quickCapture(title: string) { return this.capture.quickCapture(title); }
   knowledge(query = "") { return this.capture.knowledge(query); }
   ingestTextSource(title: string, text: string) { return this.capture.ingestTextSource(title, text); }
+
+  // Inbox Drafts (ADR 0007)
+  adoptDrafts(options?: { now?: Date }) { return this.adoption.adoptDrafts(options); }
+  inboxStatus() { return this.adoption.inboxStatus(); }
 }

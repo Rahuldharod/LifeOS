@@ -31,7 +31,8 @@ export interface BackupVerification extends BackupSummary {
   diagnostics: string[];
 }
 
-const excludedPaths = new Set([".lifeos/session.md"]);
+// `_agent/` is the derived Agent Index: rebuildable, so not backed up (ADR 0007). `_inbox/` is kept.
+const excludedPaths = new Set([".lifeos/session.md", "_agent"]);
 
 function sha256(content: Uint8Array) {
   return createHash("sha256").update(content).digest("hex");

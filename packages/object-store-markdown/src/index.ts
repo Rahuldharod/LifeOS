@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ObjectStore } from "@lifeos/application";
+import { inboxFolders, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
 
@@ -65,6 +65,8 @@ function unreadableReason(error: unknown) {
   return code === "EACCES" || code === "EPERM" ? "permission denied" : error instanceof Error ? error.message : String(error);
 }
 
+const nonObjectFolders = new Set(["_inbox", "_agent"]);
+
 async function markdownFiles(root: string, diagnostics: string[], current = root): Promise<string[]> {
   let entries;
   try { entries = await readdir(current, { withFileTypes: true }); }
@@ -76,6 +78,8 @@ async function markdownFiles(root: string, diagnostics: string[], current = root
   const found: string[] = [];
   for (const entry of entries) {
     if (entry.name === ".lifeos") continue;
+    // Agent drafts and the derived Agent Index are not objects (ADR 0007).
+    if (current === root && nonObjectFolders.has(entry.name)) continue;
     const full = path.join(current, entry.name);
     if (entry.isDirectory()) found.push(...await markdownFiles(root, diagnostics, full));
     else if (entry.isFile() && entry.name.endsWith(".md")) found.push(path.relative(root, full));
@@ -201,6 +205,71 @@ export class MarkdownObjectStore implements ObjectStore {
     const target = path.resolve(this.root, relativePath);
     if (target !== this.root && !target.startsWith(`${this.root}${path.sep}`)) throw new Error("Path escapes the LifeOS data root");
     return target;
+  }
+}
+
+/** Filesystem access to `_inbox/` (drafts, outcomes and sidecars) and `_agent/`. Splits front matter but never validates it. */
+export class FilesystemInboxStore implements InboxStore {
+  private readonly root: string;
+
+  constructor(root: string) { this.root = path.resolve(root); }
+
+  async ensureFolders() {
+    await Promise.all([...inboxFolders.map((folder) => mkdir(path.join(this.root, "_inbox", folder), { recursive: true })), mkdir(path.join(this.root, "_agent"), { recursive: true })]);
+  }
+
+  async list(folder: InboxFolder) {
+    const entries = await readdir(this.folder(folder), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? [] : Promise.reject(error));
+    const names = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md") && !entry.name.startsWith(".")).map((entry) => entry.name).sort();
+    return Promise.all(names.map((name) => this.file(folder, name)));
+  }
+
+  async read(folder: InboxFolder, name: string): Promise<InboxDocument> {
+    const file = await this.file(folder, name);
+    const content = await readFile(this.target(folder, name), "utf8");
+    const base = { ...file, content, contentHash: hash(content) };
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+    if (!match) return { ...base, body: content, error: content.trim() ? "missing YAML front matter" : "empty file" };
+    let raw: unknown;
+    try { raw = parse(match[1] ?? ""); }
+    catch (error) { return { ...base, body: match[2] ?? "", error: `unreadable YAML front matter (${(error instanceof Error ? error.message : String(error)).split("\n")[0]})` }; }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...base, body: match[2] ?? "", error: "front matter is not a set of fields" };
+    return { ...base, frontmatter: raw as Record<string, unknown>, body: match[2] ?? "" };
+  }
+
+  async move(from: InboxFolder, name: string, to: InboxFolder) {
+    await mkdir(this.folder(to), { recursive: true });
+    const extension = path.extname(name);
+    const stem = name.slice(0, name.length - extension.length);
+    let candidate = name;
+    // Adoption runs one batch at a time, so check-then-rename cannot race with another LifeOS writer.
+    for (let suffix = 2; await access(this.target(to, candidate)).then(() => true, () => false); suffix += 1) candidate = `${stem}-${suffix}${extension}`;
+    await rename(this.target(from, name), this.target(to, candidate));
+    return this.file(to, candidate);
+  }
+
+  async writeDocument(folder: InboxFolder, name: string, frontmatter: Record<string, unknown>, body: string) {
+    const target = this.target(folder, name);
+    await mkdir(path.dirname(target), { recursive: true });
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `---\n${stringify(frontmatter).trimEnd()}\n---\n${body}`, { encoding: "utf8", flag: "wx" });
+    await rename(temporary, target);
+    return this.file(folder, name);
+  }
+
+  private async file(folder: InboxFolder, name: string): Promise<InboxFile> {
+    const info = await stat(this.target(folder, name));
+    return { name, relativePath: `_inbox/${folder}/${name}`, modifiedAt: info.mtimeMs };
+  }
+
+  private folder(folder: InboxFolder) {
+    if (!inboxFolders.includes(folder)) throw new Error(`Unknown inbox folder: ${folder}`);
+    return path.join(this.root, "_inbox", folder);
+  }
+
+  private target(folder: InboxFolder, name: string) {
+    if (!name || name !== path.basename(name) || name.startsWith(".")) throw new Error(`Invalid inbox file name: ${name}`);
+    return path.join(this.folder(folder), name);
   }
 }
 
