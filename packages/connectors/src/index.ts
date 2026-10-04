@@ -19,6 +19,7 @@ export class MockCalendarConnector implements CalendarConnector {
       calendarName: "LifeOS Demo",
       calendarColor: "#5f8b7c",
       attendees: ["Alex Morgan", "Jamie Chen"],
+      attendeeDetails: [{ email: "alex.morgan@example.com", displayName: "Alex Morgan" }, { email: "jamie.chen@eagleeye.com", displayName: "Jamie Chen" }],
       clientName: "Example Client",
       productName: "LifeOS",
       projectName: "LifeOS MVP"
@@ -129,7 +130,14 @@ export class GoogleCalendarConnector implements CalendarConnector {
           endsAt: new Date(rawEnd).toISOString(),
           timezone: String(event.start.timeZone ?? event.end.timeZone ?? calendar.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
           isAllDay: allDay,
-          attendees: Array.isArray(event.attendees) ? event.attendees.map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : []
+          declined: Array.isArray(event.attendees) && event.attendees.some((attendee: Record<string, unknown>) => attendee.self === true && attendee.responseStatus === "declined"),
+          attendees: Array.isArray(event.attendees) ? event.attendees.map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : [],
+          // #38: emails for matching People. Rooms and other resources are not people.
+          attendeeDetails: Array.isArray(event.attendees) ? event.attendees.filter((attendee: Record<string, unknown>) => attendee.resource !== true).map((attendee: Record<string, unknown>) => ({
+            ...(typeof attendee.email === "string" ? { email: attendee.email } : {}),
+            ...(typeof attendee.displayName === "string" ? { displayName: attendee.displayName } : {}),
+            ...(attendee.self === true ? { self: true } : {})
+          })) : []
         };
       });
     }));

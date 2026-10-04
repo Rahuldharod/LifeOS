@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { uuidV7, type LifeOSObject } from "@lifeos/domain";
-import { markdownFileName, type AppContext } from "./context.js";
-import type { InboxDocument, InboxFile, InboxStore } from "./ports.js";
+import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
+import type { PatchModule } from "./patches.js";
+import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
+import { internalDomainsOf, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
+import { PersonMergeModule } from "./person-merge.js";
+import { ReferenceResolver, type ReferenceField } from "./resolution.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -9,12 +13,13 @@ import type { InboxDocument, InboxFile, InboxStore } from "./ports.js";
  * One batch: read each draft → check the shared contract → check idempotency (draft_key + content
  * hash) → route by kind and origin to a handler that writes objects → file the draft in
  * `_inbox/processed/` or `_inbox/failed/` with a `.result.md` sidecar → one agent-run for the batch.
- * New draft kinds and origins plug in as entries in `routes`; patches and requests get their own readers.
+ * New draft kinds and origins plug in as entries in `routes`. Patch Drafts in `_inbox/patches/` are read by
+ * `PatchModule` (patches.ts) in the same batch, after the drafts; requests will get their own reader.
  *
- * Crash safety (#32): each batch and each draft handed to a handler is journalled as an operation
- * (`adopt-batch`, `adopt-draft`). Handlers take object IDs from `run.newId()`, which are derived from
- * the journal entry, so the next batch (startup included) replays an interrupted draft onto the same
- * IDs, finishes its audit/move/sidecar, and writes the missing agent-run: nothing is duplicated.
+ * Crash safety (#32): each batch and each draft or patch handed to its handler is journalled as an operation
+ * (`adopt-batch`, `adopt-draft`). Handlers take object IDs from `run.newId()`, which are derived from the
+ * journal entry, so the next batch (startup included) replays an interrupted draft onto the same IDs,
+ * finishes its audit, move and sidecar, and writes the missing agent-run: nothing is duplicated.
  */
 
 export const draftContractVersion = 1;
@@ -43,7 +48,10 @@ export interface AdoptionRun {
   id: string;
   now: string;
   self(): Promise<LifeOSObject>;
-  /** A UUIDv7 for each object the draft creates. Always use this, not `uuidV7()`: a crash replay gets the same IDs back. */
+  /**
+   * A UUIDv7 for each object (or Review Item operation ID) the draft creates. Always use this, not `uuidV7()`:
+   * a replay after a crash gets the same IDs back, so it rewrites the same objects instead of duplicating them.
+   */
   newId(): string;
 }
 
@@ -56,9 +64,9 @@ export class DraftError extends Error {
   constructor(readonly issues: string[]) { super(issues.join("; ")); }
 }
 
-export type DraftOutcome = "adopted" | "duplicate" | "failed" | "skipped";
+export type DraftOutcome = "adopted" | "applied" | "duplicate" | "failed" | "skipped";
 export interface DraftResult {
-  /** Where the draft was found, e.g. `_inbox/drafts/x.md`. */
+  /** Where the draft was found, e.g. `_inbox/drafts/x.md` or `_inbox/patches/x.md`. */
   draft: string;
   outcome: DraftOutcome;
   objectIds: string[];
@@ -74,6 +82,11 @@ export interface AdoptionBatch {
   /** True when a draft was skipped only because it may still be being written: trigger again in a few seconds. */
   retrySoon: boolean;
 }
+/** What `file()` records in the `.result.md` sidecar; no `outcome` means failed (then `errors` is required). */
+export interface FilingResult { draftKey: string; objectIds: string[]; errors?: string[]; outcome?: "adopted" | "applied" | "duplicate"; original?: { result?: string; agentRunId?: string } }
+/** Files one inbox document from its reader's folder into `processed/` or `failed/` with its sidecar. */
+export type FileDocument = (document: InboxDocument, folder: "processed" | "failed", result: FilingResult) => Promise<DraftResult>;
+
 export interface InboxStatus {
   awaiting: number;
   failed: Array<{ path: string; reason: string }>;
@@ -92,7 +105,7 @@ export interface AutoAdoptionOptions {
   onError?: (error: unknown) => void;
 }
 export interface AutoAdoption {
-  /** Call on every watcher event in `_inbox/drafts/`; bursts collapse into one batch. */
+  /** Call on every watcher event in `_inbox/drafts/` or `_inbox/patches/`; bursts collapse into one batch. */
   notify(): void;
   /** Runs a batch now (startup); resolves undefined when this device may not write. */
   runNow(): Promise<AdoptionBatch | undefined>;
@@ -104,9 +117,9 @@ export const partialFileGraceMs = 2000;
 const adoptedAction = "draft.adopted";
 const resultName = (name: string) => `${name.replace(/\.md$/, "")}.result.md`;
 const isResult = (file: InboxFile) => file.name.endsWith(".result.md");
-type FiledResult = { draftKey: string; objectIds: string[]; errors?: string[]; outcome?: "adopted" | "duplicate"; original?: { result?: string; agentRunId?: string } };
 type Ledger = Map<string, { contentHash: string; objectIds: string[]; agentRunIds: Set<string> }>;
 type Operation = { id: string; kind: string; payload: Record<string, unknown> };
+type Reader = (document: InboxDocument) => Promise<DraftResult>;
 /** How many replayable IDs recovery checks per draft; far more objects than any single draft creates. */
 const replayWindow = 64;
 
@@ -120,12 +133,12 @@ function replayableId(seed: string, index: number, now: string) {
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-const text = (value: unknown) => typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
+export const text = (value: unknown) => typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
 const stringList = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === "string");
 
 // Any ISO 8601 date or date-time; a time must carry `Z` or an offset so the instant is unambiguous.
 const isoInstant = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?))?$/i;
-function toUtc(value: unknown) {
+export function toUtc(value: unknown) {
   const raw = value instanceof Date ? value.toISOString() : text(value);
   const match = raw.match(isoInstant);
   if (!match) return undefined;
@@ -134,10 +147,24 @@ function toUtc(value: unknown) {
   const parsed = new Date(time ? `${date}T${time.replace(",", ".")}${offset}` : `${date}T00:00:00Z`);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
-const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+
+/** The Review Item body for a proposal: its title, then the Agent's narrative as written. */
+export function proposalBody(title: string, narrative?: unknown) {
+  const body = typeof narrative === "string" ? narrative.trim() : "";
+  return `# Proposal\n\n${title}\n${body ? `\n${body}\n` : ""}`;
+}
+
+/** Which by-name references (#33) each kind can carry; others are refused rather than silently dropped. */
+const kindReferences: Record<string, ReferenceField[]> = {
+  task: ["project", "client", "product", "people", "owner", "waiting_for", "meeting"],
+  decision: ["project", "client", "product", "people", "meeting"],
+  "open-point": ["project", "client", "product", "people", "owner", "meeting"]
+};
+const contextLinkFields = ["primary_client_id", "primary_product_id", "primary_project_id"];
 
 /** Zod issues (from the object store's validation) as "field: reason"; anything else is not the draft's fault. */
-function validationIssues(error: unknown) {
+export function validationIssues(error: unknown) {
   const issues = (error as { issues?: Array<{ path: PropertyKey[]; message: string }> }).issues;
   return error instanceof DraftError ? error.issues : Array.isArray(issues) ? issues.map((issue) => `${issue.path.map(String).join(".") || "front matter"}: ${issue.message}`) : undefined;
 }
@@ -145,14 +172,24 @@ function validationIssues(error: unknown) {
 export class AdoptionModule {
   /** Handlers keyed `kind:origin`. Missing combinations fail with "not supported yet" so nothing is guessed. */
   private readonly routes: Partial<Record<`${DraftKind}:${DraftOrigin}`, DraftHandler>> = {
-    "task:user-dictated": (draft, run) => this.adoptDictatedTask(draft, run)
+    "task:user-dictated": (draft, run) => this.adoptDictated(draft, run),
+    "decision:user-dictated": (draft, run) => this.adoptDictated(draft, run),
+    "open-point:user-dictated": (draft, run) => this.adoptDictated(draft, run),
+    "task:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
+    "decision:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
+    "open-point:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
+    "person:user-dictated": (draft, run) => this.adoptPerson(draft, run),
+    "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run)
   };
+  private personMerges?: PersonMergeModule;
   /** Unparsable drafts by name → content hash: the first sighting may be a partial sync, so it is skipped once. */
   private readonly unparsableSeen = new Map<string, string>();
   /** Batches run one at a time, so startup, the watcher and "Adopt now" can never adopt one draft twice. */
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore) {}
+  private readonly resolver: ReferenceResolver;
+
+  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore, private readonly patches?: PatchModule) { this.resolver = new ReferenceResolver(ctx); }
 
   adoptDrafts(options: { now?: Date } = {}): Promise<AdoptionBatch> {
     return this.enqueue(() => this.runBatch(options.now ?? new Date()));
@@ -193,14 +230,14 @@ export class AdoptionModule {
 
   async inboxStatus(): Promise<InboxStatus> {
     if (!this.inbox) return { awaiting: 0, failed: [] };
-    const [drafts, failed] = await Promise.all([this.inbox.list("drafts"), this.inbox.list("failed")]);
+    const [drafts, patches, failed] = await Promise.all([this.inbox.list("drafts"), this.inbox.list("patches"), this.inbox.list("failed")]);
     const names = new Set(failed.map((file) => file.name));
     const reasons = await Promise.all(failed.filter((file) => !isResult(file)).map(async (file) => {
       const sidecar = names.has(resultName(file.name)) ? await this.inbox!.read("failed", resultName(file.name)).catch(() => undefined) : undefined;
       const errors = sidecar?.frontmatter?.errors;
       return { path: file.relativePath, reason: Array.isArray(errors) && errors.length ? errors.map(String).join("; ") : `no readable ${resultName(file.name)} sidecar` };
     }));
-    return { awaiting: drafts.length, failed: reasons };
+    return { awaiting: drafts.length + patches.length, failed: reasons };
   }
 
   /** System Health lines for failed drafts: they stay listed until the user removes or fixes them. */
@@ -221,20 +258,29 @@ export class AdoptionModule {
     let journalled = false;
     let retrySoon = false;
 
-    for (const file of await inbox.list("drafts")) {
-      if (recovered.handled.has(file.name)) continue;
-      if (now.getTime() - file.modifiedAt < partialFileGraceMs) { retrySoon = true; results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: modified less than 2 seconds ago; will retry` }); continue; }
-      const document = await inbox.read("drafts", file.name);
-      if (document.error && this.unparsableSeen.get(file.name) !== document.contentHash) {
-        this.unparsableSeen.set(file.name, document.contentHash);
-        retrySoon = true;
-        results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: ${document.error}; will retry once in case it is still syncing` });
-        continue;
+    // Drafts first, so a patch can target an object created by a draft in the same batch.
+    for (const folder of ["drafts", "patches"] as const) {
+      let read: Reader = (document) => this.adoptOne(document, run, ledger);
+      if (folder === "patches") {
+        if (!this.patches) break;
+        await ctx.rebuildIndex();
+        read = this.journalledPatch(run, this.patchReader(run));
       }
-      this.unparsableSeen.delete(file.name);
-      // The batch is journalled before its first draft is filed, so a crash before the agent-run is finished on restart.
-      if (!journalled) { await ctx.objects.prepareOperation?.("adopt-batch", { run_id: run.id, now: timestamp }, run.id); journalled = true; }
-      results.push(await this.adoptOne(document, run, ledger));
+      for (const file of await inbox.list(folder)) {
+        if (recovered.handled.has(file.relativePath)) continue;
+        if (now.getTime() - file.modifiedAt < partialFileGraceMs) { retrySoon = true; results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: modified less than 2 seconds ago; will retry` }); continue; }
+        const document = await inbox.read(folder, file.name);
+        if (document.error && this.unparsableSeen.get(file.relativePath) !== document.contentHash) {
+          this.unparsableSeen.set(file.relativePath, document.contentHash);
+          retrySoon = true;
+          results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: ${document.error}; will retry once in case it is still syncing` });
+          continue;
+        }
+        this.unparsableSeen.delete(file.relativePath);
+        // The batch is journalled before its first draft is filed, so a crash before the agent-run is finished on restart.
+        if (!journalled) { await ctx.objects.prepareOperation?.("adopt-batch", { run_id: run.id, now: timestamp }, run.id); journalled = true; }
+        results.push(await read(document));
+      }
     }
 
     const filed = results.filter((result) => result.outcome !== "skipped");
@@ -249,12 +295,31 @@ export class AdoptionModule {
     return { id, now, self: () => self ??= this.ctx.ensureSelfPerson(now), newId: () => uuidV7() };
   }
 
+  private patchReader(run: AdoptionRun): Reader {
+    return this.patches!.reader(run, (document, outcome, result) => this.file("patches", document, outcome, result, run));
+  }
+
+  /**
+   * Patches are journalled around their reader so recovery can finish filing one that was applied. Patches create
+   * no objects (only a guarded update and its `patch.applied` audit, which is their idempotency ledger), so a replay
+   * simply re-runs the reader: an already audited patch is then recognised and filed instead of applied twice.
+   */
+  private journalledPatch(run: AdoptionRun, read: Reader, replay?: Operation): Reader {
+    return async (document) => {
+      const operation: Operation = replay ?? { id: uuidV7(), kind: "adopt-draft", payload: { run_id: run.id, now: run.now, folder: "patches", draft: document.name, draft_key: text(document.frontmatter?.draft_key), content_hash: document.contentHash } };
+      if (!replay) await this.ctx.objects.prepareOperation?.(operation.kind, operation.payload, operation.id);
+      const result = await read(document);
+      if (result.outcome !== "skipped") await this.ctx.objects.completeOperation?.(operation.id);
+      return result;
+    };
+  }
+
   /** One agent-run per batch; a recovered batch also lists objects its drafts created before the crash. */
   private async recordRun(run: AdoptionRun, filed: DraftResult[], recovered = false) {
     const audited = this.ctx.index.all().filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === adoptedAction && (object.frontmatter.metadata as Record<string, unknown> | undefined)?.agent_run_id === run.id).map((object) => String(object.frontmatter.object_id));
-    const created = [...new Set([...audited, ...filed.flatMap((result) => result.outcome === "adopted" ? result.objectIds : [])])];
+    const created = [...new Set([...audited, ...filed.flatMap((result) => result.outcome === "adopted" || result.outcome === "applied" ? result.objectIds : [])])];
     const count = (outcome: DraftOutcome) => filed.filter((result) => result.outcome === outcome).length;
-    const summary = `${count("adopted")} adopted, ${count("duplicate")} duplicate, ${count("failed")} failed`;
+    const summary = `${count("adopted")} adopted, ${count("applied") ? `${count("applied")} applied, ` : ""}${count("duplicate")} duplicate, ${count("failed")} failed`;
     await this.ctx.objects.write({
       relativePath: `agent-runs/${markdownFileName("Inbox adoption", run.id, run.now)}`,
       frontmatter: { ...this.ctx.envelope(run.id, "agent-run", "Inbox adoption", run.now), operation: "inbox-adoption", provider: "lifeos", model: "rules", prompt_version: `draft-contract-${draftContractVersion}`, status: "succeeded", started_at: run.now, completed_at: new Date().toISOString(), output_summary: recovered ? `completed after an interruption (${summary} on recovery)` : summary, related_object_ids: created },
@@ -263,8 +328,9 @@ export class AdoptionModule {
   }
 
   /**
-   * Finishes batches interrupted by a crash (or a write error): replays each journalled draft onto its
-   * journalled IDs, or completes its audit and sidecar if it was already moved, then writes any missing agent-run.
+   * Finishes batches interrupted by a crash (or a write error): replays each journalled draft or patch still in
+   * its folder (drafts onto their journalled IDs), or completes the audit and sidecar of one already moved,
+   * then writes any missing agent-run.
    */
   private async recover(): Promise<{ results: DraftResult[]; handled: Set<string> }> {
     const pending = (await this.ctx.objects.incompleteOperations?.() ?? []).filter((operation) => operation.kind === "adopt-draft" || operation.kind === "adopt-batch");
@@ -279,7 +345,7 @@ export class AdoptionModule {
     };
     const results: DraftResult[] = [];
     for (const operation of pending.filter((candidate) => candidate.kind === "adopt-draft")) {
-      handled.add(String(operation.payload.draft));
+      handled.add(`_inbox/${String(operation.payload.folder ?? "drafts")}/${String(operation.payload.draft)}`);
       const entry = runOf(operation);
       const result = await this.recoverDraft(operation, entry.run);
       if (!result) continue;
@@ -302,25 +368,47 @@ export class AdoptionModule {
 
   private async recoverDraft(operation: Operation, run: AdoptionRun): Promise<DraftResult | undefined> {
     const inbox = this.inbox!;
+    const from = operation.payload.folder === "patches" ? "patches" as const : "drafts" as const;
+    if (from === "patches" && !this.patches) return undefined;
     const name = String(operation.payload.draft);
     const contentHash = String(operation.payload.content_hash);
     const draftKey = String(operation.payload.draft_key);
-    const draft = (await inbox.list("drafts")).find((file) => file.name === name);
-    const document = draft ? await inbox.read("drafts", name) : undefined;
-    // Still in drafts, unchanged: replay it onto the same IDs.
-    if (document?.contentHash === contentHash) return this.adoptOne(document, run, this.ledger(), operation);
+    const draftPath = `_inbox/${from}/${name}`;
+    const waiting = (await inbox.list(from)).find((file) => file.name === name);
+    const document = waiting ? await inbox.read(from, name) : undefined;
+    // The patch's own ledger: a `patch.applied` audit for this key and content means the change itself was made.
+    const patched = from === "patches" ? this.ctx.index.all().filter((object) => {
+      const metadata = object.frontmatter.metadata as Record<string, unknown> | undefined;
+      return object.frontmatter.type === "audit-event" && object.frontmatter.action === "patch.applied" && metadata?.draft_key === draftKey && metadata.content_hash === contentHash;
+    }).map((object) => String(object.frontmatter.object_id)) : [];
+    // Still in its folder, unchanged: replay it (a draft onto the same IDs), or just file a patch that was applied.
+    if (document?.contentHash === contentHash) {
+      if (from === "drafts") return this.adoptOne(document, run, this.ledger(), operation);
+      if (!patched.length) { await this.ctx.rebuildIndex(); return this.journalledPatch(run, this.patchReader(run), operation)(document); }
+      const result = await this.file("patches", document, "processed", { draftKey, objectIds: patched, outcome: "applied" }, run);
+      await this.ctx.objects.completeOperation?.(operation.id);
+      return result;
+    }
 
     // Already moved (or gone, or changed since): record what was created so a re-send is recognised.
-    const objectIds = Array.from({ length: replayWindow }, (_, index) => replayableId(operation.id, index, run.now)).filter((id) => this.ctx.index.get(id));
-    await this.auditOnce(objectIds, { draftKey, contentHash, draftPath: `_inbox/drafts/${name}`, origin: operation.payload.origin }, run, this.ledger());
+    let objectIds: string[];
+    if (from === "patches") objectIds = patched;
+    else {
+      objectIds = Array.from({ length: replayWindow }, (_, index) => replayableId(operation.id, index, run.now)).filter((id) => this.ctx.index.get(id));
+      await this.auditOnce(objectIds, { draftKey, contentHash, draftPath, origin: operation.payload.origin }, run, this.ledger());
+    }
     let result: DraftResult | undefined;
-    const processed = await inbox.list("processed");
-    const names = new Set(processed.map((file) => file.name));
-    for (const file of processed.filter((candidate) => !isResult(candidate) && !names.has(resultName(candidate.name)))) {
-      const moved = await inbox.read("processed", file.name);
-      if (moved.contentHash !== contentHash) continue;
-      result = await this.writeResult(moved, `_inbox/drafts/${name}`, file, "processed", { draftKey, objectIds, outcome: "adopted" }, run);
-      break;
+    for (const folder of ["processed", "failed"] as const) {
+      const files = await inbox.list(folder);
+      const names = new Set(files.map((file) => file.name));
+      for (const file of files.filter((candidate) => !isResult(candidate) && !names.has(resultName(candidate.name)))) {
+        const moved = await inbox.read(folder, file.name);
+        if (moved.contentHash !== contentHash) continue;
+        const filing: FilingResult = folder === "failed" ? { draftKey, objectIds: [], errors: [`${draftPath}: adoption was interrupted before the reason was recorded; send it again to see why it was refused`] } : { draftKey, objectIds, outcome: from === "patches" ? "applied" : "adopted" };
+        result = await this.writeResult(from, moved, draftPath, file, folder, filing, run);
+        break;
+      }
+      if (result) break;
     }
     await this.ctx.objects.completeOperation?.(operation.id);
     return result;
@@ -338,7 +426,7 @@ export class AdoptionModule {
     const draftKey = text(fields.draft_key);
     const prefix = `${document.relativePath}${draftKey ? ` (draft_key ${draftKey})` : ""}`;
     const fail = async (issues: string[]) => {
-      const result = await this.file(document, "failed", { draftKey, objectIds: [], errors: [`${prefix}: ${issues.join("; ")}`] }, run);
+      const result = await this.file("drafts", document, "failed", { draftKey, objectIds: [], errors: [`${prefix}: ${issues.join("; ")}`] }, run);
       if (replay) await this.ctx.objects.completeOperation?.(replay.id);
       return result;
     };
@@ -349,12 +437,12 @@ export class AdoptionModule {
     const draft = parsed.draft;
 
     const previous = replay ? undefined : ledger.get(draft.draftKey);
-    if (previous && previous.contentHash === draft.contentHash) return this.file(document, "processed", { draftKey, objectIds: previous.objectIds, outcome: "duplicate", original: await this.originalResult(draft, previous.agentRunIds) }, run);
+    if (previous && previous.contentHash === draft.contentHash) return this.file("drafts", document, "processed", { draftKey, objectIds: previous.objectIds, outcome: "duplicate", original: await this.originalResult(draft, previous.agentRunIds) }, run);
     if (previous) return fail([`draft_key: idempotency conflict: draft_key ${draft.draftKey} was already adopted from different content (object ${previous.objectIds.join(", ")}); use a new draft_key, or a Patch Draft to change it`]);
 
     const handler = this.routes[`${draft.kind}:${draft.origin}`];
     if (!handler) return fail([`kind: ${draft.kind} drafts with origin ${draft.origin} are not supported yet`]);
-    const operation: Operation = replay ?? { id: uuidV7(), kind: "adopt-draft", payload: { run_id: run.id, now: run.now, draft: document.name, draft_key: draft.draftKey, content_hash: draft.contentHash, origin: draft.origin } };
+    const operation: Operation = replay ?? { id: uuidV7(), kind: "adopt-draft", payload: { run_id: run.id, now: run.now, folder: "drafts", draft: document.name, draft_key: draft.draftKey, content_hash: draft.contentHash, origin: draft.origin } };
     if (!replay) await this.ctx.objects.prepareOperation?.(operation.kind, operation.payload, operation.id);
     const complete = () => this.ctx.objects.completeOperation?.(operation.id);
     let next = 0;
@@ -366,9 +454,12 @@ export class AdoptionModule {
       // Not the draft's fault (disk, lease, duplicate-ID block): the journal entry stays, so the next trigger replays it onto the same IDs.
       return { draft: document.relativePath, outcome: "skipped", objectIds: [], reason: `${prefix}: ${error instanceof Error ? error.message : String(error)}; will retry` };
     }
+    // A replayed handler may skip re-creating what the first attempt already wrote (e.g. a merge suggestion
+    // for a pair already proposed); anything written under this draft's IDs still belongs to it.
+    if (replay) objectIds = [...new Set([...objectIds, ...Array.from({ length: replayWindow }, (_, index) => replayableId(operation.id, index, run.now)).filter((id) => this.ctx.index.get(id))])];
     await this.auditOnce(objectIds, { draftKey: draft.draftKey, contentHash: draft.contentHash, draftPath: document.relativePath, origin: draft.origin }, run, replay ? ledger : new Map());
     ledger.set(draft.draftKey, { contentHash: draft.contentHash, objectIds, agentRunIds: new Set([run.id]) });
-    const result = await this.file(document, "processed", { draftKey, objectIds, outcome: "adopted" }, run);
+    const result = await this.file("drafts", document, "processed", { draftKey, objectIds, outcome: "adopted" }, run);
     await complete();
     return result;
   }
@@ -391,6 +482,8 @@ export class AdoptionModule {
     if (version === undefined) return { issues: ["lifeos_draft: missing; a draft must start with lifeos_draft: 1"] };
     if (version !== draftContractVersion) return { issues: [`lifeos_draft: unsupported contract version ${String(version)} (this LifeOS reads version ${draftContractVersion})`] };
     const issues: string[] = [];
+    // U7: only the application generates Review Item operation IDs, so a draft can never pre-empt or replay one.
+    if (fields.operation_id !== undefined) issues.push("operation_id: drafts must not carry an operation_id; LifeOS generates it at adoption");
     const kind = text(fields.kind);
     if (!kind) issues.push("kind: missing");
     else if (!(draftKinds as readonly string[]).includes(kind)) issues.push(`kind: unknown kind "${kind}" (expected one of ${draftKinds.join(", ")})`);
@@ -408,16 +501,17 @@ export class AdoptionModule {
   }
 
   /** Moves the draft to its outcome folder and writes the `.result.md` sidecar the Agent reads to confirm what happened. */
-  private async file(document: InboxDocument, folder: "processed" | "failed", result: FiledResult, run: AdoptionRun): Promise<DraftResult> {
-    const filed = await this.inbox!.move("drafts", document.name, folder);
-    return this.writeResult(document, document.relativePath, filed, folder, result, run);
+  private async file(from: InboxFolder, document: InboxDocument, folder: "processed" | "failed", result: FilingResult, run: AdoptionRun): Promise<DraftResult> {
+    const filed = await this.inbox!.move(from, document.name, folder);
+    return this.writeResult(from, document, document.relativePath, filed, folder, result, run);
   }
 
-  private async writeResult(document: InboxDocument, draftPath: string, filed: InboxFile, folder: "processed" | "failed", result: FiledResult, run: AdoptionRun): Promise<DraftResult> {
+  private async writeResult(from: InboxFolder, document: InboxDocument, draftPath: string, filed: InboxFile, folder: "processed" | "failed", result: FilingResult, run: AdoptionRun): Promise<DraftResult> {
     const outcome = result.outcome ?? "failed";
+    const ids = result.objectIds.join(", ");
     const original = result.original;
     const pointer = original?.result ? ` The original result is ${original.result}.` : original?.agentRunId ? ` It was adopted by agent-run ${original.agentRunId}.` : "";
-    const heading = outcome === "adopted" ? `# Adopted\n\nCreated ${result.objectIds.join(", ")}.\n` : outcome === "duplicate" ? `# Already adopted\n\nThis draft was adopted before as ${result.objectIds.join(", ")}; nothing new was created.${pointer}\n` : `# Not adopted\n\n${result.errors!.map((error) => `- ${error}`).join("\n")}\n\nFix the draft and send it again; this file is kept and never deleted automatically.\n`;
+    const heading = outcome === "adopted" ? `# Adopted\n\nCreated ${ids}.\n` : outcome === "applied" ? `# Applied\n\nChanged ${ids}. The change can be undone in LifeOS.\n` : outcome === "duplicate" ? from === "patches" ? `# Already applied\n\nThis patch was applied before to ${ids}; nothing was changed again.\n` : `# Already adopted\n\nThis draft was adopted before as ${ids}; nothing new was created.${pointer}\n` : `# Not ${from === "patches" ? "applied" : "adopted"}\n\n${result.errors!.map((error) => `- ${error}`).join("\n")}\n\nFix the draft and send it again; this file is kept and never deleted automatically.\n`;
     await this.inbox!.writeDocument(folder, resultName(filed.name), {
       lifeos_result: draftContractVersion, outcome, draft: draftPath, filed_as: filed.relativePath,
       ...(result.draftKey ? { draft_key: result.draftKey } : {}), content_hash: document.contentHash,
@@ -443,45 +537,203 @@ export class AdoptionModule {
     return ledger;
   }
 
-  /** `task` + `user-dictated`: an Inbox task owned by self, created without review (PRD story 2). */
-  private async adoptDictatedTask(draft: ParsedDraft, run: AdoptionRun) {
+  /**
+   * Kind-specific fields shared by dictated objects and extracted proposals, validated into their stored form.
+   * Envelope extras pass through; their values are validated by the envelope rules when the object is written.
+   */
+  private kindFields(draft: ParsedDraft) {
+    const { fields } = draft;
+    const issues: string[] = [];
+    const out: Record<string, unknown> = { captured_at: draft.capturedAt };
+    if (draft.kind === "task") {
+      const status = text(fields.status) || "Inbox";
+      const statuses = ["Inbox", "Next", "Waiting", "Done", "Cancelled"];
+      if (!statuses.includes(status)) issues.push(`status: unknown status "${status}" (expected one of ${statuses.join(", ")})`);
+      out.status = status;
+      if (status === "Done") out.completed_at = draft.capturedAt;
+      if (status === "Cancelled") out.cancelled_at = draft.capturedAt;
+      if (fields.priority !== undefined) {
+        const priority = text(fields.priority).toLowerCase();
+        const match = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === priority);
+        if (match) out.priority = match; else issues.push(`priority: unknown priority "${text(fields.priority)}" (expected High, Medium or Low)`);
+      }
+      if (fields.due_on !== undefined && fields.due_at !== undefined) issues.push("due_on: use due_on or due_at, not both");
+      else if (fields.due_on !== undefined) {
+        const dueOn = text(fields.due_on);
+        if (isCalendarDate(dueOn)) out.due_on = dueOn; else issues.push(`due_on: not a calendar date YYYY-MM-DD ("${dueOn}")`);
+      } else if (fields.due_at !== undefined) {
+        const dueAt = text(fields.due_at).includes("T") ? toUtc(fields.due_at) : undefined;
+        if (dueAt) { out.due_at = dueAt; out.due_timezone = text(fields.due_timezone) || "UTC"; } else issues.push(`due_at: not an ISO 8601 date-time with Z or an offset ("${text(fields.due_at)}")`);
+      }
+      if (fields.expected_output !== undefined) {
+        if (typeof fields.expected_output === "string") out.expected_output = fields.expected_output.trim(); else issues.push("expected_output: must be text");
+      }
+    }
+    if (draft.kind === "decision") {
+      // `decision_text` is kept only when given, so a proposal whose title is edited is decided under the edited title.
+      if (fields.decision_text !== undefined) { if (text(fields.decision_text)) out.decision_text = text(fields.decision_text); else issues.push("decision_text: must be non-empty text"); }
+      if (fields.decided_at === undefined) out.decided_at = draft.capturedAt;
+      else { const decidedAt = toUtc(fields.decided_at); if (decidedAt) out.decided_at = decidedAt; else issues.push(`decided_at: not an ISO 8601 date-time with Z or an offset ("${text(fields.decided_at)}")`); }
+    }
+    if (draft.kind === "open-point") out.status = "open";
+    for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) out[key] = fields[key];
+    for (const key of ["subjects", "tags"]) if (fields[key] !== undefined) { if (stringList(fields[key])) out[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
+    if (Array.isArray(out.subjects)) out.subjects = this.resolver.normaliseSubjects(out.subjects as string[]);
+
+    // References by name or ID (#33). Fields the kind cannot carry are refused, never dropped silently.
+    const allowed = kindReferences[draft.kind] ?? [];
+    for (const field of ["project", "client", "product", "people", "owner", "waiting_for", "meeting"] as ReferenceField[]) {
+      if (fields[field] !== undefined && !allowed.includes(field)) issues.push(`${field}: not used on a ${draft.kind}`);
+    }
+    const references = this.resolver.resolveDraft(Object.fromEntries(allowed.map((field) => [field, fields[field]])));
+    issues.push(...references.issues);
+    if (draft.kind === "task" && fields.waiting_for !== undefined && out.status !== "Waiting") issues.push(`waiting_for: needs status Waiting (got ${String(out.status)})`);
+    // Context not named explicitly is inherited from the referenced meeting.
+    const meeting = typeof references.links.source_meeting_id === "string" ? this.ctx.index.get(references.links.source_meeting_id) : undefined;
+    const inherited = Object.fromEntries(contextLinkFields.filter((key) => typeof meeting?.frontmatter[key] === "string").map((key) => [key, meeting!.frontmatter[key]]));
+    return { issues, fields: out, links: { ...inherited, ...references.links } as Record<string, unknown>, unresolved: references.unresolved };
+  }
+
+  /**
+   * `user-dictated` task, decision or open point: created directly with the resolved links, owned by self unless
+   * named (PRD story 2). Unresolved references never block it; each becomes a `link-resolution` Review Item.
+   */
+  private async adoptDictated(draft: ParsedDraft, run: AdoptionRun) {
+    const { issues, fields, links, unresolved } = this.kindFields(draft);
+    if (issues.length) throw new DraftError(issues);
+    const folder = ({ task: "tasks", decision: "decisions", "open-point": "open-points" } as Record<string, string>)[draft.kind]!;
+    const owner = draft.kind === "decision" ? {} : { owner_person_id: typeof links.owner_person_id === "string" ? links.owner_person_id : (await run.self()).frontmatter.id };
+    // A new decision is always active (#41 lifecycle rule).
+    const decision = draft.kind === "decision" ? { status: "active", decision_text: fields.decision_text ?? draft.title } : {};
+    const id = run.newId();
+    const narrative = draft.body.trim();
+    const created = await this.ctx.objects.write({
+      relativePath: `${folder}/${markdownFileName(draft.title, id, run.now)}`,
+      frontmatter: { ...this.ctx.envelope(id, draft.kind as "task" | "decision" | "open-point", draft.title, run.now, draft.origin), source_ids: [], ...links, ...owner, ...fields, ...decision },
+      body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
+    });
+    return [id, ...await this.resolver.raiseLinkReviews(created.frontmatter, unresolved, { now: run.now, origin: draft.origin, agentRunId: run.id, newId: run.newId })];
+  }
+
+  /**
+   * `agent-extracted` task, decision or open point: a pending create-type Review Item, never the object itself
+   * (PRD story 3). Proposed fields keep the Agent's wording and language verbatim; nothing is translated.
+   */
+  private async proposeExtracted(draft: ParsedDraft, run: AdoptionRun) {
+    const { fields: raw } = draft;
+    const { issues, fields, links, unresolved } = this.kindFields(draft);
+    const confidence = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === text(raw.confidence).toLowerCase());
+    if (raw.confidence === undefined) issues.push("confidence: missing; an extracted draft must say how sure the Agent is (High, Medium or Low)");
+    else if (!confidence) issues.push(`confidence: unknown confidence "${text(raw.confidence)}" (expected High, Medium or Low)`);
+    const narrative = draft.body.trim();
+    // Resolved references (#33): people links are proposed fields the user can change; context links and the
+    // meeting sit on the Review Item itself, where acceptance already reads them.
+    const reviewLinks = Object.fromEntries(Object.entries(links).filter(([key]) => [...contextLinkFields, "source_meeting_id"].includes(key)));
+    const personLinks = Object.fromEntries(Object.entries(links).filter(([key]) => !(key in reviewLinks)));
+    const proposed: Record<string, unknown> = { title: draft.title, ...fields, ...personLinks, ...(narrative ? { body: narrative } : {}) };
+    const evidence = this.evidence(raw.evidence, proposed, issues);
+    if (issues.length) throw new DraftError(issues);
+
+    const id = run.newId();
+    const sourceIds = [...new Set(Object.values(evidence).flat().flatMap((entry) => entry.source_id ? [entry.source_id] : []))];
+    await this.ctx.objects.write({
+      relativePath: `review-items/${markdownFileName(draft.title, id, run.now)}`,
+      frontmatter: {
+        ...this.ctx.envelope(id, "review-item", draft.title, run.now, "agent-extracted"),
+        ...(fields.sensitivity !== undefined ? { sensitivity: fields.sensitivity as ObjectEnvelope["sensitivity"] } : {}),
+        review_type: "create", target_object_type: draft.kind, proposed_fields: proposed, field_evidence: evidence, confidence_label: confidence!,
+        status: "pending", agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...reviewLinks,
+        // Names that matched nothing or several objects stay visible here; the user picks the link while editing
+        // the proposal, so no separate link-resolution item is raised for an object that does not exist yet.
+        ...(unresolved.length ? { unresolved_references: unresolved } : {}),
+        // U7: generated here, at adoption, never taken from the draft.
+        operation_id: run.newId()
+      },
+      body: proposalBody(draft.title, narrative)
+    });
+    return [id];
+  }
+
+  /**
+   * `evidence:` is a list of `{ field?, source, locator?, quote? }`; `field` defaults to `title` (the proposal as a whole).
+   * `source` is an object ID, or the exact title or URL of a source, meeting or note. A reference that matches nothing,
+   * or more than one object, is kept as `source_ref` only and shown as unresolved: it never blocks the proposal.
+   */
+  private evidence(value: unknown, proposed: Record<string, unknown>, issues: string[]) {
+    const evidence: Record<string, Array<{ source_ref: string; source_id?: string; locator?: string; quote?: string }>> = {};
+    if (value === undefined) return evidence;
+    if (!Array.isArray(value)) { issues.push("evidence: must be a list of { field, source, locator, quote } entries"); return evidence; }
+    // Fields an Agent may cite: everything proposed, plus the by-name references a draft can carry.
+    const citable = new Set([...Object.keys(proposed), "project", "client", "product", "people", "owner", "waiting_for", "meeting"]);
+    value.forEach((item: unknown, index) => {
+      const at = `evidence[${index}]`;
+      if (!item || typeof item !== "object" || Array.isArray(item)) { issues.push(`${at}: must be a { field, source, locator, quote } entry`); return; }
+      const entry = item as Record<string, unknown>;
+      const field = entry.field === undefined ? "title" : text(entry.field);
+      const source = text(entry.source);
+      const before = issues.length;
+      if (!citable.has(field)) issues.push(`${at}.field: "${field}" is not a proposed field (expected one of ${[...citable].join(", ")})`);
+      if (!source) issues.push(`${at}.source: missing; name the source by ID, title or URL`);
+      for (const key of ["locator", "quote"]) if (entry[key] !== undefined && typeof entry[key] !== "string" && typeof entry[key] !== "number") issues.push(`${at}.${key}: must be text`);
+      if (issues.length > before) return;
+      const sourceId = this.resolveSource(source);
+      (evidence[field] ??= []).push({ source_ref: source, ...(sourceId ? { source_id: sourceId } : {}), ...(entry.locator !== undefined ? { locator: text(entry.locator) } : {}), ...(entry.quote !== undefined ? { quote: text(entry.quote) } : {}) });
+    });
+    return evidence;
+  }
+
+  /** An exact match only (ID, folded title, or URL); none or several matches stay unresolved rather than guessed. */
+  private resolveSource(reference: string) {
+    const byId = this.ctx.index.get(reference);
+    if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id;
+    const folded = foldForSearch(reference);
+    const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
+      && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference));
+    return matches.length === 1 ? matches[0]!.frontmatter.id : undefined;
+  }
+
+  /**
+   * `person` (either origin, #40): an `unreviewed` Person, plus `person-merge` Review Items for likely
+   * duplicates. Never merged automatically. A draft whose email already belongs to a person adopts as that person.
+   */
+  private async adoptPerson(draft: ParsedDraft, run: AdoptionRun) {
     const { fields } = draft;
     const issues: string[] = [];
     const extra: Record<string, unknown> = {};
-    const status = text(fields.status) || "Inbox";
-    const statuses = ["Inbox", "Next", "Waiting", "Done", "Cancelled"];
-    if (!statuses.includes(status)) issues.push(`status: unknown status "${status}" (expected one of ${statuses.join(", ")})`);
-    if (status === "Done") extra.completed_at = draft.capturedAt;
-    if (status === "Cancelled") extra.cancelled_at = draft.capturedAt;
-    if (fields.priority !== undefined) {
-      const priority = text(fields.priority).toLowerCase();
-      const match = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === priority);
-      if (match) extra.priority = match; else issues.push(`priority: unknown priority "${text(fields.priority)}" (expected High, Medium or Low)`);
+    const rawEmails = fields.emails === undefined ? [] : Array.isArray(fields.emails) ? fields.emails : [fields.emails];
+    if (fields.email !== undefined) rawEmails.unshift(fields.email);
+    const emails: string[] = [];
+    for (const raw of rawEmails) {
+      const email = normalizeEmail(raw);
+      if (!email) issues.push(`${fields.email === raw ? "email" : "emails"}: not an email address ("${String(raw)}")`);
+      else if (!emails.includes(email)) emails.push(email);
     }
-    if (fields.due_on !== undefined && fields.due_at !== undefined) issues.push("due_on: use due_on or due_at, not both");
-    else if (fields.due_on !== undefined) {
-      const dueOn = text(fields.due_on);
-      if (isCalendarDate(dueOn)) extra.due_on = dueOn; else issues.push(`due_on: not a calendar date YYYY-MM-DD ("${dueOn}")`);
-    } else if (fields.due_at !== undefined) {
-      const dueAt = text(fields.due_at).includes("T") ? toUtc(fields.due_at) : undefined;
-      if (dueAt) { extra.due_at = dueAt; extra.due_timezone = text(fields.due_timezone) || "UTC"; } else issues.push(`due_at: not an ISO 8601 date-time with Z or an offset ("${text(fields.due_at)}")`);
+    const [given, ...family] = draft.title.split(/\s+/);
+    for (const key of ["given_name", "family_name", "organization_name", "job_title"]) {
+      if (fields[key] === undefined) continue;
+      if (typeof fields[key] === "string" && fields[key].trim()) extra[key] = fields[key].trim(); else issues.push(`${key}: must be text`);
     }
-    if (fields.expected_output !== undefined) {
-      if (typeof fields.expected_output === "string") extra.expected_output = fields.expected_output.trim(); else issues.push("expected_output: must be text");
-    }
-    // Envelope extras pass through; their values are validated by the envelope rules when the object is written.
+    extra.given_name ??= given;
+    if (family.length && fields.family_name === undefined && fields.given_name === undefined) extra.family_name = family.join(" ");
+    const domain = emails[0]?.split("@")[1];
+    if (fields.is_external !== undefined) { if (typeof fields.is_external === "boolean") extra.is_external = fields.is_external; else issues.push("is_external: must be true or false"); }
+    else if (domain) extra.is_external = !internalDomainsOf(this.ctx.index).includes(domain);
+    if (domain && extra.organization_name === undefined) { const organization = organizationFromDomain(domain); if (organization) extra.organization_name = organization; }
     for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) extra[key] = fields[key];
-    for (const key of ["subjects", "tags"]) if (fields[key] !== undefined) { if (stringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
+    for (const key of ["subjects", "tags", "aliases"]) if (fields[key] !== undefined) { if (stringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
     if (issues.length) throw new DraftError(issues);
 
-    const owner = await run.self();
+    // People by email first (PRD): a known address means this person already exists.
+    const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at && personEmails(object).some((email) => emails.includes(email)));
+    if (known) return [known.frontmatter.id];
     const id = run.newId();
     const narrative = draft.body.trim();
     await this.ctx.objects.write({
-      relativePath: `tasks/${markdownFileName(draft.title, id, run.now)}`,
-      frontmatter: { ...this.ctx.envelope(id, "task", draft.title, run.now, draft.origin), status, owner_person_id: owner.frontmatter.id, captured_at: draft.capturedAt, source_ids: [], ...extra },
+      relativePath: `people/${markdownFileName(draft.title, id, run.now)}`,
+      frontmatter: { ...this.ctx.envelope(id, "person", draft.title, run.now, draft.origin), ...extra, ...(emails.length ? { identifiers: emails.map((value) => ({ kind: "email", value })) } : {}), review_state: "unreviewed", captured_at: draft.capturedAt },
       body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
     });
-    return [id];
+    this.personMerges ??= new PersonMergeModule(this.ctx);
+    return [id, ...await this.personMerges.suggest({ now: run.now, personIds: [id], newId: run.newId })];
   }
 }

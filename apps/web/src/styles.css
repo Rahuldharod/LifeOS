@@ -158,6 +158,13 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .review-card input { width: 100%; margin-bottom: 5px; padding: 9px 10px; border: 1px solid #c9c8be; border-radius: 7px; background: white; font-weight: 700; }
 .review-card b, .review-card small { display: block; }
 .review-card small { margin: 5px 0 12px; }
+.review-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.review-fields label { display: grid; gap: 3px; font-size: 11px; font-weight: 750; color: #5d625c; }
+.review-fields select, .review-fields input { width: 100%; margin: 0; padding: 6px 8px; border: 1px solid #c9c8be; border-radius: 7px; background: white; font-weight: 500; }
+.review-evidence { margin: 0 0 12px; padding-left: 18px; font-size: 12px; }
+.review-evidence em { font-style: normal; font-weight: 750; }
+.review-evidence q { display: block; color: #5d625c; }
+.review-evidence .unresolved, .review-evidence.unresolved { color: #954b38; }
 .object-row { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid #e2e0d7; }
 .object-row:last-child { border-bottom: 0; }
 .object-row > i { width: 17px; height: 17px; margin-top: 2px; border: 2px solid #5f8b7c; border-radius: 50%; }
@@ -298,3 +305,33 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .origin-label { color: #6f776f; font-size: 11px; }
 .lock-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 2px 7px; border: 1px solid #b9a77a; border-radius: 999px; background: #f4ecd8; color: #5c4a1c; font-size: 10px; font-weight: 800; letter-spacing: .02em; vertical-align: middle; white-space: nowrap; }
 .sensitivity-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+
+/* #41 Decisions workspace. Status is always written as a word; the border style only reinforces it. */
+.decision-filters { margin-bottom: 18px; }
+.decision-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 12px; align-items: end; margin-top: 12px; }
+.decision-filter-grid label, .decision-fields label { display: grid; gap: 5px; }
+.decision-filter-grid small, .decision-links small { color: #66756e; font-weight: 750; }
+.decision-filter-grid select, .decision-filter-grid input { width: 100%; border: 1px solid #c9c8be; border-radius: 8px; padding: .55rem .65rem; background: white; color: #21352e; font: inherit; }
+.decisions-layout { display: grid; grid-template-columns: minmax(260px, 2fr) minmax(360px, 3fr); gap: 18px; align-items: start; }
+.decision-list ul, .decision-links ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.decision-row { display: block; width: 100%; padding: 12px 10px; border: 0; border-bottom: 1px solid #e2e0d7; background: transparent; color: inherit; text-align: left; }
+.decision-row b, .decision-row small { display: block; }
+.decision-row small { margin-top: 4px; }
+.decision-row.selected { background: #eef3ef; box-shadow: inset 3px 0 0 #245646; }
+.status-label { display: inline-block; padding: 0 6px; border: 1px solid #9fb3a8; border-radius: 999px; font-size: 11px; font-weight: 750; letter-spacing: 0; color: #23483c; }
+.status-label.status-superseded, .status-label.status-reversed { border-style: dashed; color: #5d665f; }
+.decision-chain { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid #b9a77a; background: #f7f1e3; }
+.decision-fields { margin-top: 14px; }
+.decision-fields .wide { grid-column: 1 / -1; }
+.decision-fields textarea, .decision-successor textarea, .decision-successor input { min-height: 0; width: 100%; padding: .6rem .75rem; border: 1px solid #c9c8be; border-radius: 8px; background: white; color: #21352e; font: inherit; }
+.decision-successor { display: grid; gap: 8px; margin-top: 14px; padding: 14px; border: 1px dashed #b9a77a; border-radius: 10px; background: #fbf7ec; }
+.decision-links { display: grid; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid #e2e0d7; }
+.decision-links > div { display: grid; gap: 4px; }
+.decision-people { display: flex; flex-wrap: wrap; gap: 8px; }
+.link-button { padding: 0; border: 0; background: none; color: #245646; text-align: left; text-decoration: underline dotted; }
+@media (max-width: 980px) { .decisions-layout, .decision-filter-grid { grid-template-columns: 1fr; } }
+/* #39: External people. The " - ext" text is always present; red only reinforces it (about 6:1 contrast on white). */
+.ext-suffix { color: #b3261e; font-weight: 700; white-space: pre; }
+.person-external { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.person-external label { display: inline-flex; align-items: center; gap: 4px; }
+.internal-domains-setting { margin-bottom: 18px; }

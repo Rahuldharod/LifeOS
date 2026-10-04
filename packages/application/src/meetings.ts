@@ -1,5 +1,6 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
+import { PeopleModule } from "./people.js";
 import type { CalendarEvent } from "./ports.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
@@ -9,7 +10,10 @@ export class MeetingsModule {
   /** In-flight `createMeetingFromEvent` calls, keyed by calendar event id (PB-004). */
   private readonly meetingCreations = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly ctx: AppContext) {}
+  private readonly people: PeopleModule;
+
+  /** `people` is shared with the facade, so attendee resolution and label reads use one module (one queue). */
+  constructor(private readonly ctx: AppContext, people?: PeopleModule) { this.people = people ?? new PeopleModule(ctx); }
 
   /**
    * Materializes the canonical meeting + note for a calendar event. The web UI calls this only on
@@ -119,7 +123,7 @@ export class MeetingsModule {
         project: event.projectName ? synthetic("project", event.projectName) : undefined,
         client: event.clientName ? synthetic("client", event.clientName) : undefined,
         product: event.productName ? synthetic("product", event.productName) : undefined,
-        people: event.attendees.map((name) => synthetic("person", name))
+        people: this.people.previewAttendees(event, (title) => synthetic("person", title))
       }
     };
   }
@@ -255,8 +259,7 @@ export class MeetingsModule {
       primary_client_id: client?.frontmatter.id,
       primary_product_id: product?.frontmatter.id
     }) : undefined;
-    const people: LifeOSObject[] = [];
-    for (const name of event.attendees) people.push(await this.ensureNamedObject("person", name, timestamp, { given_name: name.split(" ")[0] }));
+    const people = await this.people.resolveAttendees(event, timestamp, (name) => this.ensureNamedObject("person", name, timestamp, { given_name: name.split(" ")[0] }));
     return { client, product, project, people };
   }
 

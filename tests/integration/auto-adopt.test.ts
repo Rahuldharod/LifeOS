@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import { LifeOSApplication, type AdoptionBatch, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemInboxStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
@@ -11,9 +11,10 @@ import { FilesystemInboxStore, MarkdownObjectStore } from "@lifeos/object-store-
 // half-written files are never adopted, re-sends never duplicate, and a crashed batch is completed on restart.
 
 const roots: string[] = [];
-const triggers: Array<{ stop(): void }> = [];
+const triggers: Array<{ stop(): void; runNow(): Promise<unknown> }> = [];
 afterEach(async () => {
-  triggers.splice(0).forEach((trigger) => trigger.stop());
+  // After stop(), runNow() queues behind any batch still in flight and does nothing, so awaiting it drains the queue.
+  for (const trigger of triggers.splice(0)) { trigger.stop(); await trigger.runNow(); }
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -86,9 +87,10 @@ describe("automatic adoption trigger", () => {
     triggers.push(trigger);
     await dropDraft(root, "fresh.md", dictatedTask(), 1.9);
     trigger.notify();
-    await until(async () => (await ofType(application, "task")).length === 1);
+    await until(async () => batches.some((batch) => batch.drafts[0]?.outcome === "adopted"));
     expect(batches[0]!.drafts[0]).toMatchObject({ outcome: "skipped" });
     expect(batches.at(-1)!.drafts[0]).toMatchObject({ outcome: "adopted" });
+    expect(await ofType(application, "task")).toHaveLength(1);
   });
 
   it("catches drafts with no watcher event at all, through the periodic sweep (unreliable Drive events)", async () => {
@@ -256,5 +258,92 @@ describe("adoption performance", () => {
     expect(batch.drafts.filter((draft) => draft.outcome === "adopted")).toHaveLength(20);
     expect(await ofType(application, "task")).toHaveLength(20);
     expect(elapsed).toBeLessThan(5000);
+  });
+});
+
+describe("crash replay for every adoption handler (merged with #33, #34, #36, #40)", () => {
+  const yamlDraft = (fields: Record<string, unknown>, body = "Said in the Q3 meeting.\n") => `---\n${stringify({ lifeos_draft: 1, origin: "user-dictated", captured_at: "2026-10-04T09:15:00+02:00", ...fields })}---\n${body}`;
+  const onAdoptionAudit = ((input: { frontmatter: Record<string, unknown> }) => input.frontmatter.type === "audit-event" && input.frontmatter.action === "draft.adopted") as never;
+  /** Markdown files in a data-root folder, so the test sees what is on disk, not only what the index has. */
+  const filesIn = async (root: string, folder: string) => (await readdir(path.join(root, folder)).catch(() => [] as string[])).filter((name) => name.endsWith(".md")).sort();
+  const reviewsOf = async (application: LifeOSApplication, type: string) => (await ofType(application, "review-item")).filter((review) => review.frontmatter.review_type === type);
+
+  async function crashThenRestart(root: string, objects: ObjectStore) {
+    const crashed = await open(root, objects);
+    await expect(crashed.adoptDrafts()).rejects.toThrow(/simulated crash/);
+    const before = { decisions: await filesIn(root, "decisions"), reviews: await filesIn(root, "review-items"), people: await filesIn(root, "people") };
+    const restarted = await open(root);
+    const batch = await restarted.adoptDrafts();
+    return { restarted, batch, before };
+  }
+
+  it("a dictated decision that raised a link-resolution item: same decision and Review Item IDs, each audited once", async () => {
+    const { root } = await vault();
+    await dropDraft(root, "decision.md", yamlDraft({ kind: "decision", draft_key: "q3-decision", title: "Ship the relaunch in March", project: "No such project" }));
+    const { restarted, batch, before } = await crashThenRestart(root, crashing(new MarkdownObjectStore(root), "write", onAdoptionAudit));
+
+    expect(before.decisions).toHaveLength(1);
+    expect(before.reviews).toHaveLength(1);
+    expect(await filesIn(root, "decisions")).toEqual(before.decisions);
+    expect(await filesIn(root, "review-items")).toEqual(before.reviews);
+    const [decision] = await ofType(restarted, "decision");
+    const [link] = await reviewsOf(restarted, "link-resolution");
+    expect(link!.frontmatter).toMatchObject({ target_object_id: decision!.frontmatter.id, status: "pending" });
+    expect(batch.drafts[0]).toMatchObject({ outcome: "adopted", objectIds: [decision!.frontmatter.id, link!.frontmatter.id] });
+    expect((await adoptionAudits(restarted)).map((audit) => audit.frontmatter.object_id).sort()).toEqual([decision!.frontmatter.id, link!.frontmatter.id].sort());
+    expect(await frontmatterOf(path.join(root, "_inbox/processed/decision.result.md"))).toMatchObject({ outcome: "adopted", object_ids: [decision!.frontmatter.id, link!.frontmatter.id] });
+  });
+
+  it("an agent-extracted decision: one create Review Item, with the same ID and operation_id after the replay", async () => {
+    const { root } = await vault();
+    await dropDraft(root, "extracted.md", yamlDraft({ kind: "decision", origin: "agent-extracted", draft_key: "q3-extracted", title: "Move the launch to April", confidence: "High" }));
+    const reviewFile = async () => { const [name] = await filesIn(root, "review-items"); return frontmatterOf(path.join(root, "review-items", name!)); };
+    const crashed = await open(root, crashing(new MarkdownObjectStore(root), "write", onAdoptionAudit));
+    await expect(crashed.adoptDrafts()).rejects.toThrow(/simulated crash/);
+    const first = await reviewFile();
+
+    const restarted = await open(root);
+    expect((await restarted.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "adopted", objectIds: [first.id] });
+    expect(await filesIn(root, "review-items")).toHaveLength(1);
+    expect(await reviewFile()).toMatchObject({ id: first.id, operation_id: first.operation_id, review_type: "create", status: "pending" });
+    expect(await ofType(restarted, "decision")).toHaveLength(0);
+  });
+
+  it("a person draft that raised a person-merge suggestion: no second person or suggestion after the replay", async () => {
+    const { root, application } = await vault();
+    await dropDraft(root, "kim.md", yamlDraft({ kind: "person", draft_key: "kim-1", title: "Kim Lee", email: "kim.lee@acme.fr" }));
+    await application.adoptDrafts();
+    await dropDraft(root, "kim-again.md", yamlDraft({ kind: "person", draft_key: "kim-2", title: "Kim Lee", email: "k.lee@other.fr" }));
+    const { restarted, batch, before } = await crashThenRestart(root, crashing(new MarkdownObjectStore(root), "write", onAdoptionAudit));
+
+    expect(before.people).toHaveLength(2);
+    expect(await filesIn(root, "people")).toEqual(before.people);
+    expect(await filesIn(root, "review-items")).toEqual(before.reviews);
+    const merges = await reviewsOf(restarted, "person-merge");
+    expect(merges).toHaveLength(1);
+    expect(batch.drafts[0]!.outcome).toBe("adopted");
+    expect(batch.drafts[0]!.objectIds).toContain(merges[0]!.frontmatter.id);
+  });
+
+  it("a patch applied before the crash is filed as applied on restart, never applied twice", async () => {
+    const { root, application } = await vault();
+    await dropDraft(root, "task.md", dictatedTask());
+    const taskId = (await application.adoptDrafts()).drafts[0]!.objectIds[0]!;
+    const target = path.join(root, "_inbox", "patches", "note.md");
+    await writeFile(target, `---\n${stringify({ lifeos_patch: 1, draft_key: "note-1", origin: "user-dictated", captured_at: "2026-10-04T10:00:00+02:00", id: taskId, set: { priority: "High" }, append_note: "Joel wants it in French." })}---\n`);
+    const past = new Date(Date.now() - 60_000);
+    await utimes(target, past, past);
+
+    const inbox = crashing(new FilesystemInboxStore(root), "move", ((from: string) => from === "patches") as never);
+    const crashed = await open(root, new MarkdownObjectStore(root), inbox);
+    await expect(crashed.adoptDrafts()).rejects.toThrow(/simulated crash/);
+
+    const restarted = await open(root);
+    const batch = await restarted.adoptDrafts();
+    expect(batch.drafts[0]).toMatchObject({ draft: "_inbox/patches/note.md", outcome: "applied", objectIds: [taskId] });
+    expect(await frontmatterOf(path.join(root, "_inbox/processed/note.result.md"))).toMatchObject({ outcome: "applied", object_ids: [taskId] });
+    expect(restarted.object(taskId).body.match(/Joel wants it in French\./g)).toHaveLength(1);
+    expect(restarted.appliedPatches()).toHaveLength(1);
+    expect(await readdir(path.join(root, "_inbox/patches"))).toEqual([]);
   });
 });

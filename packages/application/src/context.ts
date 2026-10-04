@@ -1,8 +1,10 @@
-import { envelopeWriteProblem, uuidV7, type LifeOSObject, type ObjectEnvelope, type Origin } from "@lifeos/domain";
+import { envelopeWriteProblem, lifecycleWriteProblem, uuidV7, type LifeOSObject, type ObjectEnvelope, type Origin } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
 
 /** Body for a meeting note created without user text (legacy callers and crash recovery of old operations). */
 export const DEFAULT_NOTE_BODY = "# Notes\n\n";
+/** Every address of the user. All of them resolve to the single self person (PRD story 73). */
+export const DEFAULT_SELF_EMAILS = ["rahul.dharod@eagleeye.com", "rahul.dharod@untienots.com", "baloo.rahul@gmail.com"];
 
 function slugify(value: string) {
   return value
@@ -102,9 +104,10 @@ export class AppContext {
     return snapshot.inFlight.has(id) || (this.writeTicks.get(id) ?? 0) !== (snapshot.ticks.get(id) ?? 0);
   }
 
-  /** #30: origin never changes, sensitivity is known, and new or changed Areas use the agreed vocabulary. */
+  /** #30: origin never changes, sensitivity is known, and new or changed Areas use the agreed vocabulary. #41: lifecycle moves are legal. */
   assertEnvelope(frontmatter: ObjectEnvelope) {
-    const problem = envelopeWriteProblem(frontmatter, this.index.get(frontmatter.id)?.frontmatter);
+    const previous = this.index.get(frontmatter.id)?.frontmatter;
+    const problem = envelopeWriteProblem(frontmatter, previous) ?? lifecycleWriteProblem(frontmatter, previous);
     if (problem) throw new Error(problem);
   }
 
@@ -149,7 +152,7 @@ export class AppContext {
     const id = uuidV7();
     const created = await this.objects.write({
       relativePath: `people/${markdownFileName("You", id, timestamp)}`,
-      frontmatter: { ...this.envelope(id, "person", "You", timestamp), given_name: "You", is_self: true },
+      frontmatter: { ...this.envelope(id, "person", "You", timestamp), given_name: "You", is_self: true, identifiers: DEFAULT_SELF_EMAILS.map((value) => ({ kind: "email", value })) },
       body: "# You\n"
     });
     return created;

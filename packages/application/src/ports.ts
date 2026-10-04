@@ -52,13 +52,25 @@ export interface CalendarEvent {
   endsAt: string;
   timezone: string;
   isAllDay?: boolean;
+  /** The user declined the invitation; declined events are never enriched (#44). */
+  declined?: boolean;
+  /** Display labels (name, else email). Kept for the UI and name-only connectors. */
   attendees: string[];
+  /** Attendees with email when the connector knows it (#38); people are matched on these when present. */
+  attendeeDetails?: CalendarAttendee[];
   clientName?: string;
   productName?: string;
   projectName?: string;
   hasNote?: boolean;
   meetingId?: string;
   noteId?: string;
+}
+
+export interface CalendarAttendee {
+  email?: string;
+  displayName?: string;
+  /** The calendar owner (Google's `self`): always the self person. */
+  self?: boolean;
 }
 
 export interface AiProvider {

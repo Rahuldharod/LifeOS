@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { MockAiProvider } from "@lifeos/ai";
-import { LifeOSApplication } from "@lifeos/application";
+import { LifeOSApplication, type ReviewEdits } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
@@ -68,6 +68,14 @@ server.get<{ Params: { type: "task" | "project" | "client" | "product" | "person
 server.post<{ Params: { type: "task" | "project" | "client" | "product" | "person" }; Body: { fields: Record<string, unknown> } }>("/api/v1/entities/:type", async (request) => application.createEntity(request.params.type, request.body.fields));
 server.patch<{ Params: { id: string }; Body: { fields: Record<string, unknown>; expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.updateEntity(request.params.id, request.body.fields, request.body.expectedHash));
 server.delete<{ Params: { id: string }; Body: { expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.deleteEntity(request.params.id, request.body.expectedHash));
+// #39: display labels for badges and pickers, and the manual External override (null = back to the email rule).
+server.get("/api/v1/people/labels", async () => application.personLabels());
+server.put<{ Params: { id: string }; Body: { isExternal?: boolean | null; expectedHash?: string } }>("/api/v1/people/:id/external", async (request, reply) => {
+  const { isExternal, expectedHash } = request.body ?? {};
+  if (isExternal !== true && isExternal !== false && isExternal !== null) return reply.status(400).send({ error: "isExternal must be true, false or null" });
+  if (typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.setPersonExternal(request.params.id, isExternal, expectedHash);
+});
 server.post("/api/v1/index/rebuild", async () => application.rebuildIndex());
 server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/events", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
@@ -80,6 +88,12 @@ server.get("/api/v1/settings/calendar-preferences", async () => application.getC
 server.put<{ Body: { disabledCalendarIds?: string[]; defaultCalendarId?: string; expectedHash?: string } }>("/api/v1/settings/calendar-preferences", async (request) => {
   const { disabledCalendarIds = [], defaultCalendarId, expectedHash } = request.body ?? {};
   return application.saveCalendarPreferences({ disabledCalendarIds, defaultCalendarId }, expectedHash);
+});
+server.get("/api/v1/settings/internal-domains", async () => application.getInternalDomains());
+server.put<{ Body: { domains?: unknown[]; expectedHash?: string } }>("/api/v1/settings/internal-domains", async (request, reply) => {
+  const { domains, expectedHash } = request.body ?? {};
+  if (!Array.isArray(domains)) return reply.status(400).send({ error: "domains must be a list" });
+  return application.saveInternalDomains(domains, expectedHash);
 });
 server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/sync", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
@@ -134,7 +148,10 @@ server.post<{ Body: { externalId: string; calendarId?: string; from?: string; to
   const to = request.body.to ? new Date(request.body.to) : undefined;
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   if (request.body.body !== undefined && typeof request.body.body !== "string") return reply.status(400).send({ error: "Note body must be text" });
-  return application.createMeetingFromEvent(request.body.externalId, from, to, request.body.calendarId, request.body.body);
+  const created = await application.createMeetingFromEvent(request.body.externalId, from, to, request.body.calendarId, request.body.body);
+  // #40: new calendar people may duplicate older ones; propose merges in the background (never merged automatically).
+  void application.suggestPersonMerges().catch((error) => server.log.error(error));
+  return created;
 });
 server.get<{ Params: { externalId: string } }>("/api/v1/meetings/from-event/:externalId", async (request) => application.meetingFromEvent(request.params.externalId));
 server.get<{ Params: { id: string } }>("/api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
@@ -174,8 +191,9 @@ server.post<{ Params: { id: string }; Body: { sensitivity?: "normal" | "restrict
   return application.setSensitivity(request.params.id, request.body.sensitivity, request.body.expectedHash);
 });
 server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (request) => application.processMeeting(request.params.id));
-server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id));
-server.patch<{ Params: { id: string }; Body: { title: string } }>("/api/v1/review-items/:id", async (request) => application.updateReviewTitle(request.params.id, request.body.title));
+server.post<{ Params: { id: string }; Body: { linkTo?: string } | undefined }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
+// Edits a pending proposal: title, owner, due, priority and context links (#34); `null` clears a field.
+server.patch<{ Params: { id: string }; Body: ReviewEdits }>("/api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));
 server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/reject", async (request) => application.rejectReviewItem(request.params.id));
 server.get("/api/v1/today", async () => application.today());
 server.get("/api/v1/tasks", async () => application.tasks());
@@ -185,9 +203,33 @@ server.get<{ Querystring: { q?: string } }>("/api/v1/knowledge", async (request)
 server.post<{ Body: { title: string; text: string } }>("/api/v1/sources/text", async (request) => application.ingestTextSource(request.body.title, request.body.text));
 server.get<{ Params: { type: "client" | "product" | "person" } }>("/api/v1/rollups/:type", async (request) => application.rollups(request.params.type));
 server.get("/api/v1/projects", async () => application.projects());
-server.get("/api/v1/review-items", async () => application.reviews());
+// #41 Decisions workspace. Filters: projectId, clientId, productId, personId, status, from/to (ISO instants on decided_at).
+server.get<{ Querystring: { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string } }>("/api/v1/decisions", async (request) => application.decisions(request.query));
+server.get<{ Params: { id: string } }>("/api/v1/decisions/:id", async (request) => application.decision(request.params.id));
+server.post<{ Body: { fields?: Record<string, unknown> } }>("/api/v1/decisions", async (request, reply) => {
+  if (!request.body?.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields are required" });
+  return application.createDecision(request.body.fields);
+});
+server.patch<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/decisions/:id", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
+  return application.updateDecision(request.params.id, request.body.fields, request.body.expectedHash);
+});
+server.post<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/decisions/:id/supersede", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
+  return application.supersedeDecision(request.params.id, request.body.fields, request.body.expectedHash);
+});
+// Each item carries its evidence per field, with sources looked up now (missing ones come back unresolved).
+server.get("/api/v1/review-items", async () => application.reviews().map((review) => ({ ...review, evidence: application.reviewEvidence(review.frontmatter.id) })));
 server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());
 server.post("/api/v1/inbox/adopt", async () => application.adoptDrafts());
+server.get("/api/v1/enrichment", async () => application.enrichmentStatus());
+server.post("/api/v1/enrichment/work-orders", async () => application.requestEnrichment());
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/meetings/:id/enrichment/gave-up", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.markEnrichmentGaveUp(request.params.id, request.body.expectedHash);
+});
+server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
+server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
 server.get("/api/v1/backups", async () => backups.list());
 server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
@@ -222,7 +264,8 @@ try {
   await application.rebuildIndex();
   await application.recoverOperations();
   await application.rebuildIndex();
-  // Inbox Drafts (ADR 0007, #32) are adopted at startup (which also finishes a batch a crash interrupted), shortly after
+  if (session.status().writeAllowed) await application.suggestPersonMerges().catch((error) => server.log.error(error));
+  // Inbox Drafts and Patch Drafts (ADR 0007, #32) are adopted at startup (which also finishes a batch a crash interrupted), shortly after
   // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease.
   const autoAdoption = application.startAutoAdoption({ canWrite: () => session.status().writeAllowed, onError: (error) => server.log.error(error) });
   await autoAdoption.runNow();
@@ -230,7 +273,7 @@ try {
   let reconcileTimer: NodeJS.Timeout | undefined;
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
     if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
-    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/")) autoAdoption.notify(); return; }
+    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/") || filename.startsWith("_inbox/patches/")) autoAdoption.notify(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
     const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();
