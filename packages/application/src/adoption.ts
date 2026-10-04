@@ -21,9 +21,9 @@ import { contextLinkFields, inheritContextLinks, isStringList } from "./support.
  * `PatchModule` (patches.ts) in the same batch, after the drafts; requests will get their own reader.
  *
  * Crash safety (#32): each batch and each draft or patch handed to its handler is journalled as an operation
- * (`adopt-batch`, `adopt-draft`). Handlers take object IDs from `run.newId()`, which are derived from the
- * journal entry, so the next batch (startup included) replays an interrupted draft onto the same IDs,
- * finishes its audit, move and sidecar, and writes the missing agent-run: nothing is duplicated.
+ * (`adopt-batch`, `adopt-draft`). Handlers take object IDs from `run.newId(role)`, which are derived from the
+ * journal entry plus a stable role key (#59), so the next batch (startup included) replays an interrupted draft
+ * onto the same IDs, finishes its audit, move and sidecar, and writes the missing agent-run: nothing is duplicated.
  */
 
 export const draftContractVersion = 1;
@@ -54,13 +54,15 @@ export interface AdoptionRun {
   self(): Promise<LifeOSObject>;
   /**
    * A UUIDv7 for each object (or Review Item operation ID) the draft creates. Always use this, not `uuidV7()`:
-   * a replay after a crash gets the same IDs back, so it rewrites the same objects instead of duplicating them.
+   * a replay after a crash gets the same IDs back, so it finds the same objects instead of duplicating them.
+   * `role` names what the ID is for and must not depend on what the attempt found already written (#59): e.g.
+   * `main`, `source:url:<url>`, `summary`, `proposal:<key>`, `merge:<pair>`; add `:operation` for an operation ID.
    */
-  newId(): string;
+  newId(role: string): string;
 }
 
 /** Options for `proposeExtracted` when another handler reuses it (#45): extra Review Item fields, its ID, or validation only. */
-export interface ProposeOptions { extra?: Record<string, unknown>; newId?: () => string; dryRun?: boolean }
+export interface ProposeOptions { extra?: Record<string, unknown>; role?: string; dryRun?: boolean }
 
 /** Writes the objects for one draft and returns their IDs. Throw `DraftError` for anything the Agent must fix. */
 export type DraftHandler = (draft: ParsedDraft, run: AdoptionRun) => Promise<string[]>;
@@ -132,23 +134,29 @@ const isResult = (file: InboxFile) => file.name.endsWith(".result.md");
 type Ledger = Map<string, { contentHash: string; objectIds: string[]; agentRunIds: Set<string> }>;
 type Operation = { id: string; kind: string; payload: Record<string, unknown> };
 type Reader = (document: InboxDocument) => Promise<DraftResult>;
-/** How many replayable IDs recovery checks per draft; far more objects than any single draft creates. */
-const replayWindow = 64;
-
-/** UUIDv7 `index` of the journalled draft `seed`: the same inputs always give the same ID. */
-/** Every ID an operation's creates can take on a replay. */
-function replayIds(seed: string, now: string) {
-  return Array.from({ length: replayWindow }, (_, index) => replayableId(seed, index, now));
-}
-
-function replayableId(seed: string, index: number, now: string) {
-  const bytes = createHash("sha256").update(`${seed}:${index}`).digest().subarray(0, 16);
+/**
+ * The UUIDv7 for `role` in the journalled operation `seed` (#59): the same inputs always give the same ID.
+ * Layout: the 48-bit timestamp of `now`, then 26 bits derived from the operation alone (its tag), then 48 bits
+ * derived from operation + role. The tag lets recovery find every object an operation wrote whatever its roles.
+ */
+function replayableId(seed: string, role: string, now: string) {
+  const bytes = Buffer.alloc(16);
   let timestamp = BigInt(Date.parse(now));
   for (let position = 5; position >= 0; position -= 1) { bytes[position] = Number(timestamp & 0xffn); timestamp >>= 8n; }
-  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const tag = createHash("sha256").update(`operation:${seed}`).digest();
+  bytes[6] = 0x70 | (tag[0]! & 0x0f);
+  bytes[7] = tag[1]!;
+  bytes[8] = 0x80 | (tag[2]! & 0x3f);
+  bytes[9] = tag[3]!;
+  createHash("sha256").update(`${seed}\n${role}`).digest().copy(bytes, 10, 0, 6);
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** Whether `id` is one of the replayable IDs of operation `seed`, whatever its role: the replay window. */
+function replayScope(seed: string, now: string) {
+  const prefix = replayableId(seed, "", now).slice(0, 23);
+  return (id: string) => id.startsWith(prefix);
 }
 export const text = (value: unknown) => typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
 
@@ -328,6 +336,11 @@ export class AdoptionModule {
     return { id, now, self: () => self ??= this.ctx.ensureSelfPerson(now), newId: () => uuidV7() };
   }
 
+  /** The run as one journalled operation sees it: its IDs are replayable, keyed by role (#59). */
+  private replayableRun(run: AdoptionRun, operationId: string): AdoptionRun {
+    return { ...run, newId: (role) => replayableId(operationId, role, run.now) };
+  }
+
   private patchReader(run: AdoptionRun): Reader {
     return this.patches!.reader(run, (document, outcome, result) => this.file("patches", document, outcome, result, run));
   }
@@ -342,9 +355,8 @@ export class AdoptionModule {
       const operation: Operation = replay ?? { id: uuidV7(), kind: "adopt-draft", payload: { run_id: run.id, now: run.now, folder: "patches", draft: document.name, draft_key: text(document.frontmatter?.draft_key), content_hash: document.contentHash } };
       if (!replay) await this.ctx.objects.prepareOperation?.(operation.kind, operation.payload, operation.id);
       // A patch that raises an update Review Item gets replayable IDs too, so a crash never doubles the item.
-      let next = 0;
-      const read = () => this.patchReader({ ...run, newId: () => replayableId(operation.id, next++, run.now) })(document);
-      const result = await (replay ? this.ctx.replaying(replayIds(operation.id, run.now), read) : read());
+      const read = () => this.patchReader(this.replayableRun(run, operation.id))(document);
+      const result = await (replay ? this.ctx.replaying(replayScope(operation.id, run.now), read) : read());
       if (result.outcome !== "skipped") await this.ctx.objects.completeOperation?.(operation.id);
       return result;
     };
@@ -430,7 +442,7 @@ export class AdoptionModule {
     let objectIds: string[];
     if (from === "patches") objectIds = patched;
     else {
-      objectIds = Array.from({ length: replayWindow }, (_, index) => replayableId(operation.id, index, run.now)).filter((id) => this.ctx.index.get(id));
+      objectIds = this.writtenBy(operation.id, run.now);
       await this.auditOnce(objectIds, { draftKey, contentHash, draftPath, origin: operation.payload.origin }, run, this.ledger());
     }
     let result: DraftResult | undefined;
@@ -481,11 +493,10 @@ export class AdoptionModule {
     const operation: Operation = replay ?? { id: uuidV7(), kind: "adopt-draft", payload: { run_id: run.id, now: run.now, folder: "drafts", draft: document.name, draft_key: draft.draftKey, content_hash: draft.contentHash, origin: draft.origin } };
     if (!replay) await this.ctx.objects.prepareOperation?.(operation.kind, operation.payload, operation.id);
     const complete = () => this.ctx.objects.completeOperation?.(operation.id);
-    let next = 0;
     let objectIds: string[];
     // A replay may meet objects its interrupted first attempt already wrote: those are reused, never rewritten (#58).
-    const create = () => handler(draft, { ...run, newId: () => replayableId(operation.id, next++, run.now) });
-    try { objectIds = await (replay ? this.ctx.replaying(replayIds(operation.id, run.now), create) : create()); }
+    const create = () => handler(draft, this.replayableRun(run, operation.id));
+    try { objectIds = await (replay ? this.ctx.replaying(replayScope(operation.id, run.now), create) : create()); }
     catch (error) {
       const issues = validationIssues(error);
       if (issues) { await complete(); return fail(issues); }
@@ -494,12 +505,18 @@ export class AdoptionModule {
     }
     // A replayed handler may skip re-creating what the first attempt already wrote (e.g. a merge suggestion
     // for a pair already proposed); anything written under this draft's IDs still belongs to it.
-    if (replay) objectIds = [...new Set([...objectIds, ...Array.from({ length: replayWindow }, (_, index) => replayableId(operation.id, index, run.now)).filter((id) => this.ctx.index.get(id))])];
+    if (replay) { await this.ctx.rebuildIndex(); objectIds = [...new Set([...objectIds, ...this.writtenBy(operation.id, run.now)])]; }
     await this.auditOnce(objectIds, { draftKey: draft.draftKey, contentHash: draft.contentHash, draftPath: document.relativePath, origin: draft.origin }, run, replay ? ledger : new Map());
     ledger.set(draft.draftKey, { contentHash: draft.contentHash, objectIds, agentRunIds: new Set([run.id]) });
     const result = await this.file("drafts", document, "processed", { draftKey, objectIds, outcome: "adopted" }, run);
     await complete();
     return result;
+  }
+
+  /** Every object the journalled operation wrote, in any attempt: its replay window (#59). Audits are not its objects. */
+  private writtenBy(operationId: string, now: string) {
+    const scope = replayScope(operationId, now);
+    return this.ctx.index.all().filter((object) => object.frontmatter.type !== "audit-event" && scope(object.frontmatter.id)).map((object) => object.frontmatter.id);
   }
 
   /** Where the first adoption of this draft_key + content was recorded: its sidecar if still present, and its agent-run. */
@@ -643,14 +660,14 @@ export class AdoptionModule {
     const owner = draft.kind === "decision" ? {} : { owner_person_id: typeof links.owner_person_id === "string" ? links.owner_person_id : (await run.self()).frontmatter.id };
     // A new decision is always active (#41 lifecycle rule).
     const decision = draft.kind === "decision" ? { status: "active", decision_text: fields.decision_text ?? draft.title } : {};
-    const id = run.newId();
+    const id = run.newId("main");
     const narrative = draft.body.trim();
     const created = await this.ctx.objects.write({
       relativePath: `${folder}/${markdownFileName(draft.title, id, run.now)}`,
       frontmatter: { ...this.ctx.envelope(id, draft.kind as "task" | "decision" | "open-point", draft.title, run.now, draft.origin), source_ids: [], ...links, ...owner, ...fields, ...decision },
       body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
     });
-    return [id, ...await this.resolver.raiseLinkReviews(created.frontmatter, unresolved, { now: run.now, origin: draft.origin, agentRunId: run.id, newId: run.newId })];
+    return [id, ...await this.resolver.raiseLinkReviews(created.frontmatter, unresolved, { now: run.now, origin: draft.origin, agentRunId: run.id, newId: (role) => run.newId(`main/${role}`) })];
   }
 
   /**
@@ -677,8 +694,9 @@ export class AdoptionModule {
     if (issues.length) throw new DraftError(issues);
     if (options.dryRun) return [];
 
-    const created = named ? await this.linkSources(named.urls, draft, run, fields) : [];
-    const id = options.newId?.() ?? run.newId();
+    const role = options.role ?? "main";
+    const created = named ? await this.linkSources(named.urls, draft, run, fields, role) : [];
+    const id = run.newId(role);
     const sourceIds = [...new Set([...named?.ids ?? [], ...created, ...evidenceIds])];
     await this.ctx.objects.write({
       relativePath: `review-items/${markdownFileName(draft.title, id, run.now)}`,
@@ -692,7 +710,7 @@ export class AdoptionModule {
         ...(unresolved.length ? { unresolved_references: unresolved } : {}),
         ...options.extra,
         // U7: generated here, at adoption, never taken from the draft.
-        operation_id: run.newId()
+        operation_id: run.newId(`${role}:operation`)
       },
       body: proposalBody(draft.title, narrative)
     });
@@ -753,7 +771,7 @@ export class AdoptionModule {
     if (issues.length) throw new DraftError(issues);
     await this.ctx.rebuildIndex(); // sees Sources written earlier in this batch
     const existing = url ? this.sourceByUrl(url) : undefined;
-    if (!existing) return [await this.writeSource({ title: draft.title, url, pasted, occurredAt }, draft, run, fields)];
+    if (!existing) return [await this.writeSource({ title: draft.title, url, pasted, occurredAt }, draft, run, fields, "main")];
     // Reuse: fill in only what is missing (text, occurred_at), through a guarded write; never overwrite what is stored.
     const fragments = existing.frontmatter.fragments;
     const hasText = Array.isArray(fragments) && fragments.some((fragment) => text((fragment as { text?: unknown }).text));
@@ -776,9 +794,9 @@ export class AdoptionModule {
     const fromBody = !named.ids.length && !named.urls.length;
     if (fromBody && !narrative && !issues.some((issue) => issue.startsWith("sources"))) issues.push("sources: name at least one source (ID, title or URL), or write the idea in the body");
     if (issues.length) throw new DraftError(issues);
-    const created = await this.linkSources(named.urls, draft, run, fields);
-    if (fromBody) created.push(await this.writeSource({ title: draft.title, pasted: narrative }, draft, run, fields));
-    const id = run.newId();
+    const created = await this.linkSources(named.urls, draft, run, fields, "main");
+    if (fromBody) created.push(await this.writeSource({ title: draft.title, pasted: narrative }, draft, run, fields, "main/source:body"));
+    const id = run.newId("main");
     await this.ctx.objects.write({
       relativePath: `knowledge/${markdownFileName(draft.title, id, run.now)}`,
       frontmatter: { ...this.ctx.envelope(id, "knowledge-note", draft.title, run.now, draft.origin), ...fields, source_ids: [...new Set([...named.ids, ...created])], related_object_ids: [] },
@@ -814,16 +832,16 @@ export class AdoptionModule {
     return { ids: [...new Set(ids)], urls };
   }
 
-  /** Creates a web-link Source per new URL, titled by the URL until the user renames it. */
-  private async linkSources(urls: string[], draft: ParsedDraft, run: AdoptionRun, fields: Record<string, unknown>) {
+  /** Creates a web-link Source per new URL, titled by the URL until the user renames it; each URL is its own ID role. */
+  private async linkSources(urls: string[], draft: ParsedDraft, run: AdoptionRun, fields: Record<string, unknown>, role: string) {
     const created: string[] = [];
-    for (const url of urls) created.push(await this.writeSource({ title: url, url }, draft, run, fields));
+    for (const url of urls) created.push(await this.writeSource({ title: url, url }, draft, run, fields, `${role}/source:url:${url}`));
     return created;
   }
 
   /** Writes one Source in the draft's origin. Area and sensitivity follow the draft, so a restricted idea's Source stays restricted. */
-  private async writeSource(source: { title: string; url?: string; pasted?: string; occurredAt?: string }, draft: ParsedDraft, run: AdoptionRun, fields: Record<string, unknown>) {
-    const id = run.newId();
+  private async writeSource(source: { title: string; url?: string; pasted?: string; occurredAt?: string }, draft: ParsedDraft, run: AdoptionRun, fields: Record<string, unknown>, role: string) {
+    const id = run.newId(role);
     const carried = Object.fromEntries(["area", "sensitivity", ...(draft.kind === "source" ? ["subjects", "tags"] : [])].filter((key) => fields[key] !== undefined).map((key) => [key, fields[key]]));
     await this.ctx.objects.write({
       relativePath: `sources/${markdownFileName(source.title, id, run.now)}`,
@@ -874,17 +892,18 @@ export class AdoptionModule {
     for (const key of ["subjects", "tags", "aliases"]) if (fields[key] !== undefined) { if (isStringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
     if (issues.length) throw new DraftError(issues);
 
-    // People by email first (PRD): a known address means this person already exists.
+    // People by email first (PRD): a known address means this person already exists, unless it is the person
+    // this draft's own interrupted first attempt wrote (#59): then the replay goes on to the merge suggestions.
+    const id = run.newId("main");
     const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at && personEmails(object).some((email) => emails.includes(email)));
-    if (known) return [known.frontmatter.id];
-    const id = run.newId();
+    if (known && known.frontmatter.id !== id) return [known.frontmatter.id];
     const narrative = draft.body.trim();
-    await this.ctx.objects.write({
+    if (!known) await this.ctx.objects.write({
       relativePath: `people/${markdownFileName(draft.title, id, run.now)}`,
       frontmatter: { ...this.ctx.envelope(id, "person", draft.title, run.now, draft.origin), ...extra, ...(emails.length ? { identifiers: emails.map((value) => ({ kind: "email", value })) } : {}), review_state: "unreviewed", captured_at: draft.capturedAt },
       body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
     });
     this.personMerges ??= new PersonMergeModule(this.ctx);
-    return [id, ...await this.personMerges.suggest({ now: run.now, personIds: [id], newId: run.newId })];
+    return [id, ...await this.personMerges.suggest({ now: run.now, personIds: [id], newId: (role) => run.newId(`main/${role}`) })];
   }
 }

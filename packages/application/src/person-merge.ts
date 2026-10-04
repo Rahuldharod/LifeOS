@@ -46,14 +46,14 @@ export class PersonMergeModule {
    * unreviewed person (calendar- or agent-created), so deliberate look-alikes the user made are left alone;
    * `personIds` narrows the sweep to those people. A pair already proposed (in any status) is never re-proposed.
    */
-  suggest(options: { now?: string; personIds?: string[]; newId?: () => string } = {}): Promise<string[]> {
-    // `newId` (adoption's `run.newId`) makes the Review Item IDs replayable after a crash.
+  suggest(options: { now?: string; personIds?: string[]; newId?: (role: string) => string } = {}): Promise<string[]> {
+    // `newId` (adoption's `run.newId`) makes the Review Item IDs replayable after a crash, keyed by the pair (#59).
     const run = (sweeps.get(this.ctx) ?? Promise.resolve()).catch(() => undefined).then(() => this.suggestSerialized(options.now ?? new Date().toISOString(), options.personIds, options.newId ?? (() => uuidV7())));
     sweeps.set(this.ctx, run);
     return run;
   }
 
-  private async suggestSerialized(now: string, only: string[] | undefined, newId: () => string) {
+  private async suggestSerialized(now: string, only: string[] | undefined, newId: (role: string) => string) {
     const { ctx } = this;
     await ctx.rebuildIndex();
     const people = ctx.index.all().filter(live);
@@ -99,14 +99,15 @@ export class PersonMergeModule {
     return left.frontmatter.created_at <= right.frontmatter.created_at ? [left, right] : [right, left];
   }
 
-  private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: () => string) {
-    const id = newId();
+  private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: (role: string) => string) {
+    const role = `merge:${pairKey(keep.frontmatter.id, merge.frontmatter.id)}`;
+    const id = newId(role);
     const title = `Merge ${merge.frontmatter.title} into ${keep.frontmatter.title}`;
     const reason = match === "email" ? "Both have the same email address." : match === "email-local-part" ? "Their email addresses match on two internal domains." : "Their names match.";
     const proposal: PersonMergeProposal = { keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match, keep_title: keep.frontmatter.title, merge_title: merge.frontmatter.title };
     await this.ctx.objects.write({
       relativePath: `review-items/${markdownFileName(title, id, now)}`,
-      frontmatter: { ...this.ctx.envelope(id, "review-item", title, now), review_type: personMergeReviewType, target_object_type: "person", proposed_fields: { ...proposal }, confidence_label: match === "name" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: newId() },
+      frontmatter: { ...this.ctx.envelope(id, "review-item", title, now), review_type: personMergeReviewType, target_object_type: "person", proposed_fields: { ...proposal }, confidence_label: match === "name" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: newId(`${role}:operation`) },
       body: `# Possible duplicate person\n\n${reason} Accepting moves every reference from ${merge.frontmatter.title} to ${keep.frontmatter.title} and deletes ${merge.frontmatter.title}. Nothing changes until you accept.\n`
     });
     await this.ctx.writeAudit("review.proposed", id, now, { review_type: personMergeReviewType, keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match }, { type: "system" });

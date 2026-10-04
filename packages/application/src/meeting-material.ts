@@ -47,9 +47,16 @@ const confidences = ["High", "Medium", "Low"];
 /** How far back the calendar is searched for an event that has no meeting yet. */
 const eventLookbackMs = 30 * 86_400_000;
 
-/** One place for every new object and Review Item ID this handler mints. */
-/** Every ID this handler writes comes from the run, so a crash and replay rewrites the same files (#32). */
-const newId = (run: AdoptionRun) => run.newId();
+/**
+ * Every ID this handler writes comes from the run, keyed by role (#59): the meeting, each source by provider +
+ * external ID, the summary, each proposal by key. A replay that finds one already written gets the same IDs for the rest.
+ */
+const roles = {
+  meeting: "meeting",
+  source: (source: { provider: string; externalId: string }) => `source:${source.provider}:${source.externalId}`,
+  summary: "summary",
+  proposal: (key: string) => `proposal:${key}`
+};
 
 type Propose = (draft: ParsedDraft, run: AdoptionRun, options: ProposeOptions) => Promise<string[]>;
 interface MaterialSource { at: string; sourceType: string; provider: string; externalId: string; url: string; occurredAt: string; title?: string }
@@ -88,10 +95,14 @@ export class MeetingMaterialModule {
     const objectIds: string[] = [];
     if (!meeting) {
       if (objectIdPattern.test(reference) || !this.meetings) throw new DraftError([`meeting: no LifeOS meeting "${reference}"`]);
-      const ensured = await this.meetings.ensureMeetingForEvent(reference, { from: new Date(Date.parse(run.now) - eventLookbackMs), to: new Date(Date.parse(run.now) + 86_400_000), calendarId: text(fields.calendar_id) || undefined, meetingId: newId(run) });
+      const ensured = await this.meetings.ensureMeetingForEvent(reference, { from: new Date(Date.parse(run.now) - eventLookbackMs), to: new Date(Date.parse(run.now) + 86_400_000), calendarId: text(fields.calendar_id) || undefined, meetingId: run.newId(roles.meeting), draftKey: draft.draftKey });
       if (!ensured) throw new DraftError([`meeting: no LifeOS meeting or calendar event "${reference}" in the last 30 days`]);
       meeting = ensured.meeting;
       if (ensured.created) objectIds.push(meeting.frontmatter.id);
+    } else if (this.meetings && meeting.frontmatter.id === run.newId(roles.meeting)) {
+      // Replay after a crash: this draft created the meeting; make sure its creation is audited (once).
+      objectIds.push(meeting.frontmatter.id);
+      await this.meetings.auditCreatedForDraft(meeting, draft.draftKey);
     }
     const meetingId = meeting.frontmatter.id;
 
@@ -118,7 +129,7 @@ export class MeetingMaterialModule {
       if (found) { objectIds.push(found); continue; }
       // `meeting` makes kindFields inherit the meeting's project, client and product; people default to its attendees.
       const inherited = { ...proposal.draft, fields: { ...proposal.draft.fields, meeting: meetingId, ...(proposal.draft.fields.people === undefined && attendees.length ? { people: attendees } : {}) } };
-      const [reviewId] = await this.propose(inherited, run, { newId: () => newId(run), extra: { missed_in_notes: proposal.missedInNotes, proposal_key: proposal.key } });
+      const [reviewId] = await this.propose(inherited, run, { role: roles.proposal(proposal.key), extra: { missed_in_notes: proposal.missedInNotes, proposal_key: proposal.key } });
       raised.set(proposal.key, reviewId!);
       objectIds.push(reviewId!);
     }
@@ -134,7 +145,7 @@ export class MeetingMaterialModule {
     const missing = expectedMaterial.filter((kind) => !have.has(kind) && !absent.includes(kind));
     const state = missing.length ? "partial" : "enriched";
     await ctx.update(meeting, { enrichment_state: state, enrichment_missing_material: missing, enrichment_unavailable_material: absent.length ? absent : undefined, enrichment_adopted_at: run.now, ...(extraIds.length ? { source_ids: [...listed, ...extraIds] } : {}) }, { expectedHash: meeting.contentHash, now: run.now });
-    await ctx.writeAudit("meeting.enrichment-adopted", meetingId, run.now, { from: meeting.frontmatter.enrichment_state ?? "none", to: state, missing_material: missing, draft_key: draft.draftKey, agent_run_id: run.id }, { type: "agent", ref: run.id });
+    await ctx.writeAuditOnce("meeting.enrichment-adopted", meetingId, run.now, { from: meeting.frontmatter.enrichment_state ?? "none", to: state, missing_material: missing, draft_key: draft.draftKey, agent_run_id: run.id }, { type: "agent", ref: run.id });
     await ctx.rebuildIndex();
     return [...new Set(objectIds)];
   }
@@ -222,7 +233,7 @@ export class MeetingMaterialModule {
       await ctx.update(found, { meeting_id: meeting.frontmatter.id }, { expectedHash: found.contentHash, now: run.now });
       return { id: found.frontmatter.id, otherMeeting: false };
     }
-    const id = newId(run);
+    const id = run.newId(roles.source(source));
     const title = source.title ?? `${sourceLabels[source.sourceType]}: ${meeting.frontmatter.title}`;
     await ctx.objects.write({
       relativePath: `sources/${markdownFileName(title, id, run.now)}`,
@@ -254,7 +265,7 @@ export class MeetingMaterialModule {
       await ctx.update(pending, { proposed_fields: { summary }, confidence_label: confidence, source_ids: merged, agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt }, { expectedHash: pending.contentHash, now: run.now, body });
       return pending.frontmatter.id;
     }
-    const id = newId(run);
+    const id = run.newId(roles.summary);
     await ctx.objects.write({
       relativePath: `review-items/${markdownFileName(title, id, run.now)}`,
       frontmatter: {
@@ -263,7 +274,7 @@ export class MeetingMaterialModule {
         proposed_fields: { summary }, field_evidence: {}, confidence_label: confidence as "High" | "Medium" | "Low", status: "pending",
         agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...inheritContextLinks(meeting),
         // U7: generated here, at adoption, never taken from the draft.
-        operation_id: newId(run)
+        operation_id: run.newId(`${roles.summary}:operation`)
       },
       body
     });
