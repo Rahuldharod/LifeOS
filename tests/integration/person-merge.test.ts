@@ -236,6 +236,50 @@ describe("accepting a person merge (#40)", () => {
     expect(app.object(s.dup.frontmatter.id).frontmatter.deleted_at).toEqual(expect.any(String));
   });
 
+  function expectUnmerged(application: LifeOSApplication, s: Awaited<ReturnType<typeof duplicateScenario>>) {
+    const { keep, dup } = s;
+    expect(application.object(s.meetingId).frontmatter.attendee_ids).toEqual([keep.frontmatter.id, dup.frontmatter.id]);
+    expect(application.object(s.noteId).body).toContain(`lifeos://object/${dup.frontmatter.id}`);
+    expect(application.object(s.taskId).frontmatter.owner_person_id).toBe(dup.frontmatter.id);
+    expect(application.object(s.clientId).frontmatter.primary_contact_person_id).toBe(dup.frontmatter.id);
+    expect(application.object(keep.frontmatter.id).frontmatter.identifiers).toBeUndefined();
+    expect(application.object(dup.frontmatter.id).frontmatter.deleted_at).toBeUndefined();
+  }
+
+  it("#56: rejecting a merge interrupted mid-apply puts every reference back before marking it rejected", async () => {
+    const s = await duplicateScenario();
+    s.store.crashOnTombstone = true;
+    await expect(s.application.acceptReviewItem(s.reviewId)).rejects.toThrow("disk unplugged");
+    s.store.crashOnTombstone = false;
+
+    const rejected = await s.application.rejectReviewItem(s.reviewId);
+    expect(rejected.frontmatter.status).toBe("rejected");
+    expectUnmerged(s.application, s);
+    expect((await operationFiles(s.root)).filter((operation) => operation.kind === "merge-person")).toEqual([expect.objectContaining({ status: "completed" })]);
+
+    const restarted = await setup(s.root);
+    expect(await restarted.application.recoverOperations()).toEqual([]);
+    expectUnmerged(restarted.application, s);
+  });
+
+  it("#56: recovery rolls back a merge whose Review Item was already rejected, and the server starts", async () => {
+    const s = await duplicateScenario();
+    s.store.crashOnTombstone = true;
+    await expect(s.application.acceptReviewItem(s.reviewId)).rejects.toThrow("disk unplugged");
+    s.store.crashOnTombstone = false;
+    await s.application.rebuildIndex();
+    // State left by a reject that ignored the operation (before #56).
+    const review = s.application.object(s.reviewId);
+    await s.store.write({ relativePath: review.relativePath, frontmatter: { ...review.frontmatter, status: "rejected", revision: review.frontmatter.revision + 1 }, body: review.body, expectedHash: review.contentHash });
+
+    const restarted = await setup(s.root);
+    expect(await restarted.application.recoverOperations()).toHaveLength(1);
+    expectUnmerged(restarted.application, s);
+    expect(restarted.application.object(s.reviewId).frontmatter.status).toBe("rejected");
+    expect(await restarted.application.recoverOperations()).toEqual([]);
+    expect((await restarted.application.health()).diagnostics).toEqual([]);
+  });
+
   it("refuses a suggestion whose person was already merged, and rejecting changes nothing", async () => {
     const { calendar, application } = await setup();
     const keep = await application.createEntity("person", { title: "Ada Byron" });

@@ -150,6 +150,8 @@ export class PersonMergeModule {
     const review = this.ctx.index.get(String(operation.payload.reviewId));
     // The review already moved on (rolled back with a new operation, or deleted): nothing left to do.
     if (!review || review.frontmatter.operation_id !== operation.id) { await this.ctx.objects.completeOperation?.(operation.id); return "rolled-back"; }
+    // #56: the user rejected the suggestion after the merge started: undo it rather than finish it.
+    if (review.frontmatter.status !== "pending" && review.frontmatter.status !== "accepted") { await this.abandon(review, operation); return "rolled-back"; }
     try { await this.accept(review); return "completed"; }
     catch (error) { if (error instanceof PersonMergeConflictError) return "rolled-back"; throw error; }
   }
@@ -199,14 +201,33 @@ export class PersonMergeModule {
     return this.ctx.update(current, changes, { expectedHash: current.contentHash, now, body });
   }
 
+  /**
+   * #56: rejecting an item whose merge started but did not finish. Every step of a merge can be undone,
+   * so the whole plan is rolled back and the operation closed; the caller then marks the item rejected.
+   */
+  async abandon(review: LifeOSObject, operation: { id: string; payload: Record<string, unknown> }) {
+    const { ctx } = this;
+    await ctx.rebuildIndex();
+    const now = new Date().toISOString();
+    await this.undo(operation.payload.plan as PlanEntry[] | undefined ?? [], now);
+    await ctx.writeAudit("person.merge-rolled-back", review.frontmatter.id, now, { operation_id: operation.id, reason: "rejected" });
+    await ctx.objects.completeOperation?.(operation.id);
+    await ctx.rebuildIndex();
+  }
+
+  /** Puts back every file of the plan that is still at its merged value; files changed since are left alone. */
+  private async undo(plan: PlanEntry[], now: string) {
+    for (const entry of [...plan].reverse()) {
+      const current = this.ctx.index.get(entry.id);
+      if (current && !same(entry.before, entry.after) && isAt(current, entry.after)) await this.apply(current, entry.before, now);
+    }
+    await this.ctx.rebuildIndex();
+  }
+
   /** Puts back every file the plan already changed, gives the review a fresh operation and leaves it pending. */
   private async rollBack(review: LifeOSObject, plan: PlanEntry[], operationId: string, changedPath: string, now: string): Promise<never> {
     const { ctx } = this;
-    for (const entry of [...plan].reverse()) {
-      const current = ctx.index.get(entry.id);
-      if (current && !same(entry.before, entry.after) && isAt(current, entry.after)) await this.apply(current, entry.before, now);
-    }
-    await ctx.rebuildIndex();
+    await this.undo(plan, now);
     const message = `${changedPath} changed while the merge was in progress, so the merge was undone; review the suggestion again`;
     const latest = ctx.required(review.frontmatter.id);
     await ctx.update(latest, { operation_id: uuidV7(), merge_problem: message }, { expectedHash: latest.contentHash, now });

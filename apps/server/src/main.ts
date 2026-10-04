@@ -310,7 +310,8 @@ server.setErrorHandler((error, _request, reply) => {
 try {
   await session.start();
   await application.rebuildIndex();
-  await application.recoverOperations();
+  // #56: an operation that cannot be recovered is logged and shown in System Health; the server still starts.
+  await application.recoverOperations({ onError: (error, operation) => server.log.error({ err: error, operation: operation.id, kind: operation.kind }, "Operation recovery failed") });
   await application.rebuildIndex();
   if (session.status().writeAllowed) await application.suggestPersonMerges().catch((error) => server.log.error(error));
   // Inbox Drafts and Patch Drafts (ADR 0007, #32) are adopted at startup (which also finishes a batch a crash interrupted), shortly after
