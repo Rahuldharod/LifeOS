@@ -225,6 +225,12 @@ const reviewEditable: Record<string, string[]> = {
   "open-point": ["owner_person_id", "primary_project_id", "primary_client_id", "primary_product_id"]
 };
 
+/** The text of the `## Summary` section of a meeting body (written by accepting a summary Review Item, #45). */
+function meetingSummary(body: string | undefined) {
+  const match = body?.match(/^##\s+Summary\s*\n([\s\S]*?)(?=^#{1,2}\s|(?![\s\S]))/m);
+  return match?.[1]?.trim() || undefined;
+}
+
 function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choices }: {
   review: LifeObject;
   busy: boolean;
@@ -270,6 +276,16 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
       <button className="danger" disabled={busy} onClick={onReject}>Keep separate</button>
     </div>}
   </div>;
+  // #45: an AI meeting summary; accepting writes the Summary section of the meeting, never the user's note.
+  if (review.frontmatter.review_type === "summary") return <div className="review-card">
+    <b>{review.frontmatter.title}</b>
+    <small>meeting summary · {String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}</small>
+    <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{String(proposed.summary ?? "")}</ReactMarkdown></div>
+    {pending && <div className="review-actions">
+      <button className="primary" disabled={busy} onClick={onAccept}>Accept summary</button>
+      <button className="danger" disabled={busy} onClick={onReject}>Reject</button>
+    </div>}
+  </div>;
   const changes: ReviewEdits = Object.fromEntries([
     ...(title.trim() !== review.frontmatter.title ? [["title", title]] : []),
     ...editable.filter((key) => fields[key] !== current(key)).map((key) => [key, fields[key] || null])
@@ -282,7 +298,7 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
   const evidenceEntries = Object.values(evidence ?? {}).flat();
   return <div className="review-card">
     {pending ? <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Proposed title" /> : <b>{review.frontmatter.title}</b>}
-    <small>{target} · {String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}{review.frontmatter.origin === "agent-extracted" ? " · agent-extracted" : ""}</small>
+    <small>{target} · {String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}{review.frontmatter.origin === "agent-extracted" ? " · agent-extracted" : ""}{review.frontmatter.missed_in_notes === true ? <> · <strong>Not in your notes</strong></> : null}</small>
     {pending && editable.length > 0 && <div className="review-fields">
       {editable.includes("owner_person_id") && select("owner_person_id", "Owner", choices?.people ?? [])}
       {editable.includes("due_on") && <label>Due<input type="date" value={fields.due_on ?? ""} disabled={busy} onChange={(event) => setFields({ ...fields, due_on: event.target.value })} /></label>}
@@ -1266,6 +1282,8 @@ function App() {
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </article>}
+              {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
+              {meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
               <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
                 {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}

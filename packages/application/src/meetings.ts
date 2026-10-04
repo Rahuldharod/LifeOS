@@ -34,6 +34,54 @@ export class MeetingsModule {
     return run;
   }
 
+  /**
+   * #45: the meeting for a calendar event, created if missing, WITHOUT its note: enrichment can attach
+   * material to a meeting the user never opened, and the note still appears only on the first edit
+   * (`createMeetingFromEvent` then finds this meeting and adds the note). Shares the per-event queue, so
+   * it never races a first edit into a duplicate meeting. Returns undefined when the calendar has no such
+   * event. No operation is recorded: a crash before the write leaves nothing, and a retry finds the meeting.
+   */
+  async ensureMeetingForEvent(externalId: string, options: { from: Date; to: Date; calendarId?: string; meetingId: string }) {
+    const previous = this.meetingCreations.get(externalId) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(async () => {
+      const existing = this.findMeetingForEvent(externalId, options.calendarId);
+      if (existing) return { meeting: existing, created: false };
+      if (!this.ctx.calendar) throw new Error("Calendar connector is not configured");
+      const event = (await this.ctx.calendar.listEvents(options.from, options.to)).find((candidate) => candidate.externalId === externalId && (!options.calendarId || candidate.calendarId === options.calendarId));
+      if (!event) return undefined;
+      const now = new Date().toISOString();
+      const meeting = await this.writeMeeting(event, options.meetingId, await this.ensureEventContext(event, now), now);
+      await this.ctx.writeAudit("meeting.created", options.meetingId, now, { external_id: externalId, reason: "enrichment" });
+      await this.ctx.rebuildIndex();
+      return { meeting: this.ctx.index.get(options.meetingId) ?? meeting, created: true };
+    });
+    const settled = run.catch(() => undefined);
+    this.meetingCreations.set(externalId, settled);
+    void settled.then(() => { if (this.meetingCreations.get(externalId) === settled) this.meetingCreations.delete(externalId); });
+    return run;
+  }
+
+  private writeMeeting(event: CalendarEvent, meetingId: string, context: EventContext, now: string) {
+    const { ctx } = this;
+    return ctx.objects.write({
+      relativePath: `meetings/${markdownFileName(event.title, meetingId, event.startsAt, event.timezone)}`,
+      frontmatter: {
+        ...ctx.envelope(meetingId, "meeting", event.title, now, "calendar"),
+        status: "scheduled",
+        starts_at: event.startsAt,
+        ends_at: event.endsAt,
+        timezone: event.timezone,
+        attendee_ids: context.people.map((person) => person.frontmatter.id),
+        primary_client_id: context.client?.frontmatter.id,
+        primary_product_id: context.product?.frontmatter.id,
+        primary_project_id: context.project?.frontmatter.id,
+        is_all_day: event.isAllDay ?? false,
+        external_refs: [{ provider: ctx.calendar?.provider ?? "calendar", external_id: event.externalId, calendar_id: event.calendarId }]
+      },
+      body: `# ${event.title}\n\nCanonical meeting created from ${ctx.calendar?.provider ?? "calendar"}.\n`
+    });
+  }
+
   private async createMeetingFromEventSerialized(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
     const { ctx } = this;
     const event = await this.findEvent(externalId, from, to, calendarId);
@@ -61,23 +109,7 @@ export class MeetingsModule {
     const meetingId = typeof operation?.payload.meetingId === "string" ? operation.payload.meetingId : uuidV7();
     const noteId = typeof operation?.payload.noteId === "string" ? operation.payload.noteId : uuidV7();
     const noteBody = initialBody ?? (typeof operation?.payload.body === "string" ? operation.payload.body : DEFAULT_NOTE_BODY);
-    await ctx.objects.write({
-      relativePath: `meetings/${markdownFileName(event.title, meetingId, event.startsAt, event.timezone)}`,
-      frontmatter: {
-        ...ctx.envelope(meetingId, "meeting", event.title, now, "calendar"),
-        status: "scheduled",
-        starts_at: event.startsAt,
-        ends_at: event.endsAt,
-        timezone: event.timezone,
-        attendee_ids: context.people.map((person) => person.frontmatter.id),
-        primary_client_id: context.client?.frontmatter.id,
-        primary_product_id: context.product?.frontmatter.id,
-        primary_project_id: context.project?.frontmatter.id,
-        is_all_day: event.isAllDay ?? false,
-        external_refs: [{ provider: ctx.calendar?.provider ?? "calendar", external_id: event.externalId, calendar_id: event.calendarId }]
-      },
-      body: `# ${event.title}\n\nCanonical meeting created from ${ctx.calendar?.provider ?? "calendar"}.\n`
-    });
+    await this.writeMeeting(event, meetingId, context, now);
     await ctx.objects.write({
       relativePath: `meetings/${markdownFileName(`${event.title} notes`, noteId, event.startsAt, event.timezone)}`,
       frontmatter: {
