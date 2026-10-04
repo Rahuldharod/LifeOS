@@ -12,7 +12,22 @@ import { contextLinkFields, inheritContextLinks, sameValue, validTimeZone } from
 export class ReviewModule {
   /** `person-merge` Review Items (#40): suggesting, accepting and recovering merges. */
   readonly merges: PersonMergeModule;
+  /** #62: the tail of the queue of accept/reject/recover calls per Review Item, so they run one at a time. */
+  private readonly queues = new Map<string, Promise<unknown>>();
   constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule) { this.merges = new PersonMergeModule(ctx); }
+
+  /**
+   * #62: runs `work` after every earlier accept, reject or recovery of the same Review Item has settled, so a
+   * double-click or two tabs resolve to one outcome: the later call sees the first one's result.
+   */
+  private async serialise<T>(reviewId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(reviewId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(work);
+    const tail = current.catch(() => undefined);
+    this.queues.set(reviewId, tail);
+    try { return await current; }
+    finally { if (this.queues.get(reviewId) === tail) this.queues.delete(reviewId); }
+  }
 
   reviews() {
     return this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item");
@@ -60,7 +75,11 @@ export class ReviewModule {
   }
 
   /** `linkTo` is the object chosen for a `link-resolution` item; other review types ignore it. */
-  async acceptReviewItem(reviewId: string, options: { linkTo?: string } = {}) {
+  acceptReviewItem(reviewId: string, options: { linkTo?: string } = {}) {
+    return this.serialise(reviewId, () => this.accept(reviewId, options));
+  }
+
+  private async accept(reviewId: string, options: { linkTo?: string } = {}) {
     const { ctx } = this;
     const review = ctx.required(reviewId, "review-item");
     if (review.frontmatter.review_type === personMergeReviewType) return this.merges.accept(review);
@@ -254,7 +273,11 @@ export class ReviewModule {
     return result;
   }
 
-  async rejectReviewItem(reviewId: string) {
+  rejectReviewItem(reviewId: string) {
+    return this.serialise(reviewId, () => this.reject(reviewId));
+  }
+
+  private async reject(reviewId: string) {
     const review = this.ctx.required(reviewId, "review-item");
     if (review.frontmatter.status === "rejected") return review;
     if (review.frontmatter.status !== "pending") throw new Error("Only pending review items can be rejected");
@@ -272,12 +295,15 @@ export class ReviewModule {
    * Startup recovery of an `accept-review` operation (#56): finishes it while the item is pending or accepted,
    * and undoes it when the user rejected the item meanwhile (or the item is gone), so recovery never fails on it.
    */
-  async recoverAccept(operation: Operation) {
-    const review = this.ctx.index.get(String(operation.payload.reviewId));
-    if (review?.frontmatter.type === "review-item" && (review.frontmatter.status === "pending" || review.frontmatter.status === "accepted")) {
-      await this.acceptReviewItem(review.frontmatter.id);
-    } else if (review?.frontmatter.type === "review-item") await this.abandonCreate(review, operation);
-    else await this.ctx.objects.completeOperation?.(operation.id);
+  recoverAccept(operation: Operation) {
+    const reviewId = String(operation.payload.reviewId);
+    return this.serialise(reviewId, async () => {
+      const review = this.ctx.index.get(reviewId);
+      if (review?.frontmatter.type === "review-item" && (review.frontmatter.status === "pending" || review.frontmatter.status === "accepted")) {
+        await this.accept(review.frontmatter.id);
+      } else if (review?.frontmatter.type === "review-item") await this.abandonCreate(review, operation);
+      else await this.ctx.objects.completeOperation?.(operation.id);
+    });
   }
 
   /** Undoes and closes the unfinished operation of a Review Item, if it has one. */

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, link, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { inboxFolders, type AgentIndexFile, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
@@ -308,11 +308,25 @@ export class FilesystemOperationStore {
   private readonly directory: string;
   constructor(root: string) { this.directory = path.join(path.resolve(root), ".lifeos", "operations"); }
 
+  /**
+   * #62: creates the operation file exclusively (fails if it exists), so of two concurrent prepares of one
+   * operation exactly one payload wins and the other caller gets the winner's record back.
+   */
   async prepare(kind: string, payload: Record<string, unknown>, operationId: string = randomUUID()): Promise<OperationRecord> {
     const existing = await this.read(operationId);
     if (existing) return existing;
     const record: OperationRecord = { id: operationId, kind, status: "prepared", created_at: new Date().toISOString(), payload };
-    await this.save(record);
+    await mkdir(this.directory, { recursive: true });
+    const target = path.join(this.directory, `${operationId}.json`);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    try {
+      // A hard link publishes the complete file under its name in one step and, unlike rename, never replaces one.
+      await link(temporary, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return await this.read(operationId) ?? record;
+    } finally { await rm(temporary, { force: true }); }
     return record;
   }
 
