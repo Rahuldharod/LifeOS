@@ -41,7 +41,8 @@ export class MeetingsModule {
    * it never races a first edit into a duplicate meeting. Returns undefined when the calendar has no such
    * event. No operation is recorded: a crash before the write leaves nothing, and a retry finds the meeting.
    */
-  async ensureMeetingForEvent(externalId: string, options: { from: Date; to: Date; calendarId?: string; meetingId: string }) {
+  /** `draftKey`: the adopted draft asking for the meeting (#59); its `meeting.created` audit is written once per draft. */
+  async ensureMeetingForEvent(externalId: string, options: { from: Date; to: Date; calendarId?: string; meetingId: string; draftKey?: string }) {
     const previous = this.meetingCreations.get(externalId) ?? Promise.resolve();
     const run = previous.catch(() => undefined).then(async () => {
       const existing = this.findMeetingForEvent(externalId, options.calendarId);
@@ -51,7 +52,9 @@ export class MeetingsModule {
       if (!event) return undefined;
       const now = new Date().toISOString();
       const meeting = await this.writeMeeting(event, options.meetingId, await this.ensureEventContext(event, now), now);
-      await this.ctx.writeAudit("meeting.created", options.meetingId, now, { external_id: externalId, reason: "enrichment" });
+      const metadata = { external_id: externalId, reason: "enrichment" };
+      if (options.draftKey) await this.ctx.writeAuditOnce("meeting.created", options.meetingId, now, { ...metadata, draft_key: options.draftKey });
+      else await this.ctx.writeAudit("meeting.created", options.meetingId, now, metadata);
       await this.ctx.rebuildIndex();
       return { meeting: this.ctx.index.get(options.meetingId) ?? meeting, created: true };
     });
@@ -59,6 +62,12 @@ export class MeetingsModule {
     this.meetingCreations.set(externalId, settled);
     void settled.then(() => { if (this.meetingCreations.get(externalId) === settled) this.meetingCreations.delete(externalId); });
     return run;
+  }
+
+  /** The `meeting.created` audit of a meeting an adopted draft created, if a crash stopped it being written (#59). */
+  async auditCreatedForDraft(meeting: LifeOSObject, draftKey: string) {
+    const ref = (meeting.frontmatter.external_refs as Array<{ external_id?: string }> | undefined)?.[0];
+    await this.ctx.writeAuditOnce("meeting.created", meeting.frontmatter.id, meeting.frontmatter.created_at, { external_id: ref?.external_id, reason: "enrichment", draft_key: draftKey });
   }
 
   private writeMeeting(event: CalendarEvent, meetingId: string, context: EventContext, now: string) {

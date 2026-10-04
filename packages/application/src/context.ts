@@ -105,23 +105,25 @@ export class AppContext {
     if (existing) throw new ObjectConflictError(`Duplicate object ID ${id}: already used by ${existing.relativePath}; nothing was written`);
   }
 
-  /** IDs a crash replay may find already written by its own interrupted first attempt (see `replaying`). */
-  private readonly replayIds = new Set<string>();
+  /** Which IDs a crash replay may find already written by its own interrupted first attempt (see `replaying`). */
+  private readonly replayScopes = new Set<(id: string) => boolean>();
 
   /**
-   * Runs `work` as the replay of an interrupted operation whose creates use the deterministic `ids`. A create
-   * of one of these IDs at the path where it already exists returns the file the first attempt wrote (writes
-   * are atomic, so it is complete) instead of being refused as a duplicate. Nothing is ever rewritten.
+   * Runs `work` as the replay of an interrupted operation whose creates use deterministic IDs: `ids` lists them,
+   * or (#59) tells whether an ID is one of them. A create of one of these IDs at the path where it already exists
+   * returns the file the first attempt wrote (writes are atomic, so it is complete) instead of being refused as a
+   * duplicate. Nothing is ever rewritten.
    */
-  async replaying<T>(ids: Iterable<string>, work: () => Promise<T>): Promise<T> {
-    const added = [...ids].filter((id) => !this.replayIds.has(id));
-    for (const id of added) this.replayIds.add(id);
+  async replaying<T>(ids: Iterable<string> | ((id: string) => boolean), work: () => Promise<T>): Promise<T> {
+    const listed = typeof ids === "function" ? undefined : new Set(ids);
+    const scope = typeof ids === "function" ? ids : (id: string) => listed!.has(id);
+    this.replayScopes.add(scope);
     try { return await work(); }
-    finally { for (const id of added) this.replayIds.delete(id); }
+    finally { this.replayScopes.delete(scope); }
   }
 
   private async replayedCreate(relativePath: string, id: string, store: ObjectStore) {
-    if (!this.replayIds.has(id)) return undefined;
+    if (![...this.replayScopes].some((scope) => scope(id))) return undefined;
     const existing = await store.read(relativePath).catch(() => undefined);
     if (existing?.frontmatter.id !== id) return undefined;
     this.known.set(id, existing);
@@ -209,6 +211,16 @@ export class AppContext {
   async writeAudit(action: string, objectId: string, timestamp: string, metadata: Record<string, unknown>, actor: { type: "person" | "agent" | "system" | "external"; ref?: string } = { type: "person", ref: this.deviceId }) {
     const id = uuidV7();
     await this.objects.write({ relativePath: `audit/${markdownFileName(action, id, timestamp)}`, frontmatter: { ...this.envelope(id, "audit-event", action, timestamp), occurred_at: timestamp, actor_type: actor.type, ...(actor.ref ? { actor_ref: actor.ref } : {}), action, object_id: objectId, metadata }, body: `# ${action}\n` });
+  }
+
+  /**
+   * #59: an audit written while adopting a draft, at most once per draft key, action and object. A replay after
+   * a crash finds the audit its first attempt wrote (the index is rebuilt before replays) and writes nothing.
+   */
+  async writeAuditOnce(action: string, objectId: string, timestamp: string, metadata: Record<string, unknown> & { draft_key: string }, actor?: { type: "person" | "agent" | "system" | "external"; ref?: string }) {
+    const written = this.index.all().some((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === action && object.frontmatter.object_id === objectId
+      && (object.frontmatter.metadata as Record<string, unknown> | undefined)?.draft_key === metadata.draft_key);
+    if (!written) await this.writeAudit(action, objectId, timestamp, metadata, actor);
   }
 
   /** The self person being created, shared until the index holds it, so concurrent callers do not each create one (#55). */

@@ -183,7 +183,7 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
 
   // Briefs adopted earlier in this batch are not in the index yet; the rebuild below keeps the next one honest.
   // #60: on a crash replay the index may already hold this brief (same replayable ID); it is never one of its own "others".
-  const id = run.newId();
+  const id = run.newId("main");
   const sameDate = ctx.index.all().filter((object) => object.frontmatter.type === "daily-focus" && object.frontmatter.id !== id && dateText(object.frontmatter.focus_on) === focusOn);
   const others = sameDate.filter(isLive);
   // Briefs the interrupted first attempt already archived for this one; their audit may still be missing.

@@ -260,7 +260,7 @@ export class PatchModule {
 
   /** Writes the `update` Review Item (current vs proposed per field) and the audit event that makes re-sends idempotent. */
   private async raiseReview(patch: ParsedPatch, target: LifeOSObject, before: Record<string, unknown>, after: Record<string, unknown>, reasons: string[], run: AdoptionRun) {
-    const id = run.newId();
+    const id = run.newId("review");
     const changes: UpdateChange[] = Object.keys(after).map((field) => ({ field, current: before[field], proposed: after[field] }));
     const title = `Change ${[...changes.map((change) => change.field), ...(patch.appendNote ? ["note"] : [])].join(", ")} on ${target.frontmatter.title}`;
     const proposal: UpdateProposal = { changes, ...(patch.appendNote ? { append_note: patch.appendNote } : {}), reasons, base_revision: target.frontmatter.revision, base_hash: target.contentHash, draft_key: patch.draftKey, captured_at: patch.capturedAt };
@@ -272,7 +272,7 @@ export class PatchModule {
       frontmatter: {
         ...this.ctx.envelope(id, "review-item", title, run.now, patch.origin),
         review_type: "update", target_object_type: target.frontmatter.type, target_object_id: target.frontmatter.id, proposed_fields: { ...proposal },
-        confidence_label: patch.origin === "agent-extracted" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: run.newId(), source_ids: [], agent_run_id: run.id
+        confidence_label: patch.origin === "agent-extracted" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: run.newId("review:operation"), source_ids: [], agent_run_id: run.id
       },
       body: `# ${title}\n\n${reasons.map((reason) => `- ${reason}`).join("\n")}${table}${note}\n`
     });
