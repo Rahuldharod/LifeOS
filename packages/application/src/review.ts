@@ -4,7 +4,7 @@ import { markdownFileName, ObjectConflictError, type AppContext } from "./contex
 import { acceptSummary, summaryReviewType } from "./meeting-material.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
-import { PersonMergeModule, personMergeReviewType } from "./person-merge.js";
+import { PersonMergeModule, personMergeOperation, personMergeReviewType } from "./person-merge.js";
 import { contextLinkFields, inheritContextLinks, sameValue, validTimeZone } from "./support.js";
 
 
@@ -258,13 +258,56 @@ export class ReviewModule {
     const review = this.ctx.required(reviewId, "review-item");
     if (review.frontmatter.status === "rejected") return review;
     if (review.frontmatter.status !== "pending") throw new Error("Only pending review items can be rejected");
+    // #56: an accept that started but did not finish is undone first, so nothing is left half done.
+    await this.abandonOperation(review);
+    const latest = this.ctx.required(reviewId, "review-item");
     const now = new Date().toISOString();
-    const updated = await this.ctx.update(review, { status: "rejected", reviewed_at: now }, { expectedHash: review.contentHash, now });
+    const updated = await this.ctx.update(latest, { status: "rejected", reviewed_at: now }, { expectedHash: latest.contentHash, now });
     await this.ctx.writeAudit("review.rejected", reviewId, now, {});
     await this.ctx.rebuildIndex();
     return updated;
   }
+
+  /**
+   * Startup recovery of an `accept-review` operation (#56): finishes it while the item is pending or accepted,
+   * and undoes it when the user rejected the item meanwhile (or the item is gone), so recovery never fails on it.
+   */
+  async recoverAccept(operation: Operation) {
+    const review = this.ctx.index.get(String(operation.payload.reviewId));
+    if (review?.frontmatter.type === "review-item" && (review.frontmatter.status === "pending" || review.frontmatter.status === "accepted")) {
+      await this.acceptReviewItem(review.frontmatter.id);
+    } else if (review?.frontmatter.type === "review-item") await this.abandonCreate(review, operation);
+    else await this.ctx.objects.completeOperation?.(operation.id);
+  }
+
+  /** Undoes and closes the unfinished operation of a Review Item, if it has one. */
+  private async abandonOperation(review: LifeOSObject) {
+    const operationId = review.frontmatter.operation_id;
+    if (typeof operationId !== "string") return;
+    const operation = (await this.ctx.objects.incompleteOperations?.())?.find((candidate) => candidate.id === operationId);
+    if (operation?.kind === personMergeOperation) await this.merges.abandon(review, operation);
+    else if (operation?.kind === "accept-review") await this.abandonCreate(review, operation);
+  }
+
+  /**
+   * A create-accept that stopped after writing its object: the object is soft-deleted (restorable) unless the
+   * user has edited it since, in which case it is kept as theirs. Then the operation is closed.
+   */
+  private async abandonCreate(review: LifeOSObject, operation: Operation) {
+    const { ctx } = this;
+    await ctx.rebuildIndex();
+    const objectId = typeof operation.payload.objectId === "string" ? operation.payload.objectId : undefined;
+    const created = objectId ? ctx.index.get(objectId) : undefined;
+    const now = new Date().toISOString();
+    const remove = !!created && !created.frontmatter.deleted_at && created.frontmatter.revision === 1;
+    if (remove) await ctx.update(created, { deleted_at: now }, { expectedHash: created.contentHash, now });
+    await ctx.writeAudit("review.accept-rolled-back", review.frontmatter.id, now, { operation_id: operation.id, ...(remove ? { deleted_object_id: objectId } : {}) });
+    await ctx.objects.completeOperation?.(operation.id);
+    await ctx.rebuildIndex();
+  }
 }
+
+type Operation = { id: string; kind: string; payload: Record<string, unknown> };
 
 /** Fields the user may change on a pending proposal; `null` clears one. */
 export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" | "due_at" | "due_timezone" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id", string | null>>;

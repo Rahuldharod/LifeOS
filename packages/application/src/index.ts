@@ -98,7 +98,7 @@ export class LifeOSApplication {
     const diagnostics = [...health.diagnostics, ...this.agentIndex.diagnostics()];
     return { ...health, status: diagnostics.length ? "attention" : "healthy", diagnostics };
   }
-  recoverOperations() { return this.system.recoverOperations(); }
+  recoverOperations(options?: Parameters<SystemModule["recoverOperations"]>[0]) { return this.system.recoverOperations(options); }
   listObjects() { return this.system.listObjects(); }
   object(id: string) { return this.system.object(id); }
   archiveObject(id: string, expectedHash: string) { return this.system.archiveObject(id, expectedHash); }

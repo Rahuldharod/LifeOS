@@ -19,32 +19,41 @@ export class SystemModule {
   async health() {
     const { index } = this.ctx;
     // Failed Inbox Drafts stay listed until the user deals with them; they are never deleted automatically.
-    const diagnostics = [...index.diagnostics(), ...await this.adoption.diagnostics(), ...await this.enrichment?.diagnostics() ?? []];
+    const diagnostics = [...index.diagnostics(), ...this.recoveryProblems, ...await this.adoption.diagnostics(), ...await this.enrichment?.diagnostics() ?? []];
     return { status: diagnostics.length ? "attention" : "healthy", objectCount: index.all().length, diagnostics };
   }
 
-  async recoverOperations() {
+  /** Problems from the last startup recovery, shown in System Health until the next run (#56). */
+  private recoveryProblems: string[] = [];
+
+  /**
+   * Finishes or rolls back operations a crash interrupted. One failing operation never stops the others
+   * (or the server): it is reported through `onError` and System Health, and stays open for the next start.
+   */
+  async recoverOperations(options: { onError?: (error: unknown, operation: { id: string; kind: string }) => void } = {}) {
     const incomplete = await this.ctx.objects.incompleteOperations?.() ?? [];
     const recovered: string[] = [];
+    const problems: string[] = [];
     for (const operation of incomplete) {
-      if (operation.kind === "accept-review" && typeof operation.payload.reviewId === "string") {
-        await this.review.acceptReviewItem(operation.payload.reviewId);
-        recovered.push(operation.id);
-      } else if (operation.kind === personMergeOperation) {
-        await this.review.merges.recover(operation);
-        recovered.push(operation.id);
-      } else if (operation.kind === "create-meeting" && typeof operation.payload.externalId === "string" && this.ctx.calendar) {
-        await this.meetings.createMeetingFromEvent(operation.payload.externalId);
-        recovered.push(operation.id);
-      } else if (operation.kind === "supersede-decision") {
-        await this.decisions.recoverSupersede(operation);
-        recovered.push(operation.id);
-      } else if (operation.kind === "resolve-open-point" && this.openPoints) {
-        await this.openPoints.recoverResolve(operation);
-        recovered.push(operation.id);
+      try {
+        if (await this.recoverOne(operation)) recovered.push(operation.id);
+      } catch (error) {
+        problems.push(`Recovery of ${operation.kind} operation ${operation.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+        options.onError?.(error, operation);
       }
     }
+    this.recoveryProblems = problems;
     return recovered;
+  }
+
+  private async recoverOne(operation: { id: string; kind: string; payload: Record<string, unknown> }) {
+    if (operation.kind === "accept-review" && typeof operation.payload.reviewId === "string") await this.review.recoverAccept(operation);
+    else if (operation.kind === personMergeOperation) await this.review.merges.recover(operation);
+    else if (operation.kind === "create-meeting" && typeof operation.payload.externalId === "string" && this.ctx.calendar) await this.meetings.createMeetingFromEvent(operation.payload.externalId);
+    else if (operation.kind === "supersede-decision") await this.decisions.recoverSupersede(operation);
+    else if (operation.kind === "resolve-open-point" && this.openPoints) await this.openPoints.recoverResolve(operation);
+    else return false;
+    return true;
   }
 
   async listObjects() {
