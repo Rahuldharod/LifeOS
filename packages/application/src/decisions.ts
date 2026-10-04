@@ -1,5 +1,6 @@
 import { decisionStatuses, uuidV7, validateFrontmatter, type DecisionStatus, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
+import { contextLinkFields, stringsIn } from "./support.js";
 
 /** List filters (#41). `from`/`to` are ISO instants, inclusive, on `decided_at`; the UI turns local days into instants. */
 export type DecisionFilters = { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string };
@@ -7,16 +8,15 @@ export type DecisionEvidence = { field: string; sourceId: string; sourceTitle?: 
 export type PreparedDecision = { relativePath: string; frontmatter: ObjectEnvelope; body: string };
 
 /** Fields a person may set by hand. `status` is edit-only (to `reversed`); `origin` is never accepted (#30). */
-export const decisionFields = ["title", "decision_text", "rationale", "decided_at", "primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
+export const decisionFields = ["title", "decision_text", "rationale", "decided_at", ...contextLinkFields, "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
 /** Context a successor inherits from the decision it supersedes, unless the user overrides it. */
-const inherited = ["primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "area", "sensitivity"];
+const inherited = [...contextLinkFields, "people_ids", "area", "sensitivity"];
 
-const stringList = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
 /** People a decision concerns: those linked directly, plus the attendees of its source meeting. Shared with roll-ups. */
 export function decisionPeopleIds(ctx: AppContext, decision: LifeOSObject) {
   const meeting = typeof decision.frontmatter.source_meeting_id === "string" ? ctx.index.get(decision.frontmatter.source_meeting_id) : undefined;
-  return [...new Set([...stringList(decision.frontmatter.people_ids), ...stringList(meeting?.frontmatter.attendee_ids)])];
+  return [...new Set([...stringsIn(decision.frontmatter.people_ids), ...stringsIn(meeting?.frontmatter.attendee_ids)])];
 }
 
 /** Field evidence for an object, read from the accepted Review Item that created it. Shared with Open Points (#42). */
@@ -71,7 +71,7 @@ export class DecisionsModule {
       supersedes: get("supersedes_decision_id"),
       supersededBy,
       meeting: get("source_meeting_id"),
-      sources: objects(stringList(value.source_ids)),
+      sources: objects(stringsIn(value.source_ids)),
       people: objects(decisionPeopleIds(this.ctx, decision)),
       project: get("primary_project_id"),
       client: get("primary_client_id"),

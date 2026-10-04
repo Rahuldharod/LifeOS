@@ -7,6 +7,7 @@ import type { EntitiesModule } from "./entities.js";
 import type { MeetingsModule } from "./meetings.js";
 import { openPointPeopleIds } from "./open-points.js";
 import type { PeopleModule } from "./people.js";
+import { dueDate, isLive, isRestricted } from "./support.js";
 
 /**
  * Today's live panels (#48, PRD "Daily Focus and Today"). Every panel is computed on request from the
@@ -67,9 +68,6 @@ export interface TodayPanels {
 
 const todaySettingsPath = "settings/today.md";
 const timeOfDay = /^([01]\d|2[0-3]):[0-5]\d$/;
-const isLive = (object: LifeOSObject) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
-const isRestricted = (object?: LifeOSObject) => object?.frontmatter.sensitivity === "restricted";
-const dueDate = (task: LifeOSObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
 const importanceRank = (value: unknown) => value === "High" ? 0 : value === "Medium" ? 1 : value === "Low" ? 2 : 3;
 const linkRank: Record<OpenPointLink, number> = { "raised-in": 0, project: 1, client: 2, people: 3 };
 

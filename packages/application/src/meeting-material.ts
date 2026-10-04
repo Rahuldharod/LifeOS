@@ -1,9 +1,10 @@
-import { sensitivityOf, uuidV7, type LifeOSObject } from "@lifeos/domain";
+import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
 import type { MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
+import { inheritContextLinks, isLive, isRestricted, objectIdPattern } from "./support.js";
 
 /**
  * Adoption of meeting material (#45, PRD "Enrichment Work Orders"). One `meeting-material` draft per meeting,
@@ -45,7 +46,6 @@ const proposalKinds = ["task", "decision", "open-point"];
 const confidences = ["High", "Medium", "Low"];
 /** How far back the calendar is searched for an event that has no meeting yet. */
 const eventLookbackMs = 30 * 86_400_000;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** One place for every new object and Review Item ID this handler mints. */
 /** Every ID this handler writes comes from the run, so a crash and replay rewrites the same files (#32). */
@@ -55,7 +55,6 @@ type Propose = (draft: ParsedDraft, run: AdoptionRun, options: ProposeOptions) =
 interface MaterialSource { at: string; sourceType: string; provider: string; externalId: string; url: string; occurredAt: string; title?: string }
 interface MaterialProposal { at: string; key: string; missedInNotes: boolean; draft: ParsedDraft }
 
-const isLive = (object: LifeOSObject) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
 const idList = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
@@ -69,7 +68,7 @@ export class MeetingMaterialModule {
     const reference = text(fields.meeting);
     if (!reference) throw new DraftError(["meeting: missing; give the calendar event ID (or meeting ID) from the Work Order"]);
     let meeting = this.existingMeeting(reference);
-    if (meeting && sensitivityOf(meeting.frontmatter) === "restricted") throw new DraftError([`meeting: ${meeting.frontmatter.id} is restricted; LifeOS does not enrich restricted meetings`]);
+    if (meeting && isRestricted(meeting)) throw new DraftError([`meeting: ${meeting.frontmatter.id} is restricted; LifeOS does not enrich restricted meetings`]);
 
     // 2. Every check up front, so a bad draft writes nothing (not even the meeting).
     const issues: string[] = [];
@@ -88,7 +87,7 @@ export class MeetingMaterialModule {
     // 3. The meeting from the calendar event if missing; the note is still only created on the first edit.
     const objectIds: string[] = [];
     if (!meeting) {
-      if (uuid.test(reference) || !this.meetings) throw new DraftError([`meeting: no LifeOS meeting "${reference}"`]);
+      if (objectIdPattern.test(reference) || !this.meetings) throw new DraftError([`meeting: no LifeOS meeting "${reference}"`]);
       const ensured = await this.meetings.ensureMeetingForEvent(reference, { from: new Date(Date.parse(run.now) - eventLookbackMs), to: new Date(Date.parse(run.now) + 86_400_000), calendarId: text(fields.calendar_id) || undefined, meetingId: newId(run) });
       if (!ensured) throw new DraftError([`meeting: no LifeOS meeting or calendar event "${reference}" in the last 30 days`]);
       meeting = ensured.meeting;
@@ -231,7 +230,7 @@ export class MeetingMaterialModule {
         ...ctx.envelope(id, "source", title, run.now, "agent-extracted"),
         source_type: source.sourceType, provider: source.provider, external_id: source.externalId, url: source.url,
         occurred_at: source.occurredAt, captured_at: draft.capturedAt, ingestion_status: "captured", meeting_id: meeting.frontmatter.id,
-        ...contextLinks(meeting)
+        ...inheritContextLinks(meeting)
       },
       body: `# ${title}\n\n${source.url}\n`
     });
@@ -262,7 +261,7 @@ export class MeetingMaterialModule {
         ...ctx.envelope(id, "review-item", title, run.now, "agent-extracted"),
         review_type: summaryReviewType, target_object_type: "meeting", target_object_id: meeting.frontmatter.id, source_meeting_id: meeting.frontmatter.id,
         proposed_fields: { summary }, field_evidence: {}, confidence_label: confidence as "High" | "Medium" | "Low", status: "pending",
-        agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...contextLinks(meeting),
+        agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...inheritContextLinks(meeting),
         // U7: generated here, at adoption, never taken from the draft.
         operation_id: newId(run)
       },
@@ -281,11 +280,6 @@ export class MeetingMaterialModule {
     const ids = new Set([...listed, ...idList(note?.frontmatter.source_ids)]);
     return this.ctx.index.all().filter((object) => object.frontmatter.type === "source" && isLive(object) && (object.frontmatter.meeting_id === meeting.frontmatter.id || ids.has(object.frontmatter.id)));
   }
-}
-
-/** A new source carries the meeting's context links, so it shows up under the same project, client and product. */
-function contextLinks(meeting: LifeOSObject) {
-  return Object.fromEntries(["primary_project_id", "primary_client_id", "primary_product_id"].filter((key) => typeof meeting.frontmatter[key] === "string").map((key) => [key, meeting.frontmatter[key]]));
 }
 
 /** Replaces the `## Summary` section of a meeting body (up to the next heading of level 1–2), or appends one. */

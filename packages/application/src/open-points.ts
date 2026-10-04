@@ -1,18 +1,18 @@
 import { openPointStatuses, uuidV7, type LifeOSObject, type ObjectEnvelope, type OpenPointStatus } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { decisionPeopleIds, reviewEvidence, type DecisionFilters, type DecisionsModule, type PreparedDecision } from "./decisions.js";
+import { contextLinkFields, stringsIn } from "./support.js";
 
 /** Same filters as Decisions (#41); `from`/`to` apply to `raised_at` (falling back to `created_at` for older files). */
 export type OpenPointFilters = DecisionFilters;
 
 /** Fields a person may set by hand on create. Status and resolution move only through Resolve and Close; `origin` is never accepted (#30). */
-const fields = ["title", "importance", "owner_person_id", "due_on", "raised_at", "primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
+const fields = ["title", "importance", "owner_person_id", "due_on", "raised_at", ...contextLinkFields, "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
 /** After resolving or closing, the wording of the outcome stays editable; the schema refuses it on the wrong status. */
 const editable = [...fields, "status", "resolution_summary", "close_reason"];
 /** Context a decision created by "Resolve with decision" inherits from the open point, unless the user overrides it. */
-const inherited = ["primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "area", "sensitivity"];
+const inherited = [...contextLinkFields, "people_ids", "area", "sensitivity"];
 
-const stringList = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 const trimmed = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : undefined;
 const raisedAt = (object: LifeOSObject) => String(object.frontmatter.raised_at ?? object.frontmatter.created_at);
 
@@ -58,7 +58,7 @@ export class OpenPointsModule {
       openPoint,
       resolutionDecision: get("resolution_decision_id"),
       meeting: get("source_meeting_id"),
-      sources: objects(stringList(value.source_ids)),
+      sources: objects(stringsIn(value.source_ids)),
       people: objects(openPointPeopleIds(this.ctx, openPoint)),
       owner: get("owner_person_id"),
       project: get("primary_project_id"),
