@@ -149,6 +149,11 @@ export function toUtc(value: unknown) {
   const parsed = new Date(time ? `${date}T${time.replace(",", ".")}${offset}` : `${date}T00:00:00Z`);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
+/** A web link in canonical form (lower-case scheme and host, as `URL` writes it), or undefined for anything else. */
+export function webUrl(value: unknown) {
+  try { const url = new URL(text(value)); return ["http:", "https:"].includes(url.protocol) ? url.href : undefined; } catch { return undefined; }
+}
+const looksLikeUrl = (value: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
 export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 
 /** The Review Item body for a proposal: its title, then the Agent's narrative as written. */
@@ -180,6 +185,10 @@ export class AdoptionModule {
     "task:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
     "decision:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
     "open-point:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
+    "knowledge-note:user-dictated": (draft, run) => this.adoptKnowledge(draft, run),
+    "knowledge-note:agent-extracted": async (draft, run) => { await this.ctx.rebuildIndex(); return this.proposeExtracted(draft, run); },
+    "source:user-dictated": (draft, run) => this.adoptSource(draft, run),
+    "source:agent-extracted": (draft, run) => this.adoptSource(draft, run),
     "person:user-dictated": (draft, run) => this.adoptPerson(draft, run),
     "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run),
     // #46: the morning brief is written straight to a daily-focus object (ADR 0011), whatever the origin.
@@ -639,10 +648,15 @@ export class AdoptionModule {
     const personLinks = Object.fromEntries(Object.entries(links).filter(([key]) => !(key in reviewLinks)));
     const proposed: Record<string, unknown> = { title: draft.title, ...fields, ...personLinks, ...(narrative ? { body: narrative } : {}) };
     const evidence = this.evidence(raw.evidence, proposed, issues);
+    const evidenceIds = Object.values(evidence).flat().flatMap((entry) => entry.source_id ? [entry.source_id] : []);
+    // #35: a knowledge note must keep at least one source, so its proposal needs one before it can be accepted.
+    const named = draft.kind === "knowledge-note" ? this.namedSources(raw.sources, issues) : undefined;
+    if (named && !named.ids.length && !named.urls.length && !evidenceIds.length) issues.push("sources: an extracted knowledge note needs at least one source (ID, title or URL)");
     if (issues.length) throw new DraftError(issues);
 
+    const created = named ? await this.linkSources(named.urls, draft, run, fields) : [];
     const id = run.newId();
-    const sourceIds = [...new Set(Object.values(evidence).flat().flatMap((entry) => entry.source_id ? [entry.source_id] : []))];
+    const sourceIds = [...new Set([...named?.ids ?? [], ...created, ...evidenceIds])];
     await this.ctx.objects.write({
       relativePath: `review-items/${markdownFileName(draft.title, id, run.now)}`,
       frontmatter: {
@@ -658,7 +672,7 @@ export class AdoptionModule {
       },
       body: proposalBody(draft.title, narrative)
     });
-    return [id];
+    return [id, ...created];
   }
 
   /**
@@ -695,8 +709,114 @@ export class AdoptionModule {
     if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id;
     const folded = foldForSearch(reference);
     const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
-      && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference));
+      && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference || (!!webUrl(reference) && webUrl(object.frontmatter.url) === webUrl(reference))));
     return matches.length === 1 ? matches[0]!.frontmatter.id : undefined;
+  }
+
+  /**
+   * `source` (either origin, #35): pasted text (the body) and/or a web link (`url`), with an optional `occurred_at`.
+   * A live Source with the same URL is reused rather than duplicated; it only gains what it did not have yet.
+   */
+  private async adoptSource(draft: ParsedDraft, run: AdoptionRun) {
+    const { fields: raw } = draft;
+    const { issues, fields } = this.kindFields(draft);
+    const url = raw.url === undefined ? undefined : webUrl(raw.url);
+    if (raw.url !== undefined && !url) issues.push(`url: not a web link starting with http:// or https:// ("${text(raw.url)}")`);
+    const occurredAt = raw.occurred_at === undefined ? undefined : toUtc(raw.occurred_at);
+    if (raw.occurred_at !== undefined && !occurredAt) issues.push(`occurred_at: not an ISO 8601 date-time with Z or an offset ("${text(raw.occurred_at)}")`);
+    const pasted = draft.body.trim();
+    if (raw.url === undefined && !pasted) issues.push("url: a source needs a url or pasted text in the body");
+    if (issues.length) throw new DraftError(issues);
+    await this.ctx.rebuildIndex(); // sees Sources written earlier in this batch
+    const existing = url ? this.sourceByUrl(url) : undefined;
+    if (!existing) return [await this.writeSource({ title: draft.title, url, pasted, occurredAt }, draft, run, fields)];
+    // Reuse: fill in only what is missing (text, occurred_at), through a guarded write; never overwrite what is stored.
+    const fragments = existing.frontmatter.fragments;
+    const hasText = Array.isArray(fragments) && fragments.some((fragment) => text((fragment as { text?: unknown }).text));
+    const changes: Record<string, unknown> = {};
+    if (pasted && !hasText) changes.fragments = [{ id: "fragment-1", text: pasted, locator: { kind: "full-text" } }];
+    if (occurredAt && existing.frontmatter.occurred_at === undefined) changes.occurred_at = occurredAt;
+    if (Object.keys(changes).length) await this.ctx.update(existing, changes, { expectedHash: existing.contentHash, now: run.now, ...(changes.fragments ? { body: `${existing.body.trimEnd()}\n\n${pasted}\n` } : {}) });
+    return [existing.frontmatter.id];
+  }
+
+  /**
+   * `user-dictated` knowledge note (#35): created directly and linked to its `sources:` (ID, exact title or URL).
+   * URLs not stored yet become web-link Sources; an idea naming no source keeps its own text as a pasted-text Source.
+   */
+  private async adoptKnowledge(draft: ParsedDraft, run: AdoptionRun) {
+    await this.ctx.rebuildIndex(); // sees Sources written earlier in this batch
+    const { issues, fields } = this.kindFields(draft);
+    const named = this.namedSources(draft.fields.sources, issues);
+    const narrative = draft.body.trim();
+    const fromBody = !named.ids.length && !named.urls.length;
+    if (fromBody && !narrative && !issues.some((issue) => issue.startsWith("sources"))) issues.push("sources: name at least one source (ID, title or URL), or write the idea in the body");
+    if (issues.length) throw new DraftError(issues);
+    const created = await this.linkSources(named.urls, draft, run, fields);
+    if (fromBody) created.push(await this.writeSource({ title: draft.title, pasted: narrative }, draft, run, fields));
+    const id = run.newId();
+    await this.ctx.objects.write({
+      relativePath: `knowledge/${markdownFileName(draft.title, id, run.now)}`,
+      frontmatter: { ...this.ctx.envelope(id, "knowledge-note", draft.title, run.now, draft.origin), ...fields, source_ids: [...new Set([...named.ids, ...created])], related_object_ids: [] },
+      body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
+    });
+    return [id, ...created];
+  }
+
+  /** `sources:` (one reference or a list) split into stored Source IDs and URLs still to create. Ambiguity is never guessed. */
+  private namedSources(value: unknown, issues: string[]) {
+    const ids: string[] = [];
+    const urls: string[] = [];
+    if (value === undefined) return { ids, urls };
+    (Array.isArray(value) ? value : [value]).forEach((item: unknown, index) => {
+      const at = Array.isArray(value) ? `sources[${index}]` : "sources";
+      const reference = typeof item === "string" || typeof item === "number" ? text(item) : "";
+      if (!reference) { issues.push(`${at}: must be a source ID, title or URL`); return; }
+      if (looksLikeUrl(reference)) {
+        const url = webUrl(reference);
+        if (!url) { issues.push(`${at}: not a web link starting with http:// or https:// ("${reference}")`); return; }
+        const existing = this.sourceByUrl(url);
+        if (existing) ids.push(existing.frontmatter.id); else if (!urls.includes(url)) urls.push(url);
+        return;
+      }
+      const live = (object: LifeOSObject) => object.frontmatter.type === "source" && !object.frontmatter.deleted_at;
+      const byId = this.ctx.index.get(reference);
+      const matches = byId ? [byId].filter(live) : this.ctx.index.all().filter((object) => live(object) && foldForSearch(object.frontmatter.title) === foldForSearch(reference));
+      if (matches.length === 1) ids.push(matches[0]!.frontmatter.id);
+      else if (byId) issues.push(`${at}: ${reference} is a ${byId.frontmatter.deleted_at ? "deleted " : ""}${byId.frontmatter.type}, not a live source`);
+      else if (matches.length) issues.push(`${at}: "${reference}" matches ${matches.length} sources; use the source ID`);
+      else issues.push(`${at}: no source matches "${reference}"; send a source draft first, or use its ID or URL`);
+    });
+    return { ids: [...new Set(ids)], urls };
+  }
+
+  /** Creates a web-link Source per new URL, titled by the URL until the user renames it. */
+  private async linkSources(urls: string[], draft: ParsedDraft, run: AdoptionRun, fields: Record<string, unknown>) {
+    const created: string[] = [];
+    for (const url of urls) created.push(await this.writeSource({ title: url, url }, draft, run, fields));
+    return created;
+  }
+
+  /** Writes one Source in the draft's origin. Area and sensitivity follow the draft, so a restricted idea's Source stays restricted. */
+  private async writeSource(source: { title: string; url?: string; pasted?: string; occurredAt?: string }, draft: ParsedDraft, run: AdoptionRun, fields: Record<string, unknown>) {
+    const id = run.newId();
+    const carried = Object.fromEntries(["area", "sensitivity", ...(draft.kind === "source" ? ["subjects", "tags"] : [])].filter((key) => fields[key] !== undefined).map((key) => [key, fields[key]]));
+    await this.ctx.objects.write({
+      relativePath: `sources/${markdownFileName(source.title, id, run.now)}`,
+      frontmatter: {
+        ...this.ctx.envelope(id, "source", source.title, run.now, draft.origin), ...carried,
+        source_type: source.url ? "web-link" : "pasted-text", ...(source.url ? { url: source.url } : {}),
+        captured_at: draft.capturedAt, ...(source.occurredAt ? { occurred_at: source.occurredAt } : {}), ingestion_status: "captured",
+        ...(source.pasted ? { fragments: [{ id: "fragment-1", text: source.pasted, locator: { kind: "full-text" } }] } : {})
+      },
+      body: `# ${source.title}\n${source.url ? `\n<${source.url}>\n` : ""}${source.pasted ? `\n${source.pasted}\n` : ""}`
+    });
+    return id;
+  }
+
+  /** The live Source stored under this URL (compared in canonical form), if any. */
+  private sourceByUrl(url: string) {
+    return this.ctx.index.all().find((object) => object.frontmatter.type === "source" && !object.frontmatter.deleted_at && webUrl(object.frontmatter.url) === url);
   }
 
   /**
