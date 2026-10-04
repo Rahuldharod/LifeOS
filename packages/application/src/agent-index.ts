@@ -1,10 +1,11 @@
-import { sensitivityOf, type LifeOSObject } from "@lifeos/domain";
+import { type LifeOSObject } from "@lifeos/domain";
 import type { AdoptionModule } from "./adoption.js";
 import type { AppContext } from "./context.js";
 import type { DecisionsModule } from "./decisions.js";
 import { enrichmentStateOf } from "./enrichment.js";
 import { personDisplayLabels, personEmails, internalDomainsOf } from "./people.js";
 import type { AgentIndexFile, AgentIndexWriter, InboxFolder, InboxStore } from "./ports.js";
+import { isLive, isRestricted } from "./support.js";
 
 /**
  * The Agent Index (#43, ADR 0009): small Markdown summaries in `_agent/` that an Agent on a phone reads
@@ -21,8 +22,6 @@ export interface AgentIndexStatus { generatedAt?: string; error?: string }
 
 const day = 86_400_000;
 const closedStatus = /^(done|completed|complete|closed|cancelled|canceled|archived|inactive|abandoned)$/i;
-const isLive = (object: LifeOSObject) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
-const isRestricted = (object: Pick<LifeOSObject, "frontmatter">) => sensitivityOf(object.frontmatter) === "restricted";
 const str = (value: unknown) => typeof value === "string" && value.trim() ? value : undefined;
 const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 /** One line, bold markers neutralised (so a title cannot break the entry), capped so an entry stays phone-sized. */

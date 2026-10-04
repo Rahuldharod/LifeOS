@@ -1,6 +1,7 @@
-import { sensitivityOf, uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
+import { uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { personEmails } from "./people.js";
+import { isLive, isRestricted, objectIdPattern } from "./support.js";
 
 /**
  * Name resolution (#33, PRD "Object Contract"): turns draft references (a name, alias, email, object ID
@@ -27,7 +28,6 @@ export type Resolution =
 /** One reference that could not be linked; becomes a `link-resolution` Review Item. */
 export interface UnresolvedReference { field: ReferenceField; reference: string; problem: "ambiguous" | "unknown"; candidates: Candidate[] }
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Case-, accent- and whitespace-insensitive form used for exact name matching. */
 export const foldName = (value: string) => foldForSearch(value).trim().replace(/\s+/g, " ");
@@ -40,7 +40,7 @@ export class ReferenceResolver {
 
   /** Live = not tombstoned and not archived. Name matching also skips restricted objects; IDs reach them. */
   private live(type: ObjectType) {
-    return this.ctx.index.all().filter((object) => object.frontmatter.type === type && !object.frontmatter.deleted_at && !object.frontmatter.archived_at);
+    return this.ctx.index.all().filter((object) => object.frontmatter.type === type && isLive(object));
   }
 
   private outcome(matches: LifeOSObject[]): Resolution | undefined {
@@ -57,7 +57,7 @@ export class ReferenceResolver {
 
   resolve(type: ObjectType, reference: string): Resolution {
     const value = reference.trim();
-    if (uuid.test(value)) {
+    if (objectIdPattern.test(value)) {
       const object = this.ctx.index.get(value);
       return object && object.frontmatter.type === type && !object.frontmatter.deleted_at ? { status: "resolved", id: value } : { status: "unknown", candidates: [] };
     }
@@ -73,7 +73,7 @@ export class ReferenceResolver {
       if (found.status !== "unknown") return found;
     }
     const wanted = foldName(value);
-    const candidates = this.live(type).filter((object) => sensitivityOf(object.frontmatter) !== "restricted");
+    const candidates = this.live(type).filter((object) => !isRestricted(object));
     const byTitle = candidates.filter((object) => foldName(object.frontmatter.title) === wanted);
     // Recorded aliases; for people, their first name and full name count as recorded names too.
     const names = (object: LifeOSObject) => {

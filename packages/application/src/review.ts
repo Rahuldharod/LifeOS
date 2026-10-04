@@ -5,8 +5,8 @@ import { acceptSummary, summaryReviewType } from "./meeting-material.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
 import { PersonMergeModule, personMergeReviewType } from "./person-merge.js";
+import { contextLinkFields, inheritContextLinks, sameValue, validTimeZone } from "./support.js";
 
-const same = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
 export class ReviewModule {
@@ -49,9 +49,7 @@ export class ReviewModule {
           agent_run_id: agentRunId,
           source_meeting_id: meetingId,
           source_ids: [workspace.note.frontmatter.id],
-          primary_client_id: workspace.meeting.frontmatter.primary_client_id,
-          primary_product_id: workspace.meeting.frontmatter.primary_product_id,
-          primary_project_id: workspace.meeting.frontmatter.primary_project_id,
+          ...inheritContextLinks(workspace.meeting),
           operation_id: uuidV7()
         },
         body: `# Proposal\n\n${proposal.title}\n`
@@ -88,7 +86,7 @@ export class ReviewModule {
     const pick = (keys: string[]) => Object.fromEntries(keys.filter((key) => proposed[key] !== undefined).map((key) => [key, proposed[key]]));
     const extras = pick(["area", "sensitivity", "subjects", "tags", "captured_at", "people_ids"]);
     const ownerId = typeof proposed.owner_person_id === "string" ? proposed.owner_person_id : owner.frontmatter.id;
-    const common = { source_meeting_id: review.frontmatter.source_meeting_id, source_ids: review.frontmatter.source_ids ?? [], primary_client_id: review.frontmatter.primary_client_id, primary_product_id: review.frontmatter.primary_product_id, primary_project_id: review.frontmatter.primary_project_id };
+    const common = { source_meeting_id: review.frontmatter.source_meeting_id, source_ids: review.frontmatter.source_ids ?? [], ...Object.fromEntries(contextLinkFields.map((key) => [key, review.frontmatter[key]])) };
     const fields = targetType === "task"
       ? { status: proposed.status ?? "Inbox", owner_person_id: ownerId, ...pick(["priority", "due_on", "due_at", "due_timezone", "expected_output", "completed_at", "cancelled_at", "waiting_for_person_id"]), ...extras, ...common }
       : targetType === "decision"
@@ -151,7 +149,7 @@ export class ReviewModule {
     const target = ctx.required(targetId);
     if (target.frontmatter.deleted_at) throw new Error("The object to change was deleted");
     const note = proposal.append_note;
-    const landed = target.frontmatter.revision === proposal.base_revision + 1 && proposal.changes.every((change) => same(target.frontmatter[change.field], change.proposed)) && (!note || target.body.endsWith(`\n${note}\n`));
+    const landed = target.frontmatter.revision === proposal.base_revision + 1 && proposal.changes.every((change) => sameValue(target.frontmatter[change.field], change.proposed)) && (!note || target.body.endsWith(`\n${note}\n`));
     const now = new Date().toISOString();
     let updated = target;
     if (!landed) {
@@ -270,14 +268,12 @@ export class ReviewModule {
 
 /** Fields the user may change on a pending proposal; `null` clears one. */
 export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" | "due_at" | "due_timezone" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id", string | null>>;
-const contextLinks = ["primary_project_id", "primary_client_id", "primary_product_id"];
 const editableFields: Record<string, string[]> = {
-  task: ["title", "owner_person_id", "due_on", "due_at", "due_timezone", "priority", ...contextLinks],
-  decision: ["title", ...contextLinks],
-  "open-point": ["title", "owner_person_id", ...contextLinks]
+  task: ["title", "owner_person_id", "due_on", "due_at", "due_timezone", "priority", ...contextLinkFields],
+  decision: ["title", ...contextLinkFields],
+  "open-point": ["title", "owner_person_id", ...contextLinkFields]
 };
 const allEditable = new Set(Object.values(editableFields).flat());
-function validTimeZone(zone: string) { try { new Intl.DateTimeFormat("en", { timeZone: zone }); return true; } catch { return false; } }
 
 /** One evidence reference as the Review screen shows it. */
 export interface ReviewEvidence {

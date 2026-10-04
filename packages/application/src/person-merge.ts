@@ -1,6 +1,7 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { internalDomainsOf, personEmails } from "./people.js";
+import { sameValue } from "./support.js";
 
 /**
  * Person merges (#40, PRD "People → Merge"). Likely duplicates become `person-merge` Review Items;
@@ -26,8 +27,7 @@ const untouchedTypes = new Set(["audit-event", "agent-run", "review-item"]);
 const fillFields = ["family_name", "organization_name", "job_title", "timezone"];
 
 const valueOf = (object: LifeOSObject, key: string) => key === bodyKey ? object.body : object.frontmatter[key] ?? null;
-const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
-const isAt = (object: LifeOSObject, side: Record<string, unknown>) => Object.entries(side).every(([key, value]) => same(valueOf(object, key), value));
+const isAt = (object: LifeOSObject, side: Record<string, unknown>) => Object.entries(side).every(([key, value]) => sameValue(valueOf(object, key), value));
 const live = (object: LifeOSObject | undefined): object is LifeOSObject => Boolean(object && object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
 const pairKey = (a: string, b: string) => [a, b].sort().join("|");
 const nameKey = (value: unknown) => typeof value === "string" ? foldForSearch(value.normalize("NFC")).trim().replace(/\s+/g, " ") : "";
@@ -204,7 +204,7 @@ export class PersonMergeModule {
     const { ctx } = this;
     for (const entry of [...plan].reverse()) {
       const current = ctx.index.get(entry.id);
-      if (current && !same(entry.before, entry.after) && isAt(current, entry.after)) await this.apply(current, entry.before, now);
+      if (current && !sameValue(entry.before, entry.after) && isAt(current, entry.after)) await this.apply(current, entry.before, now);
     }
     await ctx.rebuildIndex();
     const message = `${changedPath} changed while the merge was in progress, so the merge was undone; review the suggestion again`;

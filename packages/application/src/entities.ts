@@ -2,13 +2,13 @@ import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
 import { decisionPeopleIds } from "./decisions.js";
 import { openPointPeopleIds } from "./open-points.js";
+import { dueDate, isRestricted } from "./support.js";
 
 export type EntityType = "task" | "project" | "client" | "product" | "person";
 
 const entityTypes: EntityType[] = ["task", "project", "client", "product", "person"];
 /** Envelope fields the user may set on any entity (#30). `origin` is deliberately absent: it is fixed at creation. */
 const envelopeFields = ["area", "sensitivity"];
-const dueDate = (task: LifeOSObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
 
 /** Tasks, projects, clients, products and people: CRUD, the Today view and rollups. */
 export class EntitiesModule {
@@ -122,7 +122,7 @@ export class EntitiesModule {
    * Restricted tasks are never Daily Focus inputs (ADR 0010), so the rule skips them too.
    */
   ruleCandidates(today: string) {
-    const ranked = this.entities("task").filter((task) => !["Done", "Cancelled"].includes(String(task.frontmatter.status)) && task.frontmatter.sensitivity !== "restricted").sort((a, b) => {
+    const ranked = this.entities("task").filter((task) => !["Done", "Cancelled"].includes(String(task.frontmatter.status)) && !isRestricted(task)).sort((a, b) => {
       const priority = (value: unknown) => value === "High" ? 0 : value === "Medium" ? 1 : value === "Low" ? 2 : 3;
       return priority(a.frontmatter.priority) - priority(b.frontmatter.priority) || String(dueDate(a) ?? "9999").localeCompare(String(dueDate(b) ?? "9999"));
     });

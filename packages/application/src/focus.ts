@@ -1,8 +1,9 @@
-import { sensitivityOf, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DraftError, isCalendarDate, text, toUtc, type AdoptionRun, type ParsedDraft } from "./adoption.js";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { workOrderContractVersion } from "./enrichment.js";
 import type { InboxStore } from "./ports.js";
+import { isLive, isRestricted, objectIdPattern } from "./support.js";
 
 /**
  * Daily Focus (ADR 0011, PRD "Daily Focus and Today"). The morning routine writes the brief as a
@@ -81,9 +82,6 @@ export interface ReplanRequest {
   message: string;
 }
 
-const isLive = (object: LifeOSObject) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
-const isRestricted = (object: LifeOSObject) => sensitivityOf(object.frontmatter) === "restricted";
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const dateText = (value: unknown) => value instanceof Date ? value.toISOString().slice(0, 10) : text(value);
 const list = (value: unknown) => Array.isArray(value) ? value as unknown[] : [];
 const record = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -97,8 +95,8 @@ function currentBrief(ctx: AppContext, date: string) {
 
 function overrideState(object: LifeOSObject | undefined): FocusOverrideState | undefined {
   if (!object) return undefined;
-  const ids = (value: unknown) => [...new Set(list(value).map(text).filter((id) => uuid.test(id)))];
-  const replaced = list(object.frontmatter.replaced).map(record).map((entry) => ({ from: text(entry?.from), to: text(entry?.to) })).filter((entry) => uuid.test(entry.from) && uuid.test(entry.to));
+  const ids = (value: unknown) => [...new Set(list(value).map(text).filter((id) => objectIdPattern.test(id)))];
+  const replaced = list(object.frontmatter.replaced).map(record).map((entry) => ({ from: text(entry?.from), to: text(entry?.to) })).filter((entry) => objectIdPattern.test(entry.from) && objectIdPattern.test(entry.to));
   return { id: object.frontmatter.id, path: object.relativePath, contentHash: object.contentHash, pinned: ids(object.frontmatter.pinned), replaced, dismissed: ids(object.frontmatter.dismissed) };
 }
 
@@ -139,7 +137,7 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
       const entry = record(raw);
       if (!entry) { issues.push(`${at}: must be an entry with ${idField}`); return {}; }
       const id = text(entry[idField]);
-      if (!uuid.test(id)) issues.push(id ? `${at}.${idField}: not an object ID ("${id}")` : `${at}.${idField}: missing`);
+      if (!objectIdPattern.test(id)) issues.push(id ? `${at}.${idField}: not an object ID ("${id}")` : `${at}.${idField}: missing`);
       else {
         // An unknown ID is accepted (shown as missing on Today); a known object of the wrong kind is the Agent's mistake.
         const target = ctx.index.get(id);
@@ -375,7 +373,7 @@ export class DailyFocusModule {
   private idOf(value: unknown, field: string) {
     const id = text(value);
     if (!id) throw new Error(`${field}: missing`);
-    if (!uuid.test(id)) throw new Error(`${field}: not an object ID ("${id}")`);
+    if (!objectIdPattern.test(id)) throw new Error(`${field}: not an object ID ("${id}")`);
     return id;
   }
 

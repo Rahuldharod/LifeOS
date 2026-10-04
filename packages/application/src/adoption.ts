@@ -9,6 +9,7 @@ import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.
 import { internalDomainsOf, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver, type ReferenceField } from "./resolution.js";
+import { contextLinkFields, inheritContextLinks, isStringList } from "./support.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -145,7 +146,6 @@ function replayableId(seed: string, index: number, now: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 export const text = (value: unknown) => typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
-const stringList = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === "string");
 
 // Any ISO 8601 date or date-time; a time must carry `Z` or an offset so the instant is unambiguous.
 const isoInstant = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?))?$/i;
@@ -177,7 +177,6 @@ const kindReferences: Record<string, ReferenceField[]> = {
   decision: ["project", "client", "product", "people", "meeting"],
   "open-point": ["project", "client", "product", "people", "owner", "meeting"]
 };
-const contextLinkFields = ["primary_client_id", "primary_product_id", "primary_project_id"];
 
 /** Zod issues (from the object store's validation) as "field: reason"; anything else is not the draft's fault. */
 export function validationIssues(error: unknown) {
@@ -608,7 +607,7 @@ export class AdoptionModule {
     }
     if (draft.kind === "open-point") out.status = "open";
     for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) out[key] = fields[key];
-    for (const key of ["subjects", "tags"]) if (fields[key] !== undefined) { if (stringList(fields[key])) out[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
+    for (const key of ["subjects", "tags"]) if (fields[key] !== undefined) { if (isStringList(fields[key])) out[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
     if (Array.isArray(out.subjects)) out.subjects = this.resolver.normaliseSubjects(out.subjects as string[]);
 
     // References by name or ID (#33). Fields the kind cannot carry are refused, never dropped silently.
@@ -621,7 +620,7 @@ export class AdoptionModule {
     if (draft.kind === "task" && fields.waiting_for !== undefined && out.status !== "Waiting") issues.push(`waiting_for: needs status Waiting (got ${String(out.status)})`);
     // Context not named explicitly is inherited from the referenced meeting.
     const meeting = typeof references.links.source_meeting_id === "string" ? this.ctx.index.get(references.links.source_meeting_id) : undefined;
-    const inherited = Object.fromEntries(contextLinkFields.filter((key) => typeof meeting?.frontmatter[key] === "string").map((key) => [key, meeting!.frontmatter[key]]));
+    const inherited = inheritContextLinks(meeting);
     return { issues, fields: out, links: { ...inherited, ...references.links } as Record<string, unknown>, unresolved: references.unresolved };
   }
 
@@ -864,7 +863,7 @@ export class AdoptionModule {
     else if (domain) extra.is_external = !internalDomainsOf(this.ctx.index).includes(domain);
     if (domain && extra.organization_name === undefined) { const organization = organizationFromDomain(domain); if (organization) extra.organization_name = organization; }
     for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) extra[key] = fields[key];
-    for (const key of ["subjects", "tags", "aliases"]) if (fields[key] !== undefined) { if (stringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
+    for (const key of ["subjects", "tags", "aliases"]) if (fields[key] !== undefined) { if (isStringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
     if (issues.length) throw new DraftError(issues);
 
     // People by email first (PRD): a known address means this person already exists.

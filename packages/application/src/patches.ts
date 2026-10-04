@@ -4,6 +4,7 @@ import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext }
 import { decisionFields } from "./decisions.js";
 import type { InboxDocument } from "./ports.js";
 import { ReferenceResolver, referenceFields, type ReferenceField } from "./resolution.js";
+import { isLive, sameValue, validTimeZone } from "./support.js";
 
 /**
  * Patch Drafts (ADR 0007, PRD "Patch drafts"): an Agent asks for a change to an existing object by
@@ -72,10 +73,8 @@ export interface UpdateProposal {
 // Audit values use `null` for "absent" (YAML cannot hold `undefined`); writes use `undefined`, which removes the field.
 const stored = (value: unknown) => value === undefined ? null : value;
 const written = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value ?? undefined]));
-const same = (left: unknown, right: unknown) => JSON.stringify(stored(left)) === JSON.stringify(stored(right));
 const metadataOf = (object: LifeOSObject) => (object.frontmatter.metadata ?? {}) as Record<string, unknown>;
 const record = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
-const validTimeZone = (zone: string) => { try { new Intl.DateTimeFormat("en", { timeZone: zone }); return true; } catch { return false; } };
 
 export class PatchModule {
   private readonly resolver: ReferenceResolver;
@@ -147,7 +146,7 @@ export class PatchModule {
     const before = record(metadata.before);
     const after = record(metadata.after);
     const appended = typeof metadata.appended_text === "string" ? metadata.appended_text : undefined;
-    const changed = Object.keys(after).filter((key) => !same(target.frontmatter[key], after[key]));
+    const changed = Object.keys(after).filter((key) => !sameValue(target.frontmatter[key], after[key]));
     if (appended && !target.body.endsWith(appended)) changed.push("the appended note");
     if (changed.length) throw new ObjectConflictError(`Cannot undo: ${changed.join(", ")} changed since the patch was applied; undo would overwrite the newer edit, so change it by hand instead`);
 
@@ -191,7 +190,7 @@ export class PatchModule {
     const target = this.target(patch);
     const reasons = this.reviewReasons(patch, target);
     const changes = this.changes(patch, target);
-    const keys = Object.keys(changes).filter((key) => !same(target.frontmatter[key], changes[key]));
+    const keys = Object.keys(changes).filter((key) => !sameValue(target.frontmatter[key], changes[key]));
     const before = Object.fromEntries(keys.map((key) => [key, stored(target.frontmatter[key])]));
     const after = Object.fromEntries(keys.map((key) => [key, stored(changes[key])]));
     // Conflict rule (PRD): the target was edited after the patch was captured, on a field the patch changes.
@@ -264,7 +263,7 @@ export class PatchModule {
       if (type && target.frontmatter.type !== type) throw new DraftError([`type: object ${id} is a ${target.frontmatter.type}, not a ${type}`]);
     } else {
       const wanted = foldForSearch(title!);
-      const matches = index.all().filter((object) => object.frontmatter.type === type && !object.frontmatter.deleted_at && !object.frontmatter.archived_at && foldForSearch(object.frontmatter.title.trim()) === wanted);
+      const matches = index.all().filter((object) => object.frontmatter.type === type && isLive(object) && foldForSearch(object.frontmatter.title.trim()) === wanted);
       if (!matches.length) throw new DraftError([`title: no ${type} titled "${title}"`]);
       if (matches.length > 1) throw new DraftError([`title: ${matches.length} ${type}s are titled "${title}" (${matches.map((match) => match.frontmatter.id).join(", ")}); give the id instead`]);
       target = matches[0]!;

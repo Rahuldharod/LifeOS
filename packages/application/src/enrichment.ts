@@ -1,8 +1,9 @@
-import { sensitivityOf, uuidV7, type LifeOSObject } from "@lifeos/domain";
+import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import type { CalendarModule } from "./calendar.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, InboxStore } from "./ports.js";
+import { isLive, isRestricted } from "./support.js";
 
 /**
  * Enrichment Work Orders (PRD "Enrichment Work Orders", ADR 0008): "Enrich last 48h" lists every ended
@@ -67,8 +68,6 @@ export function attendeeEmails(attendees: unknown): string[] {
   return emails.filter((email) => !seen.has(email.toLowerCase()) && Boolean(seen.add(email.toLowerCase())));
 }
 
-const isLive = (object: LifeOSObject) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
-const isRestricted = (object: LifeOSObject) => sensitivityOf(object.frontmatter) === "restricted";
 
 export class EnrichmentModule {
   constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly calendarModule: CalendarModule, private readonly inbox?: InboxStore) {}
