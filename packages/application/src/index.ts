@@ -8,13 +8,14 @@ import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
-import { ReviewModule } from "./review.js";
+import { ReviewModule, type ReviewEdits } from "./review.js";
 import { SystemModule } from "./system.js";
 
 export type { ExternalChange } from "./history.js";
 export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
+export type { ReviewEdits, ReviewEvidence } from "./review.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -97,6 +98,8 @@ export class LifeOSApplication {
   processMeeting(meetingId: string) { return this.review.processMeeting(meetingId); }
   acceptReviewItem(reviewId: string) { return this.review.acceptReviewItem(reviewId); }
   updateReviewTitle(reviewId: string, title: string) { return this.review.updateReviewTitle(reviewId, title); }
+  updateReviewFields(reviewId: string, changes: ReviewEdits) { return this.review.updateReviewFields(reviewId, changes); }
+  reviewEvidence(reviewId: string) { return this.review.reviewEvidence(reviewId); }
   rejectReviewItem(reviewId: string) { return this.review.rejectReviewItem(reviewId); }
 
   // Capture and knowledge

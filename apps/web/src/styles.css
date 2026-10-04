@@ -158,6 +158,13 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .review-card input { width: 100%; margin-bottom: 5px; padding: 9px 10px; border: 1px solid #c9c8be; border-radius: 7px; background: white; font-weight: 700; }
 .review-card b, .review-card small { display: block; }
 .review-card small { margin: 5px 0 12px; }
+.review-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.review-fields label { display: grid; gap: 3px; font-size: 11px; font-weight: 750; color: #5d625c; }
+.review-fields select, .review-fields input { width: 100%; margin: 0; padding: 6px 8px; border: 1px solid #c9c8be; border-radius: 7px; background: white; font-weight: 500; }
+.review-evidence { margin: 0 0 12px; padding-left: 18px; font-size: 12px; }
+.review-evidence em { font-style: normal; font-weight: 750; }
+.review-evidence q { display: block; color: #5d625c; }
+.review-evidence .unresolved { color: #954b38; }
 .object-row { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid #e2e0d7; }
 .object-row:last-child { border-bottom: 0; }
 .object-row > i { width: 17px; height: 17px; margin-top: 2px; border: 2px solid #5f8b7c; border-radius: 50%; }
