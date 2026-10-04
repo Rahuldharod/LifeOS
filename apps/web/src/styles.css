@@ -369,3 +369,14 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .link-candidates label { display: flex; align-items: center; gap: 8px; }
 .review-card .link-candidates input { width: auto; margin: 0; padding: 0; }
 .review-error { margin: 0 0 12px; color: #954b38; font-weight: 750; }
+
+/* #85: per-object history (kept versions, external edits, restore). */
+.history-link { margin: 4px 0; }
+.history-panel { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line, #ddd); border-radius: 8px; }
+.history-panel > span { font-size: 11px; letter-spacing: 0.06em; }
+.history-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line, #eee); }
+.history-row > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.history-row small { display: block; width: 100%; }
+.history-tag { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--soft, #eef); }
+.history-tag.external { background: #fde7c8; }
+.history-confirm { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

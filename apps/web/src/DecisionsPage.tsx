@@ -3,6 +3,7 @@
 // evidence). Open Points (#42, OpenPointsPage.tsx) mirror this page with their own lifecycle actions.
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
+import { HistoryLink } from "./HistoryPanel.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
@@ -133,6 +134,7 @@ function DecisionPanel({ detail, projects, clients, products, people, busy, read
 
   return <article className="decision-detail" aria-label={`Decision: ${value.title}`}>
     <span>DECISION · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
+    <HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />
     {detail.supersededBy && <p className="decision-chain" role="note">Superseded by <button className="link-button" onClick={() => onSelect(detail.supersededBy!.frontmatter.id)}>{detail.supersededBy.frontmatter.title}</button></p>}
     {detail.resolvesOpenPoints?.map((point) => <p className="decision-chain" key={point.frontmatter.id}>Resolves open point <button className="link-button" onClick={() => onOpen(point.frontmatter.id)}>{point.frontmatter.title}</button></p>)}
     {detail.supersedes && <p className="decision-chain">Supersedes <button className="link-button" onClick={() => onSelect(detail.supersedes!.frontmatter.id)}>{detail.supersedes.frontmatter.title}</button></p>}

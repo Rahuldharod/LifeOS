@@ -92,6 +92,7 @@ export class AppContext {
       latestVersion: store.latestVersion?.bind(store),
       latestVersionInfo: store.latestVersionInfo?.bind(store),
       versionAt: store.versionAt?.bind(store),
+      listVersions: store.listVersions?.bind(store),
       prepareOperation: store.prepareOperation?.bind(store),
       completeOperation: store.completeOperation?.bind(store),
       incompleteOperations: store.incompleteOperations?.bind(store)
