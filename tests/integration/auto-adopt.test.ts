@@ -511,6 +511,30 @@ describe("crash replay for every adoption handler (merged with #33, #34, #36, #4
         expect((await restarted.undoPatch(applied!.auditEventId)).body).toBe(original.body);
       });
 
+      // #81: text the user adds below the note does not hide that the patch landed.
+      it.each([
+        ["startup recovery", true],
+        ["the adoption replay", false]
+      ] as const)("a patch written before the crash, then text appended below its note: %s audits it, never applies it again", async (_label, recover) => {
+        const { root, taskId } = await withTask();
+        await dropPatch(root, { id: taskId, set: { priority: "High" }, append_note: "Joel wants it in French." });
+        await (await open(root, crashing(new MarkdownObjectStore(root), "write", auditOf("patch.applied")))).adoptDrafts().catch(() => undefined);
+        expect(await patchJournals(root)).toHaveLength(1);
+        const taskFile = path.join(root, (await open(root)).object(taskId).relativePath);
+        await writeFile(taskFile, `${await readFile(taskFile, "utf8")}\nAlso check the budget slide.\n`);
+
+        const restarted = await open(root);
+        if (recover) await restarted.recoverOperations();
+        expect((await restarted.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "applied", objectIds: [taskId] });
+        const patched = restarted.object(taskId);
+        expect(patched.body.match(/Joel wants it in French\./g)).toHaveLength(1);
+        expect(patched.body).toContain("Also check the budget slide.");
+        expect(patched.frontmatter.revision).toBe(2);
+        expect(restarted.appliedPatches()).toHaveLength(1);
+        expect(restarted.appliedPatches()[0]).toMatchObject({ before: { priority: null }, after: { priority: "High" }, appendedNote: "Joel wants it in French." });
+        expect(await patchJournals(root)).toEqual([]);
+      });
+
       it("a stale journal (patch already audited) is closed by startup recovery", async () => {
         const { root, taskId } = await withTask();
         await dropPatch(root, { id: taskId, set: { priority: "High" } });

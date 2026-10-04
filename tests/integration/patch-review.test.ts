@@ -223,6 +223,21 @@ describe("the conflict rule", () => {
     expect(application.object(task.frontmatter.id).frontmatter.priority).toBe("High");
   });
 
+  it("lets a later-dictated patch apply over an earlier-dictated one adopted after its capture (dictation order, #81 base check)", async () => {
+    const { root, application } = await vault();
+    const task = await application.quickCapture("Send Joel the sizing deck");
+    await tick();
+    const first = new Date().toISOString();
+    await tick();
+    const second = new Date().toISOString();
+    await tick();
+    await drop(root, "a-first.md", patch({ id: task.frontmatter.id, captured_at: first, set: { priority: "High" } }));
+    expect((await application.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "applied" });
+    await drop(root, "b-second.md", patch({ id: task.frontmatter.id, captured_at: second, set: { priority: "Low" } }));
+    expect((await application.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "applied" });
+    expect(application.object(task.frontmatter.id).frontmatter.priority).toBe("Low");
+  });
+
   it("treats an edit with unknown fields (another device, no audit) as touching every field", async () => {
     const { root, application } = await vault();
     const task = await application.quickCapture("Send Joel the sizing deck");
@@ -232,6 +247,55 @@ describe("the conflict rule", () => {
     await application.rebuildIndex();
     await drop(root, "p.md", patch({ id: task.frontmatter.id, captured_at: new Date(Date.now() + 30_000).toISOString(), set: { priority: "High" } }));
     expect((await application.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "review" });
+  });
+
+  // #81: the rule compares the target with its version at capture, so an edit no audit describes is still caught.
+  describe("an Obsidian edit to a patched field after capture", () => {
+    /** Sets `priority: Low` in the task file by hand, as Obsidian would: same revision, no audit. */
+    async function obsidianEdit(root: string, application: LifeOSApplication, id: string) {
+      const file = path.join(root, application.object(id).relativePath);
+      const raw = await readFile(file, "utf8");
+      await writeFile(file, raw.replace(/\nstatus: (.*)\n/, "\nstatus: $1\npriority: Low\n"));
+      await application.rebuildIndex();
+    }
+    const unrelatedEdit = (application: LifeOSApplication, id: string) => application.setSensitivity(id, "restricted", application.object(id).contentHash);
+
+    it.each([
+      ["before an unrelated audited edit", true, false],
+      ["after an unrelated audited edit", false, true],
+      ["with no other edit at all", false, false]
+    ] as const)("routes the patch to review when the Obsidian edit came %s", async (_label, editFirst, editAfter) => {
+      const { root, application } = await vault();
+      const task = await application.quickCapture("Send Joel the sizing deck");
+      const id = task.frontmatter.id;
+      await tick();
+      const capturedAt = new Date().toISOString();
+      await tick();
+      if (editFirst) await obsidianEdit(root, application, id);
+      if (editFirst || editAfter) await unrelatedEdit(application, id);
+      if (!editFirst) await obsidianEdit(root, application, id);
+      await drop(root, "late.md", patch({ id, captured_at: capturedAt, set: { priority: "High" } }));
+
+      expect((await application.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "review" });
+      expect(application.object(id).frontmatter.priority).toBe("Low");
+      expect(await audits(application, "patch.applied")).toEqual([]);
+      const [review] = await updateReviews(application);
+      expect(review!.frontmatter.proposed_fields).toMatchObject({ reasons: [expect.stringMatching(/^conflict: priority changed after this patch was captured/)] });
+    });
+
+    it("still applies when the Obsidian edit touched another field only", async () => {
+      const { root, application } = await vault();
+      const task = await application.quickCapture("Send Joel the sizing deck");
+      const id = task.frontmatter.id;
+      await tick();
+      const capturedAt = new Date().toISOString();
+      await tick();
+      await obsidianEdit(root, application, id);
+      await unrelatedEdit(application, id);
+      await drop(root, "late.md", patch({ id, captured_at: capturedAt, set: { due_on: "2026-12-01" } }));
+      expect((await application.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "applied" });
+      expect(application.object(id).frontmatter).toMatchObject({ due_on: "2026-12-01", priority: "Low", sensitivity: "restricted" });
+    });
   });
 });
 
