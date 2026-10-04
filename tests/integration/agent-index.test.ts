@@ -147,6 +147,17 @@ describe("Agent Index (#43)", () => {
     for (const name of files.filter((file) => file !== "overview.md")) expect(overview).toContain(name);
   });
 
+  it("lists the configured internal domains in overview.md, or says none are set, for the enrichment gate (#93)", async () => {
+    const { root, application } = await populated();
+    await application.writeAgentIndex({ now });
+    expect(section(await read(root, "overview.md"), "## Internal domains").trim()).toBe("- example.com");
+
+    const { root: bare, application: unset } = await vault();
+    await unset.rebuildIndex();
+    await unset.writeAgentIndex({ now });
+    expect(section(await read(bare, "overview.md"), "## Internal domains").trim()).toBe("- none set");
+  });
+
   it("excludes restricted objects everywhere and only counts them", async () => {
     const { root, application, ids } = await populated();
     const secretProject = await seed(root, "projects", "project", "Project Nightingale", { status: "active", sensitivity: "restricted" });

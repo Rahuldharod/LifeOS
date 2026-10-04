@@ -105,7 +105,7 @@ LifeOS **Refresh** writes a `replan` Work Order to `_inbox/requests/`. When Rahu
 
 1. Follow its body. Use its `focus_on`.
 2. Write a new brief with a new `draft_key` and the current `generated_at`. The newer one wins.
-3. Move the Work Order file to `_inbox/processed/`, as its body asks.
+3. When you have finished a Work Order, move that Work Order file from `_inbox/requests/` to `_inbox/processed/`. Move nothing else there.
 4. Do not send a Slack DM for a replan.
 
 ## Running it on a schedule

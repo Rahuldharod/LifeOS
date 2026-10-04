@@ -21,12 +21,12 @@ The data root is the folder that holds `_inbox/` and `_agent/`. If Rahul has not
 | --- | --- | --- |
 | `_inbox/drafts/` | you | Inbox Drafts: create something new |
 | `_inbox/patches/` | you | Patch Drafts: change something that exists |
-| `_inbox/processed/` | LifeOS | adopted drafts and their `.result.md` |
+| `_inbox/processed/` | LifeOS (and you, for finished Work Orders) | adopted drafts and their `.result.md`; finished Work Orders |
 | `_inbox/failed/` | LifeOS | refused drafts and their `.result.md` (never deleted automatically) |
 | `_inbox/requests/` | LifeOS | Work Orders for Agent runs |
 | `_agent/` | LifeOS | the Agent Index you read (see the lifeos-ask skill) |
 
-Write nothing anywhere else. Never write into `_inbox/processed/`, `_inbox/failed/` or `_agent/`.
+Write nothing anywhere else. Never write into `_inbox/failed/` or `_agent/`, and never write a file into `_inbox/processed/`. One exception: When you have finished a Work Order, move that Work Order file from `_inbox/requests/` to `_inbox/processed/`. Move nothing else there. LifeOS treats any Work Order still in `_inbox/requests/` as not done yet.
 
 ## Writing a file
 

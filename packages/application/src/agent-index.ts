@@ -82,7 +82,8 @@ export class AgentIndexModule {
     const meetingNotes = objects.filter((object) => object.frontmatter.type === "meeting-note");
     const hidden = (object: LifeOSObject) => object.frontmatter.type === "meeting" ? isMeetingRestricted(object, meetingNotes) : isRestricted(object);
     const live = objects.filter(isLive);
-    const labels = new Map(personDisplayLabels(this.ctx.index.all(), internalDomainsOf(this.ctx.index)).map((label) => [label.id, label]));
+    const internalDomains = internalDomainsOf(this.ctx.index);
+    const labels = new Map(personDisplayLabels(this.ctx.index.all(), internalDomains).map((label) => [label.id, label]));
     const self = live.find((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true);
     const today = this.localDate(now.toISOString());
     const generated = now.toISOString();
@@ -199,6 +200,8 @@ export class AgentIndexModule {
         "- decisions.md: decisions from the last 30 days", "- projects-clients-products.md: active projects, clients and products", "- people.md: people, labels, emails, external flag",
         "- meetings.md: meetings from the last 14 days and the next 7, with enrichment state", "- pending-adoption.md: drafts waiting in _inbox/"
       ]],
+      // #93: the enrichment skill's client gate needs the configured domains; none set means every non-synthetic meeting counts as client.
+      ["Internal domains", internalDomains.length ? internalDomains.map((domain) => `- ${domain}`) : ["- none set"]],
       ["Data root", [
         "- `_inbox/drafts/`, `_inbox/patches/`: where Agents write drafts; `_inbox/processed/`, `_inbox/failed/`: adoption outcomes; `_inbox/requests/`: Work Orders",
         "- `_agent/`: this derived index (disposable)",
