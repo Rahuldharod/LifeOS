@@ -14,7 +14,9 @@ import { isLive, sameValue, validTimeZone } from "./support.js";
  * One patch: check the contract → idempotency (draft_key + content hash, from `patch.applied` audit
  * events) → resolve the target → decide whether it may apply on its own → journal the before/after (#61) →
  * one guarded write → a `patch.applied` audit event holding those values → filed with the `.result.md` sidecar.
- * A replay after a crash between the write and the audit finds the journal and audits instead of re-applying.
+ * A replay after a crash between the write and the audit finds the journal and audits instead of re-applying,
+ * but only when the target really holds the journalled change (#71); otherwise the patch is planned again.
+ * Startup recovery (`recoverJournal`) closes journals left open by a crash the same way.
  * `undoPatch` puts the before values back through another guarded write, audited as `patch.undone`.
  *
  * #37: anything that may not apply on its own (meaning-changing fields, decisions, agent-extracted
@@ -77,9 +79,22 @@ const stored = (value: unknown) => value === undefined ? null : value;
 const written = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value ?? undefined]));
 /** What an auto-applied patch is about to write (#61), journalled before the write so a replay can finish it. */
 interface PatchJournal { target_id: string; base_hash: string; before: Record<string, unknown>; after: Record<string, unknown>; appended_text?: string }
-const patchJournalKind = "apply-patch";
-/** One journal entry per patch (draft_key + content), so a replay after a crash finds the entry its first attempt wrote. */
-const patchJournalId = (patch: ParsedPatch) => `apply-patch-${createHash("sha256").update(`${patch.draftKey}\n${patch.contentHash}`).digest("hex").slice(0, 32)}`;
+/** The journal as stored: the planned change plus what its `patch.applied` audit needs, so startup recovery can write it (#71). */
+type StoredPatchJournal = PatchJournal & { draft_key: string; content_hash: string; draft_path?: string; agent_run_id?: string; origin?: string; captured_at?: string; append_note?: string; now?: string };
+export const patchJournalKind = "apply-patch";
+/**
+ * One journal entry per plan of a patch (draft_key + content + the target version it was planned on), so concurrent
+ * attempts share one entry (#62) and a re-plan after a closed journal opens a fresh one (a closed ID is never reopened).
+ */
+const patchJournalId = (patch: ParsedPatch, baseHash: string) => `apply-patch-${createHash("sha256").update(`${patch.draftKey}\n${patch.contentHash}\n${baseHash}`).digest("hex").slice(0, 32)}`;
+/**
+ * #71: whether the target really holds a journalled change: a newer version whose fields equal the after-values and whose
+ * body ends with the appended text. Anything else means the write never happened (a crash between the journal and
+ * the write) or was overwritten since, so no `patch.applied` may be recorded for it.
+ */
+const holdsChange = (target: LifeOSObject, journal: PatchJournal) => journal.target_id === target.frontmatter.id && journal.base_hash !== target.contentHash
+  && Object.entries(record(journal.after)).every(([key, value]) => sameValue(target.frontmatter[key], value))
+  && (!journal.appended_text || target.body.endsWith(journal.appended_text));
 const metadataOf = (object: LifeOSObject) => (object.frontmatter.metadata ?? {}) as Record<string, unknown>;
 const record = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
 
@@ -101,7 +116,10 @@ export class PatchModule {
       const patch = parsed.patch;
 
       const previous = ledger.get(patch.draftKey);
-      if (previous && previous.contentHash === patch.contentHash) return file(document, "processed", { draftKey, objectIds: [previous.objectId], outcome: "duplicate" });
+      if (previous && previous.contentHash === patch.contentHash) {
+        await this.closeJournals(patch);
+        return file(document, "processed", { draftKey, objectIds: [previous.objectId], outcome: "duplicate" });
+      }
       if (previous) return fail([`draft_key: draft_key ${patch.draftKey} was already applied from different content (object ${previous.objectId}); use a new draft_key`]);
 
       let objectId: string, outcome: "applied" | "review";
@@ -197,9 +215,11 @@ export class PatchModule {
     const target = this.target(patch);
     // #61: an earlier attempt journalled this exact change and then wrote it, but crashed before its audit:
     // audit the journalled values instead of applying again (no second note, and Undo gets the true before).
-    const journalId = patchJournalId(patch);
-    const journal = (await this.ctx.objects.incompleteOperations?.())?.find((operation) => operation.id === journalId)?.payload as PatchJournal | undefined;
-    if (journal && journal.target_id === target.frontmatter.id && journal.base_hash !== target.contentHash) return this.audit(patch, target, journal, run);
+    // #71: only when the target really holds that change; otherwise the write never happened, so plan again.
+    const journals = await this.openJournals(patch);
+    const finished = journals.find((journal) => holdsChange(target, journal.payload));
+    if (finished) return this.audit(patch, target, finished.payload, run);
+    await this.closeJournals(patch);
     const reasons = this.reviewReasons(patch, target);
     const changes = this.changes(patch, target);
     const keys = Object.keys(changes).filter((key) => !sameValue(target.frontmatter[key], changes[key]));
@@ -216,7 +236,9 @@ export class PatchModule {
     // A patch that changes nothing ("mark it done" when it already is) writes no revision, but is still audited so a re-send is recognised.
     if (keys.length || appended) {
       // Journal the true before/after first, so a crash between the write and its audit is finished, not re-applied.
-      await this.ctx.objects.prepareOperation?.(patchJournalKind, { ...planned, draft_key: patch.draftKey, content_hash: patch.contentHash }, journalId);
+      const journalId = patchJournalId(patch, target.contentHash);
+      const journal: StoredPatchJournal = { ...planned, ...this.auditFields(patch, run), now: run.now, ...(appended ? { append_note: patch.appendNote } : {}) };
+      await this.ctx.objects.prepareOperation?.(patchJournalKind, { ...journal }, journalId);
       try { await this.ctx.update(target, written(after), { expectedHash: target.contentHash, now: run.now, ...(appended ? { body: target.body + appended } : {}) }); }
       catch (error) {
         // Not written (a guarded write is all or nothing): drop the journal so a retry starts from the target as it then is.
@@ -230,11 +252,46 @@ export class PatchModule {
   /** The `patch.applied` audit (the patch's idempotency ledger and Undo record), then closes the patch's journal. */
   private async audit(patch: ParsedPatch, target: LifeOSObject, values: PatchJournal, run: AdoptionRun) {
     await this.ctx.writeAudit(appliedAction, target.frontmatter.id, run.now, {
-      draft_key: patch.draftKey, content_hash: patch.contentHash, draft_path: patch.file.relativePath, agent_run_id: run.id, origin: patch.origin,
-      captured_at: patch.capturedAt, before: values.before, after: values.after, ...(values.appended_text ? { append_note: patch.appendNote, appended_text: values.appended_text } : {})
+      ...this.auditFields(patch, run), before: values.before, after: values.after, ...(values.appended_text ? { append_note: patch.appendNote, appended_text: values.appended_text } : {})
     });
-    await this.ctx.objects.completeOperation?.(patchJournalId(patch));
+    await this.closeJournals(patch);
     return { objectId: target.frontmatter.id, outcome: "applied" as const };
+  }
+
+  private auditFields(patch: ParsedPatch, run: AdoptionRun) {
+    return { draft_key: patch.draftKey, content_hash: patch.contentHash, draft_path: patch.file.relativePath, agent_run_id: run.id, origin: patch.origin, captured_at: patch.capturedAt };
+  }
+
+  /** The patch's journal entries a crash left open (normally none, at most one per target version it was planned on). */
+  private async openJournals(patch: { draftKey: string; contentHash: string }) {
+    const operations = await this.ctx.objects.incompleteOperations?.() ?? [];
+    return operations.filter((operation) => operation.kind === patchJournalKind && operation.payload.draft_key === patch.draftKey && operation.payload.content_hash === patch.contentHash)
+      .map((operation) => ({ id: operation.id, payload: operation.payload as unknown as StoredPatchJournal }));
+  }
+
+  private async closeJournals(patch: { draftKey: string; contentHash: string }) {
+    for (const journal of await this.openJournals(patch)) await this.ctx.objects.completeOperation?.(journal.id);
+  }
+
+  /**
+   * Startup recovery of an `apply-patch` journal (#71). Already audited (or raised for review): closed. Target holds the
+   * change: its `patch.applied` audit is written from the journal, then closed. Target does not hold it: the write never
+   * happened, so it is closed and the patch, if still waiting, is planned again by adoption. Target missing: throws, so
+   * the entry stays open and is listed in System Health.
+   */
+  async recoverJournal(operation: { id: string; payload: Record<string, unknown> }) {
+    const journal = operation.payload as unknown as StoredPatchJournal;
+    const { ctx } = this;
+    if (this.ledger().get(journal.draft_key)?.contentHash !== journal.content_hash) {
+      const target = ctx.index.get(String(journal.target_id));
+      if (!target || ctx.index.duplicatePaths?.(target.frontmatter.id)) throw new Error(`the patch's target ${String(journal.target_id)} is ${target ? "a duplicate object ID" : "missing"}, so whether patch ${journal.draft_key} was applied cannot be checked; restore the target or close the entry by hand`);
+      if (holdsChange(target, journal)) {
+        const { target_id: _target, base_hash: _base, before, after, appended_text, now, append_note, ...fields } = journal;
+        await ctx.writeAudit(appliedAction, target.frontmatter.id, now ?? new Date().toISOString(), { ...fields, before, after, ...(appended_text ? { append_note, appended_text } : {}) });
+        await ctx.rebuildIndex();
+      }
+    }
+    await ctx.objects.completeOperation?.(operation.id);
   }
 
   /**
