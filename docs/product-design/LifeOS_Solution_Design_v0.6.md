@@ -201,7 +201,7 @@ The repository keeps a domain glossary in `CONTEXT.md`. The terms below extend t
 | Focus Override (v0.6) | The user's app-owned pin, replace and dismiss choices for the day's Top 3. | Planned. |
 | Origin (v0.6) | How an object came to exist: app, user-dictated, agent-extracted, calendar, imported or external. | Planned. |
 | Sensitivity (v0.6) | Whether agents and exports may use an object: `normal` or `restricted`. | Planned. |
-| External person (v0.6) | A person whose email domain is not internal (`eagleeye.com`, `untienots.com`). | Planned. |
+| External person (v0.6) | A person whose email domain is not one of the internal domains (a setting, e.g. `example.com`). | Planned. |
 
 The Area set above supersedes the examples in section 6.4 ("work, home, family, personal"). Existing objects that use other values remain valid because the field is not enforced.
 
@@ -403,7 +403,7 @@ These pages are roll-up views over the same connected model, not separate copies
 
 **v0.6 - People (section 13.6).**
 - **Matching:** calendar attendees are matched to People by email. Unknown attendees are created with names taken from the email address; the calendar display name wins when there is one. They are flagged `unreviewed`, and merge suggestions are offered but never applied automatically.
-- **Labels:** badges and pickers show the first name, or the full name when two people share a first name. People outside `eagleeye.com` and `untienots.com` are external and shown as "Name - ext" in red, with the text always present.
+- **Labels:** badges and pickers show the first name, or the full name when two people share a first name. People outside the internal domains (a setting, e.g. `example.com`) are external and shown as "Name - ext" in red, with the text always present.
 - **Self person:** carries all of the user's work and personal addresses.
 - **Scope:** further external-people features come after Phase A.
 
@@ -759,7 +759,7 @@ If LifeOS becomes a simultaneous multi-user or always-online product, introduce 
 | Baseline (v0.6) | Claude chat reads a derived, disposable Agent Index in `_agent/`, regenerated after every write. Restricted objects are excluded. |
 | Baseline (v0.6) | `origin` and `sensitivity` are added to the envelope. Restricted objects are excluded from agents, the brief, Slack and Work Orders. This is an instruction-level control, not a lock. Finance and health are linked out, not run in LifeOS. |
 | Baseline (v0.6) | One vault for now, split-ready. Area is validated, and a split is reviewed by 31 October 2026. |
-| Baseline (v0.6) | People: attendees are matched by email; names come from the display name or the email; the label is the first name, or the full name on a clash; internal domains are `eagleeye.com` and `untienots.com`; external people are shown as "- ext" in red. Merges are never automatic. |
+| Baseline (v0.6) | People: attendees are matched by email; names come from the display name or the email; the label is the first name, or the full name on a clash; internal domains are a setting (e.g. `example.com`); external people are shown as "- ext" in red. Merges are never automatic. |
 | Baseline (v0.6) | Decisions and Open Points get a minimal workspace and lifecycle: supersede a decision; resolve (with a summary or decision) or close an open point. |
 | Baseline (v0.6) | Backups run automatically at start, at stop and daily, with a weekly off-Drive local copy (4 generations) and a documented exit plan. The stable app gets a macOS launcher and an optional start at login. |
 | Baseline (v0.6) | AI outputs follow the language of the source. The UI stays in English. The visual design is neutral (not the employer brand) and dyslexia-friendly. |
@@ -797,7 +797,7 @@ If LifeOS becomes a simultaneous multi-user or always-online product, introduce 
 | Agent drafts never adopted when no Mac runs for days (v0.6) | Drafts stay visible as "pending adoption" in the Agent Index and the brief. The app shows the count at start. |
 | Skill text drifts from the adoption code (v0.6) | Skill examples are CI fixtures run through adoption. |
 | Cloud routines may lack the Gong or Slack connectors (v0.6) | [TBD - verify]. Fallback: a desktop scheduled task. |
-| Client contracts may not allow client meeting content to go to Claude (v0.6) | Assumed acceptable because the provider does not train on the data. [TBD - confirm with Eagle Eye IT/legal]. |
+| Client contracts may not allow client meeting content to go to Claude (v0.6) | Assumed acceptable because the provider does not train on the data. [TBD - confirm with employer IT/legal]. |
 | A restricted object is read by an agent anyway (v0.6) | `sensitivity` is an instruction, not a lock. Truly sensitive material stays out of the vault. |
 | The vault lives in the employer's Drive account (v0.6) | Weekly off-Drive copy, exit plan, and a data-root review by 31 October 2026. |
 
@@ -815,7 +815,7 @@ If LifeOS becomes a simultaneous multi-user or always-online product, introduce 
 
 **Still open:**
 - What cadence and scope should future maintenance agents use for backlink suggestions, contradiction detection, stale-item review and synthesis?
-- Does syncing professional information through the employer Google Drive account, and sending client meeting content to Claude, comply with employer and client policies? [TBD - confirm with Eagle Eye IT/legal; data-root review due 31 October 2026.]
+- Does syncing professional information through the employer Google Drive account, and sending client meeting content to Claude, comply with employer and client policies? [TBD - confirm with employer IT/legal; data-root review due 31 October 2026.]
 - When hosted, what authentication, encryption, credential storage and separation rules are required for professional versus personal information?
 - Which LLM provider and key would the deferred in-app provider use? [TBD - Rahul to check; not blocking.]
 - Can cloud routines use the Gong and Slack connectors? [TBD - verify.]

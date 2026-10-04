@@ -12,6 +12,8 @@ Local-first personal knowledge and work management, backed by typed Markdown fil
 - `packages/index-memory`: rebuildable in-memory index.
 - `packages/connectors`: Google Calendar and mock integration adapters.
 - `packages/ai`: deterministic mock AI adapter behind an application port.
+- `packages/assets-filesystem`, `packages/backup-filesystem`, `packages/secrets`: managed images, checksummed backups and the macOS Keychain store.
+- `packages/contracts`, `packages/shared`: API types and rules shared by the server and the browser.
 - `schemas`: versioned object contracts and synthetic fixtures.
 - `../data`: synchronized user Markdown and assets; intentionally outside this Git repository.
 - `../backups`: read-only, checksummed data snapshots; also outside Git.
@@ -48,6 +50,30 @@ Development runs separately at `http://127.0.0.1:5174` (API on 4311) with live r
 
 To see a code change in your daily LifeOS, run `corepack pnpm update-app` when you are not mid-note.
 
+### Run the tests
+
+```bash
+corepack pnpm typecheck
+corepack pnpm test --exclude '.claude/**'
+```
+
+The `--exclude` stops Vitest from also running the copies of the tests inside agent worktrees under `.claude/`. CI runs plain `pnpm test`, because a fresh checkout has no `.claude/` folder.
+
+### First-time settings
+
+Open **Settings** after the first start and fill these cards. Each saves on its own and shows **Saved**.
+
+| Card | What to enter | If you leave it empty |
+| --- | --- | --- |
+| **My email addresses** | Every address you use, work and personal (e.g. `me@example.com`) | You are not recognised as an attendee. Today and System Health show a warning with a button to this card |
+| **Internal domains** | Your organisations' email domains (e.g. `example.com`) | Nobody is marked External ("Name - ext"). The same warning mentions it |
+| **Max must-dos** | How many items Today's Top 3 shows (1–5) | Defaults to 3 |
+| **Meetings and morning brief** | Meeting-heavy threshold (hours), brief time, time zone and workdays | Defaults: 5 hours, 06:00 Europe/Paris, Monday to Friday |
+| **Calendars in the Calendar view** | Which Google calendars to show | All are shown |
+| **Google Calendar** / **Google Drive** | OAuth client ID and secret (see below) | Calendar uses the mock calendar; Drive is not used yet |
+
+These settings are synced files in `../data/settings/` (ADR 0005), so both computers share them.
+
 ### Maintenance
 
 | Command | What it does |
@@ -64,10 +90,11 @@ The Markdown root is authoritative. Browser state and indexes are disposable. Re
 Documentation is intentionally lean during the MVP:
 
 - [`docs/architecture/README.md`](docs/architecture/README.md) explains system boundaries and responsibilities.
-- [`docs/decisions/`](docs/decisions/) records durable architectural decisions.
+- [`docs/decisions/`](docs/decisions/) records durable architectural decisions (ADRs 0001–0013).
+- [`CONTEXT.md`](CONTEXT.md) is the domain glossary.
 - [`docs/architecture/mvp-gap-analysis.md`](docs/architecture/mvp-gap-analysis.md) preserves the solution-design audit and deferred scope.
-- [`docs/product-design/LifeOS_Solution_Design_v0.6.md`](docs/product-design/LifeOS_Solution_Design_v0.6.md) is the current versioned solution baseline. v0.4 is kept for history.
-- [`docs/product-design/LifeOS_PRD_Phase-A_v1.0.md`](docs/product-design/LifeOS_PRD_Phase-A_v1.0.md) is the Phase A spec (also GitHub issue #21).
+- [`docs/product-design/LifeOS_Solution_Design_v0.7.md`](docs/product-design/LifeOS_Solution_Design_v0.7.md) is the current versioned solution baseline. v0.4 and v0.6 are kept for history.
+- [`docs/product-design/LifeOS_PRD_Phase-A_v1.0.md`](docs/product-design/LifeOS_PRD_Phase-A_v1.0.md) is the Phase A spec (also GitHub issue #21), with its build status, build decisions and known gaps.
 - [`docs/product-design/Product Backlog.md`](docs/product-design/Product%20Backlog.md) captures product intent and prioritization before work becomes a GitHub Issue.
 - [`AGENTS.md`](AGENTS.md) tells coding agents how to navigate and safely change the repository.
 - [`CLAUDE.md`](CLAUDE.md) points Claude Code to the shared agent instructions without duplicating them.
@@ -80,5 +107,13 @@ There is no standalone user guide yet. During the MVP, changing workflows should
 2. Open **Settings** in LifeOS and paste the Desktop client ID and secret into the Google Calendar card. They are saved directly to macOS Keychain under service `com.lifeos.local` and the secret field is cleared. Google Drive credentials can be stored independently on the same page.
 3. Open **Calendar** and choose **Connect Google Calendar**. LifeOS requests only `calendar.readonly`, validates OAuth state and PKCE, and stores tokens in Keychain.
 4. Future restarts reuse the Keychain credentials and refresh token. Environment variables remain available only as an optional development bootstrap.
+
+### macOS Keychain prompts
+
+LifeOS stores Google credentials in the Keychain through a small helper it builds in `~/Library/Application Support/LifeOS/keychain-helper/` (the Xcode command-line tools must be installed). macOS may ask whether this helper can read the LifeOS items:
+
+- **When it asks:** once at start, and when you connect or sync Google Calendar. Loading pages and saving settings never ask.
+- **What to click:** **Always Allow**, so later syncs do not ask again.
+- **If you click Deny:** the Connections card says **Keychain access denied** with a **Retry** button. Nothing else fails; click Retry when you are ready.
 
 The loopback callback defaults to `http://127.0.0.1:4310/api/v1/connections/google/callback`. No token or client secret is written to Markdown, logs, backups, or Git.
