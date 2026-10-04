@@ -1,5 +1,6 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
+import { adoptDailyFocus } from "./focus.js";
 import type { PatchModule } from "./patches.js";
 import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
 import { ReferenceResolver } from "./resolution.js";
@@ -109,7 +110,10 @@ export function validationIssues(error: unknown) {
 export class AdoptionModule {
   /** Handlers keyed `kind:origin`. Missing combinations fail with "not supported yet" so nothing is guessed. */
   private readonly routes: Partial<Record<`${DraftKind}:${DraftOrigin}`, DraftHandler>> = {
-    "task:user-dictated": (draft, run) => this.adoptDictatedTask(draft, run)
+    "task:user-dictated": (draft, run) => this.adoptDictatedTask(draft, run),
+    // #46: the morning brief is written straight to a daily-focus object (ADR 0011), whatever the origin.
+    "daily-focus:agent-extracted": (draft, run) => adoptDailyFocus(this.ctx, draft, run),
+    "daily-focus:user-dictated": (draft, run) => adoptDailyFocus(this.ctx, draft, run)
   };
   /** Unparsable drafts by name → content hash: the first sighting may be a partial sync, so it is skipped once. */
   private readonly unparsableSeen = new Map<string, string>();

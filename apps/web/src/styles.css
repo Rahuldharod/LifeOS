@@ -323,3 +323,13 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .decision-people { display: flex; flex-wrap: wrap; gap: 8px; }
 .link-button { padding: 0; border: 0; background: none; color: #245646; text-align: left; text-decoration: underline dotted; }
 @media (max-width: 980px) { .decisions-layout, .decision-filter-grid { grid-template-columns: 1fr; } }
+
+/* #46 Daily Focus: finished items struck through, past meetings and missing references muted. */
+.daily-focus .capture-row { align-items: center; justify-content: space-between; }
+.focus-section { margin-top: 18px; }
+.focus-section h4 { margin: 0 0 4px; color: #245646; font-size: 14px; }
+.focus-item.done b, .focus-item.cancelled b { text-decoration: line-through; color: #758078; }
+.focus-item.done > i, .focus-item.cancelled > i { background: #5f8b7c; }
+.focus-item.past b, .focus-item.missing b { color: #758078; }
+.focus-item.missing b { font-style: italic; }
+.focus-narrative { margin-top: 18px; white-space: pre-wrap; color: #3d4a44; }

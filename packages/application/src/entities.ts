@@ -98,9 +98,10 @@ export class EntitiesModule {
     return updated;
   }
 
-  today() {
+  /** `date` is the user's local calendar date (YYYY-MM-DD); without it, the UTC date. */
+  today(date?: string) {
     const active = this.entities("task").filter((object) => !["Done", "Cancelled"].includes(String(object.frontmatter.status)));
-    const today = new Date().toISOString().slice(0, 10);
+    const today = date ?? new Date().toISOString().slice(0, 10);
     const dueDate = (task: LifeOSObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
     const ranked = [...active].sort((a, b) => {
       const priority = (value: unknown) => value === "High" ? 0 : value === "Medium" ? 1 : value === "Low" ? 2 : 3;
@@ -112,7 +113,8 @@ export class EntitiesModule {
       dueToday: active.filter((task) => dueDate(task) === today),
       upcoming: active.filter((task) => Boolean(dueDate(task) && dueDate(task)! > today)).sort((a, b) => String(dueDate(a)).localeCompare(String(dueDate(b)))),
       waiting: active.filter((task) => task.frontmatter.status === "Waiting"),
-      topThree: ranked.slice(0, 3).map((task) => ({ task, reason: dueDate(task) && dueDate(task)! <= today ? "Due or overdue" : task.frontmatter.priority ? `${task.frontmatter.priority} priority` : "Active commitment" })),
+      // Restricted tasks are never Daily Focus inputs (ADR 0010), so the deterministic Top 3 skips them too.
+      topThree: ranked.filter((task) => task.frontmatter.sensitivity !== "restricted").slice(0, 3).map((task) => ({ task, reason: dueDate(task) && dueDate(task)! <= today ? "Due or overdue" : task.frontmatter.priority ? `${task.frontmatter.priority} priority` : "Active commitment" })),
       reviewCount: this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.status === "pending").length
     };
   }

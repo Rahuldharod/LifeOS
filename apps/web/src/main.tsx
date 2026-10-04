@@ -51,7 +51,9 @@ type Workspace = {
   tasks: LifeObject[];
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
-type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[]; upcoming: LifeObject[]; waiting: LifeObject[]; topThree: Array<{ task: LifeObject; reason: string }>; reviewCount: number };
+type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string };
+type DailyFocus = { date: string; brief?: { id: string; title: string; path: string; generatedAt: string; body: string }; iOwe: FocusItem[]; top3: FocusItem[]; top3Source: "brief" | "rule"; waitingAndDecisions: FocusItem[]; meetingPrep: FocusItem[]; dayShape?: { meetingHours: number; freeHours: number }; deferCandidates: FocusItem[]; restrictedHidden: number };
+type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[]; upcoming: LifeObject[]; waiting: LifeObject[]; topThree: Array<{ task: LifeObject; reason: string }>; reviewCount: number; focus?: DailyFocus };
 type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
@@ -383,7 +385,7 @@ function App() {
 
   const loadCollections = async () => {
     const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
-      api<Today>("/api/v1/today"), api<LifeObject[]>("/api/v1/tasks"),
+      api<Today>(`/api/v1/today?date=${dateInTimeZone(new Date(), displayTimeZone)}`), api<LifeObject[]>("/api/v1/tasks"),
       api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
@@ -633,6 +635,17 @@ function App() {
       await loadCollections();
       setMessage(result.message);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Enrichment request failed"); }
+    finally { setBusy(false); }
+  };
+
+  // #46: "Refresh" asks Claude to re-plan today by writing a replan Work Order; the brief itself is never edited here.
+  const requestReplan = async () => {
+    setBusy(true);
+    try {
+      const result = await api<{ message: string }>("/api/v1/focus/replan", { method: "POST", body: JSON.stringify({ date: dateInTimeZone(new Date(), displayTimeZone) }) });
+      await loadCollections();
+      setMessage(result.message);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Re-plan request failed"); }
     finally { setBusy(false); }
   };
 
@@ -1054,7 +1067,8 @@ function App() {
           <Summary label="Today's events" value={events.length} detail="across connected calendars" />
         </div>
         <article className="quick-capture"><span>QUICK CAPTURE</span><div className="capture-row"><input value={capture} onChange={(event) => setCapture(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) submitCapture(); }} placeholder="Capture a task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={submitCapture}>Capture</button></div></article>
-        <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>
+        {today.focus ? <DailyFocusPanel focus={today.focus} disabled={busy || readOnly} onRefresh={() => void requestReplan()} />
+          : <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>}
         <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void requestEnrichment()}>Enrich last 48h</button></div>
           {enrichment.staleWorkOrders.length > 0 && <ul className="diagnostics">{enrichment.staleWorkOrders.map((order) => <li key={order.path}>Work Order not processed for {order.ageDays} days: <code>{order.path}</code></li>)}</ul>}
           {enrichment.proposedGaveUp.map((meeting) => <div className="object-row" key={meeting.meetingId}><i /><div><b>{meeting.title}</b><small>No material 48 hours after the request</small></div><button disabled={busy || readOnly} onClick={() => void giveUpEnrichment(meeting.meetingId)}>Give up</button></div>)}</article>
@@ -1261,6 +1275,31 @@ function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: s
 }
 function Summary({ label, value, detail }: { label: string; value: string | number; detail: string }) {
   return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
+}
+/**
+ * #46: the morning brief with live status, in the agreed order: I owe → Top 3 → waiting/decisions →
+ * meeting prep → day shape. Finished items are struck through (the server already sank them), past
+ * meetings are marked, and deleted references show as missing. Without a brief, the rule's Top 3 shows.
+ */
+function DailyFocusPanel({ focus, disabled, onRefresh }: { focus: DailyFocus; disabled: boolean; onRefresh: () => void }) {
+  const stateLabel = { open: "", done: "Done", cancelled: "Cancelled", past: "Past", missing: "Missing: deleted or not found" } as const;
+  const row = (item: FocusItem, details: Array<string | undefined>) => <div className={`object-row focus-item ${item.state}`} key={item.id}><i /><div><b>{item.object?.frontmatter.title ?? "Missing item"}</b><small>{[stateLabel[item.state], ...details].filter(Boolean).join(" · ")}</small></div></div>;
+  const section = (title: string, items: FocusItem[], details: (item: FocusItem) => Array<string | undefined>, empty: string) => <div className="focus-section"><h4>{title}</h4>{items.length ? items.map((item) => row(item, details(item))) : <p className="muted">{empty}</p>}</div>;
+  const { brief } = focus;
+  return <article className="daily-focus">
+    <span>DAILY FOCUS</span>
+    <div className="capture-row"><p className="muted">{brief ? `Generated at ${formatTime(brief.generatedAt)}` : "No brief for today yet. Top 3 suggested by priority, then due date."}</p><button disabled={disabled} onClick={onRefresh} title="Ask Claude to re-plan today">Refresh</button></div>
+    {brief && section("I owe", focus.iOwe, (item) => [item.overdue && item.state === "open" ? "Overdue" : undefined], "Nothing owed today.")}
+    {section("Top 3", focus.top3, (item) => [item.whyToday, item.ifThen], "No active commitments to rank.")}
+    {brief && <>
+      {section("Waiting and decisions", focus.waitingAndDecisions, (item) => [item.ageDays !== undefined ? `${item.ageDays} days` : undefined], "Nothing to chase.")}
+      {section("Meeting prep", focus.meetingPrep, (item) => [item.object?.frontmatter.starts_at ? formatTime(item.object.frontmatter.starts_at) : undefined, item.context, item.ask ? `Your ask: ${item.ask}` : undefined], "No meetings to prepare.")}
+      {focus.dayShape && <div className="focus-section"><h4>Day shape</h4><p>{focus.dayShape.meetingHours} h in meetings · {focus.dayShape.freeHours} h free</p></div>}
+      {focus.deferCandidates.length > 0 && section("Consider deferring", focus.deferCandidates, (item) => [item.reason], "")}
+      {brief.body.trim() && <p className="focus-narrative">{brief.body.trim()}</p>}
+    </>}
+    {focus.restrictedHidden > 0 && <p className="muted">{focus.restrictedHidden} restricted {focus.restrictedHidden === 1 ? "item" : "items"} not shown.</p>}
+  </article>;
 }
 function Meta({ label, value }: { label: string; value: string }) {
   return <div className="meta"><small>{label}</small><b title={value}>{value}</b></div>;

@@ -5,6 +5,7 @@ import { CaptureModule } from "./capture.js";
 import { EnrichmentModule } from "./enrichment.js";
 import { DecisionsModule, type DecisionFilters } from "./decisions.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
+import { DailyFocusModule } from "./focus.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
@@ -25,6 +26,8 @@ export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from 
 export type { EnrichmentEntry, EnrichmentRequest, EnrichmentState, EnrichmentStatus } from "./enrichment.js";
 export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial } from "./enrichment.js";
 export type { AppliedPatch } from "./patches.js";
+export type { DailyFocusView, FocusItem, FocusItemState, ReplanRequest } from "./focus.js";
+export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords } from "./focus.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -43,6 +46,7 @@ export class LifeOSApplication {
   private readonly enrichment: EnrichmentModule;
   private readonly decisionsModule: DecisionsModule;
   private readonly patches: PatchModule;
+  private readonly focus: DailyFocusModule;
 
   /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
@@ -56,6 +60,7 @@ export class LifeOSApplication {
     this.enrichment = new EnrichmentModule(ctx, this.meetings, this.calendarModule, inbox);
     this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment);
     this.entitiesModule = new EntitiesModule(ctx);
+    this.focus = new DailyFocusModule(ctx, inbox);
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
     this.history = new HistoryModule(ctx);
@@ -88,7 +93,14 @@ export class LifeOSApplication {
   deleteEntity(id: string, expectedHash: string) { return this.entitiesModule.deleteEntity(id, expectedHash); }
   tasks() { return this.entitiesModule.tasks(); }
   updateTask(id: string, changes: Record<string, unknown>, expectedHash: string) { return this.entitiesModule.updateTask(id, changes, expectedHash); }
-  today() { return this.entitiesModule.today(); }
+  /** Today: the live lists plus the Daily Focus brief with live status (#46). `date` is the user's local date; `now` marks past meetings. */
+  today(options: { date?: string; now?: Date } = {}) {
+    const date = options.date ?? (options.now ?? new Date()).toISOString().slice(0, 10);
+    const today = this.entitiesModule.today(date);
+    return { ...today, focus: this.focus.view(date, today.topThree, options.now) };
+  }
+  /** "Refresh" on Today: writes a `replan` Work Order for the date (#46). */
+  requestReplan(date: string, options?: { now?: Date }) { return this.focus.requestReplan(date, options); }
   rollups(type: "client" | "product" | "person") { return this.entitiesModule.rollups(type); }
   projects() { return this.entitiesModule.projects(); }
 

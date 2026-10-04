@@ -177,7 +177,16 @@ server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (r
 server.post<{ Params: { id: string }; Body: { linkTo?: string } | undefined }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
 server.patch<{ Params: { id: string }; Body: { title: string } }>("/api/v1/review-items/:id", async (request) => application.updateReviewTitle(request.params.id, request.body.title));
 server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/reject", async (request) => application.rejectReviewItem(request.params.id));
-server.get("/api/v1/today", async () => application.today());
+// #46: `date` is the user's local date (the browser knows the display time zone); it picks the Daily Focus brief.
+server.get<{ Querystring: { date?: string } }>("/api/v1/today", async (request, reply) => {
+  const date = request.query.date;
+  if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.status(400).send({ error: "date must be YYYY-MM-DD" });
+  return application.today({ date });
+});
+server.post<{ Body: { date?: string } }>("/api/v1/focus/replan", async (request, reply) => {
+  if (typeof request.body?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(request.body.date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
+  return application.requestReplan(request.body.date);
+});
 server.get("/api/v1/tasks", async () => application.tasks());
 server.patch<{ Params: { id: string }; Body: { changes: Record<string, unknown>; expectedHash: string } }>("/api/v1/tasks/:id", async (request) => application.updateTask(request.params.id, request.body.changes, request.body.expectedHash));
 server.post<{ Body: { text: string } }>("/api/v1/capture", async (request) => application.quickCapture(request.body.text));
