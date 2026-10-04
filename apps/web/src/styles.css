@@ -75,6 +75,8 @@ article small { color: #6c766f; }
 .timeline-gap small { color: #8a958f; font-size: 10px; }
 .timeline-empty { display: grid; gap: 5px; margin-top: 18px; padding: 24px 12px; border: 1px dashed #cfd4cf; border-radius: 10px; color: #617068; text-align: center; }
 .timeline-error { border-color: #dfb978; background: #fff4df; color: #76552f; }
+.calendar-offline { padding: 14px 12px; margin-bottom: 12px; }
+.calendar-offline button { justify-self: center; margin-top: 4px; }
 .event { width: 100%; margin-top: 16px; padding: 15px; border: 1px solid #d7d5cb; border-radius: 10px; background: #f8f5ec; text-align: left; }
 .timeline .event { margin-top: 0; padding: 12px; }
 .event b, .event small { display: block; }
