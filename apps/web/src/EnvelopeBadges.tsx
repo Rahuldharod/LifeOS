@@ -7,6 +7,7 @@ export function LockBadge({ frontmatter }: { frontmatter: Record<string, unknown
   return isRestricted(frontmatter) ? <span className="lock-badge" title="Restricted: kept away from Agents, Daily Focus, Work Orders and Slack"><span aria-hidden>🔒</span> Restricted</span> : null;
 }
 
-export function EnvelopeBadges({ frontmatter }: { frontmatter: Record<string, unknown> }) {
-  return <span className="envelope-badges"><small className="origin-label">Origin: {originLabel(frontmatter)}</small><LockBadge frontmatter={frontmatter} /></span>;
+/** `lock={false}` leaves the lock badge to a SensitivityToggle shown nearby (#86), so it is not shown twice. */
+export function EnvelopeBadges({ frontmatter, lock = true }: { frontmatter: Record<string, unknown>; lock?: boolean }) {
+  return <span className="envelope-badges"><small className="origin-label">Origin: {originLabel(frontmatter)}</small>{lock && <LockBadge frontmatter={frontmatter} />}</span>;
 }

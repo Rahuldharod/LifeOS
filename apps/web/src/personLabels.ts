@@ -2,13 +2,13 @@
 // only looks them up and falls back to the title for a person the labels do not know yet.
 import type { SearchOption } from "./searchOptions.js";
 
-export type PersonLabel = { id: string; name: string; label: string; suffix?: string; isExternal: boolean; externalSource: "self" | "override" | "email" | "stored" };
+export type PersonLabel = { id: string; name: string; label: string; suffix?: string; isExternal: boolean; externalSource: "self" | "override" | "email" | "stored"; unreviewed?: boolean };
 type PersonLike = { frontmatter: { id: string; title: string } };
 
 export const labelMap = (labels: PersonLabel[]) => new Map(labels.map((label) => [label.id, label]));
 
 /** The label for a person, or a plain stand-in built from the title (for example an unsaved attendee preview). */
-export function personLabel(labels: Map<string, PersonLabel>, person: PersonLike): Pick<PersonLabel, "name" | "label" | "suffix"> {
+export function personLabel(labels: Map<string, PersonLabel>, person: PersonLike): Pick<PersonLabel, "name" | "label" | "suffix" | "unreviewed"> {
   return labels.get(person.frontmatter.id) ?? { name: person.frontmatter.title, label: person.frontmatter.title };
 }
 

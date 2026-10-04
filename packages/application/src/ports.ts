@@ -18,6 +18,8 @@ export interface ObjectStore {
    * it copies, without reading it. Lets a start skip unchanged objects cheaply (ADR 0012).
    */
   latestVersionInfo?(id: string): Promise<{ relativePath: string; revision: number; hashPrefix: string } | undefined>;
+  /** #85: the kept copies of `id`, newest first (highest revision, then most recently saved), without reading them. */
+  listVersions?(id: string): Promise<Array<{ relativePath: string; revision: number; hashPrefix: string }>>;
   /**
    * #81: `id` as the app last saved it at or before `instant`: of the stored copies whose `updated_at` is not after it,
    * the highest revision, and of that revision the copy saved first (a later copy of the same revision holds an edit
