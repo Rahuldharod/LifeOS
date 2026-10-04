@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { sensitivityOf, type LifeOSObject } from "@lifeos/domain";
+import type { LifeOSObject } from "@lifeos/domain";
+import { contextLinkFields, isRestricted as restrictedFrontmatter } from "@lifeos/shared";
 
 /** Small helpers shared by the application modules (#53). One home, so the rules cannot drift apart. */
 
@@ -7,7 +8,7 @@ type WithFrontmatter = Pick<LifeOSObject, "frontmatter">;
 
 /** ADR 0010: restricted only when `sensitivity: restricted`; missing means normal. No object is not restricted. */
 export const isRestricted = (object: { frontmatter: { sensitivity?: unknown } } | undefined) =>
-  object ? sensitivityOf(object.frontmatter) === "restricted" : false;
+  object ? restrictedFrontmatter(object.frontmatter) : false;
 
 /**
  * ADR 0010, #63: a meeting counts as restricted when the meeting itself or any of its (non-deleted) meeting
@@ -33,8 +34,8 @@ export const isLive = (object: WithFrontmatter) => !object.frontmatter.deleted_a
  */
 export const sameValue = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
-/** The context links an object carries: its primary project, client and product. */
-export const contextLinkFields = ["primary_project_id", "primary_client_id", "primary_product_id"] as const;
+/** The context links an object carries (home: @lifeos/shared, so the web app uses the same list, #75). */
+export { contextLinkFields };
 
 /** The context links a new object takes from its meeting: each one the meeting holds as text. */
 export function inheritContextLinks(meeting: WithFrontmatter | undefined): Record<string, unknown> {

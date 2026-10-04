@@ -2,7 +2,7 @@ import { originOf, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeo
 import { isCalendarDate, proposalBody, toUtc } from "./adoption.js";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { acceptSummary, summaryReviewType } from "./meeting-material.js";
-import { DecisionsModule } from "./decisions.js";
+import type { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
 import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeReviewType, survivingPersonId } from "./person-merge.js";
@@ -16,7 +16,7 @@ export class ReviewModule {
   readonly merges: PersonMergeModule;
   /** #62: accept, reject and recover calls run one at a time per Review Item (ADR 0013). */
   private readonly queues = new OneAtATime();
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly decisions = new DecisionsModule(ctx)) { this.merges = new PersonMergeModule(ctx); }
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly decisions: DecisionsModule) { this.merges = new PersonMergeModule(ctx); }
 
   /**
    * #62: runs `work` after every earlier accept, reject or recovery of the same Review Item has settled, so a
