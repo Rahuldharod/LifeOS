@@ -97,24 +97,79 @@ export class HistoryModule {
    * copy pruned since is refused with a plain message and nothing changes.
    */
   async restoreVersion(auditEventId: string, now = new Date()) {
-    const { ctx } = this;
-    const event = ctx.index.get(auditEventId);
-    const versionPath = event?.frontmatter.type === "audit-event" ? (event.frontmatter.metadata as Record<string, unknown> | undefined)?.version_path : undefined;
+    const event = this.ctx.index.get(auditEventId);
+    const metadata = event?.frontmatter.type === "audit-event" ? event.frontmatter.metadata as Record<string, unknown> | undefined : undefined;
+    const versionPath = metadata?.version_path;
     if (typeof versionPath !== "string") throw new Error(`Not an external change with a kept version: ${auditEventId}`);
+    return this.putBack(String(event!.frontmatter.object_id), versionPath, String(metadata!.relative_path), { audit_event_id: auditEventId }, now);
+  }
+
+  /**
+   * #85: the history of one object, newest first: its kept version copies (ADR 0012) and the audit events about
+   * them (edits made outside the app, restores). An external event whose copy was pruned since is marked `kept: false`.
+   */
+  async objectHistory(objectId: string): Promise<HistoryEntry[]> {
+    const { ctx } = this;
+    const current = ctx.index.get(objectId);
+    const events = ctx.index.all().filter(({ frontmatter }) => frontmatter.type === "audit-event" && frontmatter.object_id === objectId && historyActions.has(String(frontmatter.action)));
+    const files = await ctx.objects.listVersions?.(objectId) ?? [];
+    const kept = new Set(files.map((file) => file.relativePath));
+    const eventEntries: HistoryEntry[] = events.map(({ frontmatter }) => {
+      const metadata = (frontmatter.metadata ?? {}) as Record<string, unknown>;
+      const versionPath = typeof metadata.version_path === "string" ? metadata.version_path : undefined;
+      const external = frontmatter.actor_type === "external";
+      return {
+        kind: "event", id: frontmatter.id, action: String(frontmatter.action), at: String(frontmatter.occurred_at ?? frontmatter.updated_at),
+        device: String(metadata.observed_by_device ?? frontmatter.updated_by_device), external,
+        ...(versionPath ? { versionPath } : {}), kept: versionPath ? kept.has(versionPath) : false, current: false
+      };
+    });
+    // An external edit becomes the new baseline, kept under the hash of the edited file (`current_hash`).
+    const externalEdits = events.filter(({ frontmatter }) => frontmatter.actor_type === "external")
+      .map(({ frontmatter }) => ({ at: String(frontmatter.occurred_at), metadata: (frontmatter.metadata ?? {}) as Record<string, unknown> }))
+      .filter(({ metadata }) => typeof metadata.current_hash === "string");
+    const versionEntries: HistoryEntry[] = [];
+    for (const [position, file] of files.entries()) {
+      const copy = await ctx.objects.read(file.relativePath).catch(() => undefined);
+      if (!copy) continue;
+      const edit = externalEdits.find(({ metadata }) => String(metadata.current_hash).startsWith(file.hashPrefix));
+      versionEntries.push({
+        kind: "version", id: file.relativePath, title: copy.frontmatter.title, revision: file.revision,
+        at: edit?.at ?? String(copy.frontmatter.updated_at), device: String(edit?.metadata.observed_by_device ?? copy.frontmatter.updated_by_device),
+        external: Boolean(edit), versionPath: file.relativePath, kept: true,
+        current: position === 0 && Boolean(current) && current!.frontmatter.revision === file.revision && current!.contentHash.startsWith(file.hashPrefix)
+      });
+    }
+    // Newest first by time; versions keep the store's order among themselves (revision, then most recently saved).
+    return [...versionEntries, ...eventEntries].map((entry, order) => ({ entry, order, time: Date.parse(entry.at) || 0 }))
+      .sort((a, b) => b.time - a.time || a.order - b.order).map(({ entry }) => entry);
+  }
+
+  /** #85: puts back one of the object's kept copies through a guarded write, audited as `object.restored-from-version`. */
+  async restoreKeptVersion(objectId: string, versionPath: string, now = new Date()) {
+    const folder = `.lifeos/versions/${objectId}/`;
+    if (!versionPath.startsWith(folder) || !/^\d+--[0-9a-f]+\.md$/.test(versionPath.slice(folder.length))) throw new Error(`Not a kept version of ${objectId}: ${versionPath}`);
+    const current = this.ctx.index.get(objectId);
+    if (!current) throw new Error(`Object not found: ${objectId}`);
+    return this.putBack(objectId, versionPath, current.relativePath, {}, now);
+  }
+
+  /** Writes the copy at `versionPath` over the object (or creates it at `fallbackPath` if deleted), then audits it. */
+  private async putBack(id: string, versionPath: string, fallbackPath: string, metadata: Record<string, unknown>, now: Date) {
+    const { ctx } = this;
     const kept = await ctx.objects.read(versionPath).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") throw new Error(versionPrunedMessage);
       throw error;
     });
-    const id = String(event!.frontmatter.object_id);
     const current = ctx.index.get(id);
     const timestamp = now.toISOString();
     const restored = await ctx.objects.write({
-      relativePath: current?.relativePath ?? String((event!.frontmatter.metadata as Record<string, unknown>).relative_path),
+      relativePath: current?.relativePath ?? fallbackPath,
       ...(current ? { expectedHash: current.contentHash } : {}),
       frontmatter: { ...kept.frontmatter, revision: (current?.frontmatter.revision ?? kept.frontmatter.revision) + 1, updated_at: timestamp, updated_by_device: ctx.deviceId },
       body: kept.body
     });
-    await ctx.writeAudit("object.restored-from-version", id, timestamp, { audit_event_id: auditEventId, version_path: versionPath });
+    await ctx.writeAudit("object.restored-from-version", id, timestamp, { ...metadata, version_path: versionPath });
     await ctx.rebuildIndex();
     return restored;
   }
@@ -124,6 +179,28 @@ export class HistoryModule {
     if (object.frontmatter.type !== "audit-event") await this.ctx.objects.keepVersion?.(object);
   }
 }
+
+/** #85: one row of an object's history: a kept version copy, or an audit event about the object. */
+export interface HistoryEntry {
+  kind: "version" | "event";
+  /** The version's path, or the audit event's ID. */
+  id: string;
+  /** ISO 8601 UTC: when the copy was saved (or the outside edit was seen), or when the event happened. */
+  at: string;
+  device: string;
+  /** Made outside LifeOS (Obsidian, an agent, another app). */
+  external: boolean;
+  versionPath?: string;
+  /** False when the copy was pruned (ADR 0012) and can no longer be restored. */
+  kept: boolean;
+  /** The version matches the file on disk now. */
+  current: boolean;
+  title?: string;
+  revision?: number;
+  action?: string;
+}
+
+const historyActions = new Set(["object.changed-externally", "object.deleted-externally", "object.made-unreadable-externally", "object.restored-from-version"]);
 
 /** #79: shown when an audit names a version copy that retention (ADR 0012) has since deleted. */
 export const versionPrunedMessage = "This version is no longer kept (only the last 10 are)";

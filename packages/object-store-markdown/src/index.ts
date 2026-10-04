@@ -265,6 +265,11 @@ export class MarkdownObjectStore implements ObjectStore {
     return newest ? this.read(newest.relativePath) : undefined;
   }
 
+  /** #85: the kept copies of `id`, newest first (highest revision, then most recently saved), without reading them. */
+  async listVersions(id: string) {
+    return (await this.versionFiles(id, true)).map(({ relativePath, revision, hashPrefix }) => ({ relativePath, revision, hashPrefix }));
+  }
+
   async versionAt(id: string, instant: string) {
     const wanted = Date.parse(instant);
     // Oldest saved first within a revision, so the first copy found for the highest revision is the app's own save.
