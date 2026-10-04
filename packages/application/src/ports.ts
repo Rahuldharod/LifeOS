@@ -9,10 +9,15 @@ export interface ObjectStore {
   keepVersion?(object: LifeOSObject): Promise<string>;
   /**
    * #69: the newest copy of `id` in the versions store (highest revision, then most recently saved), read as an object
-   * whose `relativePath` is the version's path. The store also keeps each revision it writes, so this is the
-   * last-known state across restarts and devices. Undefined when nothing is stored for `id`.
+   * whose `relativePath` is the version's path. The store also keeps each revision it writes (the last N, ADR 0012), so
+   * this is the last-known state across restarts and devices. Undefined when nothing is stored for `id`.
    */
   latestVersion?(id: string): Promise<LifeOSObject | undefined>;
+  /**
+   * #72: where the newest stored version of `id` is, its revision and the first hex digits of the hash of the file
+   * it copies, without reading it. Lets a start skip unchanged objects cheaply (ADR 0012).
+   */
+  latestVersionInfo?(id: string): Promise<{ relativePath: string; revision: number; hashPrefix: string } | undefined>;
   prepareOperation?(kind: string, payload: Record<string, unknown>, operationId: string): Promise<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>;
   completeOperation?(operationId: string): Promise<void>;
   incompleteOperations?(): Promise<Array<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>>;

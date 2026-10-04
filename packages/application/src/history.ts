@@ -28,6 +28,8 @@ export class HistoryModule {
 
   /** IDs already checked against the versions store in this session (the store is the baseline that survives a restart). */
   private readonly checked = new Set<string>();
+  /** #72: IDs holding another device's newer revision whose version file has not synced yet; checked again every pass. */
+  private readonly awaitingVersion = new Set<string>();
 
   private async detect() {
     const { ctx } = this;
@@ -41,20 +43,35 @@ export class HistoryModule {
       const current = ctx.index.get(id);
       const firstLook = !this.checked.has(id);
       this.checked.add(id);
-      if (!firstLook && current && sameContent(current, known)) { ctx.known.set(id, current); continue; }
+      if (!firstLook && current && sameContent(current, known) && !this.awaitingVersion.has(id)) { ctx.known.set(id, current); continue; }
       const relativePath = current?.relativePath ?? known.relativePath;
+      // #72: the newest version's file name carries its revision and the hash of the file it copies. When the file on
+      // disk has that revision and hash, nothing changed and no version file is read (the cheap check at every start).
+      const info = await ctx.objects.latestVersionInfo?.(id);
+      if (current && info && info.revision === current.frontmatter.revision && info.revision >= known.frontmatter.revision && current.contentHash.startsWith(info.hashPrefix)) {
+        ctx.known.set(id, current);
+        this.awaitingVersion.delete(id);
+        continue;
+      }
       // #69: the newest stored version is the baseline when it is at least as new as the in-memory one. That covers
       // a restart (edits made while the app was closed) and another device's LifeOS write, which syncs its version too.
-      const stored = await ctx.objects.latestVersion?.(id);
+      const stored = info ? await ctx.objects.read(info.relativePath).catch(() => undefined) : await ctx.objects.latestVersion?.(id);
       if (firstLook && !stored) await this.persist(known);
-      const last = stored && stored.frontmatter.revision >= known.frontmatter.revision ? { ...stored, relativePath } : known;
+      // While waiting for another device's version, the in-memory copy is that unchecked file: compare with the store.
+      const last = stored && (this.awaitingVersion.has(id) || stored.frontmatter.revision >= known.frontmatter.revision) ? stored : known;
       if (current) {
         ctx.known.set(id, current);
-        if (sameContent(current, last)) continue;
-        // A newer revision whose version has not synced yet (or the app stopped between write and version): a LifeOS
-        // write, not an edit. It becomes the stored baseline, so an edit on top of it is caught later.
-        if (current.frontmatter.revision > last.frontmatter.revision) { await this.persist(current); continue; }
+        if (sameContent(current, last)) { this.awaitingVersion.delete(id); continue; }
+        if (current.frontmatter.revision > last.frontmatter.revision) {
+          // A newer revision with no stored version yet. Stamped by this device: a LifeOS write whose version was not
+          // saved (the app stopped in between), so it becomes the baseline. Stamped by another device: its version has
+          // not synced yet. #72: wait for it instead of trusting the file, which may carry an Obsidian edit on top.
+          if (current.frontmatter.updated_by_device === ctx.deviceId) await this.persist(current);
+          else this.awaitingVersion.add(id);
+          continue;
+        }
       } else ctx.known.delete(id);
+      this.awaitingVersion.delete(id);
       const change = current ? "changed" : ctx.index.diagnostics().some((entry) => entry.startsWith(`${relativePath}:`)) ? "unreadable" : "deleted";
       const versionPath = await ctx.objects.keepVersion?.(last);
       await ctx.writeAudit(change === "unreadable" ? "object.made-unreadable-externally" : `object.${change}-externally`, id, now, {
