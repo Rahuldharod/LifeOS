@@ -1,6 +1,7 @@
 import { openPointStatuses, uuidV7, type LifeOSObject, type ObjectEnvelope, type OpenPointStatus } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { decisionPeopleIds, reviewEvidence, type DecisionFilters, type DecisionsModule, type PreparedDecision } from "./decisions.js";
+import { operationKinds, type Operation } from "./ports.js";
 import { contextLinkFields, stringsIn } from "./support.js";
 
 /** Same filters as Decisions (#41); `from`/`to` apply to `raised_at` (falling back to `created_at` for older files). */
@@ -139,12 +140,12 @@ export class OpenPointsModule {
     const defaults = Object.fromEntries(inherited.filter((key) => point.frontmatter[key] !== undefined).map((key) => [key, point.frontmatter[key]]));
     const prepared = this.decisions.prepare({ ...input, title: trimmed(input.title) ?? point.frontmatter.title }, defaults, now);
     const operationId = uuidV7();
-    await this.ctx.objects.prepareOperation?.("resolve-open-point", { openPointId: id, decision: prepared }, operationId);
+    await this.ctx.objects.prepareOperation?.(operationKinds.resolveOpenPoint, { openPointId: id, decision: prepared }, operationId);
     return this.finishResolve(operationId, id, prepared, expectedHash, now);
   }
 
   /** Crash recovery for an incomplete `resolve-open-point` operation. */
-  async recoverResolve(operation: { id: string; payload: Record<string, unknown> }) {
+  async recoverResolve(operation: Operation) {
     await this.ctx.rebuildIndex();
     const { openPointId, decision } = operation.payload as { openPointId: string; decision: PreparedDecision };
     const point = this.ctx.index.get(openPointId);

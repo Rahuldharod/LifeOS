@@ -1,6 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
+import { OneAtATime } from "./support.js";
 
 /** The synced internal-domains setting (ADR 0005): one fixed file. Unset means nobody is External by email (#54). */
 const internalDomainsPath = "settings/internal-domains.md";
@@ -162,8 +163,8 @@ function attendeesOf(event: CalendarEvent): CalendarAttendee[] {
 
 /** People for calendar attendees (#38): matched by email, created when unknown, the user always the self person. */
 export class PeopleModule {
-  /** Serializes resolution so concurrent meetings sharing a new attendee agree on one person. */
-  private queue: Promise<unknown> = Promise.resolve();
+  /** Resolution runs one call at a time, so concurrent meetings sharing a new attendee agree on one person. */
+  private readonly queue = new OneAtATime();
 
   constructor(private readonly ctx: AppContext) {}
 
@@ -290,9 +291,7 @@ export class PeopleModule {
   }
 
   resolveAttendees(event: CalendarEvent, timestamp: string, ensureNamed: (name: string) => Promise<LifeOSObject>) {
-    const run = this.queue.catch(() => undefined).then(() => this.resolveSerialized(event, timestamp, ensureNamed));
-    this.queue = run;
-    return run;
+    return this.queue.run("attendees", () => this.resolveSerialized(event, timestamp, ensureNamed));
   }
 
   private async resolveSerialized(event: CalendarEvent, timestamp: string, ensureNamed: (name: string) => Promise<LifeOSObject>) {

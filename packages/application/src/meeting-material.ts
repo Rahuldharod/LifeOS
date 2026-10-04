@@ -4,7 +4,7 @@ import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
 import type { MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
-import { inheritContextLinks, isLive, isMeetingRestricted, objectIdPattern } from "./support.js";
+import { inheritContextLinks, isLive, isMeetingRestricted, objectIdPattern, replayRoles } from "./support.js";
 
 /**
  * Adoption of meeting material (#45, PRD "Enrichment Work Orders"). One `meeting-material` draft per meeting,
@@ -52,10 +52,10 @@ const eventLookbackMs = 30 * 86_400_000;
  * external ID, the summary, each proposal by key. A replay that finds one already written gets the same IDs for the rest.
  */
 const roles = {
-  meeting: "meeting",
-  source: (source: { provider: string; externalId: string }) => `source:${source.provider}:${source.externalId}`,
-  summary: "summary",
-  proposal: (key: string) => `proposal:${key}`
+  meeting: replayRoles.meeting,
+  source: (source: { provider: string; externalId: string }) => replayRoles.source(source.provider, source.externalId),
+  summary: replayRoles.summary,
+  proposal: replayRoles.proposal
 };
 
 type Propose = (draft: ParsedDraft, run: AdoptionRun, options: ProposeOptions) => Promise<string[]>;
@@ -145,7 +145,7 @@ export class MeetingMaterialModule {
     const missing = expectedMaterial.filter((kind) => !have.has(kind) && !absent.includes(kind));
     const state = missing.length ? "partial" : "enriched";
     await ctx.update(meeting, { enrichment_state: state, enrichment_missing_material: missing, enrichment_unavailable_material: absent.length ? absent : undefined, enrichment_adopted_at: run.now, ...(extraIds.length ? { source_ids: [...listed, ...extraIds] } : {}) }, { expectedHash: meeting.contentHash, now: run.now });
-    await ctx.writeAuditOnce("meeting.enrichment-adopted", meetingId, run.now, { from: meeting.frontmatter.enrichment_state ?? "none", to: state, missing_material: missing, draft_key: draft.draftKey, agent_run_id: run.id }, { type: "agent", ref: run.id });
+    await ctx.writeAuditOnce("meeting.enrichment-adopted", meetingId, run.now, { from: meeting.frontmatter.enrichment_state ?? "none", to: state, missing_material: missing, draft_key: draft.draftKey, agent_run_id: run.id }, { matchOn: ["draft_key"], actor: { type: "agent", ref: run.id } });
     await ctx.rebuildIndex();
     return [...new Set(objectIds)];
   }
@@ -274,7 +274,7 @@ export class MeetingMaterialModule {
         proposed_fields: { summary }, field_evidence: {}, confidence_label: confidence as "High" | "Medium" | "Low", status: "pending",
         agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...inheritContextLinks(meeting),
         // U7: generated here, at adoption, never taken from the draft.
-        operation_id: run.newId(`${roles.summary}:operation`)
+        operation_id: run.newId(replayRoles.operation(roles.summary))
       },
       body
     });

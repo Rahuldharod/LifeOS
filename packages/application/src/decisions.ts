@@ -1,5 +1,6 @@
 import { decisionStatuses, uuidV7, validateFrontmatter, type DecisionStatus, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
+import { operationKinds, type Operation } from "./ports.js";
 import { contextLinkFields, stringsIn } from "./support.js";
 
 /** List filters (#41). `from`/`to` are ISO instants, inclusive, on `decided_at`; the UI turns local days into instants. */
@@ -139,7 +140,7 @@ export class DecisionsModule {
     const prepared = this.prepare(input, { ...defaults, supersedes_decision_id: id }, now);
     const operationId = uuidV7();
     // #70: the old decision's hash at prepare time, so recovery never writes over a later edit.
-    await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, baseHash: expectedHash, decision: prepared }, operationId);
+    await this.ctx.objects.prepareOperation?.(operationKinds.supersedeDecision, { oldId: id, baseHash: expectedHash, decision: prepared }, operationId);
     return this.finishSupersede(operationId, id, { decision: prepared }, expectedHash, now);
   }
 
@@ -161,7 +162,7 @@ export class DecisionsModule {
     if (problem) throw new Error(problem);
     const now = new Date().toISOString();
     const operationId = uuidV7();
-    await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, baseHash: expectedHash, successorId, ...old }, operationId);
+    await this.ctx.objects.prepareOperation?.(operationKinds.supersedeDecision, { oldId: id, baseHash: expectedHash, successorId, ...old }, operationId);
     return this.finishSupersede(operationId, id, { successorId, ...old }, expectedHash, now);
   }
 
@@ -181,7 +182,7 @@ export class DecisionsModule {
    * operation is closed and audited, and an update Review Item stays pending, so accepting it reports the
    * conflict and rejecting it resolves it.
    */
-  async recoverSupersede(operation: { id: string; payload: Record<string, unknown> }) {
+  async recoverSupersede(operation: Operation) {
     await this.ctx.rebuildIndex();
     const { oldId, baseHash, decision, successorId, changes, body } = operation.payload as { oldId: string; baseHash?: string; decision?: PreparedDecision; successorId?: string } & SupersededWrite;
     const newId = successorId ?? decision!.frontmatter.id;

@@ -5,7 +5,7 @@ import type { DecisionsModule } from "./decisions.js";
 import { enrichmentStateOf } from "./enrichment.js";
 import { personDisplayLabels, personEmails, internalDomainsOf } from "./people.js";
 import type { AgentIndexFile, AgentIndexWriter, InboxFolder, InboxStore } from "./ports.js";
-import { isLive, isMeetingRestricted, isRestricted } from "./support.js";
+import { isLive, isMeetingRestricted, isRestricted, OneAtATime } from "./support.js";
 
 /**
  * The Agent Index (#43, ADR 0009): small Markdown summaries in `_agent/` that an Agent on a phone reads
@@ -34,7 +34,7 @@ const ageDays = (since: string | undefined, now: Date) => since && !Number.isNaN
 
 export class AgentIndexModule {
   private timer?: ReturnType<typeof setTimeout>;
-  private running: Promise<unknown> = Promise.resolve();
+  private readonly running = new OneAtATime();
   private state: AgentIndexStatus = {};
   private readonly debounceMs: number;
   readonly timeZone: string;
@@ -57,7 +57,7 @@ export class AgentIndexModule {
     clearTimeout(this.timer);
     this.timer = undefined;
     if (!this.writer) return Promise.resolve(this.state);
-    const run = this.running.then(async () => {
+    return this.running.run("write", async () => {
       try {
         const now = options.now ?? new Date();
         await this.writer!.write(await this.build(now));
@@ -67,8 +67,6 @@ export class AgentIndexModule {
       }
       return this.state;
     });
-    this.running = run;
-    return run;
   }
 
   status(): AgentIndexStatus { return { ...this.state }; }

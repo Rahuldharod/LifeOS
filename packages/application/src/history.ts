@@ -1,5 +1,6 @@
 import type { LifeOSObject } from "@lifeos/domain";
 import type { AppContext } from "./context.js";
+import { OneAtATime } from "./support.js";
 
 export interface ExternalChange {
   objectId: string;
@@ -15,15 +16,13 @@ export interface ExternalChange {
  * writes an `external` audit event, so the user can see and undo the change.
  */
 export class HistoryModule {
-  private queue: Promise<unknown> = Promise.resolve();
+  private readonly queue = new OneAtATime();
 
   constructor(private readonly ctx: AppContext) {}
 
   /** Runs one detection at a time, so overlapping watcher callbacks cannot record the same change twice. */
   recordExternalChanges(): Promise<ExternalChange[]> {
-    const run = this.queue.then(() => this.detect());
-    this.queue = run.catch(() => undefined);
-    return run;
+    return this.queue.run("detect", () => this.detect());
   }
 
   /** IDs already checked against the versions store in this session (the store is the baseline that survives a restart). */

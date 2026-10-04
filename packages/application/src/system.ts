@@ -4,10 +4,16 @@ import type { AppContext } from "./context.js";
 import type { EnrichmentModule } from "./enrichment.js";
 import type { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
-import { personMergeOperation } from "./person-merge.js";
 import type { OpenPointsModule } from "./open-points.js";
-import { patchJournalKind, type PatchModule } from "./patches.js";
+import type { PatchModule } from "./patches.js";
+import { operationKinds, type Operation, type OperationKind } from "./ports.js";
 import type { ReviewModule } from "./review.js";
+
+/**
+ * Operation kinds startup recovery leaves alone: adoption replays `adopt-draft` and `adopt-batch` entries at the start
+ * of its next batch (adoption.ts `recover`), which runs at startup and after every new draft.
+ */
+export const notRecoveredAtStartup = [operationKinds.adoptDraft, operationKinds.adoptBatch] as const;
 
 /** Index, health, crash recovery and generic object access. */
 export class SystemModule {
@@ -47,15 +53,23 @@ export class SystemModule {
     return recovered;
   }
 
-  private async recoverOne(operation: { id: string; kind: string; payload: Record<string, unknown> }) {
-    if (operation.kind === "accept-review" && typeof operation.payload.reviewId === "string") await this.review.recoverAccept(operation);
-    else if (operation.kind === personMergeOperation) await this.review.merges.recover(operation);
-    else if (operation.kind === "create-meeting" && typeof operation.payload.externalId === "string" && this.ctx.calendar) await this.meetings.createMeetingFromEvent(operation.payload.externalId);
-    else if (operation.kind === "supersede-decision") await this.decisions.recoverSupersede(operation);
-    else if (operation.kind === "resolve-open-point" && this.openPoints) await this.openPoints.recoverResolve(operation);
-    else if (operation.kind === patchJournalKind && this.patches) await this.patches.recoverJournal(operation);
-    else return false;
-    return true;
+  /**
+   * ADR 0013: the startup recovery handler of each operation kind. A handler returns false when it cannot run here
+   * (e.g. no calendar connector), leaving the operation open for a later start. Kinds in `notRecoveredAtStartup`
+   * are finished by their own module instead.
+   */
+  private readonly recovery: Record<Exclude<OperationKind, typeof notRecoveredAtStartup[number]>, (operation: Operation) => Promise<boolean>> = {
+    [operationKinds.acceptReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverAccept(operation), true),
+    [operationKinds.mergePerson]: async (operation) => (await this.review.merges.recover(operation), true),
+    [operationKinds.createMeeting]: async (operation) => typeof operation.payload.externalId === "string" && !!this.ctx.calendar && (await this.meetings.createMeetingFromEvent(operation.payload.externalId), true),
+    [operationKinds.supersedeDecision]: async (operation) => (await this.decisions.recoverSupersede(operation), true),
+    [operationKinds.resolveOpenPoint]: async (operation) => !!this.openPoints && (await this.openPoints.recoverResolve(operation), true),
+    [operationKinds.applyPatch]: async (operation) => !!this.patches && (await this.patches.recoverJournal(operation), true)
+  };
+
+  private recoverOne(operation: Operation) {
+    const handler = (this.recovery as Partial<Record<string, (operation: Operation) => Promise<boolean>>>)[operation.kind];
+    return handler ? handler(operation) : Promise.resolve(false);
   }
 
   async listObjects() {

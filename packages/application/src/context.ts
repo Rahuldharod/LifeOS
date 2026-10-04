@@ -1,5 +1,6 @@
 import { envelopeWriteProblem, lifecycleWriteProblem, uuidV7, type LifeOSObject, type ObjectEnvelope, type Origin } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
+import { sameValue } from "./support.js";
 
 /** Body for a meeting note created without user text (legacy callers and crash recovery of old operations). */
 export const DEFAULT_NOTE_BODY = "# Notes\n\n";
@@ -45,6 +46,8 @@ export function markdownFileName(title: string, id: string, timestamp: string, t
 export class ObjectConflictError extends Error { override name = "ObjectConflictError"; }
 
 export interface RebuildResult { objectCount: number; diagnostics: string[] }
+/** Who an audit event is by. */
+export type AuditActor = { type: "person" | "agent" | "system" | "external"; ref?: string };
 
 export class AppContext {
   /** The object store with the application's write guards applied. Modules write only through this. */
@@ -209,19 +212,33 @@ export class AppContext {
   }
 
   /** `actor` defaults to the person on this device; external edits have no known actor, so no `actor_ref`. */
-  async writeAudit(action: string, objectId: string, timestamp: string, metadata: Record<string, unknown>, actor: { type: "person" | "agent" | "system" | "external"; ref?: string } = { type: "person", ref: this.deviceId }) {
+  async writeAudit(action: string, objectId: string, timestamp: string, metadata: Record<string, unknown>, actor: AuditActor = { type: "person", ref: this.deviceId }) {
     const id = uuidV7();
     await this.objects.write({ relativePath: `audit/${markdownFileName(action, id, timestamp)}`, frontmatter: { ...this.envelope(id, "audit-event", action, timestamp), occurred_at: timestamp, actor_type: actor.type, ...(actor.ref ? { actor_ref: actor.ref } : {}), action, object_id: objectId, metadata }, body: `# ${action}\n` });
   }
 
   /**
-   * #59: an audit written while adopting a draft, at most once per draft key, action and object. A replay after
-   * a crash finds the audit its first attempt wrote (the index is rebuilt before replays) and writes nothing.
+   * Audit events with one of `actions` whose metadata equals `match` on every key it gives (`sameValue`), optionally
+   * only those about `objectId`. Reads the index, so it sees what the last rebuild saw.
    */
-  async writeAuditOnce(action: string, objectId: string, timestamp: string, metadata: Record<string, unknown> & { draft_key: string }, actor?: { type: "person" | "agent" | "system" | "external"; ref?: string }) {
-    const written = this.index.all().some((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === action && object.frontmatter.object_id === objectId
-      && (object.frontmatter.metadata as Record<string, unknown> | undefined)?.draft_key === metadata.draft_key);
-    if (!written) await this.writeAudit(action, objectId, timestamp, metadata, actor);
+  findAudits(actions: string | readonly string[], match: Record<string, unknown> = {}, objectId?: string) {
+    const wanted = typeof actions === "string" ? [actions] : actions;
+    return this.index.all().filter((object) => {
+      if (object.frontmatter.type !== "audit-event" || !wanted.includes(String(object.frontmatter.action))) return false;
+      if (objectId !== undefined && object.frontmatter.object_id !== objectId) return false;
+      const metadata = (object.frontmatter.metadata ?? {}) as Record<string, unknown>;
+      return Object.entries(match).every(([key, value]) => sameValue(metadata[key], value));
+    });
+  }
+
+  /**
+   * ADR 0013: the one audit-once helper. Writes the audit unless one with the same action and object already exists
+   * whose metadata equals this one on every `matchOn` key (none: any such audit counts). A replay after a crash finds
+   * the audit its first attempt wrote (the index is rebuilt before replays) and writes nothing.
+   */
+  async writeAuditOnce<M extends Record<string, unknown>>(action: string, objectId: string, timestamp: string, metadata: M, options: { matchOn: ReadonlyArray<keyof M & string>; actor?: AuditActor }) {
+    const match = Object.fromEntries(options.matchOn.map((key) => [key, metadata[key]]));
+    if (!this.findAudits(action, match, objectId).length) await this.writeAudit(action, objectId, timestamp, metadata, options.actor);
   }
 
   /** The self person being created, shared until the index holds it, so concurrent callers do not each create one (#55). */
