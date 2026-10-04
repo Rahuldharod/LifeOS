@@ -16,7 +16,7 @@ import { useSplitPane } from "./splitPane.js";
 import { useResizableBox } from "./resizableBox.js";
 import { NoteHeader } from "./NoteHeader.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
-import { areaOptions } from "./envelope.js";
+import { areaOptions, isRestricted } from "./envelope.js";
 import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
 import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
@@ -37,6 +37,7 @@ import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, ty
 import { SettingsPage } from "./SettingsPage.js";
 import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
+import { SensitivityToggle } from "./SensitivityToggle.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -1264,7 +1265,7 @@ function App() {
           <div className="meeting-main">
             {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
-                <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3></div>
+                <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3>{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
                 <div className="context-grid">
                   <Meta label="When" value={workspace.meeting.frontmatter.is_all_day === true ? `${String(workspace.meeting.frontmatter.starts_at).slice(0, 10)} · All day` : formatDate(workspace.meeting.frontmatter.starts_at)} />
                   <Meta label="Project" value={workspace.context.project?.frontmatter.title ?? "Not linked"} />
