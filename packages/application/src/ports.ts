@@ -18,6 +18,12 @@ export interface ObjectStore {
    * it copies, without reading it. Lets a start skip unchanged objects cheaply (ADR 0012).
    */
   latestVersionInfo?(id: string): Promise<{ relativePath: string; revision: number; hashPrefix: string } | undefined>;
+  /**
+   * #81: `id` as the app last saved it at or before `instant`: of the stored copies whose `updated_at` is not after it,
+   * the highest revision, and of that revision the copy saved first (a later copy of the same revision holds an edit
+   * made outside the app). Undefined when no such copy is kept (none yet, or pruned per ADR 0012).
+   */
+  versionAt?(id: string, instant: string): Promise<LifeOSObject | undefined>;
   /** Journals an operation before its first write (ADR 0013). Exclusive: if `operationId` exists, its stored record wins. */
   prepareOperation?(kind: OperationKind, payload: Record<string, unknown>, operationId: string): Promise<StoredOperation>;
   completeOperation?(operationId: string): Promise<void>;

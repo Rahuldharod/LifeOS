@@ -265,6 +265,17 @@ export class MarkdownObjectStore implements ObjectStore {
     return newest ? this.read(newest.relativePath) : undefined;
   }
 
+  async versionAt(id: string, instant: string) {
+    const wanted = Date.parse(instant);
+    // Oldest saved first within a revision, so the first copy found for the highest revision is the app's own save.
+    const files = (await this.versionFiles(id, true)).sort((a, b) => b.revision - a.revision || a.savedAt - b.savedAt);
+    for (const file of files) {
+      const copy = await this.read(file.relativePath).catch(() => undefined);
+      if (copy && Date.parse(String(copy.frontmatter.updated_at)) <= wanted) return copy;
+    }
+    return undefined;
+  }
+
   private versionFolder(id: string) { return path.posix.join(".lifeos", "versions", id); }
 
   /** The versions of `id`, newest first. Modification times are read only for revisions with more than one copy. */

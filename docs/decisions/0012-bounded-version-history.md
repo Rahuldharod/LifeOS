@@ -12,6 +12,8 @@
 
 **Baseline.** The newest copy is the baseline for external-edit detection: the last state the app knows about. If the file on disk differs from it, the edit is recorded as an `external` audit event, and the edited file becomes the new baseline.
 
+**Patch base (#81).** The patch conflict rule compares the target with its version as of the patch's `captured_at`: the highest revision saved by then, and of that revision the copy saved first (a later copy of the same revision holds an outside edit). If that copy was pruned, only audit events decide.
+
 **Startup cost.** At start, each object's baseline is checked by listing its versions folder. No copy is read. If the file's revision and hash match the newest copy's file name, nothing changed. A copy is read only when they differ. Modification times are read only to order two copies of the same revision.
 
 **Other devices.** A file with a newer revision but no copy yet is handled by its `updated_by_device` stamp:

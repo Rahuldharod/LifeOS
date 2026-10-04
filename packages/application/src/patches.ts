@@ -78,7 +78,7 @@ export interface UpdateProposal {
 const stored = (value: unknown) => value === undefined ? null : value;
 const written = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value ?? undefined]));
 /** What an auto-applied patch is about to write (#61), journalled before the write so a replay can finish it. */
-interface PatchJournal { target_id: string; base_hash: string; before: Record<string, unknown>; after: Record<string, unknown>; appended_text?: string }
+interface PatchJournal { target_id: string; base_hash: string; before: Record<string, unknown>; after: Record<string, unknown>; appended_text?: string; base_note_count?: number }
 /** The journal as stored: the planned change plus what its `patch.applied` audit needs, so startup recovery can write it (#71). */
 type StoredPatchJournal = PatchJournal & { draft_key: string; content_hash: string; draft_path?: string; agent_run_id?: string; origin?: string; captured_at?: string; append_note?: string; now?: string };
 /**
@@ -88,12 +88,14 @@ type StoredPatchJournal = PatchJournal & { draft_key: string; content_hash: stri
 const patchJournalId = (patch: ParsedPatch, baseHash: string) => `apply-patch-${createHash("sha256").update(`${patch.draftKey}\n${patch.contentHash}\n${baseHash}`).digest("hex").slice(0, 32)}`;
 /**
  * #71: whether the target really holds a journalled change: a newer version whose fields equal the after-values and whose
- * body ends with the appended text. Anything else means the write never happened (a crash between the journal and
- * the write) or was overwritten since, so no `patch.applied` may be recorded for it.
+ * body holds the appended text once more than the base did (#81: anywhere, so text the user added below the note since
+ * does not hide it). Anything else means the write never happened (a crash between the journal and the write) or was
+ * overwritten since, so no `patch.applied` may be recorded for it.
  */
 const holdsChange = (target: LifeOSObject, journal: PatchJournal) => journal.target_id === target.frontmatter.id && journal.base_hash !== target.contentHash
   && Object.entries(record(journal.after)).every(([key, value]) => sameValue(target.frontmatter[key], value))
-  && (!journal.appended_text || target.body.endsWith(journal.appended_text));
+  && (!journal.appended_text || occurrences(target.body, journal.appended_text) > (journal.base_note_count ?? 0));
+const occurrences = (body: string, part: string) => body.split(part).length - 1;
 const metadataOf = (object: LifeOSObject) => (object.frontmatter.metadata ?? {}) as Record<string, unknown>;
 const record = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
 
@@ -225,13 +227,13 @@ export class PatchModule {
     const before = Object.fromEntries(keys.map((key) => [key, stored(target.frontmatter[key])]));
     const after = Object.fromEntries(keys.map((key) => [key, stored(changes[key])]));
     // Conflict rule (PRD): the target was edited after the patch was captured, on a field the patch changes.
-    const conflicts = this.changedSince(target, patch.capturedAt, keys);
+    const conflicts = await this.changedSince(target, patch.capturedAt, keys);
     if (conflicts.length) reasons.push(`conflict: ${conflicts.join(", ")} changed after this patch was captured (${patch.capturedAt}); review it so the newer edit is not overwritten`);
     if (reasons.length && (keys.length || patch.appendNote)) return { objectId: await this.raiseReview(patch, target, before, after, reasons, run), outcome: "review" };
 
     // The exact text appended, so undo can remove precisely that and nothing the user wrote after it.
     const appended = patch.appendNote ? appendedText(target.body, patch.appendNote) : undefined;
-    const planned: PatchJournal = { target_id: target.frontmatter.id, base_hash: target.contentHash, before, after, ...(appended ? { appended_text: appended } : {}) };
+    const planned: PatchJournal = { target_id: target.frontmatter.id, base_hash: target.contentHash, before, after, ...(appended ? { appended_text: appended, base_note_count: occurrences(target.body, appended) } : {}) };
     // A patch that changes nothing ("mark it done" when it already is) writes no revision, but is still audited so a re-send is recognised.
     if (keys.length || appended) {
       // Journal the true before/after first, so a crash between the write and its audit is finished, not re-applied.
@@ -286,7 +288,7 @@ export class PatchModule {
       const target = ctx.index.get(String(journal.target_id));
       if (!target || ctx.index.duplicatePaths?.(target.frontmatter.id)) throw new Error(`the patch's target ${String(journal.target_id)} is ${target ? "a duplicate object ID" : "missing"}, so whether patch ${journal.draft_key} was applied cannot be checked; restore the target or close the entry by hand`);
       if (holdsChange(target, journal)) {
-        const { target_id: _target, base_hash: _base, before, after, appended_text, now, append_note, ...fields } = journal;
+        const { target_id: _target, base_hash: _base, base_note_count: _count, before, after, appended_text, now, append_note, ...fields } = journal;
         await ctx.writeAuditOnce(appliedAction, target.frontmatter.id, now ?? new Date().toISOString(), { ...fields, before, after, ...(appended_text ? { append_note, appended_text } : {}) }, { matchOn: ["draft_key", "content_hash"] });
         await ctx.rebuildIndex();
       }
@@ -295,22 +297,37 @@ export class PatchModule {
   }
 
   /**
-   * Which of `keys` were changed after `capturedAt`, read from the target's audit events. Another patch's
-   * change counts from when it was captured, so dictation order wins over adoption order. An edit whose
-   * fields are unknown (external edit, unaudited write) counts as touching every field: never overwrite blind.
+   * Which of `keys` were changed after `capturedAt`, from two sources:
+   * - the target's audit events since then. Another patch's change counts from when it was captured, so dictation
+   *   order wins over adoption order. An edit whose fields are unknown (unaudited write) counts as touching every field.
+   * - #81: the target's content against its base, the version the app saved as of `capturedAt` (ADR 0012). A field whose
+   *   value differs from the base, other than by a patch dictated before this one, was changed since, even when no audit
+   *   says so (an Obsidian edit not yet detected, made before or after another audited edit). Never overwrite blind.
+   * With no base kept (created after the capture, or pruned), only the audit events decide.
    */
-  private changedSince(target: LifeOSObject, capturedAt: string, keys: string[]) {
+  private async changedSince(target: LifeOSObject, capturedAt: string, keys: string[]) {
+    if (!keys.length) return [];
     const since = Date.parse(capturedAt);
-    if (!keys.length || !(Date.parse(String(target.frontmatter.updated_at)) > since)) return [];
     const events = this.ctx.index.all().filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.object_id === target.frontmatter.id && Date.parse(String(object.frontmatter.occurred_at)) > since);
-    if (!events.length) return keys;
     const changed = new Set<string>();
-    for (const event of events) {
-      const metadata = metadataOf(event);
-      if (event.frontmatter.action === appliedAction && typeof metadata.captured_at === "string" && !(Date.parse(metadata.captured_at) > since)) continue;
-      const fields = touchedFields(String(event.frontmatter.action), metadata);
-      if (!fields) return keys;
-      fields.forEach((field) => changed.add(field));
+    // Values set since the capture by patches dictated before it: not a conflict (dictation order).
+    const earlier: Array<Record<string, unknown>> = [];
+    if (Date.parse(String(target.frontmatter.updated_at)) > since) {
+      if (!events.length) return keys;
+      for (const event of events) {
+        const metadata = metadataOf(event);
+        if (event.frontmatter.action === appliedAction && typeof metadata.captured_at === "string" && !(Date.parse(metadata.captured_at) > since)) { earlier.push(record(metadata.after)); continue; }
+        const fields = touchedFields(String(event.frontmatter.action), metadata);
+        if (!fields) return keys;
+        fields.forEach((field) => changed.add(field));
+      }
+    }
+    const base = await this.ctx.objects.versionAt?.(target.frontmatter.id, capturedAt);
+    if (base && base.contentHash !== target.contentHash) {
+      for (const key of keys) {
+        const current = target.frontmatter[key];
+        if (!sameValue(current, base.frontmatter[key]) && !earlier.some((after) => Object.hasOwn(after, key) && sameValue(current, after[key]))) changed.add(key);
+      }
     }
     return keys.filter((key) => changed.has(key));
   }
