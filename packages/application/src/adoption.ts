@@ -1,6 +1,8 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
 import type { InboxDocument, InboxFile, InboxStore } from "./ports.js";
+import { DEFAULT_INTERNAL_DOMAINS, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
+import { PersonMergeModule } from "./person-merge.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -101,8 +103,11 @@ function validationIssues(error: unknown) {
 export class AdoptionModule {
   /** Handlers keyed `kind:origin`. Missing combinations fail with "not supported yet" so nothing is guessed. */
   private readonly routes: Partial<Record<`${DraftKind}:${DraftOrigin}`, DraftHandler>> = {
-    "task:user-dictated": (draft, run) => this.adoptDictatedTask(draft, run)
+    "task:user-dictated": (draft, run) => this.adoptDictatedTask(draft, run),
+    "person:user-dictated": (draft, run) => this.adoptPerson(draft, run),
+    "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run)
   };
+  private personMerges?: PersonMergeModule;
   /** Unparsable drafts by name → content hash: the first sighting may be a partial sync, so it is skipped once. */
   private readonly unparsableSeen = new Map<string, string>();
   /** Batches run one at a time, so startup, the watcher and "Adopt now" can never adopt one draft twice. */
@@ -292,5 +297,50 @@ export class AdoptionModule {
       body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
     });
     return [id];
+  }
+
+  /**
+   * `person` (either origin, #40): an `unreviewed` Person, plus `person-merge` Review Items for likely
+   * duplicates. Never merged automatically. A draft whose email already belongs to a person adopts as that person.
+   */
+  private async adoptPerson(draft: ParsedDraft, run: AdoptionRun) {
+    const { fields } = draft;
+    const issues: string[] = [];
+    const extra: Record<string, unknown> = {};
+    const rawEmails = fields.emails === undefined ? [] : Array.isArray(fields.emails) ? fields.emails : [fields.emails];
+    if (fields.email !== undefined) rawEmails.unshift(fields.email);
+    const emails: string[] = [];
+    for (const raw of rawEmails) {
+      const email = normalizeEmail(raw);
+      if (!email) issues.push(`${fields.email === raw ? "email" : "emails"}: not an email address ("${String(raw)}")`);
+      else if (!emails.includes(email)) emails.push(email);
+    }
+    const [given, ...family] = draft.title.split(/\s+/);
+    for (const key of ["given_name", "family_name", "organization_name", "job_title"]) {
+      if (fields[key] === undefined) continue;
+      if (typeof fields[key] === "string" && fields[key].trim()) extra[key] = fields[key].trim(); else issues.push(`${key}: must be text`);
+    }
+    extra.given_name ??= given;
+    if (family.length && fields.family_name === undefined && fields.given_name === undefined) extra.family_name = family.join(" ");
+    const domain = emails[0]?.split("@")[1];
+    if (fields.is_external !== undefined) { if (typeof fields.is_external === "boolean") extra.is_external = fields.is_external; else issues.push("is_external: must be true or false"); }
+    else if (domain) extra.is_external = !DEFAULT_INTERNAL_DOMAINS.includes(domain);
+    if (domain && extra.organization_name === undefined) { const organization = organizationFromDomain(domain); if (organization) extra.organization_name = organization; }
+    for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) extra[key] = fields[key];
+    for (const key of ["subjects", "tags", "aliases"]) if (fields[key] !== undefined) { if (stringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
+    if (issues.length) throw new DraftError(issues);
+
+    // People by email first (PRD): a known address means this person already exists.
+    const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at && personEmails(object).some((email) => emails.includes(email)));
+    if (known) return [known.frontmatter.id];
+    const id = uuidV7();
+    const narrative = draft.body.trim();
+    await this.ctx.objects.write({
+      relativePath: `people/${markdownFileName(draft.title, id, run.now)}`,
+      frontmatter: { ...this.ctx.envelope(id, "person", draft.title, run.now, draft.origin), ...extra, ...(emails.length ? { identifiers: emails.map((value) => ({ kind: "email", value })) } : {}), review_state: "unreviewed", captured_at: draft.capturedAt },
+      body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
+    });
+    this.personMerges ??= new PersonMergeModule(this.ctx);
+    return [id, ...await this.personMerges.suggest({ now: run.now, personIds: [id] })];
   }
 }

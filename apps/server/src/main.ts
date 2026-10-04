@@ -134,7 +134,10 @@ server.post<{ Body: { externalId: string; calendarId?: string; from?: string; to
   const to = request.body.to ? new Date(request.body.to) : undefined;
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   if (request.body.body !== undefined && typeof request.body.body !== "string") return reply.status(400).send({ error: "Note body must be text" });
-  return application.createMeetingFromEvent(request.body.externalId, from, to, request.body.calendarId, request.body.body);
+  const created = await application.createMeetingFromEvent(request.body.externalId, from, to, request.body.calendarId, request.body.body);
+  // #40: new calendar people may duplicate older ones; propose merges in the background (never merged automatically).
+  void application.suggestPersonMerges().catch((error) => server.log.error(error));
+  return created;
 });
 server.get<{ Params: { externalId: string } }>("/api/v1/meetings/from-event/:externalId", async (request) => application.meetingFromEvent(request.params.externalId));
 server.get<{ Params: { id: string } }>("/api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
@@ -222,6 +225,7 @@ try {
   await application.rebuildIndex();
   await application.recoverOperations();
   await application.rebuildIndex();
+  if (session.status().writeAllowed) await application.suggestPersonMerges().catch((error) => server.log.error(error));
   // Inbox Drafts (ADR 0007) are adopted at startup and shortly after one lands, but only while this device holds the lease.
   let adoptTimer: NodeJS.Timeout | undefined;
   const adopt = async () => {

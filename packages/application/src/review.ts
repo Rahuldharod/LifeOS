@@ -1,10 +1,13 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
+import { PersonMergeModule, personMergeReviewType } from "./person-merge.js";
 
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
 export class ReviewModule {
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule) {}
+  /** `person-merge` Review Items (#40): suggesting, accepting and recovering merges. */
+  readonly merges: PersonMergeModule;
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule) { this.merges = new PersonMergeModule(ctx); }
 
   reviews() {
     return this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item");
@@ -56,6 +59,7 @@ export class ReviewModule {
   async acceptReviewItem(reviewId: string) {
     const { ctx } = this;
     const review = ctx.required(reviewId, "review-item");
+    if (review.frontmatter.review_type === personMergeReviewType) return this.merges.accept(review);
     if (review.frontmatter.status === "accepted" && typeof review.frontmatter.resolved_object_id === "string") {
       if (typeof review.frontmatter.operation_id === "string") await ctx.objects.completeOperation?.(review.frontmatter.operation_id);
       return ctx.required(review.frontmatter.resolved_object_id);

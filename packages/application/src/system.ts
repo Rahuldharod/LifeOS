@@ -2,6 +2,7 @@ import { sensitivities, sensitivityOf, type Sensitivity } from "@lifeos/domain";
 import type { AdoptionModule } from "./adoption.js";
 import type { AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
+import { personMergeOperation } from "./person-merge.js";
 import type { ReviewModule } from "./review.js";
 
 /** Index, health, crash recovery and generic object access. */
@@ -25,6 +26,9 @@ export class SystemModule {
     for (const operation of incomplete) {
       if (operation.kind === "accept-review" && typeof operation.payload.reviewId === "string") {
         await this.review.acceptReviewItem(operation.payload.reviewId);
+        recovered.push(operation.id);
+      } else if (operation.kind === personMergeOperation) {
+        await this.review.merges.recover(operation);
         recovered.push(operation.id);
       } else if (operation.kind === "create-meeting" && typeof operation.payload.externalId === "string" && this.ctx.calendar) {
         await this.meetings.createMeetingFromEvent(operation.payload.externalId);
