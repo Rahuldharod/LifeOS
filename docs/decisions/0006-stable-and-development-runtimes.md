@@ -1,7 +1,7 @@
 # ADR 0006: Separate stable and development runtimes
 
 - Status: Accepted
-- Note (2026-10-04): the open launcher question below was decided in the Phase A PRD (story 85: a double-clickable launcher and optional start at login). It is not built yet; the terminal commands remain the way to run the app.
+- Note (2026-10-04): the open launcher question below was decided in the Phase A PRD (story 85: a double-clickable launcher and optional start at login). It is not built: on 2026-10-04 it moved to Phase B (#90). The terminal commands remain the way to run the app.
 - Date: 2026-10-02
 
 The user's daily LifeOS is one background process on `127.0.0.1:4310`: Fastify serves both the API and the production web build, with no file watcher, so code changes never reload it mid-note. `scripts/lifeos.mjs` starts, stops and updates it; `update-app` builds before stopping, so a failed build leaves the running app untouched. Its PID file and log live on the device (`~/Library/Application Support/LifeOS`, `~/Library/Logs/LifeOS`), not in the synced Drive folder, so the other device never sees a stale PID. The running app serves a snapshot of the web build copied at start (`LIFEOS_WEB_ROOT`), so a later `pnpm build` cannot change it; only `start` or `update-app` refreshes it.

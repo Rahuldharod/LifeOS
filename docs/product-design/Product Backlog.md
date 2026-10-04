@@ -1,6 +1,6 @@
 # LifeOS Product Backlog
 
-Last reviewed: 2026-10-03
+Last reviewed: 2026-10-04
 
 This file is the durable product-level backlog for LifeOS. It captures problems and opportunities before they are detailed enough to become implementation work.
 
@@ -34,14 +34,11 @@ High-value capabilities to address after the current version is stable.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-003 | Visual-editor quality pass | Ensure Markdown and Visual modes round-trip headings, emphasis, lists, task boxes, code, tables, links, images, and LifeOS links without formatting drift. Moved from Now on 2026-10-02: the daily-use symptom is covered by PB-019. | 5 | High | 3 | — | — |
 | PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Submitting appends a formatted row to the Inbox of this Product Backlog (Captured date, Idea with Bug/Feature label and next PB ID, Source/context with the current page). Supersedes the 2026-09-21 feedback idea. Needs a decision on writing into the code repo at runtime, see ADR 0001. | 3 | High | 2 | — | — |
-| PB-022b | Persist synced events locally | The Calendar tab depends on a live Google call, so a token or network failure leaves the day blank. Store the last synced events per day (derived, rebuildable) and show them, marked as stale, when Google is unreachable. Split from PB-022. | 4 | Medium | 3 | — | — |
 | PB-005 | Note filters | Narrow the notes list by type, date range, project, client, product or person. Keyword search shipped in PB-025; the relationship fields are now set per note (PB-006). Re-scoped 2026-10-03. | 4 | High | 2 | — | — |
 | PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
 | PB-010 | Relationship pickers in the other forms | Use the searchable dropdown from PB-006 for project, client, product and people fields in the Tasks, Projects, Clients, Products and People forms. Notes are done (PB-006). Re-scoped 2026-10-03. | 4 | High | 2 | — | — |
-| PB-011 | Note history and restoration | Browse prior Markdown revisions and restore an earlier version without using the filesystem manually. Update 2026-10-04: the last 10 copies per object are kept (ADR 0012) and a restore API exists for copies named by an external-edit audit (#79); there is no button yet (PRD *Known gaps*). | 4 | High | 3 | — | — |
 
 ## Later
 
@@ -96,6 +93,9 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-025 | Notes: Open/Deleted tabs, keyword search (every word, ignoring case and accents) and restore; restore refused when the meeting has a newer note | 2026-10-02 |
 | PB-006 | Note header: click the title to rename; searchable dropdowns under it for project, client, product and (meeting notes) people. Each pick saves on its own, in Notes and in the Calendar editor. For a note not yet created, choices are held and applied right after the first edit creates it | 2026-10-03 |
 | PB-007 | `lifeos://object/...` links open the object in the app: notes (including deleted) in Notes, meetings in Calendar on their day, tasks, projects, clients, products and people in their list with the card highlighted, review items in Inbox. One click opens it in every mode, including the editor's link bubble (which no longer opens a new tab); the open note is saved first; missing or unsupported targets explain why | 2026-10-03 |
+| PB-003 | Visual-editor round-trip suite in CI; an "Unproven formatting" label names Markdown the editor would rewrite; images are never lost; LifeOS's Summary section round-trips (#89, #91, #96). Remaining rewrites are a PRD *Known gap* | 2026-10-04 |
+| PB-022b | Calendar offline fallback: Today and the calendar view list meetings already stored in LifeOS under an Offline banner with Retry; never demo meetings (#88, #94). Built from stored meetings, not a separate cache | 2026-10-04 |
+| PB-011 | History panel on every object with "Restore this version"; restore keeps sensitivity and review state and is refused if the object changed since the panel opened (#85, #92) | 2026-10-04 |
 
 ## Decision log
 
@@ -111,5 +111,6 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-02 | PB-022c merged into PB-004. Survey: one duplicate (Product Weekly 2026-09-21), caused by a check-then-write race in `createMeetingFromEvent`; one missing note is a never-opened event, not a defect. | Avoid building the same duplicate detector twice; fix the cause, not just the symptom. |
 | 2026-10-02 | Archive means `archived_at` in place, not a move to `data/archive/` (ADR 0006). | Moving files would bypass ObjectStore hash checks, and the scan reads every folder, so a moved duplicate would still be flagged. |
 | 2026-10-04 | PB-007: one click on a LifeOS link opens the object in every mode, including the Visual editor. | Tried plain-click-edits / Cmd+click-opens first; it was not discoverable. LifeOS links are for navigation and their wording is rarely edited (arrow keys or Markdown mode still work). |
+| 2026-10-04 | Phase A closes on the core. Launcher and start at login, dyslexia-friendly font, dark theme, Playwright tests and the 10,000-object fixture move to Phase B (#90); each needs its own ticket. PB-003, PB-022b and PB-011 are complete. | Decided by Rahul so Phase A can close on the core (#90). |
 | 2026-10-04 | Phase A build decisions and known gaps are recorded in the PRD (*Decisions made during the build*, *Known gaps*) and Solution Design v0.7 (13.10, 13.11), not duplicated here. | One place per decision; the backlog keeps intent and priority only. |
 | 2026-10-02 | PB-023/024: group by last-edited date (matches the sort); the divider width is a per-device browser preference (ADR 0005); the stable app now serves a snapshot of the build. | Headers must follow the list order; 13-inch and 4K screens need different widths; a plain `pnpm build` was silently changing the running app. |

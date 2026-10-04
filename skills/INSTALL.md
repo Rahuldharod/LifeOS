@@ -2,11 +2,13 @@
 
 Five Claude skills: Object Contract, Capture, Ask, Morning and Enrichment. Install them, then test them on **fake data** before pointing them at your real LifeOS.
 
-| Skill | What it does |
-| --- | --- |
-| `lifeos-object-contract` | The rules for writing into the LifeOS inbox |
-| `lifeos-capture` | Adds tasks, decisions, open points, notes, sources, and changes |
-| `lifeos-ask` | Answers questions from the Agent Index |
+| Skill | What it does | Steps |
+| --- | --- | --- |
+| `lifeos-object-contract` | The rules for writing into the LifeOS inbox | Parts 1–6 |
+| `lifeos-capture` | Adds tasks, decisions, open points, notes, sources, and changes | Parts 1–6 |
+| `lifeos-ask` | Answers questions from the Agent Index | Parts 1–6 |
+| `lifeos-morning` | Writes the Daily Focus brief and sends your 5-line Slack DM | Part 7 |
+| `lifeos-enrichment` | Collects meeting material after meetings | Part 8 |
 
 **Rule for the whole dry-run: synthetic data only.** Never use the real `data/` folder until every check below passes.
 
