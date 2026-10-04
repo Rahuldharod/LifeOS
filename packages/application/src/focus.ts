@@ -155,9 +155,9 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
     if (entry.overdue !== undefined && typeof entry.overdue !== "boolean") issues.push(`${at}.overdue: must be true or false`);
     return { overdue: entry.overdue === true };
   });
-  // The brief may fill as many Top 3 slots as the user's max must-dos setting allows (default 3).
-  const topLimit = maxMustDosOf(ctx.index.all().find((object) => object.relativePath === focusSettingsPath && object.frontmatter.type === "app-setting")?.frontmatter);
-  const top3 = section("top3", "task_id", ["task"], topLimit, (entry, at) => ({ why_today: requiredText(entry, at, "why_today"), ...optionalText(entry, "if_then") }));
+  // Up to the highest max must-dos a user can choose; Today shows only as many as the current setting allows,
+  // so a brief is never lost because the setting is lower than its Top 3.
+  const top3 = section("top3", "task_id", ["task"], maxMustDosLimit, (entry, at) => ({ why_today: requiredText(entry, at, "why_today"), ...optionalText(entry, "if_then") }));
   const waiting = section("waiting_and_decisions", "object_id", ["task", "decision", "open-point"], undefined, (entry, at) => {
     const age = entry.age_days;
     if (age !== undefined && !(typeof age === "number" && Number.isInteger(age) && age >= 0)) issues.push(`${at}.age_days: must be a whole number of days`);

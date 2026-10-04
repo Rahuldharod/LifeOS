@@ -116,7 +116,7 @@ describe("adopting a daily-focus draft", () => {
     expect((await application.today({ date, now })).focus.brief?.lengthWarning).toContain("400 words");
   });
 
-  it("lets the brief's Top 3 grow to the max must-dos setting, and no further", async () => {
+  it("lets the brief's Top 3 grow to the highest max must-dos (5), and no further", async () => {
     const { root, application } = await vault();
     const ids = await Promise.all(["A", "B", "C", "D", "E", "F"].map((title) => task(application, title)));
     await application.saveFocusSettings({ maxMustDos: 5 });
