@@ -6,7 +6,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as crepePackage from "@milkdown/crepe";
 import { withSummarySection } from "../../packages/application/src/meeting-material.js";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
-import { roundTripReport, storedMarkdown, unprovenConstructs, visualEditorFeatures, visualMarkdown } from "../../apps/web/src/editorMarkdown.js";
+import { lostImages, roundTripReport, storedMarkdown, unprovenConstructs, visualEditorFeatures, visualMarkdown } from "../../apps/web/src/editorMarkdown.js";
+import { preserveImages, type ImageAwareEditor } from "../../apps/web/src/visualEditorImages.js";
 
 // Issue #89 (PB-003): opening a note in the visual editor and saving it must not change Markdown the
 // user did not edit. Every fixture is loaded into the real Milkdown Crepe editor through the app's
@@ -19,7 +20,17 @@ import { roundTripReport, storedMarkdown, unprovenConstructs, visualEditorFeatur
 const fixtures = path.resolve(process.cwd(), "tests/fixtures/editor-round-trip"); // vitest runs from the repository root
 const owner = "meetings/2026-10-01-weekly-sync.md";
 // The same structural type the app gives Crepe (its published types do not resolve under this tsconfig).
-type CrepeEditor = { create(): Promise<unknown>; destroy(): Promise<unknown>; getMarkdown(): string };
+type CrepeEditor = ImageAwareEditor & {
+  create(): Promise<unknown>;
+  destroy(): Promise<unknown>;
+  getMarkdown(): string;
+  editor: { action<T>(action: (ctx: { get(slice: "editorView"): EditorView }) => T): T };
+};
+/** The bits of ProseMirror's EditorView these tests use (reached by Milkdown slice name, as the app does). */
+type EditorView = {
+  state: { doc: { content: { size: number } }; schema: { nodes: Record<string, { create(attrs: Record<string, unknown>): unknown }> }; tr: { insert(at: number, node: unknown): unknown; insertText(text: string, at: number): unknown } };
+  dispatch(transaction: unknown): void;
+};
 const { Crepe } = crepePackage as unknown as { Crepe: new (config: { root: Node; defaultValue: string; features?: Record<string, boolean> }) => CrepeEditor };
 
 const LOSSLESS = [
@@ -36,7 +47,15 @@ const LOSSLESS = [
   "blockquote.md",
   "footnote.md",
   "html-inline-block.md",
-  "front-matter.md"
+  "front-matter.md",
+  // #91: every image form survives a Visual round trip byte-for-byte.
+  "image-managed.md",
+  "image-inline.md",
+  "image-titled.md",
+  "image-untitled-same-folder.md",
+  "image-special-path.md",
+  "image-empty-alt.md",
+  "image-in-list-and-link.md"
 ];
 
 /** Fixture → the construct `unprovenConstructs` must name for it. */
@@ -45,9 +64,6 @@ const KNOWN_FAILURES: Record<string, string> = {
   "bullets-plus.md": "bullets written with - or +",
   "task-list-dash.md": "bullets written with - or +",
   "summary-section.md": "blocks not separated by a blank line",
-  "image-managed.md": "images",
-  "image-inline.md": "images",
-  "image-titled.md": "images",
   "heading-setext.md": "underlined (setext) headings",
   "heading-then-text.md": "blocks not separated by a blank line",
   "paragraph-then-list.md": "blocks not separated by a blank line",
@@ -67,7 +83,13 @@ const KNOWN_FAILURES: Record<string, string> = {
   "nested-four-spaces.md": "nested lists indented differently from the editor",
   "html-block-multiline.md": "blocks not separated by a blank line",
   "blank-lines-extra.md": "several blank lines in a row",
-  "front-matter-blank-line.md": "blank lines at the start or end of the note"
+  "front-matter-blank-line.md": "blank lines at the start or end of the note",
+  // #91: the image is kept; only the way it is written changes.
+  "image-title-single-quotes.md": "image titles not in double quotes",
+  "image-alt-formatting.md": "formatting inside image descriptions",
+  "image-in-table.md": "images inside tables",
+  "image-reference.md": "reference-style links",
+  "image-path-brackets.md": "brackets in image paths"
 };
 
 /** Byte-level cases a file fixture cannot hold reliably (line endings, final newline). */
@@ -93,17 +115,28 @@ async function loadBody(name: string) {
 }
 
 /** Loads `body` into Crepe exactly as the visual editor does and returns what it would save. */
-async function throughVisualEditor(body: string) {
+async function throughVisualEditor(body: string, edit?: (editor: CrepeEditor) => void) {
   const root = document.createElement("div");
   document.body.append(root);
   const editor = new Crepe({ root, defaultValue: visualMarkdown(body), features: visualEditorFeatures });
+  preserveImages(editor);
   try {
     await editor.create();
-    return storedMarkdown(editor.getMarkdown(), owner);
+    edit?.(editor);
+    return storedMarkdown(editor.getMarkdown(), owner, body);
   } finally {
     await editor.destroy();
     root.remove();
   }
+}
+
+/** Inserts a block image the way Crepe's image block does after an upload (src = what `onUpload` returned). */
+function insertImageBlock(src: string) {
+  return (editor: CrepeEditor) => editor.editor.action((ctx) => {
+    const view = ctx.get("editorView");
+    const type = view.state.schema.nodes["image-block"]!;
+    view.dispatch(view.state.tr.insert(view.state.doc.content.size, type.create({ src, caption: "", ratio: 1 })));
+  });
 }
 
 describe("visual editor round trip (#89, PB-003)", () => {
@@ -130,6 +163,58 @@ describe("visual editor round trip (#89, PB-003)", () => {
 
     it("an empty note", async () => {
       expect(await throughVisualEditor("")).toBe("");
+    });
+  });
+
+  describe("images are never lost (#91)", () => {
+    it("an untitled image survives an edit elsewhere in the note", async () => {
+      const body = "Sketch: ![alt](assets/x.png)\n\n![Board](../assets/board.png)\n";
+      const saved = await throughVisualEditor(body, (editor) => editor.editor.action((ctx) => {
+        const view = ctx.get("editorView");
+        view.dispatch(view.state.tr.insertText("Edited. ", 1));
+      }));
+      expect(saved).toBe("Edited. Sketch: ![alt](assets/x.png)\n\n![Board](../assets/board.png)\n");
+    });
+
+    it("an image inserted (uploaded) in Visual mode is saved and still there when the note is reopened", async () => {
+      const uploaded = "/api/v1/assets/2026-10-04-whiteboard--0123456789abcdef.png"; // what the app's onUpload returns
+      const saved = await throughVisualEditor("Notes.\n", insertImageBlock(uploaded));
+      expect(saved).toBe("Notes.\n\n![](../assets/2026-10-04-whiteboard--0123456789abcdef.png)\n");
+      expect(await throughVisualEditor(saved)).toBe(saved);
+      expect(lostImages(saved, await throughVisualEditor(saved))).toEqual([]);
+    });
+
+    it("a block image keeps its alt text (Crepe would otherwise overwrite it with the image size)", async () => {
+      const body = "![Quarterly chart](https://example.com/chart.png \"Q3\")\n";
+      expect(await throughVisualEditor(body)).toBe(body);
+    });
+
+    it("no fixture loses an image, even the ones the editor rewrites", async () => {
+      for (const name of [...LOSSLESS, ...Object.keys(KNOWN_FAILURES)]) {
+        const { body } = await loadBody(name);
+        expect(lostImages(body, await throughVisualEditor(body)), name).toEqual([]);
+      }
+    });
+
+    it("the save guard catches a real loss: unpatched Crepe drops an untitled image", async () => {
+      const body = "Whiteboard:\n\n![Whiteboard photo](../assets/whiteboard.png)\n\nEnd.\n";
+      const root = document.createElement("div");
+      document.body.append(root);
+      const editor = new Crepe({ root, defaultValue: visualMarkdown(body), features: visualEditorFeatures });
+      try {
+        await editor.create();
+        const saved = storedMarkdown(editor.getMarkdown(), owner, body);
+        expect(saved).toBe("Whiteboard:\n\nEnd.\n");
+        expect(lostImages(body, saved)).toEqual(["Whiteboard photo → ../assets/whiteboard.png"]);
+      } finally {
+        await editor.destroy();
+        root.remove();
+      }
+    });
+
+    it("an asset name that is not valid percent-encoding still loads and survives", async () => {
+      const body = "![Odd](../assets/100%.png)\n";
+      expect(await throughVisualEditor(body)).toBe(body);
     });
   });
 

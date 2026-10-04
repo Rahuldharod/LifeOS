@@ -413,7 +413,7 @@ Status of the user stories on branch `feature/phase-a-21` (head `897c0e1`). **Bu
 | 84 | Exit plan | Documented only | See *Further Notes*. |
 | 85 | macOS launcher, start at login | **Not built** | Terminal commands only (ADR 0006). |
 | 86 | Calendar offline fallback (PB-022b) | **Not built** | — |
-| 87 | Editor round-trip suite (PB-003) | **Built** | Fixture suite runs the real visual editor in CI; constructs it rewrites are listed as known failures, and Visual mode shows an "Unproven formatting" label on any note that does not round-trip byte-for-byte (#89). |
+| 87 | Editor round-trip suite (PB-003) | **Built** | Fixture suite runs the real visual editor in CI; constructs it rewrites are listed as known failures, and Visual mode shows an "Unproven formatting" label on any note that does not round-trip byte-for-byte (#89). Images (untitled, titled, managed, special-character paths, uploaded or pasted in Visual mode) now round-trip; if a save would still drop one, Visual mode turns read-only and says why (#91). |
 | 88–91 | Accessibility and interface | **Partial** | Built: lists capped with "Show N more", lock badges with text, keyboard-reachable warnings and pickers. Not built: optional dyslexia-friendly font, dark theme. |
 | 92–95 | Steve and the skills pack | **Not built** | No skills pack or skill-fixture CI job yet. |
 
@@ -442,15 +442,14 @@ Product decisions taken while building, not in the original spec. Each is now ho
 
 ## Known gaps
 
-Known limits of the current build. Only the visual-editor rows can lose content; each needs a decision or a ticket.
+Known limits of the current build. Each needs a decision or a ticket.
 
 | **Gap** | **Effect today** | **Source** |
 | --- | --- | --- |
 | No restore button for version copies | Restoring a version copy named by an external-edit audit works only through the API (`POST /api/v1/history/:id/restore`). There is no button in the app. Deleted notes do have a Restore button. | #79 |
 | Undo is refused if text was added below the note | Undo removes exactly the note a patch appended. If the user has typed anything after it, Undo is refused ("change it by hand"), so it never deletes the user's text. | #61, #81 |
 | Calendar sync still reads the Keychain each time | Loading and saving no longer prompt, but each calendar sync or connect reads the Google tokens and client secret, which can show a Keychain prompt if access was not set to "Always Allow". | #77 |
-| Visual editor drops images without a title | An image written `![alt](path)` (no title, as Markdown mode and pasted Markdown write it) is not shown in Visual mode, and any edit made there saves the note without it. Visual mode shows the "Unproven formatting" label; Markdown mode is safe. | #89 |
-| Visual editor rewrites other Markdown | Editing in Visual mode reformats untouched parts of the note: `-` bullets become `*`, the Summary markers and blocks written without blank lines get blank lines, `---` becomes `***`, tables are re-padded, and more (full list: `KNOWN_FAILURES` in `tests/integration/editor-round-trip.test.ts`). Meaning is kept; the bytes change. The label warns before the user edits. | #89 |
+| Visual editor rewrites other Markdown | Editing in Visual mode reformats untouched parts of the note: `-` bullets become `*`, the Summary markers and blocks written without blank lines get blank lines, `---` becomes `***`, tables are re-padded, image titles in single quotes become double quotes, and more (full list: `KNOWN_FAILURES` in `tests/integration/editor-round-trip.test.ts`). Meaning is kept; the bytes change. The label warns before the user edits. | #89 |
 | Two-device limits | If another device's version copy never arrives over Drive, edits made on top of it are not flagged as external. A version copy pruned after 10 saves can no longer be restored or used by the patch conflict rule (then only audit events decide). | ADR 0012, #80, #81 |
 
 ## Further Notes

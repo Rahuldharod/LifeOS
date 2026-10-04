@@ -1,0 +1,1 @@
+![](../assets/no-alt.png)
