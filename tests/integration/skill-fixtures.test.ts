@@ -406,3 +406,99 @@ describe("morning routine skill (#51)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// #93 enrichment client gate and Work Order filing. Each `<!-- gate: {...} -->` example in the enrichment
+// skill is decided by the gate as the skill documents it, against an Agent Index the real code writes.
+// ---------------------------------------------------------------------------------------------------------
+
+interface GateExpectation {
+  name: string;
+  /** What Settings → Internal domains holds; empty means unset. */
+  internal_domains: string[];
+  /** Whether the meeting is linked to a client, so `_agent/meetings.md` shows a `client` on its line. */
+  client: boolean;
+  outcome: "allowed" | "refused";
+  /** A text the documented refusal reason must contain. */
+  reason?: string;
+}
+
+const enrichmentSkill = "lifeos-enrichment/SKILL.md";
+const gateFixtures = [...readFileSync(path.join(skillsRoot, enrichmentSkill), "utf8").matchAll(/<!--\s*gate:\s*(\{[\s\S]*?\})\s*-->\s*\n```[\w-]*\n([\s\S]*?)\n```/g)]
+  .map((match) => ({ expect: JSON.parse(match[1]!) as GateExpectation, entry: parse(match[2]!) as { attendee_emails?: string[] } }));
+
+/** The client gate exactly as `lifeos-enrichment` documents it ("Policy gate: read this first"), for the `blocked` state. */
+function clientGate(attendeeEmails: string[], overview: string, meetingLine: string, dataRootName: string): { outcome: "allowed" | "refused"; reason?: string } {
+  const synthetic = dataRootName === ".dev-data" && attendeeEmails.length > 0 && attendeeEmails.every((email) => /@example\.(com|org|net)$/i.test(email));
+  if (synthetic) return { outcome: "allowed" };
+  const section = overview.split("## Internal domains")[1]?.split(/\n## /)[0] ?? "";
+  const domains = [...section.matchAll(/^- (\S+)$/gm)].map((match) => match[1]!.toLowerCase()).filter((domain) => domain !== "none");
+  if (!domains.length) return { outcome: "refused", reason: "no internal domains are set" };
+  if (/(^|· )client: /.test(meetingLine)) return { outcome: "refused", reason: "client meeting" };
+  const internal = (email: string) => domains.includes(email.split("@")[1]?.toLowerCase() ?? "");
+  if (!attendeeEmails.length || !attendeeEmails.every(internal)) return { outcome: "refused", reason: "client meeting" };
+  return { outcome: "allowed" };
+}
+
+async function gateVault(want: GateExpectation) {
+  const root = await mkdtemp(path.join(tmpdir(), "lifeos-skill-gate-"));
+  roots.push(root);
+  const written: { files: Array<{ name: string; content: string }> } = { files: [] };
+  const writer = { write: async (files: Array<{ name: string; content: string }>) => { written.files = files; } };
+  const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), undefined, undefined, "test", new FilesystemInboxStore(root), writer, { agentIndexDebounceMs: 60_000, timeZone: "Europe/Paris" });
+  await application.rebuildIndex();
+  if (want.internal_domains.length) await application.saveInternalDomains(want.internal_domains);
+  const client = want.client ? await application.createEntity("client", { title: "Example Grocer" }) : undefined;
+  const now = new Date();
+  const id = "0192f000-0000-7000-8000-000000000901";
+  const meeting = { id, type: "meeting", schema_version: 1, revision: 1, title: "Gate check", created_at: now.toISOString(), updated_at: now.toISOString(), updated_by_device: "test", status: "confirmed", starts_at: hoursAgo(3), ends_at: hoursAgo(2), timezone: "Europe/Paris", attendee_ids: [], ...(client ? { primary_client_id: client.frontmatter.id } : {}) };
+  await mkdir(path.join(root, "meetings"), { recursive: true });
+  await writeFile(path.join(root, "meetings", `${id}.md`), `---\n${JSON.stringify(meeting)}\n---\n# Gate check\n`);
+  await application.rebuildIndex();
+  await application.writeAgentIndex({ now });
+  const file = (name: string) => written.files.find((entry) => entry.name === name)!.content;
+  const meetingLine = file("meetings.md").split("\n- **").find((entry) => entry.includes(`id: ${id}`)) ?? "";
+  return { overview: file("overview.md"), meetingLine };
+}
+
+describe("enrichment client gate (#93)", () => {
+  it("documents the three required gate cases, and every example sits in the enrichment skill", () => {
+    const cases = gateFixtures.map((fixture) => fixture.expect);
+    expect(cases.some((want) => !want.internal_domains.length && want.outcome === "refused")).toBe(true);
+    expect(cases.some((want) => want.internal_domains.length && !want.client && want.outcome === "refused")).toBe(true);
+    expect(cases.some((want) => want.internal_domains.length && !want.client && want.outcome === "allowed")).toBe(true);
+    expect(new Set(cases.map((want) => want.name)).size).toBe(cases.length);
+  });
+
+  it.each(gateFixtures.map((fixture) => [fixture.expect.name, fixture] as const))("%s: the documented gate decides it as the example says", async (_name, fixture) => {
+    const { overview, meetingLine } = await gateVault(fixture.expect);
+    expect(meetingLine).not.toBe("");
+    const decision = clientGate(fixture.entry.attendee_emails ?? [], overview, meetingLine, "data");
+    expect(decision.outcome).toBe(fixture.expect.outcome);
+    if (fixture.expect.reason) expect(decision.reason).toContain(fixture.expect.reason);
+  });
+
+  it("reads the internal domains from _agent/overview.md and tells Rahul why when none are set", async () => {
+    const skill = await readFile(path.join(skillsRoot, enrichmentSkill), "utf8");
+    const gate = skill.slice(0, skill.indexOf("## Steps"));
+    expect(gate).toContain("`_agent/overview.md`");
+    expect(gate).toContain("Internal domains");
+    expect(gate).toContain("none set");
+    expect(gate).not.toContain("internal person in `_agent/people.md`");
+    expect(skill).toContain("no internal domains are set in LifeOS");
+  });
+});
+
+describe("only finished Work Orders are moved to _inbox/processed/ (#93)", () => {
+  const filing = "When you have finished a Work Order, move that Work Order file from `_inbox/requests/` to `_inbox/processed/`. Move nothing else there.";
+
+  it.each(["lifeos-object-contract", "lifeos-enrichment", "lifeos-morning"])("%s states the exception in the same words", async (folder) => {
+    const text = await readFile(path.join(skillsRoot, folder, "SKILL.md"), "utf8");
+    expect(text).toContain(filing);
+  });
+
+  it("the Object Contract no longer forbids writing to _inbox/processed/ without the exception", async () => {
+    const contract = await readFile(path.join(skillsRoot, "lifeos-object-contract/SKILL.md"), "utf8");
+    expect(contract).not.toContain("Never write into `_inbox/processed/`, `_inbox/failed/` or `_agent/`.");
+  });
+});
