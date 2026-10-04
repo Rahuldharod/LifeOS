@@ -6,12 +6,26 @@ import { contextLinkFields, stringsIn } from "./support.js";
 export type DecisionFilters = { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string };
 export type DecisionEvidence = { field: string; sourceId: string; sourceTitle?: string; fragmentId: string; text?: string; locator?: unknown };
 export type PreparedDecision = { relativePath: string; frontmatter: ObjectEnvelope; body: string };
+/** Other changes written to the old decision with the supersede (an update Review Item's other fields and note). */
+export type SupersededWrite = { changes?: Record<string, unknown>; body?: string };
 
 /** Fields a person may set by hand. `status` is edit-only (to `reversed`); `origin` is never accepted (#30). */
 export const decisionFields = ["title", "decision_text", "rationale", "decided_at", ...contextLinkFields, "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
 /** Context a successor inherits from the decision it supersedes, unless the user overrides it. */
 const inherited = [...contextLinkFields, "people_ids", "area", "sensitivity"];
 
+
+/** Why `successor` cannot replace decision `oldId` now (#67); `undefined` when it can. */
+function successorProblem(oldId: string, successorId: string, successor: LifeOSObject | undefined) {
+  if (successorId === oldId) return "A decision cannot supersede itself";
+  if (!successor || successor.frontmatter.type !== "decision") return `The replacing decision ${successorId} no longer exists; nothing was changed`;
+  const name = `"${successor.frontmatter.title}"`;
+  if (successor.frontmatter.deleted_at) return `The replacing decision ${name} was deleted; nothing was changed`;
+  if (successor.frontmatter.archived_at) return `The replacing decision ${name} was archived; nothing was changed`;
+  if (successor.frontmatter.status !== "active") return `The replacing decision ${name} is ${String(successor.frontmatter.status)}; only an active decision can replace another. Nothing was changed`;
+  if (successor.frontmatter.supersedes_decision_id !== undefined && successor.frontmatter.supersedes_decision_id !== oldId) return `The replacing decision ${name} already replaces another decision; nothing was changed`;
+  return undefined;
+}
 
 /** People a decision concerns: those linked directly, plus the attendees of its source meeting. Shared with roll-ups. */
 export function decisionPeopleIds(ctx: AppContext, decision: LifeOSObject) {
@@ -119,48 +133,86 @@ export class DecisionsModule {
    */
   async supersedeDecision(id: string, input: Record<string, unknown>, expectedHash: string) {
     if (!expectedHash) throw new Error("expectedHash is required to supersede a decision");
-    const old = this.ctx.required(id, "decision");
-    if (old.frontmatter.status === "superseded") throw new Error(`This decision is already superseded${typeof old.frontmatter.superseded_by_decision_id === "string" ? ` by ${old.frontmatter.superseded_by_decision_id}` : ""}`);
-    if (old.frontmatter.status !== "active") throw new Error(`Only active decisions can be superseded; this one is ${String(old.frontmatter.status)}`);
-    if (old.contentHash !== expectedHash) throw new ObjectConflictError(`Decision changed since it was opened: ${old.relativePath}`);
+    const old = this.supersedable(id, expectedHash);
     const now = new Date().toISOString();
     const defaults = Object.fromEntries(inherited.filter((key) => old.frontmatter[key] !== undefined).map((key) => [key, old.frontmatter[key]]));
     const prepared = this.prepare(input, { ...defaults, supersedes_decision_id: id }, now);
     const operationId = uuidV7();
     await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, decision: prepared }, operationId);
-    return this.finishSupersede(operationId, id, prepared, expectedHash, now);
+    return this.finishSupersede(operationId, id, { decision: prepared }, expectedHash, now);
   }
 
-  /** Crash recovery for an incomplete `supersede-decision` operation. */
+  /**
+   * #67: supersede with a decision that already exists (an accepted update Review Item), through the same
+   * recoverable operation. Both links are set: the old decision first (guarded, with any other proposed
+   * `changes` and `body`), then the successor's `supersedes_decision_id`. The successor is checked first, so a
+   * deleted, archived or no-longer-active one writes nothing. Idempotent once both links are in place.
+   */
+  async supersedeWith(id: string, successorId: string, expectedHash: string, old: SupersededWrite = {}) {
+    const current = this.ctx.required(id, "decision");
+    const successor = this.ctx.index.get(successorId);
+    const linked = current.frontmatter.superseded_by_decision_id === successorId;
+    if (linked && successor?.frontmatter.supersedes_decision_id === id) return { decision: successor, superseded: current };
+    if (!linked) this.supersedable(id, expectedHash);
+    const problem = successorProblem(id, successorId, successor);
+    if (problem) throw new Error(problem);
+    const now = new Date().toISOString();
+    const operationId = uuidV7();
+    await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, successorId, ...old }, operationId);
+    return this.finishSupersede(operationId, id, { successorId, ...old }, expectedHash, now);
+  }
+
+  /** The old decision, if it may be superseded with this hash; throws the reason otherwise. */
+  private supersedable(id: string, expectedHash: string) {
+    const old = this.ctx.required(id, "decision");
+    if (old.frontmatter.status === "superseded") throw new Error(`This decision is already superseded${typeof old.frontmatter.superseded_by_decision_id === "string" ? ` by ${old.frontmatter.superseded_by_decision_id}` : ""}`);
+    if (old.frontmatter.status !== "active") throw new Error(`Only active decisions can be superseded; this one is ${String(old.frontmatter.status)}`);
+    if (old.contentHash !== expectedHash) throw new ObjectConflictError(`Decision changed since it was opened: ${old.relativePath}`);
+    return old;
+  }
+
+  /** Crash recovery for an incomplete `supersede-decision` operation (a new successor, or an existing one, #67). */
   async recoverSupersede(operation: { id: string; payload: Record<string, unknown> }) {
     await this.ctx.rebuildIndex();
-    const { oldId, decision } = operation.payload as { oldId: string; decision: PreparedDecision };
+    const { oldId, decision, successorId, changes, body } = operation.payload as { oldId: string; decision?: PreparedDecision; successorId?: string } & SupersededWrite;
+    const newId = successorId ?? decision!.frontmatter.id;
     const old = this.ctx.index.get(oldId);
-    // The old decision moved on some other way: nothing safe to finish, so close the operation.
-    if (!old || (old.frontmatter.status !== "active" && old.frontmatter.superseded_by_decision_id !== decision.frontmatter.id)) {
+    // The old decision moved on some other way, or an existing successor stopped being a valid one before
+    // the old decision was written: nothing safe to finish, so close the operation.
+    if (!old || (old.frontmatter.status !== "active" && old.frontmatter.superseded_by_decision_id !== newId)
+      || (successorId && old.frontmatter.status === "active" && successorProblem(oldId, successorId, this.ctx.index.get(successorId)))) {
       await this.ctx.objects.completeOperation?.(operation.id);
       return undefined;
     }
-    return this.finishSupersede(operation.id, oldId, decision, old.contentHash, new Date().toISOString());
+    const next = successorId ? { successorId, changes, body } : { decision: decision! };
+    return this.finishSupersede(operation.id, oldId, next, old.contentHash, new Date().toISOString());
   }
 
-  private async finishSupersede(operationId: string, oldId: string, prepared: PreparedDecision, expectedHash: string, now: string) {
-    const newId = prepared.frontmatter.id;
+  private async finishSupersede(operationId: string, oldId: string, next: { decision: PreparedDecision } | ({ successorId: string } & SupersededWrite), expectedHash: string, now: string) {
+    const newId = "decision" in next ? next.decision.frontmatter.id : next.successorId;
     let old = this.ctx.required(oldId, "decision");
     if (old.frontmatter.status === "active") {
+      const extra: SupersededWrite = "decision" in next ? {} : next;
       try {
-        old = await this.ctx.update(old, { status: "superseded", superseded_by_decision_id: newId }, { expectedHash, now });
+        old = await this.ctx.update(old, { ...extra.changes, status: "superseded", superseded_by_decision_id: newId }, { expectedHash, now, ...(extra.body !== undefined ? { body: extra.body } : {}) });
       } catch (error) {
         // Nothing was written: drop the operation so recovery cannot replay it without the user's guard.
         await this.ctx.objects.completeOperation?.(operationId);
         throw error;
       }
     }
-    const decision = this.ctx.index.get(newId) ?? await this.ctx.objects.write(prepared);
+    const decision = "decision" in next ? this.ctx.index.get(newId) ?? await this.ctx.objects.write(next.decision) : await this.linkBack(newId, oldId, now);
     await this.ctx.writeAudit("decision.superseded", oldId, now, { superseded_by_decision_id: newId });
     await this.ctx.objects.completeOperation?.(operationId);
     await this.ctx.rebuildIndex();
     return { decision, superseded: old };
+  }
+
+  /** Points an existing successor back at the decision it replaces, unless it already does. */
+  private async linkBack(successorId: string, oldId: string, now: string) {
+    const successor = this.ctx.required(successorId, "decision");
+    if (successor.frontmatter.supersedes_decision_id === oldId) return successor;
+    return this.ctx.update(successor, { supersedes_decision_id: oldId }, { expectedHash: successor.contentHash, now });
   }
 
   private all() {
