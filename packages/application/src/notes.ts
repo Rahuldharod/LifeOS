@@ -1,5 +1,6 @@
 import type { ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, type AppContext } from "./context.js";
+import { isLive, sameValue } from "./support.js";
 
 const noteTypes = ["meeting-note", "knowledge-note"];
 
@@ -9,7 +10,7 @@ export class NotesModule {
 
   notes() {
     return this.ctx.index.all()
-      .filter((object) => noteTypes.includes(object.frontmatter.type) && !object.frontmatter.deleted_at && !object.frontmatter.archived_at)
+      .filter((object) => noteTypes.includes(object.frontmatter.type) && isLive(object))
       .sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at));
   }
 
@@ -83,7 +84,7 @@ export class NotesModule {
       people.forEach((personId) => live(personId, "person", "Person"));
       selected.people_ids = people;
     }
-    const unchanged = Object.entries(selected).every(([key, value]) => JSON.stringify(current.frontmatter[key] ?? null) === JSON.stringify(value ?? null));
+    const unchanged = Object.entries(selected).every(([key, value]) => sameValue(current.frontmatter[key], value));
     if (unchanged) return current;
     const now = new Date().toISOString();
     const updated = await this.ctx.update(current, selected, { expectedHash, now });

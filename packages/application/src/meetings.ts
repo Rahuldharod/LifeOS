@@ -2,7 +2,7 @@ import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
 import { operationKinds, type CalendarEvent } from "./ports.js";
-import { OneAtATime } from "./support.js";
+import { isLive, OneAtATime } from "./support.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
 
@@ -196,12 +196,11 @@ export class MeetingsModule {
    * also holds real text is reported for a manual merge and never archived automatically.
    */
   async reconcileDuplicateMeetings(options: { apply: boolean }) {
-    const live = (object: LifeOSObject) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
     const all = this.ctx.index.all();
     const notesOf = (meeting: LifeOSObject) => all.filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.archived_at);
     const realText = (note: LifeOSObject) => note.body.trim() !== "" && note.body !== DEFAULT_NOTE_BODY && note.body.trim() !== DEFAULT_NOTE_BODY.trim() ? note.body.trim().length : 0;
     const groups = new Map<string, LifeOSObject[]>();
-    for (const meeting of all.filter((object) => object.frontmatter.type === "meeting" && live(object))) {
+    for (const meeting of all.filter((object) => object.frontmatter.type === "meeting" && isLive(object))) {
       const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<Record<string, unknown>> : [];
       for (const ref of refs) {
         if (typeof ref?.external_id !== "string") continue;
@@ -259,7 +258,7 @@ export class MeetingsModule {
    * refs written before calendar_id or provider were recorded match on the fields they have. */
   private findMeetingForEvent(externalId: string, calendarId?: string) {
     const provider = this.ctx.calendar?.provider;
-    return this.ctx.index.all().find((object) => object.frontmatter.type === "meeting" && !object.frontmatter.deleted_at && !object.frontmatter.archived_at &&
+    return this.ctx.index.all().find((object) => object.frontmatter.type === "meeting" && isLive(object) &&
       Array.isArray(object.frontmatter.external_refs) &&
       object.frontmatter.external_refs.some((reference: unknown) => {
         if (typeof reference !== "object" || reference === null) return false;

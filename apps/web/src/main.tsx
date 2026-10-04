@@ -28,7 +28,8 @@ import { awaitingAdoptionLabel } from "./todayPanels.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
 import { reviewInFlight } from "./reviewInFlight.js";
-import { formatDate, formatTime } from "./dateFormat.js";
+import { displayTimeZone as storedDisplayTimeZone, formatDate, formatTime } from "./dateFormat.js";
+import { contextLinkFields } from "@lifeos/shared";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, type Today, type TodayPanels } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
@@ -83,7 +84,7 @@ const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open
 
 function formatEventDate(event: Event) {
   if (!event.isAllDay) return formatDate(event.startsAt);
-  const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timeZone = storedDisplayTimeZone();
   const safeMidday = `${event.startsAt.slice(0, 10)}T12:00:00.000Z`;
   return `${new Date(safeMidday).toLocaleDateString([], { dateStyle: "medium", timeZone })} · All day`;
 }
@@ -205,9 +206,9 @@ type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Arra
 type ReviewEdits = Record<string, string | null>;
 /** Which proposal fields the user may edit before accepting, per target type (#34). */
 const reviewEditable: Record<string, string[]> = {
-  task: ["owner_person_id", "due_on", "priority", "primary_project_id", "primary_client_id", "primary_product_id"],
-  decision: ["primary_project_id", "primary_client_id", "primary_product_id"],
-  "open-point": ["owner_person_id", "primary_project_id", "primary_client_id", "primary_product_id"]
+  task: ["owner_person_id", "due_on", "priority", ...contextLinkFields],
+  decision: [...contextLinkFields],
+  "open-point": ["owner_person_id", ...contextLinkFields]
 };
 
 /**
@@ -356,8 +357,8 @@ function App() {
   const [calendarError, setCalendarError] = useState<string>();
   const [connectionSettings, setConnectionSettings] = useState<ConnectionSettings>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
-  const [displayTimeZone, setDisplayTimeZone] = useState(() => localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone));
+  const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
+  const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), storedDisplayTimeZone()));
   const [calendarFilter, setCalendarFilter] = useState("all");
   const [calendarSources, setCalendarSources] = useState<Record<string, { name: string; color?: string }>>({});
   // Every calendar the account can view; empty until loaded, or when the calendar connection is unavailable.

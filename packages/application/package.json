@@ -1,1 +1,1 @@
-{"name":"@lifeos/application","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lifeos/domain":"workspace:*"}}
+{"name":"@lifeos/application","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lifeos/domain":"workspace:*","@lifeos/shared":"workspace:*"}}
