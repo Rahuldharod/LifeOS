@@ -30,20 +30,50 @@ function hash(content: string) {
   return createHash("sha256").update(content).digest("hex");
 }
 
+/** A file in the data root that is not a valid object. The message is the System Health diagnostic (U2). */
+export class InvalidObjectFileError extends Error {
+  override name = "InvalidObjectFileError";
+}
+
+/** "field: reason" for each schema issue, so the user can see what to fix. */
+function schemaReasons(error: unknown) {
+  const issues = (error as { issues?: Array<{ path: PropertyKey[]; message: string }> }).issues;
+  if (!Array.isArray(issues)) return error instanceof Error ? error.message : "invalid front matter";
+  return issues.map((issue) => `${issue.path.map(String).join(".") || "front matter"}: ${issue.message}`).join("; ");
+}
+
 function decode(content: string, relativePath: string): LifeOSObject {
+  if (!content.trim()) throw new InvalidObjectFileError(`${relativePath}: empty file`);
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) throw new Error(`${relativePath}: missing YAML front matter`);
-  const frontmatter = validateFrontmatter(parse(match[1] ?? ""));
+  if (!match) throw new InvalidObjectFileError(`${relativePath}: missing YAML front matter`);
+  let raw: unknown;
+  try { raw = parse(match[1] ?? ""); }
+  catch (error) { throw new InvalidObjectFileError(`${relativePath}: invalid YAML front matter (${(error instanceof Error ? error.message : String(error)).split("\n")[0]})`); }
+  const id = raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? ` (id ${(raw as { id: string }).id})` : "";
+  let frontmatter: ObjectEnvelope;
+  try { frontmatter = validateFrontmatter(raw); }
+  catch (error) { throw new InvalidObjectFileError(`${relativePath}${id}: invalid front matter (${schemaReasons(error)})`); }
   return { frontmatter, body: match[2] ?? "", relativePath, contentHash: hash(content) };
 }
 
-async function markdownFiles(root: string, current = root): Promise<string[]> {
-  const entries = await readdir(current, { withFileTypes: true });
+function unreadableReason(error: unknown) {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EACCES" || code === "EPERM" ? "permission denied" : error instanceof Error ? error.message : String(error);
+}
+
+async function markdownFiles(root: string, diagnostics: string[], current = root): Promise<string[]> {
+  let entries;
+  try { entries = await readdir(current, { withFileTypes: true }); }
+  catch (error) {
+    if (current === root) throw error;
+    diagnostics.push(`${path.relative(root, current)}/: unreadable folder (${unreadableReason(error)})`);
+    return [];
+  }
   const found: string[] = [];
   for (const entry of entries) {
     if (entry.name === ".lifeos") continue;
     const full = path.join(current, entry.name);
-    if (entry.isDirectory()) found.push(...await markdownFiles(root, full));
+    if (entry.isDirectory()) found.push(...await markdownFiles(root, diagnostics, full));
     else if (entry.isFile() && entry.name.endsWith(".md")) found.push(path.relative(root, full));
   }
   return found;
@@ -70,15 +100,18 @@ export class MarkdownObjectStore implements ObjectStore {
   }
 
   async scan() {
-    const files = await markdownFiles(this.root).catch((error: Error) => {
+    const diagnostics: string[] = [];
+    const files = await markdownFiles(this.root, diagnostics).catch((error: Error) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
     });
     const result: LifeOSObject[] = [];
-    const diagnostics: string[] = [];
     for (const relativePath of files) {
+      let content: string;
+      try { content = await readFile(this.safePath(relativePath), "utf8"); }
+      catch (error) { diagnostics.push(`${relativePath}: unreadable (${unreadableReason(error)})`); continue; }
       try {
-        const object = await this.read(relativePath);
+        const object = decode(content, relativePath);
         result.push(object);
         diagnostics.push(...await this.imageDiagnostics(object));
       }

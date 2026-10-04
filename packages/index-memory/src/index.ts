@@ -32,7 +32,8 @@ export class MemoryIndex implements IndexStore {
   private validateGraph() {
     const all = [...this.objects.values()];
     const selfPeople = all.filter((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true);
-    if (selfPeople.length > 1) this.issues.push(`Multiple self people configured: ${selfPeople.map((person) => person.frontmatter.id).join(", ")}`);
+    const located = (id: string) => `${this.objects.get(id)?.relativePath ?? "?"} (id ${id})`;
+    if (selfPeople.length > 1) this.issues.push(`Multiple self people configured: ${selfPeople.map((person) => located(person.frontmatter.id)).join(", ")}`);
 
     const notesByMeeting = new Map<string, string[]>();
     for (const object of all) {
@@ -44,7 +45,7 @@ export class MemoryIndex implements IndexStore {
       this.validateReferences(object);
     }
     for (const [meetingId, noteIds] of notesByMeeting) {
-      if (noteIds.length > 1) this.issues.push(`Meeting ${meetingId} has multiple canonical notes: ${noteIds.join(", ")}`);
+      if (noteIds.length > 1) this.issues.push(`Meeting ${meetingId} has multiple canonical notes: ${noteIds.map(located).join(", ")}`);
     }
     const externalRefs = new Map<string, string>();
     // Archived objects (e.g. a reconciled duplicate meeting, PB-004) no longer claim their external id.
@@ -56,7 +57,7 @@ export class MemoryIndex implements IndexStore {
         if (typeof reference.provider !== "string" || typeof reference.external_id !== "string") continue;
         const key = `${reference.provider}:${reference.external_id}`;
         const prior = externalRefs.get(key);
-        if (prior && prior !== object.frontmatter.id) this.issues.push(`Duplicate external reference ${key}: ${prior}, ${object.frontmatter.id}`);
+        if (prior && prior !== object.frontmatter.id) this.issues.push(`Duplicate external reference ${key}: ${located(prior)}, ${located(object.frontmatter.id)}`);
         else externalRefs.set(key, object.frontmatter.id);
       }
     }
@@ -86,11 +87,11 @@ export class MemoryIndex implements IndexStore {
   private validateReference(source: LifeOSObject, field: string, targetId: string, expectedType?: string) {
     const target = this.objects.get(targetId);
     if (!target) {
-      this.issues.push(`${source.relativePath}: ${field} references missing object ${targetId}`);
+      this.issues.push(`${source.relativePath} (id ${source.frontmatter.id}): ${field} references missing object ${targetId}`);
       return;
     }
     if (expectedType && target.frontmatter.type !== expectedType) {
-      this.issues.push(`${source.relativePath}: ${field} expects ${expectedType}, found ${target.frontmatter.type}`);
+      this.issues.push(`${source.relativePath} (id ${source.frontmatter.id}): ${field} expects ${expectedType}, found ${target.frontmatter.type} (${target.relativePath})`);
     }
   }
 }
