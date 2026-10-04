@@ -374,6 +374,8 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .link-candidates label { display: flex; align-items: center; gap: 8px; }
 .review-card .link-candidates input { width: auto; margin: 0; padding: 0; }
 .review-error { margin: 0 0 12px; color: #954b38; font-weight: 750; }
+.unproven-formatting { margin: 0; padding: 8px 14px; border-top: 1px solid #e3e1d8; background: #fff7e0; color: #5c4a12; font-size: 13px; }
+.unproven-formatting strong { display: inline; margin: 0 6px 0 0; font: inherit; font-weight: 700; color: inherit; }
 /* #86: Mark restricted / Mark normal on Decisions, Open Points and meetings. */
 .sensitivity-control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12px; }
 .sensitivity-control small { color: #77827d; }
