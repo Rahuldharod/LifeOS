@@ -1,5 +1,6 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
+import { decisionPeopleIds } from "./decisions.js";
 
 export type EntityType = "task" | "project" | "client" | "product" | "person";
 
@@ -120,7 +121,9 @@ export class EntitiesModule {
     const field = type === "client" ? "primary_client_id" : type === "product" ? "primary_product_id" : "owner_person_id";
     return this.entities(type).map((entity) => ({
       entity,
-      related: this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && (object.frontmatter[field] === entity.frontmatter.id || (Array.isArray(object.frontmatter.attendee_ids) && object.frontmatter.attendee_ids.includes(entity.frontmatter.id))))
+      related: this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && (object.frontmatter[field] === entity.frontmatter.id || (Array.isArray(object.frontmatter.attendee_ids) && object.frontmatter.attendee_ids.includes(entity.frontmatter.id))
+        // #41: a decision concerns its linked people and its source meeting's attendees, as in the Decisions person filter.
+        || (type === "person" && object.frontmatter.type === "decision" && decisionPeopleIds(this.ctx, object).includes(entity.frontmatter.id))))
     }));
   }
 

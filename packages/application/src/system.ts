@@ -1,11 +1,12 @@
 import { sensitivities, sensitivityOf, type Sensitivity } from "@lifeos/domain";
 import type { AppContext } from "./context.js";
+import type { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { ReviewModule } from "./review.js";
 
 /** Index, health, crash recovery and generic object access. */
 export class SystemModule {
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule) {}
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly decisions: DecisionsModule) {}
 
   rebuildIndex() {
     return this.ctx.rebuildIndex();
@@ -25,6 +26,9 @@ export class SystemModule {
         recovered.push(operation.id);
       } else if (operation.kind === "create-meeting" && typeof operation.payload.externalId === "string" && this.ctx.calendar) {
         await this.meetings.createMeetingFromEvent(operation.payload.externalId);
+        recovered.push(operation.id);
+      } else if (operation.kind === "supersede-decision") {
+        await this.decisions.recoverSupersede(operation);
         recovered.push(operation.id);
       }
     }

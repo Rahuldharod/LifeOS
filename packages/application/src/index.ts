@@ -1,6 +1,7 @@
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
+import { DecisionsModule, type DecisionFilters } from "./decisions.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
@@ -10,6 +11,7 @@ import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./p
 import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
 
+export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { ExternalChange } from "./history.js";
 export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, ObjectStore, SecretStore } from "./ports.js";
 
@@ -26,13 +28,15 @@ export class LifeOSApplication {
   private readonly review: ReviewModule;
   private readonly capture: CaptureModule;
   private readonly history: HistoryModule;
+  private readonly decisionsModule: DecisionsModule;
 
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development") {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.meetings = new MeetingsModule(ctx);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
-    this.system = new SystemModule(ctx, this.meetings, this.review);
+    this.decisionsModule = new DecisionsModule(ctx);
+    this.system = new SystemModule(ctx, this.meetings, this.review, this.decisionsModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
@@ -69,6 +73,13 @@ export class LifeOSApplication {
   today() { return this.entitiesModule.today(); }
   rollups(type: "client" | "product" | "person") { return this.entitiesModule.rollups(type); }
   projects() { return this.entitiesModule.projects(); }
+
+  // Decisions (#41)
+  decisions(filters: DecisionFilters = {}) { return this.decisionsModule.decisions(filters); }
+  decision(id: string) { return this.decisionsModule.decision(id); }
+  createDecision(fields: Record<string, unknown>) { return this.decisionsModule.createDecision(fields); }
+  updateDecision(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.decisionsModule.updateDecision(id, fields, expectedHash); }
+  supersedeDecision(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.decisionsModule.supersedeDecision(id, fields, expectedHash); }
 
   // Calendar
   listCalendarEvents(from?: Date, to?: Date) { return this.calendarModule.listCalendarEvents(from, to); }
