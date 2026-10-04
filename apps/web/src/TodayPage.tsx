@@ -7,6 +7,7 @@ import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import type { TodaySettings } from "./SettingsPage.js";
 import { awaitingAdoptionLabel, daysBetween } from "./todayPanels.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
+import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
 import { CappedRows, GiveUpRow, LivePanel, WaitingGroupRow, type WaitingGroup } from "./TodayLists.js";
 
 type LifeObject = { frontmatter: Record<string, unknown> & { id: string; title: string; type: string; status?: string; revision: number; created_at: string; updated_at: string }; body: string; relativePath: string; contentHash: string };
@@ -25,19 +26,22 @@ export type TodayPanels = {
   staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }>; settings: TodaySettings;
   /** #76: present while the user's own email addresses or the internal domains are unset. */
   setupWarning?: SetupWarning;
+  /** #84: present when a backup or the off-Drive copy failed, or none succeeded in 26 hours. */
+  backupWarning?: BackupWarningState;
 };
 export type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
 
 type Props = {
   today: Today; panels?: TodayPanels; enrichment: EnrichmentStatus; eventCount: number; capture: string; busy: boolean; readOnly: boolean;
   onCaptureChange: (text: string) => void; onCapture: () => void; onReplan: () => Promise<void>; onChangeFocus: (change: FocusChange) => Promise<void>;
-  onEnrich: () => Promise<void>; onGiveUp: (meetingId: string) => Promise<boolean>; onOpenInbox: () => void; onOpenSettingsCard: (cardId: string) => void;
+  onEnrich: () => Promise<void>; onGiveUp: (meetingId: string) => Promise<boolean>; onOpenInbox: () => void; onOpenSettingsCard: (cardId: string) => void; onBackUpNow: () => void;
 };
 
-export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, capture, busy, readOnly, onCaptureChange, onCapture, onReplan, onChangeFocus, onEnrich, onGiveUp, onOpenInbox, onOpenSettingsCard }: Props) {
+export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, capture, busy, readOnly, onCaptureChange, onCapture, onReplan, onChangeFocus, onEnrich, onGiveUp, onOpenInbox, onOpenSettingsCard, onBackUpNow }: Props) {
   return <>
     <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
     <SelfEmailWarning warning={todayPanels?.setupWarning} onOpenSettings={onOpenSettingsCard} />
+    <BackupWarning warning={todayPanels?.backupWarning} disabled={busy || readOnly} onBackUpNow={onBackUpNow} />
     <div className="summary">
       <Summary label="Active tasks" value={today.tasks.length} detail="across all contexts" />
       <Summary label="Review inbox" value={today.reviewCount} detail="awaiting confirmation" />

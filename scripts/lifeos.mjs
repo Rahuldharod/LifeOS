@@ -84,15 +84,15 @@ async function start() {
 async function stop() {
   const pid = runningPid();
   if (!pid) { rmSync(pidFile, { force: true }); console.log("LifeOS is not running."); return true; }
-  // SIGTERM lets the server release its device lease before exiting.
+  // SIGTERM lets the server take its clean-stop backup (#84) and release its device lease before exiting.
   process.kill(pid, "SIGTERM");
-  for (let waited = 0; waited < 10_000; waited += 250) {
+  for (let waited = 0; waited < 60_000; waited += 250) {
     if (!runningPid()) { rmSync(pidFile, { force: true }); console.log("LifeOS stopped."); return true; }
     await sleep(250);
   }
   process.kill(pid, "SIGKILL");
   rmSync(pidFile, { force: true });
-  console.log("LifeOS did not stop in 10 seconds and was force-stopped.");
+  console.log("LifeOS did not stop in 60 seconds and was force-stopped.");
   return true;
 }
 

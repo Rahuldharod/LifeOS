@@ -1,5 +1,6 @@
 import { AdoptionModule, type AutoAdoptionOptions } from "./adoption.js";
 import { AgentIndexModule, type AgentIndexOptions } from "./agent-index.js";
+import { BackupModule, type AutoBackupOptions, type BackupService } from "./backups.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
@@ -40,6 +41,7 @@ export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySe
 export { defaultTodaySettings, weekdays } from "./today.js";
 export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
 export type { AgentIndexOptions, AgentIndexStatus } from "./agent-index.js";
+export type { AutoBackupOptions, AutoBackups, BackupService, BackupSettings, BackupStatus, BackupSummary, BackupTrigger, BackupWarning, BackupWarningKind } from "./backups.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -63,6 +65,7 @@ export class LifeOSApplication {
   private readonly focus: DailyFocusModule;
   private readonly agentIndex: AgentIndexModule;
   private readonly todayModule: TodayModule;
+  private readonly backups: BackupModule;
 
   /**
    * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
@@ -89,6 +92,7 @@ export class LifeOSApplication {
     const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone };
     this.agentIndex = new AgentIndexModule(ctx, this.decisionsModule, this.adoption, inbox, agentIndex, agentIndexOptions);
     ctx.onRebuild = () => this.agentIndex.schedule();
+    this.backups = new BackupModule(ctx);
   }
 
   // System
@@ -221,4 +225,9 @@ export class LifeOSApplication {
   // Patch Drafts: applied by adoption; listed and undone here
   appliedPatches() { return this.patches.appliedPatches(); }
   undoPatch(auditEventId: string) { return this.patches.undoPatch(auditEventId); }
+
+  // Backups (#84, ADR 0004): automatic at start, clean stop and daily; a weekly off-Drive copy; a warning on failure
+  startAutoBackups(service: BackupService, options?: AutoBackupOptions) { return this.backups.start(service, options); }
+  getBackupSettings() { return this.backups.settings(); }
+  saveBackupSettings(input: { offDriveFolder?: unknown }, expectedHash?: string) { return this.backups.saveSettings(input, expectedHash); }
 }
