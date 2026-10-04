@@ -8,6 +8,7 @@ export type EntityType = "task" | "project" | "client" | "product" | "person";
 const entityTypes: EntityType[] = ["task", "project", "client", "product", "person"];
 /** Envelope fields the user may set on any entity (#30). `origin` is deliberately absent: it is fixed at creation. */
 const envelopeFields = ["area", "sensitivity"];
+const dueDate = (task: LifeOSObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
 
 /** Tasks, projects, clients, products and people: CRUD, the Today view and rollups. */
 export class EntitiesModule {
@@ -103,11 +104,6 @@ export class EntitiesModule {
   today(date?: string) {
     const active = this.entities("task").filter((object) => !["Done", "Cancelled"].includes(String(object.frontmatter.status)));
     const today = date ?? new Date().toISOString().slice(0, 10);
-    const dueDate = (task: LifeOSObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
-    const ranked = [...active].sort((a, b) => {
-      const priority = (value: unknown) => value === "High" ? 0 : value === "Medium" ? 1 : value === "Low" ? 2 : 3;
-      return priority(a.frontmatter.priority) - priority(b.frontmatter.priority) || String(dueDate(a) ?? "9999").localeCompare(String(dueDate(b) ?? "9999"));
-    });
     return {
       tasks: active,
       overdue: active.filter((task) => Boolean(dueDate(task) && dueDate(task)! < today)),
@@ -115,9 +111,22 @@ export class EntitiesModule {
       upcoming: active.filter((task) => Boolean(dueDate(task) && dueDate(task)! > today)).sort((a, b) => String(dueDate(a)).localeCompare(String(dueDate(b)))),
       waiting: active.filter((task) => task.frontmatter.status === "Waiting"),
       // Restricted tasks are never Daily Focus inputs (ADR 0010), so the deterministic Top 3 skips them too.
-      topThree: ranked.filter((task) => task.frontmatter.sensitivity !== "restricted").slice(0, 3).map((task) => ({ task, reason: dueDate(task) && dueDate(task)! <= today ? "Due or overdue" : task.frontmatter.priority ? `${task.frontmatter.priority} priority` : "Active commitment" })),
+      topThree: this.ruleCandidates(today).slice(0, 3),
       reviewCount: this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.status === "pending").length
     };
+  }
+
+  /**
+   * The deterministic Top 3 rule, as a full ranking: active tasks by priority, then due date, each with
+   * its visible reason. #47 takes as many as the max must-dos allows, skipping dismissed ones.
+   * Restricted tasks are never Daily Focus inputs (ADR 0010), so the rule skips them too.
+   */
+  ruleCandidates(today: string) {
+    const ranked = this.entities("task").filter((task) => !["Done", "Cancelled"].includes(String(task.frontmatter.status)) && task.frontmatter.sensitivity !== "restricted").sort((a, b) => {
+      const priority = (value: unknown) => value === "High" ? 0 : value === "Medium" ? 1 : value === "Low" ? 2 : 3;
+      return priority(a.frontmatter.priority) - priority(b.frontmatter.priority) || String(dueDate(a) ?? "9999").localeCompare(String(dueDate(b) ?? "9999"));
+    });
+    return ranked.map((task) => ({ task, reason: dueDate(task) && dueDate(task)! <= today ? "Due or overdue" : task.frontmatter.priority ? `${task.frontmatter.priority} priority` : "Active commitment" }));
   }
 
   rollups(type: "client" | "product" | "person") {

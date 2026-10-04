@@ -347,3 +347,10 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .focus-item.past b, .focus-item.missing b { color: #758078; }
 .focus-item.missing b { font-style: italic; }
 .focus-narrative { margin-top: 18px; white-space: pre-wrap; color: #3d4a44; }
+/* #47 Focus Overrides: controls on each Top 3 row; "Pinned" and "Replaces" are written in the row text. */
+.top-three .object-row > div:nth-child(2) { flex: 1; }
+.focus-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+.focus-replace, .focus-pin { margin: 8px 0; }
+.focus-dismissed { margin-top: 10px; }
+.focus-dismissed .object-row { align-items: center; padding: 8px 0; }
+.focus-dismissed .object-row > div { flex: 1; color: #758078; }

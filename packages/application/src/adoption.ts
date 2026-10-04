@@ -159,7 +159,7 @@ export function webUrl(value: unknown) {
   try { const url = new URL(text(value)); return ["http:", "https:"].includes(url.protocol) ? url.href : undefined; } catch { return undefined; }
 }
 const looksLikeUrl = (value: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
-export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 
 /** The Review Item body for a proposal: its title, then the Agent's narrative as written. */
 export function proposalBody(title: string, narrative?: unknown) {

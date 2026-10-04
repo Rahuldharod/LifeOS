@@ -54,8 +54,9 @@ type Workspace = {
   tasks: LifeObject[];
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
-type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string };
-type DailyFocus = { date: string; brief?: { id: string; title: string; path: string; generatedAt: string; body: string }; iOwe: FocusItem[]; top3: FocusItem[]; top3Source: "brief" | "rule"; waitingAndDecisions: FocusItem[]; meetingPrep: FocusItem[]; dayShape?: { meetingHours: number; freeHours: number }; deferCandidates: FocusItem[]; restrictedHidden: number };
+type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
+type FocusChange = { action: "pin" | "unpin" | "replace" | "dismiss" | "restore" | "reset"; taskId?: string; replacementId?: string };
+type DailyFocus = { date: string; brief?: { id: string; title: string; path: string; generatedAt: string; body: string }; iOwe: FocusItem[]; top3: FocusItem[]; top3Source: "brief" | "rule"; maxMustDos: number; override?: { contentHash: string }; dismissedTop3: FocusItem[]; waitingAndDecisions: FocusItem[]; meetingPrep: FocusItem[]; dayShape?: { meetingHours: number; freeHours: number }; deferCandidates: FocusItem[]; restrictedHidden: number };
 type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[]; upcoming: LifeObject[]; waiting: LifeObject[]; topThree: Array<{ task: LifeObject; reason: string }>; reviewCount: number; focus?: DailyFocus };
 type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
@@ -337,6 +338,7 @@ function App() {
   // #39: short, unambiguous names; recomputed by the server on every load.
   const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
   const [internalDomains, setInternalDomains] = useState<{ domains: string[]; contentHash?: string }>();
+  const [focusSettings, setFocusSettings] = useState<{ maxMustDos: number; contentHash?: string }>();
   const [reviews, setReviews] = useState<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>([]);
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
   const [notes, setNotes] = useState<LifeObject[]>([]);
@@ -758,6 +760,34 @@ function App() {
     finally { setBusy(false); }
   };
 
+  // #47: pin, replace, dismiss (and undo) on today's Top 3; saved to the app-owned Focus Override with the hash we last saw.
+  const changeFocus = async (change: FocusChange) => {
+    const focus = today.focus;
+    if (!focus) return;
+    setBusy(true);
+    try {
+      const next = await api<DailyFocus>("/api/v1/focus/overrides", { method: "POST", body: JSON.stringify({ date: focus.date, ...change, expectedHash: focus.override?.contentHash }) });
+      setToday((current) => ({ ...current, focus: next }));
+      setMessage({ pin: "Pinned to today's Top 3", unpin: "Unpinned", replace: "Replaced in today's Top 3", dismiss: "Dismissed for today", restore: "Restored to today's Top 3", reset: "Your Top 3 changes for today were cleared" }[change.action]);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) { await loadCollections(); setMessage("Today's Top 3 was changed on another device. The latest is loaded; make your change again."); }
+      else setMessage(error instanceof Error ? error.message : "Could not change the Top 3");
+    } finally { setBusy(false); }
+  };
+
+  const loadFocusSettings = async () => setFocusSettings(await api<{ maxMustDos: number; contentHash?: string }>("/api/v1/settings/daily-focus").catch(() => undefined));
+  /** #47: saves the synced max must-dos setting; resolves to an error message, or undefined on success. */
+  const saveFocusSettings = async (maxMustDos: number): Promise<string | undefined> => {
+    try {
+      setFocusSettings(await api<{ maxMustDos: number; contentHash?: string }>("/api/v1/settings/daily-focus", { method: "PUT", body: JSON.stringify({ maxMustDos, expectedHash: focusSettings?.contentHash }) }));
+      await loadCollections();
+      return undefined;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) { await loadFocusSettings(); return "The setting was changed on another device. The latest version is loaded; make your change again."; }
+      return error instanceof Error ? error.message : "Could not save the setting";
+    }
+  };
+
   const giveUpEnrichment = (meetingId: string) => run(async () => {
     const meeting = objectLinks.find((object) => object.frontmatter.id === meetingId);
     if (!meeting) throw new Error("Meeting not found; refresh and try again");
@@ -1144,7 +1174,7 @@ function App() {
       setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
     } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
-  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); } }, [view]);
+  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); void loadFocusSettings(); } }, [view]);
 
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
@@ -1182,7 +1212,7 @@ function App() {
           <Summary label="Today's events" value={events.length} detail="across connected calendars" />
         </div>
         <article className="quick-capture"><span>QUICK CAPTURE</span><div className="capture-row"><input value={capture} onChange={(event) => setCapture(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) submitCapture(); }} placeholder="Capture a task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={submitCapture}>Capture</button></div></article>
-        {today.focus ? <DailyFocusPanel focus={today.focus} disabled={busy || readOnly} onRefresh={() => void requestReplan()} />
+        {today.focus ? <DailyFocusPanel focus={today.focus} tasks={today.tasks} disabled={busy || readOnly} onRefresh={() => void requestReplan()} onChange={(change) => void changeFocus(change)} />
           : <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>}
         <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void requestEnrichment()}>Enrich last 48h</button></div>
           {enrichment.staleWorkOrders.length > 0 && <ul className="diagnostics">{enrichment.staleWorkOrders.map((order) => <li key={order.path}>Work Order not processed for {order.ageDays} days: <code>{order.path}</code></li>)}</ul>}
@@ -1383,7 +1413,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
     </section>
   </main>;
 }
@@ -1399,7 +1429,7 @@ function Summary({ label, value, detail }: { label: string; value: string | numb
  * meeting prep → day shape. Finished items are struck through (the server already sank them), past
  * meetings are marked, and deleted references show as missing. Without a brief, the rule's Top 3 shows.
  */
-function DailyFocusPanel({ focus, disabled, onRefresh }: { focus: DailyFocus; disabled: boolean; onRefresh: () => void }) {
+function DailyFocusPanel({ focus, tasks, disabled, onRefresh, onChange }: { focus: DailyFocus; tasks: LifeObject[]; disabled: boolean; onRefresh: () => void; onChange: (change: FocusChange) => void }) {
   const stateLabel = { open: "", done: "Done", cancelled: "Cancelled", past: "Past", missing: "Missing: deleted or not found" } as const;
   const row = (item: FocusItem, details: Array<string | undefined>) => <div className={`object-row focus-item ${item.state}`} key={item.id}><i /><div><b>{item.object?.frontmatter.title ?? "Missing item"}</b><small>{[stateLabel[item.state], ...details].filter(Boolean).join(" · ")}</small></div></div>;
   const section = (title: string, items: FocusItem[], details: (item: FocusItem) => Array<string | undefined>, empty: string) => <div className="focus-section"><h4>{title}</h4>{items.length ? items.map((item) => row(item, details(item))) : <p className="muted">{empty}</p>}</div>;
@@ -1408,7 +1438,7 @@ function DailyFocusPanel({ focus, disabled, onRefresh }: { focus: DailyFocus; di
     <span>DAILY FOCUS</span>
     <div className="capture-row"><p className="muted">{brief ? `Generated at ${formatTime(brief.generatedAt)}` : "No brief for today yet. Top 3 suggested by priority, then due date."}</p><button disabled={disabled} onClick={onRefresh} title="Ask Claude to re-plan today">Refresh</button></div>
     {brief && section("I owe", focus.iOwe, (item) => [item.overdue && item.state === "open" ? "Overdue" : undefined], "Nothing owed today.")}
-    {section("Top 3", focus.top3, (item) => [item.whyToday, item.ifThen], "No active commitments to rank.")}
+    <TopThreeSection focus={focus} tasks={tasks} disabled={disabled} onChange={onChange} stateLabel={stateLabel} />
     {brief && <>
       {section("Waiting and decisions", focus.waitingAndDecisions, (item) => [item.ageDays !== undefined ? `${item.ageDays} days` : undefined], "Nothing to chase.")}
       {section("Meeting prep", focus.meetingPrep, (item) => [item.object?.frontmatter.starts_at ? formatTime(item.object.frontmatter.starts_at) : undefined, item.context, item.ask ? `Your ask: ${item.ask}` : undefined], "No meetings to prepare.")}
@@ -1417,6 +1447,64 @@ function DailyFocusPanel({ focus, disabled, onRefresh }: { focus: DailyFocus; di
       {brief.body.trim() && <p className="focus-narrative">{brief.body.trim()}</p>}
     </>}
     {focus.restrictedHidden > 0 && <p className="muted">{focus.restrictedHidden} restricted {focus.restrictedHidden === 1 ? "item" : "items"} not shown.</p>}
+  </article>;
+}
+/**
+ * #47: the effective Top 3 with the user's controls. Every control is a real button or select (keyboard
+ * operable, Escape cancels a replace), and "Pinned" / "Replaces …" are written out, never shown by colour alone.
+ */
+function TopThreeSection({ focus, tasks, disabled, onChange, stateLabel }: { focus: DailyFocus; tasks: LifeObject[]; disabled: boolean; onChange: (change: FocusChange) => void; stateLabel: Record<FocusItem["state"], string> }) {
+  const [replacing, setReplacing] = useState<string>();
+  const [choice, setChoice] = useState("");
+  const [toPin, setToPin] = useState("");
+  // Open, non-restricted tasks not already shown: the candidates for Replace and Pin (the server checks again).
+  const candidates = tasks.filter((task) => task.frontmatter.sensitivity !== "restricted" && !focus.top3.some((item) => item.id === task.frontmatter.id));
+  const title = (item: FocusItem) => item.object?.frontmatter.title ?? "Missing item";
+  const cancelReplace = () => { setReplacing(undefined); setChoice(""); };
+  const options = <>{candidates.map((task) => <option key={task.frontmatter.id} value={task.frontmatter.id}>{task.frontmatter.title}</option>)}</>;
+  return <div className="focus-section top-three">
+    <h4>Top 3</h4>
+    {!focus.top3.length && <p className="muted">No active commitments to rank.</p>}
+    {focus.top3.map((item) => <div key={item.id}>
+      <div className={`object-row focus-item ${item.state}`}><i /><div><b>{title(item)}</b><small>{[item.pinned ? "Pinned" : undefined, stateLabel[item.state], item.whyToday, item.replaces ? `Replaces "${item.replaces.title}"` : undefined, item.ifThen].filter(Boolean).join(" · ")}</small></div>
+        <div className="focus-controls">
+          {item.object && <button type="button" aria-pressed={Boolean(item.pinned)} aria-label={`${item.pinned ? "Unpin" : "Pin"} ${title(item)}`} disabled={disabled} onClick={() => onChange({ action: item.pinned ? "unpin" : "pin", taskId: item.id })}>{item.pinned ? "Unpin" : "Pin"}</button>}
+          <button type="button" aria-expanded={replacing === item.id} aria-label={`Replace ${title(item)}`} disabled={disabled || !candidates.length} onClick={() => replacing === item.id ? cancelReplace() : (setReplacing(item.id), setChoice(""))}>Replace</button>
+          <button type="button" aria-label={`Dismiss ${title(item)} for today`} disabled={disabled} onClick={() => onChange({ action: "dismiss", taskId: item.id })}>Dismiss</button>
+        </div>
+      </div>
+      {replacing === item.id && <div className="capture-row focus-replace" onKeyDown={(event) => { if (event.key === "Escape") cancelReplace(); }}>
+        <select autoFocus aria-label={`Task to put in place of ${title(item)}`} value={choice} onChange={(event) => setChoice(event.target.value)}><option value="">Choose a task…</option>{options}</select>
+        <button type="button" className="primary" disabled={disabled || !choice} onClick={() => { onChange({ action: "replace", taskId: item.id, replacementId: choice }); cancelReplace(); }}>Replace</button>
+        <button type="button" onClick={cancelReplace}>Cancel</button>
+      </div>}
+    </div>)}
+    {focus.top3.length < focus.maxMustDos && candidates.length > 0 && <div className="capture-row focus-pin">
+      <select aria-label="Task to pin to today's Top 3" value={toPin} disabled={disabled} onChange={(event) => setToPin(event.target.value)}><option value="">Add a task to today's Top 3…</option>{options}</select>
+      <button type="button" disabled={disabled || !toPin} onClick={() => { onChange({ action: "pin", taskId: toPin }); setToPin(""); }}>Pin</button>
+    </div>}
+    {focus.dismissedTop3.length > 0 && <div className="focus-dismissed"><small>Dismissed for today</small>
+      {focus.dismissedTop3.map((item) => <div className="object-row" key={item.id}><div><b>{title(item)}</b></div><button type="button" aria-label={`Restore ${title(item)} to today's Top 3`} disabled={disabled} onClick={() => onChange({ action: "restore", taskId: item.id })}>Restore</button></div>)}
+    </div>}
+    {focus.override && <button type="button" className="link-button" disabled={disabled} onClick={() => onChange({ action: "reset" })}>Clear my Top 3 changes for today</button>}
+  </div>;
+}
+/** #47: the synced max must-dos setting: how many items Today's Top 3 shows. */
+function MaxMustDosCard({ setting, disabled, onSave }: { setting?: { maxMustDos: number; contentHash?: string }; disabled: boolean; onSave: (maxMustDos: number) => Promise<string | undefined> }) {
+  const [value, setValue] = useState(setting?.maxMustDos ?? 3);
+  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (setting) setValue(setting.maxMustDos); }, [setting?.maxMustDos]);
+  const save = async () => {
+    setSaving(true);
+    const error = await onSave(value);
+    setSaving(false);
+    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Today's Top 3 now shows at most this many must-dos." });
+  };
+  return <article className="internal-domains-setting"><span>TODAY</span><h3>Max must-dos</h3>
+    <p className="muted">How many items Today's Top 3 shows, whether from the morning brief or the priority rule. Pinned tasks count towards it.</p>
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><select aria-label="Max must-dos" value={value} disabled={disabled} onChange={(event) => { setValue(Number(event.target.value)); setStatus(undefined); }}>{[1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select><button type="button" disabled={disabled || saving || value === setting.maxMustDos} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
+    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
   </article>;
 }
 function Meta({ label, value }: { label: string; value: string }) {
