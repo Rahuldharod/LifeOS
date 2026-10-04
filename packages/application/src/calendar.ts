@@ -1,11 +1,26 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError as SettingsConflictError, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
-import type { CalendarPreferences } from "./ports.js";
+import type { CalendarEvent, CalendarPreferences } from "./ports.js";
+import { isLive } from "./support.js";
 
 /** An identical failed sync within this window does not write another Sync Run file (PB-022a). */
 const FAILED_SYNC_RUN_THROTTLE_MS = 60 * 60 * 1000;
 
+
+/**
+ * #88 (PB-022b): why the calendar could not be read. Matched by error name, so the application needs no adapter
+ * classes: `GoogleAuthError` (expired or revoked token), `KeychainAccessDeniedError` (#77), anything else = network.
+ */
+export type CalendarOfflineReason = "network" | "auth" | "keychain-denied";
+export interface CalendarOffline { reason: CalendarOfflineReason; error: string; lastSuccessfulSyncAt?: string }
+/** A calendar range: live events, or the meetings already stored in LifeOS while `offline` is set. */
+export interface CalendarDay { events: Array<CalendarEvent & { stored?: true }>; offline?: CalendarOffline }
+
+export function calendarOfflineReason(error: unknown): CalendarOfflineReason {
+  const name = error instanceof Error ? error.name : "";
+  return name === "GoogleAuthError" ? "auth" : name === "KeychainAccessDeniedError" ? "keychain-denied" : "network";
+}
 
 const calendarPreferencesPath = "settings/calendar-preferences.md";
 
@@ -78,6 +93,54 @@ export class CalendarModule {
       if (calendar.provider === "google") await this.writeSyncRun("failed", started, 0, error instanceof Error ? error.message : "Unknown error").catch(() => undefined);
       throw error;
     }
+  }
+
+  /**
+   * #88: the range from the calendar (`sync` records a Sync Run, as `syncCalendar`), or, when the calendar cannot be
+   * read, the meetings already stored in LifeOS for the range with the reason and the last successful sync time.
+   * The fallback only reads: no stored meeting is changed or deleted while offline.
+   */
+  async calendarDay(from = new Date(), to = new Date(Date.now() + 7 * 86_400_000), options: { sync?: boolean } = {}): Promise<CalendarDay> {
+    try {
+      return { events: options.sync ? await this.syncCalendar(from, to) : await this.listCalendarEvents(from, to) };
+    } catch (error) {
+      return { events: this.storedMeetings(from, to), offline: this.offline(error) };
+    }
+  }
+
+  /** The offline state for a failed calendar read: reason, message and last successful sync. */
+  offline(error: unknown): CalendarOffline {
+    return { reason: calendarOfflineReason(error), error: error instanceof Error ? error.message : String(error), lastSuccessfulSyncAt: this.calendarSyncStatus().lastSuccessfulSyncAt };
+  }
+
+  /** Live meetings in the index overlapping the range, shaped as calendar events, sorted by start. Read-only. */
+  storedMeetings(from: Date, to: Date): Array<CalendarEvent & { stored: true }> {
+    const { index } = this.ctx;
+    const objects = index.all();
+    return objects
+      .filter((meeting) => meeting.frontmatter.type === "meeting" && isLive(meeting) &&
+        Date.parse(String(meeting.frontmatter.ends_at)) > from.getTime() && Date.parse(String(meeting.frontmatter.starts_at)) < to.getTime())
+      .map((meeting) => {
+        const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<{ external_id?: unknown; calendar_id?: unknown }> : [];
+        const ref = refs.find((candidate) => typeof candidate === "object" && candidate !== null && typeof candidate.external_id === "string");
+        const note = objects.find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && isLive(object));
+        const attendees = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids.map((id) => index.get(String(id))?.frontmatter.title).filter((title): title is string => Boolean(title)) : [];
+        return {
+          externalId: ref ? String(ref.external_id) : meeting.frontmatter.id,
+          ...(ref && typeof ref.calendar_id === "string" ? { calendarId: ref.calendar_id } : {}),
+          title: meeting.frontmatter.title,
+          startsAt: String(meeting.frontmatter.starts_at),
+          endsAt: String(meeting.frontmatter.ends_at),
+          timezone: typeof meeting.frontmatter.timezone === "string" ? meeting.frontmatter.timezone : "UTC",
+          isAllDay: meeting.frontmatter.is_all_day === true,
+          attendees,
+          hasNote: Boolean(note),
+          meetingId: meeting.frontmatter.id,
+          ...(note ? { noteId: note.frontmatter.id } : {}),
+          stored: true as const
+        };
+      })
+      .sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
   }
 
   /** Last Google Calendar sync outcomes, derived from Sync Run files, for the reconnect banner (PB-022a). */

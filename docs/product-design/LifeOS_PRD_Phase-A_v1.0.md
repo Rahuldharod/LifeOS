@@ -276,7 +276,7 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
 - **`focus-override`** (a new app-owned type): one per date, holding pinned, replaced (old → new) and dismissed task IDs. The effective Top 3 is the brief's `top3` with overrides applied. With no brief, the existing deterministic rule (priority, then due date) applies, with its visible reason.
 - **Live overlay:** Today renders the brief using live index state. Completed or cancelled tasks are struck through and sink. Past meetings are marked. "Generated at HH:MM" is shown. Refresh writes a `replan` Work Order to `_inbox/requests/`.
 - **Live panels** stay computed by the app: overdue, due today, upcoming high priority, waiting by person, next meetings, open points linked to today's meetings, review count, drafts awaiting adoption, failed drafts, stale work orders.
-- **Settings** (synced app-setting): max must-dos (default 3), meeting-hours information threshold (default 5), brief time (default 06:00 Europe/Paris on workdays, confirmed by Rahul 2026-10-03), internal domains (no default: set in Settings → **Internal domains**, e.g. `example.com`), the user's own addresses (no default: Settings → **My email addresses**), weekly off-Drive backup folder (not built).
+- **Settings** (synced app-setting): max must-dos (default 3), meeting-hours information threshold (default 5), brief time (default 06:00 Europe/Paris on workdays, confirmed by Rahul 2026-10-03), internal domains (no default: set in Settings → **Internal domains**, e.g. `example.com`), the user's own addresses (no default: Settings → **My email addresses**), weekly off-Drive backup folder (Settings → **Off-Drive backup folder**, #84).
 - **The morning routine** (a cloud routine; a desktop scheduled task is the fallback) reads the Agent Index, calendar and pending drafts, writes the `daily-focus` draft, and sends a read-only Slack DM to self. The DM has 5 lines: Top 3, the I-owe count with the overdue count, day shape, and a path or link to the brief. The order is I owe → Top 3 → waiting/decisions → meeting prep → day shape. Restricted objects are never included. Inbox triage stays in Steve's separate brief.
 
 ### Decisions and Open Points workspace
@@ -401,15 +401,15 @@ Status of the user stories on branch `feature/phase-a-21` (head `897c0e1`). **Bu
 | 1–16 | Capture and agent writes | **Built** (app side) | Adoption, auto-adopt, name resolution, routing by origin, Knowledge Note and Source drafts (#31–#35). Phone dictation and the language rule depend on the skills pack (not built). |
 | 17–22 | Patch drafts | **Built** | Auto-apply, review routing, conflict rule, undo (#36, #37, #61, #71, #81). See *Known gaps* for undo limits. |
 | 23–27 | Agent Index | **Built** | `_agent/` files, freshness stamp, pending drafts, restricted counted only (#43, #63). |
-| 28–41 | Post-meeting enrichment | **Built** (app side) | Work Order, enrichment state, Give up, stale Work Orders, meeting-material adoption, summary between markers (#44, #45, #66). The enrichment skill is not built. |
+| 28–41 | Post-meeting enrichment | **Built** (app side) | Work Order, enrichment state (shown on the meeting page with missing and unavailable material), Give up, stale Work Orders, meeting-material adoption, summary between markers (#44, #45, #66, #87). The enrichment skill is not built. |
 | 42–44 | Review | **Built** | Editable proposals; `update`, `link-resolution` (with candidate picker), `person-merge` and `summary` types; atomic, double-click-safe accept (#57, #62). |
 | 45–57 | Today and the Daily Focus brief | **Built** (app side) | Brief with live overlay, Refresh writes a `replan` Work Order, Focus Overrides, live panels, settings (#46–#48, #64). |
 | 58–59 | Slack DM | **Not built** | Part of the morning routine (agent side). |
 | 60 | Inbox triage stays in Steve | No build needed | — |
 | 61–66 | Decisions and Open Points | **Built** | Lists, filters, create/edit, supersede, resolve/close (#41, #42, #67). |
-| 67–73 | People | **Built** | Email matching, names, labels, external marker, merge suggestions, self addresses in Settings (#38–#40, #54, #65, #76). |
+| 67–73 | People | **Built** | Email matching, names, labels, external marker, "unreviewed" marker cleared by Confirm or Save, merge suggestions, self addresses in Settings (#38–#40, #54, #65, #76, #87). |
 | 74–80 | Safety, sensitivity and data integrity | **Built** | Path diagnostics, duplicate-ID blocking, revision check, external-edit history, Origin/Sensitivity/Area, subject normalisation (#26–#30, #58, #63, #69, #72, #79, #80). |
-| 81–83 | Automatic backups, off-Drive copy, failure banner | **Not built** | Backups are still manual (System view). |
+| 81–83 | Automatic backups, off-Drive copy, failure banner | **Built** | At start, clean stop and daily; weekly checksum-verified off-Drive copy (4 kept); banner on Today and System Health (#84). |
 | 84 | Exit plan | Documented only | See *Further Notes*. |
 | 85 | macOS launcher, start at login | **Not built** | Terminal commands only (ADR 0006). |
 | 86 | Calendar offline fallback (PB-022b) | **Not built** | — |

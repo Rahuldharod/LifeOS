@@ -3,9 +3,11 @@
 // existing decision, resolve with a new decision (created and linked in one step), or close.
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
+import { HistoryLink } from "./HistoryPanel.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
+import { SensitivityToggle } from "./SensitivityToggle.js";
 
 type LifeObject = { frontmatter: Record<string, unknown> & { id: string; type: string; title: string; revision: number }; body: string; relativePath: string; contentHash: string };
 type Evidence = { field: string; sourceId: string; sourceTitle?: string; fragmentId: string; text?: string; locator?: unknown };
@@ -137,6 +139,7 @@ function OpenPointPanel({ detail, projects, clients, products, people, busy, rea
 
   return <article className="decision-detail" aria-label={`Open point: ${value.title}`}>
     <span>OPEN POINT · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
+    <HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />
     {value.status === "resolved" && <p className="decision-chain" role="note">Resolved {formatDate(value.resolved_at)}{detail.resolutionDecision ? <> by decision {link(detail.resolutionDecision)}</> : value.resolution_decision_id ? <span className="muted"> by a decision that is missing</span> : null}</p>}
     {value.status === "closed" && <p className="decision-chain" role="note">Closed {formatDate(value.closed_at)}{value.close_reason ? `: ${String(value.close_reason)}` : " (no reason given)"}</p>}
     <div className="crud-fields decision-fields">
@@ -151,8 +154,9 @@ function OpenPointPanel({ detail, projects, clients, products, people, busy, rea
       <SearchSelect label="Product" options={options(products)} value={draft.primary_product_id} disabled={locked} onChange={(next) => set("primary_product_id", next)} />
       <SearchSelect multi label="People" options={options(people)} value={draft.people_ids} disabled={locked} onChange={(next) => set("people_ids", next)} />
     </div>
+    <SensitivityToggle object={openPoint} noun="open point" disabled={locked} run={run} onChanged={() => refresh(value.id)} />
     <div className="crud-actions">
-      <EnvelopeBadges frontmatter={value} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
+      <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
       <button disabled={locked || !draft.title.trim() || (value.status === "resolved" && !draft.resolution_summary.trim() && !value.resolution_decision_id)} onClick={() => void save()}>Save changes</button>
       {isOpen && <>
         <button disabled={locked || Boolean(action)} onClick={() => setAction({ kind: "resolve", summary: "", decisionId: "" })}>Resolve…</button>

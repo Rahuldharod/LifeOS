@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { MockAiProvider } from "@lifeos/ai";
-import { LifeOSApplication, type ReviewEdits, type Weekday } from "@lifeos/application";
+import { LifeOSApplication, type AutoBackups, type ReviewEdits, type Weekday } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
@@ -48,6 +48,12 @@ const calendar = { get provider() { return (google ?? mockCalendar).provider; },
 // The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild; the watcher ignores `_agent/`.
 const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot));
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
+// #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
+let autoBackups: AutoBackups | undefined;
+const backupWarning = async () => {
+  const warning = (await autoBackups?.status().catch(() => undefined))?.warning;
+  return warning ? { backupWarning: warning } : {};
+};
 
 // The stable app serves the UI itself (same origin); only the Vite dev UI needs CORS.
 await server.register(cors, { origin: ["http://127.0.0.1:5174", "http://localhost:5174"] });
@@ -64,7 +70,7 @@ server.addHook("onResponse", async (request, reply) => {
   if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && reply.statusCode < 400 && session.status().writeAllowed) await session.touch();
 });
 
-server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh() }));
+server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), ...await backupWarning() }));
 server.post("/api/v1/session/take-over", async () => session.takeOver());
 server.get("/api/v1/objects", async () => application.listObjects());
 server.get<{ Querystring: { q?: string; state?: string } }>("/api/v1/notes", async (request, reply) => {
@@ -83,6 +89,11 @@ server.put<{ Params: { id: string }; Body: { isExternal?: boolean | null; expect
   if (isExternal !== true && isExternal !== false && isExternal !== null) return reply.status(400).send({ error: "isExternal must be true, false or null" });
   if (typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
   return application.setPersonExternal(request.params.id, isExternal, expectedHash);
+});
+// #87: the user confirms an automatically created ("unreviewed") person.
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/people/:id/reviewed", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.confirmPersonReviewed(request.params.id, request.body.expectedHash);
 });
 server.post("/api/v1/index/rebuild", async () => application.rebuildIndex());
 server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/events", async (request, reply) => {
@@ -122,6 +133,23 @@ server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/s
   const to = request.query.to ? new Date(request.query.to) : undefined;
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   return application.syncCalendar(from, to);
+});
+// #88 (PB-022b): like /calendar/events and /calendar/sync, but a calendar that cannot be read (network, expired
+// token, denied Keychain) answers 200 with the meetings already in LifeOS and an `offline` state, never an error.
+const calendarRange = (query: { from?: string; to?: string }) => {
+  const from = query.from ? new Date(query.from) : undefined;
+  const to = query.to ? new Date(query.to) : undefined;
+  return (from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to) ? undefined : { from, to };
+};
+server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/day", async (request, reply) => {
+  const range = calendarRange(request.query);
+  if (!range) return reply.status(400).send({ error: "Enter a valid calendar date range" });
+  return application.calendarDay(range.from, range.to);
+});
+server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/day/sync", async (request, reply) => {
+  const range = calendarRange(request.query);
+  if (!range) return reply.status(400).send({ error: "Enter a valid calendar date range" });
+  return application.calendarDay(range.from, range.to, { sync: true });
 });
 server.get("/api/v1/connections/google", async () => googleConnectionStatus(secrets, google, application.calendarSyncStatus()));
 server.get("/api/v1/settings/connections", async () => connectionSettings(secrets, google, application.calendarSyncStatus()));
@@ -229,7 +257,7 @@ server.get<{ Querystring: { date?: string } }>("/api/v1/today", async (request, 
 server.get<{ Querystring: { date?: string; timeZone?: string } }>("/api/v1/today/panels", async (request, reply) => {
   const { date, timeZone } = request.query;
   if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.status(400).send({ error: "date must be YYYY-MM-DD" });
-  return application.todayPanels({ date, timeZone });
+  return { ...await application.todayPanels({ date, timeZone }), ...await backupWarning() };
 });
 server.post<{ Body: { date?: string } }>("/api/v1/focus/replan", async (request, reply) => {
   if (typeof request.body?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(request.body.date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
@@ -295,8 +323,18 @@ server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v
 server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
 server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
 server.post<{ Params: { id: string } }>("/api/v1/history/:id/restore", async (request) => application.restoreVersion(request.params.id));
+// #85: one object's kept versions and the audit events about them, and restoring any kept version.
+server.get<{ Params: { id: string } }>("/api/v1/objects/:id/history", async (request) => application.objectHistory(request.params.id));
+server.post<{ Params: { id: string }; Body: { versionPath?: string } }>("/api/v1/objects/:id/history/restore", async (request, reply) => {
+  if (typeof request.body?.versionPath !== "string") return reply.status(400).send({ error: "versionPath is required" });
+  return application.restoreKeptVersion(request.params.id, request.body.versionPath);
+});
 server.get("/api/v1/backups", async () => backups.list());
-server.post("/api/v1/backups", async () => backups.create());
+// "Back up now" (System and the backup warning): recorded like the automatic ones, so a success clears the warning.
+server.post("/api/v1/backups", async () => autoBackups ? autoBackups.runNow() : backups.create());
+server.get("/api/v1/backups/status", async () => autoBackups?.status());
+server.get("/api/v1/settings/backups", async () => application.getBackupSettings());
+server.put<{ Body: { offDriveFolder?: unknown; expectedHash?: string } }>("/api/v1/settings/backups", async (request) => application.saveBackupSettings({ offDriveFolder: request.body?.offDriveFolder }, request.body?.expectedHash));
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
 
 // Serves the production web build (PB-001): unknown non-API paths fall back to index.html.
@@ -338,6 +376,8 @@ try {
   const autoAdoption = application.startAutoAdoption({ canWrite: () => session.status().writeAllowed, onError: (error) => server.log.error(error) });
   await autoAdoption.runNow();
   await server.listen({ host, port });
+  // Backups (#84): at start, daily while running and at a clean stop; only while this device holds the lease (ADR 0003).
+  autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
   let reconcileTimer: NodeJS.Timeout | undefined;
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
     if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
@@ -354,6 +394,8 @@ try {
     clearTimeout(reconcileTimer);
     autoAdoption.stop();
     watcher.close();
+    // The clean-stop backup, taken before the lease is released.
+    await autoBackups?.stop().catch((error) => server.log.error(error));
     await session.close();
     await server.close();
     process.exit(0);
