@@ -35,9 +35,12 @@ import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, ty
 import { SettingsPage } from "./SettingsPage.js";
 import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
+import { roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
+import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
+  getMarkdown(): string;
   destroy(): Promise<unknown>;
   setReadonly(value: boolean): unknown;
   editor: { config(configure: (ctx: { set(slice: string, value: unknown): void }) => void): unknown };
@@ -126,16 +129,6 @@ function imagePreviewSource(source?: string) {
 /** react-markdown drops unknown protocols; LifeOS object links must survive so they can be clicked (PB-007). */
 const keepLifeosLinks = (url: string) => lifeosLinkId(url) ? url : defaultUrlTransform(url);
 
-function visualMarkdown(markdown: string) {
-  return markdown.replace(/(!\[[^\]]*\]\()(?:\.\.\/)*assets\/([^\s)>]+)(\))/g, (_match, before: string, fileName: string, after: string) => `${before}/api/v1/assets/${encodeURIComponent(decodeURIComponent(fileName))}${after}`);
-}
-
-function storedMarkdown(markdown: string, ownerRelativePath: string) {
-  const depth = Math.max(0, ownerRelativePath.split("/").length - 1);
-  const prefix = depth ? "../".repeat(depth) : "";
-  return markdown.replace(/\/api\/v1\/assets\/([^\s)>]+)/g, (_match, encoded: string) => `${prefix}assets/${decodeURIComponent(encoded)}`);
-}
-
 function fileContentBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -161,6 +154,8 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
   // Only changes made after the user has focused the editor count as edits. Crepe can re-emit
   // normalized Markdown on its own after loading; that must never dirty the draft or trigger a save.
   const engaged = useRef(false);
+  // #89: whether saving from this editor would rewrite Markdown the user did not edit.
+  const [roundTrip, setRoundTrip] = useState<RoundTripReport>();
 
   useEffect(() => {
     if (!root.current) return;
@@ -168,6 +163,7 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
     let instance: CrepeInstance | undefined;
     const editorRoot = root.current;
     engaged.current = false;
+    setRoundTrip(undefined);
     void import("@milkdown/crepe").then(async (crepePackage) => {
       if (!active) return;
       const Crepe = (crepePackage as unknown as { Crepe: CrepeConstructor }).Crepe;
@@ -180,7 +176,7 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
       instance = new Crepe({
         root: editorRoot,
         defaultValue: visualMarkdown(markdown),
-        features: { "top-bar": true, latex: false, ai: false },
+        features: visualEditorFeatures,
         featureConfigs: { "image-block": { onUpload: uploadManagedImage, inlineOnUpload: uploadManagedImage, blockOnUpload: uploadManagedImage, proxyDomURL: imagePreviewSource } }
       });
       crepe.current = instance;
@@ -192,13 +188,15 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
         latest.current.onChange(storedMarkdown(nextMarkdown, latest.current.owner?.relativePath ?? "meetings/pending.md"));
       }));
       await instance.create();
-      if (active) instance.setReadonly(latest.current.readOnly);
+      if (!active) return;
+      instance.setReadonly(latest.current.readOnly);
+      setRoundTrip(roundTripReport(markdown, storedMarkdown(instance.getMarkdown(), latest.current.owner?.relativePath ?? "meetings/pending.md")));
     });
     return () => { active = false; crepe.current = undefined; if (instance) void instance.destroy(); };
   }, [editorKey]);
 
   useEffect(() => { crepe.current?.setReadonly(readOnly); }, [readOnly]);
-  return <div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} />;
+  return <><UnprovenFormattingLabel report={roundTrip} /><div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }
 
 type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };
