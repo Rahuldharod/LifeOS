@@ -167,7 +167,9 @@ export class MarkdownObjectStore implements ObjectStore {
     } else {
       // #58: a create (no expected hash) never overwrites a file, nor reuses an ID a sibling file name already carries.
       if (current !== undefined) throw new ObjectConflictError(`Cannot create ${input.relativePath}: a file already exists there`);
-      const claimed = await this.siblingWithId(target, input.frontmatter.id);
+      // #73: audit events skip the scan. Their flat folder grows forever, their IDs are fresh UUIDv7s, and the
+      // index check plus the no-overwrite publish still apply.
+      const claimed = input.frontmatter.type === "audit-event" ? undefined : await this.siblingWithId(target, input.frontmatter.id);
       if (claimed) throw new ObjectConflictError(`Duplicate object ID ${input.frontmatter.id}: already used by ${claimed}; nothing was written`);
     }
     const next = serialize(input.frontmatter, input.body);
