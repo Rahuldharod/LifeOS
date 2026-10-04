@@ -31,7 +31,7 @@ export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./res
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
 export type { EnrichmentEntry, EnrichmentRequest, EnrichmentState, EnrichmentStatus } from "./enrichment.js";
 export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial } from "./enrichment.js";
-export type { AppliedPatch } from "./patches.js";
+export type { AppliedPatch, UpdateChange, UpdateProposal } from "./patches.js";
 export type { DailyFocusView, FocusItem, FocusItemState, ReplanRequest } from "./focus.js";
 export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords } from "./focus.js";
 export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";

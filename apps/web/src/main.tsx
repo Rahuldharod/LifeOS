@@ -61,7 +61,7 @@ type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeO
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
 type InboxDrafts = { awaiting: number; failed: Array<{ path: string; reason: string }> };
-type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "duplicate" | "failed" | "skipped" }> };
+type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "review" | "duplicate" | "failed" | "skipped" }> };
 type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
 type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
 type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus };
@@ -243,6 +243,23 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
   const [title, setTitle] = useState(review.frontmatter.title);
   const [fields, setFields] = useState<Record<string, string>>(() => Object.fromEntries(editable.map((key) => [key, current(key)])));
   const pending = review.frontmatter.status === "pending";
+  // #37: a change to an existing object (from a Patch Draft) shows current vs proposed per field; it cannot be renamed.
+  if (review.frontmatter.review_type === "update") {
+    const proposal = review.frontmatter.proposed_fields as { changes?: Array<{ field: string; current: unknown; proposed: unknown }>; append_note?: string; reasons?: string[] };
+    const show = (value: unknown) => value === null || value === undefined ? "(none)" : typeof value === "string" ? value : JSON.stringify(value);
+    return <div className="review-card">
+      <b>{review.frontmatter.title}</b>
+      <small>{(proposal.reasons ?? []).join(" · ")} · {review.frontmatter.status}</small>
+      <table className="review-changes"><thead><tr><th>Field</th><th>Current</th><th>Proposed</th></tr></thead><tbody>
+        {(proposal.changes ?? []).map((change) => <tr key={change.field}><td>{change.field}</td><td>{show(change.current)}</td><td>{show(change.proposed)}</td></tr>)}
+        {proposal.append_note && <tr><td>note</td><td>(none)</td><td>{proposal.append_note}</td></tr>}
+      </tbody></table>
+      {pending && <div className="review-actions">
+        <button className="primary" disabled={busy} onClick={onAccept}>Apply change</button>
+        <button className="danger" disabled={busy} onClick={onReject}>Reject</button>
+      </div>}
+    </div>;
+  }
   // #40: a merge suggestion has nothing to edit; it shows why it was proposed and what accepting does.
   if (review.frontmatter.review_type === "person-merge") return <div className="review-card">
     <b>{review.frontmatter.title}</b>
@@ -698,7 +715,7 @@ function App() {
       const batch = await api<AdoptionBatch>("/api/v1/inbox/adopt", { method: "POST" });
       const count = (outcome: string) => batch.drafts.filter((draft) => draft.outcome === outcome).length;
       await loadCollections();
-      setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("applied")} patches applied, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
+      setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("applied")} patches applied, ${count("review")} sent to review, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Adoption failed"); }
     finally { setBusy(false); }
   };

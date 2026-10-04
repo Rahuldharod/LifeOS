@@ -141,8 +141,6 @@ describe("refusing Patch Drafts", () => {
     ["nothing.md", { title: "Call the bank", type: "task" }, /set: nothing to change; give set and\/or append_note/],
     ["version.md", { lifeos_patch: 2, title: "Call the bank", type: "task", set: { status: "Done" } }, /lifeos_patch: unsupported contract version 2/],
     ["bad-values.md", { id: "TASK", set: { status: "Finished", priority: "Urgent", due_on: "2026-10-09", due_at: "2026-10-09T10:00:00Z" } }, /status: unknown status "Finished".*priority: unknown priority "Urgent".*due_on: use due_on or due_at, not both/],
-    ["title-change.md", { id: "TASK", set: { title: "Renamed" } }, /set\.title: changes to title need review/],
-    ["agent.md", { id: "TASK", origin: "agent-extracted", set: { status: "Done" } }, /origin: agent-extracted patches always need review/],
     ["unknown-person.md", { id: "TASK", set: { status: "Waiting", waiting_for: "Nobody" } }, /waiting_for: no person called "Nobody"/]
   ])("fails %s with a specific, path-aware reason and changes nothing", async (name, fields, reason) => {
     const { root, application } = await vault();
