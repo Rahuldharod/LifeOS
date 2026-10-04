@@ -36,10 +36,18 @@ describe("self email warning (#76)", () => {
     expect((await panels(application)).setupWarning).toEqual({ selfEmailsMissing: true, internalDomainsMissing: false });
   });
 
-  it("disappears once self emails are saved, and does not turn health to attention", async () => {
+  it("still warns that nobody is External when self emails are set but internal domains are not", async () => {
+    const application = await setup();
+    await application.saveSelfEmails(["me@example.com"], undefined);
+    expect((await application.health()).setupWarning).toEqual({ selfEmailsMissing: false, internalDomainsMissing: true });
+    expect((await panels(application)).setupWarning).toEqual({ selfEmailsMissing: false, internalDomainsMissing: true });
+  });
+
+  it("disappears once both settings are saved, and never turns health to attention", async () => {
     const application = await setup();
     expect((await application.health()).status).toBe("healthy");
     await application.saveSelfEmails(["me@example.com"], undefined);
+    await application.saveInternalDomains(["example.com"], undefined);
     expect((await application.health()).setupWarning).toBeUndefined();
     expect((await panels(application)).setupWarning).toBeUndefined();
   });

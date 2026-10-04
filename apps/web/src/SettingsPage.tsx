@@ -6,7 +6,7 @@ import type { CalendarOption, CalendarPrefs } from "./calendarPrefs.js";
 import { PageHeader } from "./pageParts.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
-import { selfEmailsCardId } from "./SelfEmailWarning.js";
+import { internalDomainsCardId, selfEmailsCardId } from "./SelfEmailWarning.js";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export type TodaySettings = { meetingHoursThreshold: number; briefTime: string; briefTimeZone: string; briefDays: Weekday[]; contentHash?: string };
@@ -157,7 +157,8 @@ function InternalDomainsCard({ setting, disabled, onSave }: { setting?: { domain
     setSaving(false);
     setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. People labels now use these domains." });
   };
-  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>Internal domains</h3>
+  // #76: Today and System Health link here; tabIndex lets the link move keyboard focus to the card.
+  return <article className="internal-domains-setting" id={internalDomainsCardId} tabIndex={-1}><span>PEOPLE</span><h3>Internal domains</h3>
     <p className="muted">Email domains of your own organisations, separated by commas. Anyone with addresses only on other domains is shown as "Name<span className="ext-suffix"> - ext</span>". You can override this on each person.</p>
     {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Internal domains" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="example.com, example.org" /><button type="button" disabled={disabled || saving || !dirty || !domains.length} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
     {setting && !setting.domains.length && !text.trim() && <p className="muted" role="status">Not set yet: nobody is marked External automatically.</p>}

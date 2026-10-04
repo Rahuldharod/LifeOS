@@ -23,7 +23,7 @@ export type TodayPanels = {
   openPointsForMeetings: Array<{ openPoint: LifeObject; meetingId: string; meetingTitle: string; link: "raised-in" | "project" | "client" | "people" }>;
   reviewCount: number; inbox: { awaiting: number; drafts: number; patches: number }; failedDrafts: Array<{ path: string; reason: string }>;
   staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }>; settings: TodaySettings;
-  /** #76: present while the user's own email addresses are unset. */
+  /** #76: present while the user's own email addresses or the internal domains are unset. */
   setupWarning?: SetupWarning;
 };
 export type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
@@ -31,13 +31,13 @@ export type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; titl
 type Props = {
   today: Today; panels?: TodayPanels; enrichment: EnrichmentStatus; eventCount: number; capture: string; busy: boolean; readOnly: boolean;
   onCaptureChange: (text: string) => void; onCapture: () => void; onReplan: () => Promise<void>; onChangeFocus: (change: FocusChange) => Promise<void>;
-  onEnrich: () => Promise<void>; onGiveUp: (meetingId: string) => Promise<boolean>; onOpenInbox: () => void; onOpenSelfEmails: () => void;
+  onEnrich: () => Promise<void>; onGiveUp: (meetingId: string) => Promise<boolean>; onOpenInbox: () => void; onOpenSettingsCard: (cardId: string) => void;
 };
 
-export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, capture, busy, readOnly, onCaptureChange, onCapture, onReplan, onChangeFocus, onEnrich, onGiveUp, onOpenInbox, onOpenSelfEmails }: Props) {
+export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, capture, busy, readOnly, onCaptureChange, onCapture, onReplan, onChangeFocus, onEnrich, onGiveUp, onOpenInbox, onOpenSettingsCard }: Props) {
   return <>
     <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
-    <SelfEmailWarning warning={todayPanels?.setupWarning} onOpenSettings={onOpenSelfEmails} />
+    <SelfEmailWarning warning={todayPanels?.setupWarning} onOpenSettings={onOpenSettingsCard} />
     <div className="summary">
       <Summary label="Active tasks" value={today.tasks.length} detail="across all contexts" />
       <Summary label="Review inbox" value={today.reviewCount} detail="awaiting confirmation" />

@@ -32,7 +32,7 @@ import { formatDate, formatTime } from "./dateFormat.js";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, type Today, type TodayPanels } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
-import { SelfEmailWarning, selfEmailsCardId, type SetupWarning } from "./SelfEmailWarning.js";
+import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -1050,10 +1050,10 @@ function App() {
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
   }, []);
-  /** #76: opens Settings and moves focus to the "My email addresses" card once it has rendered. */
-  const openSelfEmailsSettings = () => {
+  /** #76: opens Settings and moves focus to the given card once it has rendered. */
+  const openSettingsCard = (cardId: string) => {
     setView("Settings");
-    window.setTimeout(() => { const card = document.getElementById(selfEmailsCardId); card?.scrollIntoView({ block: "center", behavior: "smooth" }); card?.focus({ preventScroll: true }); }, 80);
+    window.setTimeout(() => { const card = document.getElementById(cardId); card?.scrollIntoView({ block: "center", behavior: "smooth" }); card?.focus({ preventScroll: true }); }, 80);
   };
   useEffect(() => {
     if (!highlightId) return;
@@ -1192,7 +1192,7 @@ function App() {
 
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
-      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} onOpenSelfEmails={openSelfEmailsSettings} />}
+      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} onOpenSettingsCard={openSettingsCard} />}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
@@ -1370,7 +1370,7 @@ function App() {
           <Summary label="Write access" value={readOnly ? "Read-only" : "Enabled"} detail={readOnly ? "another device lease is active" : "revision checks remain active"} />
           <Summary label="Device" value={health?.session.currentDeviceId ?? "—"} detail="this installation" />
         </div>
-        <SelfEmailWarning warning={health?.setupWarning} onOpenSettings={openSelfEmailsSettings} />
+        <SelfEmailWarning warning={health?.setupWarning} onOpenSettings={openSettingsCard} />
         {readOnly && <article className="lease-warning"><span>DEVICE HANDOFF REQUIRED</span><h3>{health?.session.activeDeviceId} is still active</h3><p>{health?.session.warning}</p><p>Only take over after LifeOS is closed and Google Drive has finished synchronizing on the other computer.</p><button className="takeover" disabled={busy} onClick={takeOverSession}>Take over write access</button></article>}
         <div className="system-grid">
           <article><span>SESSION LEASE</span><div className="system-details"><Meta label="Active device" value={health?.session.activeDeviceId ?? "—"} /><Meta label="Started" value={formatDate(health?.session.startedAt)} /><Meta label="Last activity" value={formatDate(health?.session.lastActivityAt)} /><Meta label="Lease expires" value={formatDate(health?.session.leaseExpiresAt)} /></div></article>

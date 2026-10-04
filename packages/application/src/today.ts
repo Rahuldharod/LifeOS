@@ -65,7 +65,7 @@ export interface TodayPanels {
   failedDrafts: InboxStatus["failed"];
   staleWorkOrders: EnrichmentStatus["staleWorkOrders"];
   settings: TodaySettings;
-  /** #76: present while the user's own email addresses are unset. */
+  /** #76: present while the user's own email addresses or the internal domains are unset. */
   setupWarning?: PeopleSetupWarning;
 }
 

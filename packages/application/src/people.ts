@@ -125,13 +125,14 @@ export function selfEmailsOf(index: Pick<AppContext["index"], "all">) {
   return selfEmailsFrom(settingIn(index, selfEmailsPath)?.frontmatter);
 }
 
-/** #76: set while the user's own addresses are unset, so Today and System Health can point to Settings. */
-export interface PeopleSetupWarning { selfEmailsMissing: true; internalDomainsMissing: boolean }
+/** #76: set while the user's own addresses or the internal domains are unset, so Today and System Health can point to Settings. */
+export interface PeopleSetupWarning { selfEmailsMissing: boolean; internalDomainsMissing: boolean }
 
-/** Undefined once self emails are set; `internalDomainsMissing` adds that nobody is marked External either. */
+/** Undefined once both settings are saved. */
 export function peopleSetupWarning(index: Pick<AppContext["index"], "all">): PeopleSetupWarning | undefined {
-  if (selfEmailsOf(index).length) return undefined;
-  return { selfEmailsMissing: true, internalDomainsMissing: internalDomainsOf(index).length === 0 };
+  const selfEmailsMissing = selfEmailsOf(index).length === 0;
+  const internalDomainsMissing = internalDomainsOf(index).length === 0;
+  return selfEmailsMissing || internalDomainsMissing ? { selfEmailsMissing, internalDomainsMissing } : undefined;
 }
 
 export function personDisplayLabels(objects: ReadonlyArray<Pick<LifeOSObject, "frontmatter">>, internalDomains: readonly string[]): PersonLabel[] {
@@ -171,7 +172,7 @@ export class PeopleModule {
     return internalDomainsOf(this.ctx.index);
   }
 
-  /** #76: present while the user's own addresses are unset. */
+  /** #76: present while the user's own addresses or the internal domains are unset. */
   setupWarning() {
     return peopleSetupWarning(this.ctx.index);
   }
