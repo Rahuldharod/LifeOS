@@ -121,6 +121,8 @@ export class LifeOSApplication {
   acceptReviewItem(reviewId: string, options?: { linkTo?: string }) { return this.review.acceptReviewItem(reviewId, options); }
   updateReviewTitle(reviewId: string, title: string) { return this.review.updateReviewTitle(reviewId, title); }
   rejectReviewItem(reviewId: string) { return this.review.rejectReviewItem(reviewId); }
+  /** #40: proposes `person-merge` Review Items for likely duplicate people; never merges by itself. */
+  suggestPersonMerges() { return this.review.merges.suggest(); }
 
   // Capture and knowledge
   quickCapture(title: string) { return this.capture.quickCapture(title); }

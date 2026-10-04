@@ -219,6 +219,16 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave }: {
 }) {
   const [title, setTitle] = useState(review.frontmatter.title);
   const pending = review.frontmatter.status === "pending";
+  // #40: a merge suggestion has nothing to edit; it shows why it was proposed and what accepting does.
+  if (review.frontmatter.review_type === "person-merge") return <div className="review-card">
+    <b>{review.frontmatter.title}</b>
+    <small>{String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}{typeof review.frontmatter.merge_problem === "string" ? ` · ${review.frontmatter.merge_problem}` : ""}</small>
+    <p>{review.body.replace(/^# .*\n+/, "").trim()}</p>
+    {pending && <div className="review-actions">
+      <button className="primary" disabled={busy} onClick={onAccept}>Merge</button>
+      <button className="danger" disabled={busy} onClick={onReject}>Keep separate</button>
+    </div>}
+  </div>;
   return <div className="review-card">
     {pending ? <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Proposed task title" /> : <b>{review.frontmatter.title}</b>}
     <small>{String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}</small>
