@@ -6,6 +6,7 @@ import type { CalendarOption, CalendarPrefs } from "./calendarPrefs.js";
 import { PageHeader } from "./pageParts.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
+import { selfEmailsCardId } from "./SelfEmailWarning.js";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export type TodaySettings = { meetingHoursThreshold: number; briefTime: string; briefTimeZone: string; briefDays: Weekday[]; contentHash?: string };
@@ -50,6 +51,8 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   const saveSelfEmails = async (emails: string[]): Promise<string | undefined> => {
     try {
       setSelfEmails(await api<{ emails: string[]; contentHash?: string }>("/api/v1/settings/self-emails", { method: "PUT", body: JSON.stringify({ emails, expectedHash: selfEmails?.contentHash }) }));
+      // #76: reloads Today and System Health so their "not set" warning goes away at once.
+      await onChanged();
       return undefined;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) { await loadSelfEmails(); return "Your email addresses were changed on another device. The latest version is loaded; make your change again."; }
@@ -178,7 +181,8 @@ function SelfEmailsCard({ setting, disabled, onSave }: { setting?: { emails: str
     setSaving(false);
     setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: emails.length ? "Saved. Attendees with these addresses are now you." : "Saved. No address is matched to you." });
   };
-  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>My email addresses</h3>
+  // #76: Today and System Health link here; tabIndex lets the link move keyboard focus to the card.
+  return <article className="internal-domains-setting" id={selfEmailsCardId} tabIndex={-1}><span>PEOPLE</span><h3>My email addresses</h3>
     <p className="muted">Every address you use, separated by commas. Calendar attendees with one of these addresses are linked to you instead of creating a new person.</p>
     {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
     {setting && !setting.emails.length && !status && <p className="muted" role="status">Not set yet: no attendee is recognised as you by email.</p>}

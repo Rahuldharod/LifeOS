@@ -23,7 +23,7 @@ export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
 export type { ExternalChange } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
-export type { ExternalSource, PersonLabel } from "./people.js";
+export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
@@ -96,7 +96,9 @@ export class LifeOSApplication {
   async health() {
     const health = await this.system.health();
     const diagnostics = [...health.diagnostics, ...this.agentIndex.diagnostics()];
-    return { ...health, status: diagnostics.length ? "attention" : "healthy", diagnostics };
+    // #76: a setup warning, not an integrity problem, so it never turns the status to "attention".
+    const setupWarning = this.people.setupWarning();
+    return { ...health, status: diagnostics.length ? "attention" : "healthy", diagnostics, ...(setupWarning ? { setupWarning } : {}) };
   }
   recoverOperations(options?: Parameters<SystemModule["recoverOperations"]>[0]) { return this.system.recoverOperations(options); }
   listObjects() { return this.system.listObjects(); }
