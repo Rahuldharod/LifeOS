@@ -13,7 +13,8 @@ import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connecto
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { KnownSecrets, MacOSKeychainSecretStore } from "@lifeos/secrets";
-import { connectionSettings, googleConnectionStatus, probeConnectionSecrets, secretRefs } from "./connections.js";
+import { connectionSettings, googleConnectionStatus, secretRefs } from "./connections.js";
+import { calendarSource } from "./calendar-source.js";
 import { httpError } from "./http-errors.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
@@ -35,16 +36,11 @@ const secrets = new KnownSecrets(new MacOSKeychainSecretStore());
 if (process.env.GOOGLE_CLIENT_SECRET) await secrets.set(secretRefs.calendarClientSecret, process.env.GOOGLE_CLIENT_SECRET);
 if (process.env.GOOGLE_CLIENT_ID) await secrets.set(secretRefs.calendarClientId, process.env.GOOGLE_CLIENT_ID);
 // Dev mode (PB-001) forces the mock calendar: Google's OAuth callback belongs to the stable app on 4310. It reads no secret at startup.
-const mockCalendarOnly = process.env.LIFEOS_CALENDAR === "mock";
-let google: GoogleCalendarConnector | undefined;
+// #94: outside dev mode the mock never answers; a denied Keychain makes calendar reads offline (stored meetings + banner).
+const calendars = calendarSource({ secrets, mockOnly: process.env.LIFEOS_CALENDAR === "mock", mock: new MockCalendarConnector(), createGoogle: (clientId) => new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets }) });
 /** Startup and Retry: the only reads made just to know what is configured. A denied prompt leaves the card showing Retry. */
-const probeSecrets = async () => {
-  const clientId = await probeConnectionSecrets(secrets);
-  if (clientId && !google) google = new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets });
-};
-if (!mockCalendarOnly) await probeSecrets().catch((error) => console.error("Could not read Google connection secrets", error));
-const mockCalendar = new MockCalendarConnector();
-const calendar = { get provider() { return (google ?? mockCalendar).provider; }, listEvents: (from: Date, to: Date) => (google ?? mockCalendar).listEvents(from, to), listCalendars: () => (google ?? mockCalendar).listCalendars() };
+await calendars.probe().catch((error) => console.error("Could not read Google connection secrets", error));
+const calendar = calendars.calendar;
 // The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild; the watcher ignores `_agent/`.
 const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot));
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
@@ -151,12 +147,12 @@ server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/d
   if (!range) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   return application.calendarDay(range.from, range.to, { sync: true });
 });
-server.get("/api/v1/connections/google", async () => googleConnectionStatus(secrets, google, application.calendarSyncStatus()));
-server.get("/api/v1/settings/connections", async () => connectionSettings(secrets, google, application.calendarSyncStatus()));
+server.get("/api/v1/connections/google", async () => googleConnectionStatus(secrets, calendars.google, application.calendarSyncStatus()));
+server.get("/api/v1/settings/connections", async () => connectionSettings(secrets, calendars.google, application.calendarSyncStatus()));
 // #77: Retry on the Connections card after a denied Keychain prompt; may show the prompt again, since the user asked.
 server.post("/api/v1/settings/connections/retry", async () => {
-  await probeSecrets();
-  return connectionSettings(secrets, google, application.calendarSyncStatus());
+  await calendars.probe();
+  return connectionSettings(secrets, calendars.google, application.calendarSyncStatus());
 });
 server.post<{ Params: { provider: "calendar" | "drive" }; Body: { clientId: string; clientSecret: string } }>("/api/v1/settings/connections/google/:provider", async (request, reply) => {
   const clientId = request.body.clientId.trim();
@@ -164,7 +160,7 @@ server.post<{ Params: { provider: "calendar" | "drive" }; Body: { clientId: stri
   if (!clientId.endsWith(".apps.googleusercontent.com") || !clientSecret) return reply.status(400).send({ error: "Enter a valid Google OAuth client ID and client secret" });
   const prefix = request.params.provider === "calendar" ? "google:default" : "google-drive:default";
   await Promise.all([secrets.set(`${prefix}:client-id`, clientId), secrets.set(`${prefix}:client-secret`, clientSecret)]);
-  if (request.params.provider === "calendar") google = new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets });
+  if (request.params.provider === "calendar") calendars.useGoogle(clientId);
   return { configured: true, connected: false };
 });
 server.post<{ Body: { clientId: string; clientSecret: string } }>("/api/v1/connections/google/configure", async (request, reply) => {
@@ -172,18 +168,18 @@ server.post<{ Body: { clientId: string; clientSecret: string } }>("/api/v1/conne
   const clientSecret = request.body.clientSecret.trim();
   if (!clientId.endsWith(".apps.googleusercontent.com") || !clientSecret) return reply.status(400).send({ error: "Enter a valid Google OAuth Desktop client ID and client secret" });
   await Promise.all([secrets.set("google:default:client-id", clientId), secrets.set("google:default:client-secret", clientSecret)]);
-  google = new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets });
-  return googleConnectionStatus(secrets, google, application.calendarSyncStatus());
+  calendars.useGoogle(clientId);
+  return googleConnectionStatus(secrets, calendars.google, application.calendarSyncStatus());
 });
 server.get("/api/v1/connections/google/start", async (_request, reply) => {
-  if (!google) return reply.status(400).send({ error: "Configure the Google OAuth Desktop client before connecting Google Calendar" });
-  return { authorizationUrl: await google.authorizationUrl() };
+  if (!calendars.google) return reply.status(400).send({ error: "Configure the Google OAuth Desktop client before connecting Google Calendar" });
+  return { authorizationUrl: await calendars.google.authorizationUrl() };
 });
 server.get<{ Querystring: { code?: string; state?: string; error?: string } }>("/api/v1/connections/google/callback", async (request, reply) => {
-  if (!google) return reply.status(400).type("text/html").send("<h1>Google Calendar is not configured</h1>");
+  if (!calendars.google) return reply.status(400).type("text/html").send("<h1>Google Calendar is not configured</h1>");
   if (request.query.error) return reply.status(400).type("text/html").send(`<h1>Connection declined</h1><p>${request.query.error}</p>`);
   if (!request.query.code || !request.query.state) return reply.status(400).type("text/html").send("<h1>Invalid OAuth callback</h1>");
-  await google.completeAuthorization(request.query.code, request.query.state);
+  await calendars.google.completeAuthorization(request.query.code, request.query.state);
   await application.recordGoogleConnection();
   return reply.type("text/html").send('<!doctype html><meta charset="utf-8"><title>LifeOS connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;color:#173f32}a{color:#173f32}</style><h1>Google Calendar connected</h1><p>Your tokens are stored in macOS Keychain. You can return to LifeOS.</p><a href="/">Return to LifeOS</a>');
 });

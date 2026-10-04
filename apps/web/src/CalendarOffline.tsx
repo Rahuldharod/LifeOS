@@ -24,6 +24,23 @@ export function calendarOfflineText(offline: CalendarOffline, timeZone?: string)
   return `Offline: showing meetings already in LifeOS (last synced ${when})`;
 }
 
+/** Retry reached the server, but the calendar is still unreadable: the offline state (and banner) stays. */
+export class CalendarStillOfflineError extends Error {
+  constructor(readonly offline: CalendarOffline) { super(`Calendar is still offline: ${reasonText[offline.reason]}`); }
+}
+
+/**
+ * #94: Retry on the offline banner. After a Keychain denial it first asks the Keychain again (the user asked, so a
+ * prompt is fine), then reloads the day. Resolves only when the calendar is back; while still offline it rejects,
+ * so no success message is shown and the banner stays.
+ */
+export async function retryCalendarDay<Event>(offline: CalendarOffline | undefined, steps: { reprobeKeychain: () => Promise<unknown>; loadDay: () => Promise<CalendarDay<Event>> }) {
+  if (offline?.reason === "keychain-denied") await steps.reprobeKeychain().catch(() => undefined);
+  const day = await steps.loadDay();
+  if (day.offline) throw new CalendarStillOfflineError(day.offline);
+  return day;
+}
+
 /** Renders nothing while the calendar is online. Status is said in words, never by colour alone. */
 export function CalendarOfflineBanner({ offline, timeZone, busy, onRetry }: { offline?: CalendarOffline; timeZone?: string; busy: boolean; onRetry: () => void }) {
   if (!offline) return null;
