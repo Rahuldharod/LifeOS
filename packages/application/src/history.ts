@@ -1,6 +1,6 @@
 import type { LifeOSObject } from "@lifeos/domain";
-import type { AppContext } from "./context.js";
-import { OneAtATime } from "./support.js";
+import { ObjectConflictError, type AppContext } from "./context.js";
+import { isRestricted, OneAtATime } from "./support.js";
 
 export interface ExternalChange {
   objectId: string;
@@ -145,17 +145,31 @@ export class HistoryModule {
       .sort((a, b) => b.time - a.time || a.order - b.order).map(({ entry }) => entry);
   }
 
-  /** #85: puts back one of the object's kept copies through a guarded write, audited as `object.restored-from-version`. */
-  async restoreKeptVersion(objectId: string, versionPath: string, now = new Date()) {
+  /**
+   * #92: what the History panel loads when it opens: the history, the object's hash now (sent back with a restore,
+   * so a save made in between is not overwritten) and whether it is restricted (a restore keeps that).
+   */
+  async historyPanel(objectId: string): Promise<HistoryPanel> {
+    const current = this.ctx.index.get(objectId);
+    return { entries: await this.objectHistory(objectId), ...(current ? { contentHash: current.contentHash } : {}), restricted: isRestricted(current) };
+  }
+
+  /**
+   * #85: puts back one of the object's kept copies through a guarded write, audited as `object.restored-from-version`.
+   * #92: guarded by `expectedHash`, the hash the History panel was opened with, so a save made since (on any device)
+   * is never overwritten: the restore is refused and the user reloads.
+   */
+  async restoreKeptVersion(objectId: string, versionPath: string, expectedHash: string, now = new Date()) {
     const folder = `.lifeos/versions/${objectId}/`;
     if (!versionPath.startsWith(folder) || !/^\d+--[0-9a-f]+\.md$/.test(versionPath.slice(folder.length))) throw new Error(`Not a kept version of ${objectId}: ${versionPath}`);
     const current = this.ctx.index.get(objectId);
     if (!current) throw new Error(`Object not found: ${objectId}`);
-    return this.putBack(objectId, versionPath, current.relativePath, {}, now);
+    if (current.contentHash !== expectedHash) throw new ObjectConflictError(restoreConflictMessage);
+    return this.putBack(objectId, versionPath, current.relativePath, {}, now, expectedHash);
   }
 
   /** Writes the copy at `versionPath` over the object (or creates it at `fallbackPath` if deleted), then audits it. */
-  private async putBack(id: string, versionPath: string, fallbackPath: string, metadata: Record<string, unknown>, now: Date) {
+  private async putBack(id: string, versionPath: string, fallbackPath: string, metadata: Record<string, unknown>, now: Date, expectedHash?: string) {
     const { ctx } = this;
     const kept = await ctx.objects.read(versionPath).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") throw new Error(versionPrunedMessage);
@@ -165,8 +179,8 @@ export class HistoryModule {
     const timestamp = now.toISOString();
     const restored = await ctx.objects.write({
       relativePath: current?.relativePath ?? fallbackPath,
-      ...(current ? { expectedHash: current.contentHash } : {}),
-      frontmatter: { ...kept.frontmatter, revision: (current?.frontmatter.revision ?? kept.frontmatter.revision) + 1, updated_at: timestamp, updated_by_device: ctx.deviceId },
+      ...(current ? { expectedHash: expectedHash ?? current.contentHash } : {}),
+      frontmatter: { ...keepCurrentState(kept.frontmatter, current?.frontmatter), revision: (current?.frontmatter.revision ?? kept.frontmatter.revision) + 1, updated_at: timestamp, updated_by_device: ctx.deviceId },
       body: kept.body
     });
     await ctx.writeAudit("object.restored-from-version", id, timestamp, { ...metadata, version_path: versionPath });
@@ -200,10 +214,36 @@ export interface HistoryEntry {
   action?: string;
 }
 
+/** #92: GET /api/v1/objects/:id/history. `contentHash` is absent when the object no longer exists. */
+export interface HistoryPanel {
+  entries: HistoryEntry[];
+  contentHash?: string;
+  restricted: boolean;
+}
+
 const historyActions = new Set(["object.changed-externally", "object.deleted-externally", "object.made-unreadable-externally", "object.restored-from-version"]);
 
 /** #79: shown when an audit names a version copy that retention (ADR 0012) has since deleted. */
 export const versionPrunedMessage = "This version is no longer kept (only the last 10 are)";
+
+/** #92: shown when the object changed after its History panel was opened; nothing is restored. */
+export const restoreConflictMessage = "This was changed since you opened its history, so nothing was restored. Reload to see the latest version, then try again.";
+
+/**
+ * #92: restoring content never changes the object's sensitivity (ADR 0010) or a person's review state: the current
+ * values win over the kept copy's, and a field the current object does not have is dropped from the copy. With no
+ * current object (the file was deleted), the copy is put back as kept.
+ */
+const preservedFields = ["sensitivity", "review_state"] as const;
+function keepCurrentState(kept: LifeOSObject["frontmatter"], current: LifeOSObject["frontmatter"] | undefined) {
+  if (!current) return kept;
+  const result: Record<string, unknown> = { ...kept };
+  for (const field of preservedFields) {
+    if (current[field] === undefined) delete result[field];
+    else result[field] = current[field];
+  }
+  return result as LifeOSObject["frontmatter"];
+}
 
 /** Same front matter values and body. Key order and YAML formatting are not changes (#69). */
 function sameContent(a: LifeOSObject, b: LifeOSObject) {

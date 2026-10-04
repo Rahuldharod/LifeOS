@@ -1,7 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryLink, HistoryList, HistoryRow, prunedMessage, restoreEntry, type HistoryEntry } from "./HistoryPanel.js";
+import { ApiError } from "./api.js";
+import { HistoryLink, HistoryList, HistoryRow, prunedMessage, restoreConflictMessage, restoreEntry, type HistoryEntry } from "./HistoryPanel.js";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const version = (revision: number, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
@@ -9,6 +10,7 @@ const version = (revision: number, extra: Partial<HistoryEntry> = {}): HistoryEn
   at: `2026-10-0${Math.min(revision, 9)}T08:00:00Z`, device: "work-mac", external: false, kept: true, current: false, title: `Title ${revision}`, revision, ...extra
 });
 const noop = () => undefined;
+const opened = { contentHash: "hash-opened", restricted: false };
 
 beforeEach(() => { vi.stubGlobal("localStorage", { getItem: () => "UTC" }); });
 
@@ -54,13 +56,13 @@ describe("History panel (#85)", () => {
   it("restores through the history endpoint, shows a toast, then reloads the history (which now holds the restore)", async () => {
     const calls: string[] = [];
     const run = vi.fn(async (action: () => Promise<void>, success: string) => { await action(); calls.push(`toast:${success}`); return true; });
-    const ok = await restoreEntry("t1", version(2), {
+    const ok = await restoreEntry("t1", version(2), opened, {
       post: async (url, body) => { calls.push(`post:${url}:${JSON.stringify(body)}`); },
       run, reload: async () => { calls.push("reload"); }, onRestored: async () => { calls.push("refresh"); }
     });
     expect(ok).toBe(true);
     expect(calls).toEqual([
-      `post:/api/v1/objects/t1/history/restore:{"versionPath":".lifeos/versions/t1/000002--abc2.md"}`,
+      `post:/api/v1/objects/t1/history/restore:{"versionPath":".lifeos/versions/t1/000002--abc2.md","expectedHash":"hash-opened"}`,
       "reload", "refresh", expect.stringMatching(/^toast:Restored revision 2 from .*2026/)
     ]);
   });
@@ -68,13 +70,30 @@ describe("History panel (#85)", () => {
   it("does nothing for a pruned or current version, and reloads after a refused restore", async () => {
     const post = vi.fn();
     const run = vi.fn(async () => true);
-    expect(await restoreEntry("t1", version(2, { kept: false }), { post, run, reload: async () => undefined })).toBe(false);
-    expect(await restoreEntry("t1", version(3, { current: true }), { post, run, reload: async () => undefined })).toBe(false);
+    expect(await restoreEntry("t1", version(2, { kept: false }), opened, { post, run, reload: async () => undefined })).toBe(false);
+    expect(await restoreEntry("t1", version(3, { current: true }), opened, { post, run, reload: async () => undefined })).toBe(false);
     expect(run).not.toHaveBeenCalled();
 
     const reload = vi.fn(async () => undefined);
     const failing = async (action: () => Promise<void>) => { await action().catch(() => undefined); return false; };
-    await restoreEntry("t1", version(2), { post: async () => { throw new Error(prunedMessage); }, run: failing, reload });
+    await restoreEntry("t1", version(2), opened, { post: async () => { throw new Error(prunedMessage); }, run: failing, reload });
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("#92: says a restricted object stays restricted after the restore", async () => {
+    const toasts: string[] = [];
+    const run = async (action: () => Promise<void>, success: string) => { await action(); toasts.push(success); return true; };
+    await restoreEntry("t1", version(2), { contentHash: "h", restricted: true }, { post: async () => undefined, run, reload: async () => undefined });
+    expect(toasts[0]).toMatch(/^Restored revision 2 from .*2026.*\. It stays restricted: a restore never changes sensitivity\.$/);
+  });
+
+  it("#92: refuses with a reload prompt when the object changed since the history was opened, and reloads the history", async () => {
+    const reload = vi.fn(async () => undefined);
+    let error: unknown;
+    const run = async (action: () => Promise<void>) => { await action().catch((failure) => { error = failure; }); return false; };
+    await restoreEntry("t1", version(2), opened, { post: async () => { throw new ApiError("Expected content hash abc but found def", 409); }, run, reload });
+    expect((error as Error).message).toBe(restoreConflictMessage);
+    expect(restoreConflictMessage).toMatch(/Reload/);
     expect(reload).toHaveBeenCalledOnce();
   });
 

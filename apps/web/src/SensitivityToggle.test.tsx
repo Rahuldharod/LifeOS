@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api.js";
-import { changeSensitivity, SensitivityToggle, type SensitivityObject } from "./SensitivityToggle.js";
+import { changeSensitivity, SensitivityToggle, sensitivityToast, type SensitivityObject } from "./SensitivityToggle.js";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const noop = async () => true;
@@ -56,5 +56,17 @@ describe("changeSensitivity (#86)", () => {
   it("passes other errors through unchanged", async () => {
     const call = async () => { throw new ApiError("LifeOS server is not reachable", 0); };
     await expect(changeSensitivity(object(), "meeting", call)).rejects.toThrow("LifeOS server is not reachable");
+  });
+});
+
+describe("sensitivityToast (#86, #92)", () => {
+  it("says what the change does", () => {
+    expect(sensitivityToast(false, "decision")).toBe("Marked restricted: this decision is kept away from Agents");
+    expect(sensitivityToast(true, "decision")).toBe("Marked normal: this decision can be shared with Agents again");
+  });
+
+  it("says a meeting stays excluded when its note is still restricted (#63)", () => {
+    expect(sensitivityToast(true, "meeting", true)).toBe("Marked normal, but this meeting stays kept away from Agents and Work Orders because its note is restricted");
+    expect(sensitivityToast(false, "meeting", true)).toBe("Marked restricted: this meeting is kept away from Agents");
   });
 });

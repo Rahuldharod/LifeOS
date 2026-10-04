@@ -2,7 +2,7 @@
 // each with a 'Restore this version' action that asks for confirmation, then puts the copy back through the
 // guarded write. Copies that retention has pruned say so and offer nothing.
 import React, { useEffect, useId, useState } from "react";
-import { api } from "./api.js";
+import { api, ApiError } from "./api.js";
 import { formatDate } from "./dateFormat.js";
 import { CappedRows } from "./TodayLists.js";
 
@@ -14,6 +14,14 @@ export type HistoryEntry = {
 
 /** Same wording as the server's refusal (#79), so the list and a late restore attempt agree. */
 export const prunedMessage = "This version is no longer kept (only the last 10 are)";
+
+/** #92: same wording as the server's refusal when the object changed after the panel opened. */
+export const restoreConflictMessage = "This was changed since you opened its history, so nothing was restored. Reload to see the latest version, then try again.";
+
+/** #92: GET /api/v1/objects/:id/history: the history plus the object's hash and sensitivity when the panel opened. */
+export type HistoryPanelData = { entries: HistoryEntry[]; contentHash?: string; restricted: boolean };
+/** What the panel was opened with: the hash a restore is guarded by, and whether the object is restricted. */
+export type OpenedObject = Pick<HistoryPanelData, "contentHash" | "restricted">;
 
 const eventLabels: Record<string, string> = {
   "object.changed-externally": "Edited outside LifeOS",
@@ -34,8 +42,9 @@ export const canRestore = (entry: HistoryEntry) => entry.kind === "version" && e
 /**
  * The restore step itself, separate from the UI so it can be tested: posts the version, then refreshes the history
  * and the caller's view. `run` is the app's action runner, which shows the success toast or the server's error.
+ * #92: guarded by the hash the panel was opened with; a restore keeps the current sensitivity, and the toast says so.
  */
-export async function restoreEntry(objectId: string, entry: HistoryEntry, deps: {
+export async function restoreEntry(objectId: string, entry: HistoryEntry, opened: OpenedObject, deps: {
   post: (url: string, body: unknown) => Promise<unknown>;
   run: (action: () => Promise<void>, success: string) => Promise<boolean>;
   reload: () => Promise<void>;
@@ -43,10 +52,13 @@ export async function restoreEntry(objectId: string, entry: HistoryEntry, deps: 
 }) {
   if (!canRestore(entry)) return false;
   return deps.run(async () => {
-    try { await deps.post(`/api/v1/objects/${objectId}/history/restore`, { versionPath: entry.versionPath }); }
-    finally { await deps.reload(); }
+    try { await deps.post(`/api/v1/objects/${objectId}/history/restore`, { versionPath: entry.versionPath, expectedHash: opened.contentHash }); }
+    catch (error) {
+      if (error instanceof ApiError && error.status === 409) throw new Error(restoreConflictMessage);
+      throw error;
+    } finally { await deps.reload(); }
     await deps.onRestored?.();
-  }, `Restored revision ${entry.revision} from ${formatDate(entry.at)}`);
+  }, `Restored revision ${entry.revision} from ${formatDate(entry.at)}${opened.restricted ? ". It stays restricted: a restore never changes sensitivity." : ""}`);
 }
 
 /** One row. While `confirming`, the restore button is replaced by an explicit confirm / cancel pair. */
@@ -89,20 +101,21 @@ export function HistoryLink({ objectId, title, disabled, run, onRestored }: {
   onRestored?: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [entries, setEntries] = useState<HistoryEntry[]>();
+  const [panel, setPanel] = useState<HistoryPanelData>();
+  const entries = panel?.entries;
   const [error, setError] = useState<string>();
   const [confirmingId, setConfirmingId] = useState<string>();
   const [working, setWorking] = useState(false);
   const panelId = useId();
   const reload = async () => {
-    try { setEntries(await api<HistoryEntry[]>(`/api/v1/objects/${objectId}/history`)); setError(undefined); }
+    try { setPanel(await api<HistoryPanelData>(`/api/v1/objects/${objectId}/history`)); setError(undefined); }
     catch (failure) { setError(failure instanceof Error ? failure.message : "History could not be loaded"); }
   };
   useEffect(() => { if (open) void reload(); else setConfirmingId(undefined); }, [open, objectId]);
   const confirm = async (entry: HistoryEntry) => {
     setWorking(true);
     try {
-      await restoreEntry(objectId, entry, { post: (url, body) => api(url, { method: "POST", body: JSON.stringify(body) }), run, reload, onRestored });
+      await restoreEntry(objectId, entry, { contentHash: panel?.contentHash, restricted: panel?.restricted ?? false }, { post: (url, body) => api(url, { method: "POST", body: JSON.stringify(body) }), run, reload, onRestored });
     } finally { setWorking(false); setConfirmingId(undefined); }
   };
   return <div className="history-link">

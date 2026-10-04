@@ -58,7 +58,7 @@ describe("object history (#85)", () => {
     await save(application, "Third");
     const original = (await application.objectHistory(taskId)).find((entry) => entry.kind === "version" && entry.title === "Original")!;
 
-    const restored = await application.restoreKeptVersion(taskId, original.versionPath!);
+    const restored = await application.restoreKeptVersion(taskId, original.versionPath!, application.object(taskId).contentHash);
     expect(restored.frontmatter).toMatchObject({ title: "Original", revision: 4, updated_by_device: "this-mac" });
     expect(application.object(taskId).frontmatter.title).toBe("Original");
 
@@ -78,13 +78,64 @@ describe("object history (#85)", () => {
     const pruned = (await application.objectHistory(taskId)).find((entry) => entry.kind === "event" && entry.external)!;
     expect(pruned).toMatchObject({ kept: false });
     const before = application.object(taskId).contentHash;
-    await expect(application.restoreKeptVersion(taskId, pruned.versionPath!)).rejects.toThrow("This version is no longer kept (only the last 10 are)");
+    await expect(application.restoreKeptVersion(taskId, pruned.versionPath!, before)).rejects.toThrow("This version is no longer kept (only the last 10 are)");
     expect(application.object(taskId).contentHash).toBe(before);
   });
 
   it("only restores copies from the object's own versions folder", async () => {
     const { application } = await vault();
-    await expect(application.restoreKeptVersion(taskId, "people/self.md")).rejects.toThrow(/Not a kept version/);
-    await expect(application.restoreKeptVersion(taskId, `.lifeos/versions/${taskId}/../${selfId}/000001--abc.md`)).rejects.toThrow(/Not a kept version/);
+    await expect(application.restoreKeptVersion(taskId, "people/self.md", "any")).rejects.toThrow(/Not a kept version/);
+    await expect(application.restoreKeptVersion(taskId, `.lifeos/versions/${taskId}/../${selfId}/000001--abc.md`, "any")).rejects.toThrow(/Not a kept version/);
+  });
+
+  it("#92: keeps the current sensitivity when an older normal version is restored", async () => {
+    const { application } = await vault();
+    await save(application, "Second");
+    await application.setSensitivity(taskId, "restricted", application.object(taskId).contentHash);
+    const normal = (await application.objectHistory(taskId)).find((entry) => entry.kind === "version" && entry.title === "Second" && entry.revision === 2)!;
+    const restored = await application.restoreKeptVersion(taskId, normal.versionPath!, application.object(taskId).contentHash);
+    expect(restored.frontmatter.sensitivity).toBe("restricted");
+    expect(application.object(taskId).frontmatter.sensitivity).toBe("restricted");
+
+    // Current normal wins over an older restricted copy too: restore never changes sensitivity.
+    await application.setSensitivity(taskId, "normal", application.object(taskId).contentHash);
+    const restrictedCopy = (await application.objectHistory(taskId)).find((entry) => entry.kind === "version" && !entry.current && entry.revision === restored.frontmatter.revision)!;
+    const back = await application.restoreKeptVersion(taskId, restrictedCopy.versionPath!, application.object(taskId).contentHash);
+    expect(back.frontmatter.sensitivity ?? "normal").toBe("normal");
+  });
+
+  it("#92: keeps a confirmed person confirmed when an older unreviewed version is restored", async () => {
+    const { application, root } = await vault();
+    const personId = "01995d61-7baf-7c21-9c96-9c5d2f6a32ac";
+    await writeFile(path.join(root, "people/anna.md"), `---\nid: ${personId}\ntype: person\nschema_version: 1\nrevision: 1\ntitle: Anna Roux\ncreated_at: 2026-10-01T08:00:00Z\nupdated_at: 2026-10-01T08:00:00Z\nupdated_by_device: test\ngiven_name: Anna\nfamily_name: Roux\nreview_state: unreviewed\n---\n`);
+    await application.rebuildIndex();
+    await application.recordExternalChanges();
+    await application.confirmPersonReviewed(personId, application.object(personId).contentHash);
+    expect(application.object(personId).frontmatter.review_state).toBe("reviewed");
+    const unreviewed = (await application.objectHistory(personId)).find((entry) => entry.kind === "version" && !entry.current)!;
+    const restored = await application.restoreKeptVersion(personId, unreviewed.versionPath!, application.object(personId).contentHash);
+    expect(restored.frontmatter.review_state).toBe("reviewed");
+  });
+
+  it("#92: refuses the restore when the object changed after the history was opened, and changes nothing", async () => {
+    const { application } = await vault();
+    await save(application, "Second");
+    const opened = application.object(taskId).contentHash;
+    const original = (await application.objectHistory(taskId)).find((entry) => entry.kind === "version" && entry.title === "Original")!;
+    await save(application, "Saved on another device");
+    const before = application.object(taskId).contentHash;
+    const refusal = application.restoreKeptVersion(taskId, original.versionPath!, opened);
+    await expect(refusal).rejects.toThrow(/changed since you opened its history/);
+    await expect(refusal).rejects.toMatchObject({ name: "ObjectConflictError" });
+    expect(application.object(taskId).contentHash).toBe(before);
+    expect((await application.objectHistory(taskId)).some((entry) => entry.action === "object.restored-from-version")).toBe(false);
+  });
+
+  it("#92: gives the History panel the hash it is opened with and whether the object is restricted", async () => {
+    const { application } = await vault();
+    await application.setSensitivity(taskId, "restricted", application.object(taskId).contentHash);
+    const panel = await application.historyPanel(taskId);
+    expect(panel).toMatchObject({ contentHash: application.object(taskId).contentHash, restricted: true });
+    expect(panel.entries).toEqual(await application.objectHistory(taskId));
   });
 });

@@ -324,10 +324,11 @@ server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
 server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
 server.post<{ Params: { id: string } }>("/api/v1/history/:id/restore", async (request) => application.restoreVersion(request.params.id));
 // #85: one object's kept versions and the audit events about them, and restoring any kept version.
-server.get<{ Params: { id: string } }>("/api/v1/objects/:id/history", async (request) => application.objectHistory(request.params.id));
-server.post<{ Params: { id: string }; Body: { versionPath?: string } }>("/api/v1/objects/:id/history/restore", async (request, reply) => {
-  if (typeof request.body?.versionPath !== "string") return reply.status(400).send({ error: "versionPath is required" });
-  return application.restoreKeptVersion(request.params.id, request.body.versionPath);
+// #92: the panel keeps the hash it was opened with and sends it back, so a save made since is never overwritten (409).
+server.get<{ Params: { id: string } }>("/api/v1/objects/:id/history", async (request) => application.historyPanel(request.params.id));
+server.post<{ Params: { id: string }; Body: { versionPath?: string; expectedHash?: string } }>("/api/v1/objects/:id/history/restore", async (request, reply) => {
+  if (typeof request.body?.versionPath !== "string" || typeof request.body.expectedHash !== "string") return reply.status(400).send({ error: "versionPath and expectedHash are required" });
+  return application.restoreKeptVersion(request.params.id, request.body.versionPath, request.body.expectedHash);
 });
 server.get("/api/v1/backups", async () => backups.list());
 // "Back up now" (System and the backup warning): recorded like the automatic ones, so a success clears the warning.

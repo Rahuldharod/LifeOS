@@ -7,7 +7,7 @@ import type { EntitiesModule } from "./entities.js";
 import type { MeetingsModule } from "./meetings.js";
 import { openPointPeopleIds } from "./open-points.js";
 import type { PeopleModule, PeopleSetupWarning } from "./people.js";
-import { dueDate, isLive, isRestricted } from "./support.js";
+import { dueDate, isLive, isMeetingRestricted } from "./support.js";
 
 /**
  * Today's live panels (#48, PRD "Daily Focus and Today"). Every panel is computed on request from the
@@ -227,7 +227,7 @@ export class TodayModule {
           if (event.isAllDay || event.declined || (event.calendarId && disabledCalendarIds.includes(event.calendarId))) continue;
           if (Date.parse(event.endsAt) <= dayStart || Date.parse(event.startsAt) >= dayEnd) continue;
           const meeting = event.meetingId ? ctx.index.get(event.meetingId) : undefined;
-          result.push({ title: event.title, startsAt: event.startsAt, endsAt: event.endsAt, calendarEventId: event.externalId, ...(event.calendarName ? { calendarName: event.calendarName } : {}), ...(event.meetingId ? { meetingId: event.meetingId } : {}), ...(event.noteId ? { noteId: event.noteId } : {}), restricted: isRestricted(meeting) });
+          result.push({ title: event.title, startsAt: event.startsAt, endsAt: event.endsAt, calendarEventId: event.externalId, ...(event.calendarName ? { calendarName: event.calendarName } : {}), ...(event.meetingId ? { meetingId: event.meetingId } : {}), ...(event.noteId ? { noteId: event.noteId } : {}), restricted: isMeetingRestricted(meeting, ctx.index.all()) });
         }
       } catch (error) {
         calendarError = error instanceof Error ? error.message : String(error);
@@ -241,7 +241,7 @@ export class TodayModule {
       const startsAt = String(meeting.frontmatter.starts_at), endsAt = String(meeting.frontmatter.ends_at);
       if (!(Date.parse(endsAt) > dayStart && Date.parse(startsAt) < dayEnd)) continue;
       const note = ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
-      result.push({ title: meeting.frontmatter.title, startsAt, endsAt, meetingId: meeting.frontmatter.id, ...(note ? { noteId: note.frontmatter.id } : {}), restricted: isRestricted(meeting) });
+      result.push({ title: meeting.frontmatter.title, startsAt, endsAt, meetingId: meeting.frontmatter.id, ...(note ? { noteId: note.frontmatter.id } : {}), restricted: isMeetingRestricted(meeting, ctx.index.all()) });
     }
     return { meetings: result.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), calendarError, calendarOffline };
   }
