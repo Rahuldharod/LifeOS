@@ -24,6 +24,7 @@ import { DecisionsPage } from "./DecisionsPage.js";
 import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
+import { awaitingAdoptionLabel, daysBetween, visibleRows } from "./todayPanels.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -61,7 +62,19 @@ type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[
 type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
-type InboxDrafts = { awaiting: number; failed: Array<{ path: string; reason: string }> };
+type InboxDrafts = { awaiting: number; drafts?: number; patches?: number; failed: Array<{ path: string; reason: string }> };
+type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+type TodaySettings = { meetingHoursThreshold: number; briefTime: string; briefTimeZone: string; briefDays: Weekday[]; contentHash?: string };
+/** #48: Today's live panels, computed by the server on each load (never from the brief). */
+type TodayPanels = {
+  date: string; overdue: LifeObject[]; dueToday: LifeObject[]; upcomingHighPriority: LifeObject[];
+  waitingByPerson: Array<{ personId?: string; label: string; isExternal: boolean; tasks: LifeObject[] }>;
+  nextMeetings: Array<{ title: string; startsAt: string; endsAt: string; inProgress: boolean; meetingId?: string; noteId?: string; calendarEventId?: string; calendarName?: string; restricted: boolean }>;
+  meetingHours: number; meetingHeavy: boolean; calendarError?: string;
+  openPointsForMeetings: Array<{ openPoint: LifeObject; meetingId: string; meetingTitle: string; link: "raised-in" | "project" | "client" | "people" }>;
+  reviewCount: number; inbox: { awaiting: number; drafts: number; patches: number }; failedDrafts: Array<{ path: string; reason: string }>;
+  staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }>; settings: TodaySettings;
+};
 type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "review" | "duplicate" | "failed" | "skipped" }> };
 type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
 type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
@@ -330,6 +343,8 @@ function App() {
   const [events, setEvents] = useState<Event[]>([]);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [today, setToday] = useState<Today>({ tasks: [], overdue: [], dueToday: [], upcoming: [], waiting: [], topThree: [], reviewCount: 0 });
+  const [todayPanels, setTodayPanels] = useState<TodayPanels>();
+  const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [tasks, setTasks] = useState<LifeObject[]>([]);
   const [projects, setProjects] = useState<ProjectRollup[]>([]);
   const [clients, setClients] = useState<EntityRollup[]>([]);
@@ -488,6 +503,8 @@ function App() {
     setAppliedPatches(await api<AppliedPatch[]>("/api/v1/inbox/patches"));
     // #44: loaded on its own so a failure here never blanks the other panels.
     void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
+    // #48: likewise; it may wait on the calendar, so it never holds up the rest of the page.
+    void api<TodayPanels>(`/api/v1/today/panels?date=${dateInTimeZone(new Date(), displayTimeZone)}&timeZone=${encodeURIComponent(displayTimeZone)}`).then(setTodayPanels).catch(() => undefined);
     setPersonLabels(await labelsRequest);
   };
 
@@ -519,6 +536,19 @@ function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) { await loadInternalDomains(); return "The internal domains were changed on another device. The latest version is loaded; make your change again."; }
       return error instanceof Error ? error.message : "Could not save internal domains";
+    }
+  };
+
+  const loadTodaySettings = async () => setTodaySettings(await api<TodaySettings>("/api/v1/settings/today").catch(() => undefined));
+  /** #48: saves the synced Today settings; resolves to an error message, or undefined on success. */
+  const saveTodaySettings = async (changes: Omit<TodaySettings, "contentHash">): Promise<string | undefined> => {
+    try {
+      setTodaySettings(await api<TodaySettings>("/api/v1/settings/today", { method: "PUT", body: JSON.stringify({ ...changes, expectedHash: todaySettings?.contentHash }) }));
+      await loadCollections();
+      return undefined;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) { await loadTodaySettings(); return "The Today settings were changed on another device. The latest version is loaded; make your change again."; }
+      return error instanceof Error ? error.message : "Could not save the Today settings";
     }
   };
 
@@ -1174,7 +1204,7 @@ function App() {
       setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
     } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
-  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); void loadFocusSettings(); } }, [view]);
+  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); void loadFocusSettings(); void loadTodaySettings(); } }, [view]);
 
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
@@ -1215,13 +1245,14 @@ function App() {
         {today.focus ? <DailyFocusPanel focus={today.focus} tasks={today.tasks} disabled={busy || readOnly} onRefresh={() => void requestReplan()} onChange={(change) => void changeFocus(change)} />
           : <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>}
         <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void requestEnrichment()}>Enrich last 48h</button></div>
-          {enrichment.staleWorkOrders.length > 0 && <ul className="diagnostics">{enrichment.staleWorkOrders.map((order) => <li key={order.path}>Work Order not processed for {order.ageDays} days: <code>{order.path}</code></li>)}</ul>}
+          {/* #48: stale Work Orders moved to the "Inbox and agents" live panel. */}
           {enrichment.proposedGaveUp.map((meeting) => <div className="object-row" key={meeting.meetingId}><i /><div><b>{meeting.title}</b><small>No material 48 hours after the request</small></div><button disabled={busy || readOnly} onClick={() => void giveUpEnrichment(meeting.meetingId)}>Give up</button></div>)}</article>
-        <ObjectList title="Overdue" objects={today.overdue} empty="Nothing overdue." />
-        <ObjectList title="Due today" objects={today.dueToday} empty="Nothing due today." />
-        <ObjectList title="Upcoming priority work" objects={today.upcoming.length ? today.upcoming : today.tasks.filter((task) => task.frontmatter.priority === "High")} empty="No upcoming dated or high-priority work." />
-        <ObjectList title="Waiting" objects={today.waiting} empty="Nothing waiting on someone else." />
-        <article><span>TODAY'S EVENTS</span>{calendarError ? <p className="muted">Calendar could not be loaded: {calendarError}</p> : !events.length && <p className="muted">No events today.</p>}{events.slice(0, 5).map((event) => <div className="object-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}><i /><div><b>{event.title}</b><small>{formatEventDate(event)} · {event.calendarName ?? "Calendar"}</small></div></div>)}</article>
+        {todayPanels ? <TodayLivePanels panels={todayPanels} onOpenInbox={() => setView("Inbox")} /> : <>
+          {/* Until the live panels load (or if they fail), the basic lists from /today stand in. */}
+          <ObjectList title="Overdue" objects={today.overdue} empty="Nothing overdue." />
+          <ObjectList title="Due today" objects={today.dueToday} empty="Nothing due today." />
+          <ObjectList title="Waiting" objects={today.waiting} empty="Nothing waiting on someone else." />
+        </>}
       </>}
 
       {view === "Calendar" && <>
@@ -1385,7 +1416,7 @@ function App() {
       {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
 
       {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
-        <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p><b>{inboxDrafts.awaiting}</b> {inboxDrafts.awaiting === 1 ? "draft" : "drafts"} awaiting adoption</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
+        <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p>{awaitingAdoptionLabel(inboxDrafts)}</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
         {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
@@ -1413,7 +1444,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
     </section>
   </main>;
 }
@@ -1518,6 +1549,53 @@ function PeopleMeta({ label, people, labels, empty }: { label: string; people: L
   const text = people.map((person) => personLabel(labels, person).label).join(", ") || empty;
   return <div className="meta"><small>{label}</small><b title={text}>{people.length ? <PeopleList people={people} labels={labels} /> : empty}</b></div>;
 }
+/**
+ * #48: one live panel. At most 6 rows show until "Show N more" (a real button, so keyboard and screen
+ * readers reach it); the count sits in the heading as text.
+ */
+function LivePanel<T>({ title, items, empty, row, note }: { title: string; items: readonly T[]; empty: string; row: (item: T) => React.ReactNode; note?: React.ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  const id = React.useId();
+  const { rows, hidden } = visibleRows(items, expanded);
+  const collapsible = visibleRows(items, false).hidden > 0;
+  return <article className="live-panel" aria-labelledby={`${id}-title`}>
+    <span id={`${id}-title`}>{title.toUpperCase()} · {items.length}</span>
+    {note}
+    {!items.length && <p className="muted">{empty}</p>}
+    <div id={`${id}-rows`}>{rows.map(row)}</div>
+    {collapsible && <button type="button" className="show-more" aria-expanded={expanded} aria-controls={`${id}-rows`} onClick={() => setExpanded(!expanded)}>{expanded ? "Show fewer" : `Show ${hidden} more`}</button>}
+  </article>;
+}
+
+const dueText = (task: LifeObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
+const openPointLinkText = { "raised-in": "Raised in", project: "Same project as", client: "Same client as", people: "Same people as" } as const;
+
+/** #48: Today's live panels, in the PRD's order. Status is always said in words, never by colour alone. */
+function TodayLivePanels({ panels, onOpenInbox }: { panels: TodayPanels; onOpenInbox: () => void }) {
+  const taskRow = (detail: (task: LifeObject) => string) => (task: LifeObject) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}<LockBadge frontmatter={task.frontmatter} /></b><small>{detail(task)}</small></div></div>;
+  const overdueBy = (task: LifeObject) => { const due = dueText(task); const days = due ? daysBetween(due, panels.date) : 0; return `Overdue by ${days} ${days === 1 ? "day" : "days"} · due ${due}`; };
+  const meetingTime = (meeting: TodayPanels["nextMeetings"][number]) => `${formatTime(meeting.startsAt)}–${formatTime(meeting.endsAt)}`;
+  const inboxRows = [
+    { key: "reviews", text: `${panels.reviewCount} review ${panels.reviewCount === 1 ? "item" : "items"} awaiting confirmation` },
+    { key: "awaiting", text: awaitingAdoptionLabel(panels.inbox) },
+    ...panels.failedDrafts.map((entry) => ({ key: `failed:${entry.path}`, text: `Failed draft: ${entry.reason}`, path: entry.path })),
+    ...panels.staleWorkOrders.map((order) => ({ key: `stale:${order.path}`, text: `Stale Work Order: not processed for ${order.ageDays} days`, path: order.path }))
+  ];
+  return <>
+    <LivePanel title="Overdue" items={panels.overdue} empty="Nothing overdue." row={taskRow(overdueBy)} />
+    <LivePanel title="Due today" items={panels.dueToday} empty="Nothing due today." row={taskRow((task) => `Due today${task.frontmatter.priority ? ` · ${String(task.frontmatter.priority)} priority` : ""}`)} />
+    <LivePanel title="Upcoming high priority" items={panels.upcomingHighPriority} empty="No upcoming high-priority work." row={taskRow((task) => `High priority · ${dueText(task) ? `due ${dueText(task)}` : "no due date"}`)} />
+    <LivePanel title="Waiting by person" items={panels.waitingByPerson} empty="Nothing waiting on someone else." row={(group) => <div className="object-row" key={group.personId ?? "unknown"}><i /><div><b>{group.label}</b><small>{group.tasks.length} waiting: {group.tasks.map((task) => task.frontmatter.title).join(", ")}</small></div></div>} />
+    <LivePanel title="Next meetings" items={panels.nextMeetings} empty={panels.calendarError ? "No meetings found in LifeOS for the rest of today." : "No more meetings today."}
+      note={<>{panels.calendarError && <p className="muted" role="status">Calendar could not be read ({panels.calendarError}); showing meetings already in LifeOS.</p>}<p className="muted">{panels.meetingHours} h of meetings today{panels.meetingHeavy ? ` · Meeting-heavy day (${panels.settings.meetingHoursThreshold} h or more)` : ""}</p></>}
+      row={(meeting) => <div className="object-row" key={meeting.meetingId ?? meeting.calendarEventId}><i /><div><b>{meeting.title}{meeting.restricted && <LockBadge frontmatter={{ sensitivity: "restricted" }} />}</b><small>{[meeting.inProgress ? "Now" : undefined, meetingTime(meeting), meeting.calendarName, meeting.noteId ? "Has notes" : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
+    <LivePanel title="Open points for today's meetings" items={panels.openPointsForMeetings} empty="No open points linked to today's meetings."
+      row={(entry) => <div className="object-row" key={entry.openPoint.frontmatter.id}><i /><div><b>{entry.openPoint.frontmatter.title}<LockBadge frontmatter={entry.openPoint.frontmatter} /></b><small>{[`${openPointLinkText[entry.link]} ${entry.meetingTitle}`, entry.openPoint.frontmatter.importance ? `${String(entry.openPoint.frontmatter.importance)} importance` : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
+    <LivePanel title="Inbox and agents" items={inboxRows} empty="" note={<button type="button" onClick={onOpenInbox}>Open Inbox</button>}
+      row={(entry) => <div className="object-row" key={entry.key}><i /><div><b>{entry.text}</b>{"path" in entry && entry.path && <small><code>{entry.path}</code></small>}</div></div>} />
+  </>;
+}
+
 function ObjectList({ title, objects, empty }: { title: string; objects: LifeObject[]; empty: string }) {
   return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map((object) => <div className="object-row" key={object.frontmatter.id}><i /><div><b>{object.frontmatter.title}<LockBadge frontmatter={object.frontmatter} /></b><small>{object.frontmatter.status ?? object.frontmatter.type} · Updated {formatDate(object.frontmatter.updated_at)}</small></div></div>)}</article>;
 }
@@ -1551,6 +1629,37 @@ function PersonExternalControl({ person, labels, disabled, onChange }: { person:
   return <span className="person-external"><small>Shown as</small><b><PersonName {...label} /></b>{!isSelf && onChange && <label><small>External</small><select value={externalChoiceOf(person.frontmatter)} disabled={disabled} onChange={(event) => onChange(person, event.target.value as ExternalChoice)}>
     <option value="auto">Auto (by email domain{externalChoiceOf(person.frontmatter) === "auto" ? `: ${derived}` : ""})</option><option value="external">External</option><option value="internal">Internal</option>
   </select></label>}</span>;
+}
+
+const weekdayNames: Array<[Weekday, string]> = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
+/** #48: the synced Today settings: when a day counts as meeting-heavy, and when the morning routine writes the brief. */
+function TodaySettingsCard({ setting, disabled, timeZones, onSave }: { setting?: TodaySettings; disabled: boolean; timeZones: string[]; onSave: (changes: Omit<TodaySettings, "contentHash">) => Promise<string | undefined> }) {
+  const [threshold, setThreshold] = useState("");
+  const [time, setTime] = useState("");
+  const [zone, setZone] = useState("");
+  const [days, setDays] = useState<Weekday[]>([]);
+  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (setting) { setThreshold(String(setting.meetingHoursThreshold)); setTime(setting.briefTime); setZone(setting.briefTimeZone); setDays(setting.briefDays); } }, [setting]);
+  const save = async () => {
+    setSaving(true);
+    const error = await onSave({ meetingHoursThreshold: Number(threshold), briefTime: time, briefTimeZone: zone, briefDays: days });
+    setSaving(false);
+    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved." });
+  };
+  const edit = <T,>(set: (value: T) => void) => (value: T) => { set(value); setStatus(undefined); };
+  return <article className="today-setting"><span>TODAY</span><h3>Meetings and morning brief</h3>
+    {!setting ? <p className="muted">Loading…</p> : <>
+      <label>Meeting-heavy day from (hours) <input type="number" min={0} max={24} step={0.5} value={threshold} disabled={disabled} onChange={(event) => edit(setThreshold)(event.target.value)} /></label>
+      <p className="muted">Information only: Today notes a meeting-heavy day; nothing is blocked.</p>
+      <label>Brief time <input type="time" value={time} disabled={disabled} onChange={(event) => edit(setTime)(event.target.value)} /></label>
+      <label>Brief time zone <select value={zone} disabled={disabled} onChange={(event) => edit(setZone)(event.target.value)}>{[...new Set([zone, ...timeZones])].map((option) => <option key={option}>{option}</option>)}</select></label>
+      <fieldset disabled={disabled}><legend>Brief days</legend>{weekdayNames.map(([day, name]) => <label key={day}><input type="checkbox" checked={days.includes(day)} onChange={(event) => edit(setDays)(event.target.checked ? [...days, day] : days.filter((value) => value !== day))} /> {name}</label>)}</fieldset>
+      <button type="button" disabled={disabled || saving || !days.length || !threshold.trim() || !time} onClick={save}>{saving ? "Saving…" : "Save"}</button>
+      {!days.length && <p className="calendar-error" role="alert">Choose at least one day.</p>}
+    </>}
+    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
+  </article>;
 }
 
 /** #39: the synced internal-domains setting. People with addresses only on other domains are shown as External. */

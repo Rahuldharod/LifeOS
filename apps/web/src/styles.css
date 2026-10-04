@@ -337,6 +337,11 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .person-external { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .person-external label { display: inline-flex; align-items: center; gap: 4px; }
 .internal-domains-setting { margin-bottom: 18px; }
+/* #48: Today live panels and Today settings */
+.live-panel .show-more { margin-top: 8px; }
+.today-setting { margin-bottom: 18px; display: grid; gap: 8px; justify-items: start; }
+.today-setting fieldset { display: flex; flex-wrap: wrap; gap: 10px; border: 0; padding: 0; margin: 0; }
+.today-setting fieldset label { display: inline-flex; align-items: center; gap: 4px; }
 
 /* #46 Daily Focus: finished items struck through, past meetings and missing references muted. */
 .daily-focus .capture-row { align-items: center; justify-content: space-between; }
