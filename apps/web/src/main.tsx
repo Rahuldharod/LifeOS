@@ -55,6 +55,7 @@ type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
 type InboxDrafts = { awaiting: number; failed: Array<{ path: string; reason: string }> };
 type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "duplicate" | "failed" | "skipped" }> };
+type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
 type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus };
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
@@ -275,6 +276,7 @@ function App() {
   const [sourceText, setSourceText] = useState("");
   const [health, setHealth] = useState<SystemHealth>();
   const [inboxDrafts, setInboxDrafts] = useState<InboxDrafts>({ awaiting: 0, failed: [] });
+  const [enrichment, setEnrichment] = useState<EnrichmentStatus>({ proposedGaveUp: [], staleWorkOrders: [] });
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
@@ -400,6 +402,8 @@ function App() {
       api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
+    // #44: loaded on its own so a failure here never blanks the other panels.
+    void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
   };
 
   const refreshWorkspace = async (meetingId: string) => {
@@ -634,6 +638,24 @@ function App() {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Adoption failed"); }
     finally { setBusy(false); }
   };
+
+  // #44: "Enrich last 48h" writes a Work Order for Claude; the server's message says what happened.
+  const requestEnrichment = async () => {
+    setBusy(true);
+    try {
+      const result = await api<{ message: string }>("/api/v1/enrichment/work-orders", { method: "POST" });
+      await loadCollections();
+      setMessage(result.message);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Enrichment request failed"); }
+    finally { setBusy(false); }
+  };
+
+  const giveUpEnrichment = (meetingId: string) => run(async () => {
+    const meeting = objectLinks.find((object) => object.frontmatter.id === meetingId);
+    if (!meeting) throw new Error("Meeting not found; refresh and try again");
+    await api(`/api/v1/meetings/${meetingId}/enrichment/gave-up`, { method: "POST", body: JSON.stringify({ expectedHash: meeting.contentHash }) });
+    await loadCollections();
+  }, "Stopped waiting for material for this meeting");
 
   const changeTask = (task: LifeObject, changes: Record<string, unknown>) => run(async () => {
     await api(`/api/v1/tasks/${task.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes, expectedHash: task.contentHash }) });
@@ -1042,6 +1064,9 @@ function App() {
         </div>
         <article className="quick-capture"><span>QUICK CAPTURE</span><div className="capture-row"><input value={capture} onChange={(event) => setCapture(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) submitCapture(); }} placeholder="Capture a task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={submitCapture}>Capture</button></div></article>
         <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>
+        <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void requestEnrichment()}>Enrich last 48h</button></div>
+          {enrichment.staleWorkOrders.length > 0 && <ul className="diagnostics">{enrichment.staleWorkOrders.map((order) => <li key={order.path}>Work Order not processed for {order.ageDays} days: <code>{order.path}</code></li>)}</ul>}
+          {enrichment.proposedGaveUp.map((meeting) => <div className="object-row" key={meeting.meetingId}><i /><div><b>{meeting.title}</b><small>No material 48 hours after the request</small></div><button disabled={busy || readOnly} onClick={() => void giveUpEnrichment(meeting.meetingId)}>Give up</button></div>)}</article>
         <ObjectList title="Overdue" objects={today.overdue} empty="Nothing overdue." />
         <ObjectList title="Due today" objects={today.dueToday} empty="Nothing due today." />
         <ObjectList title="Upcoming priority work" objects={today.upcoming.length ? today.upcoming : today.tasks.filter((task) => task.frontmatter.priority === "High")} empty="No upcoming dated or high-priority work." />

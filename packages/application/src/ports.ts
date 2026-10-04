@@ -52,6 +52,8 @@ export interface CalendarEvent {
   endsAt: string;
   timezone: string;
   isAllDay?: boolean;
+  /** The user declined the invitation; declined events are never enriched (#44). */
+  declined?: boolean;
   attendees: string[];
   clientName?: string;
   productName?: string;

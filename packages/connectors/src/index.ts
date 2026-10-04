@@ -129,6 +129,7 @@ export class GoogleCalendarConnector implements CalendarConnector {
           endsAt: new Date(rawEnd).toISOString(),
           timezone: String(event.start.timeZone ?? event.end.timeZone ?? calendar.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
           isAllDay: allDay,
+          declined: Array.isArray(event.attendees) && event.attendees.some((attendee: Record<string, unknown>) => attendee.self === true && attendee.responseStatus === "declined"),
           attendees: Array.isArray(event.attendees) ? event.attendees.map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : []
         };
       });
