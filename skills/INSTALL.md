@@ -1,6 +1,6 @@
 # LifeOS skills pack v1: install and dry-run
 
-Three Claude skills. Install them, then test them on **fake data** before pointing them at your real LifeOS.
+Five Claude skills: Object Contract, Capture, Ask, Morning and Enrichment. Install them, then test them on **fake data** before pointing them at your real LifeOS.
 
 | Skill | What it does |
 | --- | --- |
