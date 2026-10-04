@@ -75,8 +75,8 @@ export class LifeOSApplication {
     this.meetings = new MeetingsModule(ctx, this.people);
     this.adoption = new AdoptionModule(ctx, inbox, this.patches, this.meetings);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
-    this.review = new ReviewModule(ctx, this.meetings);
     this.decisionsModule = new DecisionsModule(ctx);
+    this.review = new ReviewModule(ctx, this.meetings, this.decisionsModule);
     this.openPointsModule = new OpenPointsModule(ctx, this.decisionsModule);
     this.enrichment = new EnrichmentModule(ctx, this.meetings, this.calendarModule, inbox);
     this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment, this.openPointsModule);

@@ -2,6 +2,7 @@ import { originOf, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeo
 import { isCalendarDate, proposalBody, toUtc } from "./adoption.js";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { acceptSummary, summaryReviewType } from "./meeting-material.js";
+import { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
 import { PersonMergeModule, personMergeOperation, personMergeReviewType } from "./person-merge.js";
@@ -14,7 +15,7 @@ export class ReviewModule {
   readonly merges: PersonMergeModule;
   /** #62: the tail of the queue of accept/reject/recover calls per Review Item, so they run one at a time. */
   private readonly queues = new Map<string, Promise<unknown>>();
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule) { this.merges = new PersonMergeModule(ctx); }
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly decisions = new DecisionsModule(ctx)) { this.merges = new PersonMergeModule(ctx); }
 
   /**
    * #62: runs `work` after every earlier accept, reject or recovery of the same Review Item has settled, so a
@@ -168,6 +169,9 @@ export class ReviewModule {
     const target = ctx.required(targetId);
     if (target.frontmatter.deleted_at) throw new Error("The object to change was deleted");
     const note = proposal.append_note;
+    // #67: superseding goes through the Decisions workspace path, which sets both links.
+    const successor = target.frontmatter.type === "decision" ? proposal.changes.find((change) => change.field === "superseded_by_decision_id")?.proposed : undefined;
+    const successorId = typeof successor === "string" ? successor : undefined;
     const landed = target.frontmatter.revision === proposal.base_revision + 1 && proposal.changes.every((change) => sameValue(target.frontmatter[change.field], change.proposed)) && (!note || target.body.endsWith(`\n${note}\n`));
     const now = new Date().toISOString();
     let updated = target;
@@ -176,7 +180,13 @@ export class ReviewModule {
         throw new ObjectConflictError(`${target.frontmatter.title} changed since this review item was raised (revision ${proposal.base_revision}, now ${target.frontmatter.revision}); reject it and send the change again`);
       }
       const changes = Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed ?? undefined]));
-      updated = await ctx.update(target, changes, { expectedHash: proposal.base_hash, now, ...(note ? { body: target.body + appendedText(target.body, note) } : {}) });
+      const body = note ? target.body + appendedText(target.body, note) : undefined;
+      updated = successorId
+        ? (await this.decisions.supersedeWith(targetId, successorId, proposal.base_hash, { changes, ...(body !== undefined ? { body } : {}) })).superseded
+        : await ctx.update(target, changes, { expectedHash: proposal.base_hash, now, ...(body !== undefined ? { body } : {}) });
+    } else if (successorId) {
+      // #67: a crash may have left the successor's back link unwritten; finish it (a no-op once both links are set).
+      updated = (await this.decisions.supersedeWith(targetId, successorId, target.contentHash)).superseded;
     }
     await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId }, { expectedHash: review.contentHash, now });
     await ctx.writeAudit("review.accepted", targetId, now, {
