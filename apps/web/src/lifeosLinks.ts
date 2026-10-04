@@ -6,7 +6,7 @@ export type LinkedObject = { frontmatter: { id: string; type: string; title: str
 export type LinkTarget =
   | { kind: "note"; id: string; deleted: boolean }
   | { kind: "meeting"; id: string }
-  | { kind: "entity"; id: string; view: "Tasks" | "Projects" | "Clients" | "Products" | "People" }
+  | { kind: "entity"; id: string; view: "Tasks" | "Projects" | "Clients" | "Products" | "People" | "Decisions" }
   | { kind: "inbox"; id: string }
   | { kind: "unsupported"; id: string; type: string }
   | { kind: "missing"; id: string }
@@ -19,7 +19,7 @@ export function lifeosLinkId(href: string | null | undefined): string | undefine
   return href ? LINK.exec(href.trim())?.[1]?.toLowerCase() : undefined;
 }
 
-const entityViews: Record<string, "Tasks" | "Projects" | "Clients" | "Products" | "People"> = { task: "Tasks", project: "Projects", client: "Clients", product: "Products", person: "People" };
+const entityViews: Record<string, "Tasks" | "Projects" | "Clients" | "Products" | "People" | "Decisions"> = { task: "Tasks", project: "Projects", client: "Clients", product: "Products", person: "People", decision: "Decisions" };
 
 export function resolveLifeosLink(href: string, objects: LinkedObject[]): LinkTarget {
   const id = lifeosLinkId(href);

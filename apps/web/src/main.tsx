@@ -19,6 +19,8 @@ import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions } from "./envelope.js";
 import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
+import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
+import { DecisionsPage } from "./DecisionsPage.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -64,9 +66,9 @@ type ConnectionSettings = { calendar: { configured: boolean; connected: boolean 
 type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
-type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
+type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
 
-const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
+const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
 
 function formatDate(value: unknown) {
   if (typeof value !== "string") return "—";
@@ -94,25 +96,6 @@ function dateInTimeZone(value: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value;
   return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function addCalendarDays(date: string, days: number) {
-  const value = new Date(`${date}T12:00:00.000Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-function zonedMidnight(date: string, timeZone: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  const target = Date.UTC(year!, month! - 1, day!, 0, 0, 0);
-  let guess = target;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(guess));
-    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((candidate) => candidate.type === type)?.value);
-    const represented = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
-    guess += target - represented;
-  }
-  return new Date(guess);
 }
 
 function dayRange(date: string, timeZone: string) {
@@ -1027,7 +1010,7 @@ function App() {
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
   useEffect(() => { if (view === "Settings") void loadCalendarCatalog(); }, [view]);
 
-  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
+  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
   const offeredCalendars: CalendarOption[] = calendarCatalog.length
     ? enabledCalendars(calendarCatalog, calendarPrefs)
@@ -1224,6 +1207,8 @@ function App() {
         <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.map((person) => person.frontmatter.title).join(", ") || "None linked"}</p></article>)}</div>
         {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
       </>}
+
+      {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
 
       {view === "Clients" && <EntityCrudPage highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
       {view === "Products" && <EntityCrudPage highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}

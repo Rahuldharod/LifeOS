@@ -185,6 +185,21 @@ server.get<{ Querystring: { q?: string } }>("/api/v1/knowledge", async (request)
 server.post<{ Body: { title: string; text: string } }>("/api/v1/sources/text", async (request) => application.ingestTextSource(request.body.title, request.body.text));
 server.get<{ Params: { type: "client" | "product" | "person" } }>("/api/v1/rollups/:type", async (request) => application.rollups(request.params.type));
 server.get("/api/v1/projects", async () => application.projects());
+// #41 Decisions workspace. Filters: projectId, clientId, productId, personId, status, from/to (ISO instants on decided_at).
+server.get<{ Querystring: { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string } }>("/api/v1/decisions", async (request) => application.decisions(request.query));
+server.get<{ Params: { id: string } }>("/api/v1/decisions/:id", async (request) => application.decision(request.params.id));
+server.post<{ Body: { fields?: Record<string, unknown> } }>("/api/v1/decisions", async (request, reply) => {
+  if (!request.body?.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields are required" });
+  return application.createDecision(request.body.fields);
+});
+server.patch<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/decisions/:id", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
+  return application.updateDecision(request.params.id, request.body.fields, request.body.expectedHash);
+});
+server.post<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/decisions/:id/supersede", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
+  return application.supersedeDecision(request.params.id, request.body.fields, request.body.expectedHash);
+});
 server.get("/api/v1/review-items", async () => application.reviews());
 server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());
 server.post("/api/v1/inbox/adopt", async () => application.adoptDrafts());
