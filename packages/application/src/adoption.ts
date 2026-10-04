@@ -95,7 +95,11 @@ export interface FilingResult { draftKey: string; objectIds: string[]; errors?: 
 export type FileDocument = (document: InboxDocument, folder: "processed" | "failed", result: FilingResult) => Promise<DraftResult>;
 
 export interface InboxStatus {
+  /** Inbox Drafts plus Patch Drafts waiting to be adopted. */
   awaiting: number;
+  /** The split of `awaiting` (#48), so labels can say "3 drafts and 1 patch" rather than call patches drafts. */
+  drafts: number;
+  patches: number;
   failed: Array<{ path: string; reason: string }>;
 }
 
@@ -254,7 +258,7 @@ export class AdoptionModule {
   }
 
   async inboxStatus(): Promise<InboxStatus> {
-    if (!this.inbox) return { awaiting: 0, failed: [] };
+    if (!this.inbox) return { awaiting: 0, drafts: 0, patches: 0, failed: [] };
     const [drafts, patches, failed] = await Promise.all([this.inbox.list("drafts"), this.inbox.list("patches"), this.inbox.list("failed")]);
     const names = new Set(failed.map((file) => file.name));
     const reasons = await Promise.all(failed.filter((file) => !isResult(file)).map(async (file) => {
@@ -262,7 +266,7 @@ export class AdoptionModule {
       const errors = sidecar?.frontmatter?.errors;
       return { path: file.relativePath, reason: Array.isArray(errors) && errors.length ? errors.map(String).join("; ") : `no readable ${resultName(file.name)} sidecar` };
     }));
-    return { awaiting: drafts.length + patches.length, failed: reasons };
+    return { awaiting: drafts.length + patches.length, drafts: drafts.length, patches: patches.length, failed: reasons };
   }
 
   /** System Health lines for failed drafts: they stay listed until the user removes or fixes them. */

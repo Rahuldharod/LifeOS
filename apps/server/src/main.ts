@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { MockAiProvider } from "@lifeos/ai";
-import { LifeOSApplication, type ReviewEdits } from "@lifeos/application";
+import { LifeOSApplication, type ReviewEdits, type Weekday } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
@@ -95,6 +95,13 @@ server.put<{ Body: { domains?: unknown[]; expectedHash?: string } }>("/api/v1/se
   const { domains, expectedHash } = request.body ?? {};
   if (!Array.isArray(domains)) return reply.status(400).send({ error: "domains must be a list" });
   return application.saveInternalDomains(domains, expectedHash);
+});
+// #48: meeting-hours threshold and brief time; invalid values answer 400 with every problem named.
+server.get("/api/v1/settings/today", async () => application.getTodaySettings());
+server.put<{ Body: { meetingHoursThreshold?: number; briefTime?: string; briefTimeZone?: string; briefDays?: Weekday[]; expectedHash?: string } }>("/api/v1/settings/today", async (request) => {
+  const { expectedHash, meetingHoursThreshold, briefTime, briefTimeZone, briefDays } = request.body ?? {};
+  const changes = Object.fromEntries(Object.entries({ meetingHoursThreshold, briefTime, briefTimeZone, briefDays }).filter(([, value]) => value !== undefined));
+  return application.saveTodaySettings(changes, expectedHash);
 });
 server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/sync", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
@@ -201,6 +208,12 @@ server.get<{ Querystring: { date?: string } }>("/api/v1/today", async (request, 
   const date = request.query.date;
   if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.status(400).send({ error: "date must be YYYY-MM-DD" });
   return application.today({ date });
+});
+// #48: the live panels; `timeZone` (IANA, the browser's display zone) sets the local day's boundaries for meetings.
+server.get<{ Querystring: { date?: string; timeZone?: string } }>("/api/v1/today/panels", async (request, reply) => {
+  const { date, timeZone } = request.query;
+  if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.status(400).send({ error: "date must be YYYY-MM-DD" });
+  return application.todayPanels({ date, timeZone });
 });
 server.post<{ Body: { date?: string } }>("/api/v1/focus/replan", async (request, reply) => {
   if (typeof request.body?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(request.body.date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });

@@ -17,6 +17,7 @@ import type { Sensitivity } from "@lifeos/domain";
 import type { AgentIndexWriter, AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
 import { ReviewModule, type ReviewEdits } from "./review.js";
 import { SystemModule } from "./system.js";
+import { TodayModule, type TodaySettings } from "./today.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
@@ -34,6 +35,8 @@ export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial }
 export type { AppliedPatch, UpdateChange, UpdateProposal } from "./patches.js";
 export type { DailyFocusView, FocusItem, FocusItemState, ReplanRequest } from "./focus.js";
 export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords } from "./focus.js";
+export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySettings, WaitingGroup, Weekday } from "./today.js";
+export { defaultTodaySettings, weekdays } from "./today.js";
 export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
 export type { AgentIndexOptions, AgentIndexStatus } from "./agent-index.js";
 
@@ -58,6 +61,7 @@ export class LifeOSApplication {
   private readonly people: PeopleModule;
   private readonly focus: DailyFocusModule;
   private readonly agentIndex: AgentIndexModule;
+  private readonly todayModule: TodayModule;
 
   /**
    * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
@@ -77,6 +81,7 @@ export class LifeOSApplication {
     this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment, this.openPointsModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.focus = new DailyFocusModule(ctx, inbox);
+    this.todayModule = new TodayModule(ctx, this.entitiesModule, this.adoption, this.enrichment, this.meetings, this.calendarModule, this.people);
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
     this.history = new HistoryModule(ctx);
@@ -122,6 +127,10 @@ export class LifeOSApplication {
     const today = this.entitiesModule.today(date);
     return { ...today, focus: this.focus.view(date, today.topThree, options.now) };
   }
+  /** #48: Today's live panels, computed fresh from the index, calendar and `_inbox/` (never from the brief). */
+  todayPanels(options: { date?: string; now?: Date; timeZone?: string } = {}) { return this.todayModule.panels(options); }
+  getTodaySettings() { return this.todayModule.settings(); }
+  saveTodaySettings(input: Partial<Omit<TodaySettings, "contentHash">>, expectedHash?: string) { return this.todayModule.saveSettings(input, expectedHash); }
   /** "Refresh" on Today: writes a `replan` Work Order for the date (#46). */
   requestReplan(date: string, options?: { now?: Date }) { return this.focus.requestReplan(date, options); }
   rollups(type: "client" | "product" | "person") { return this.entitiesModule.rollups(type); }
