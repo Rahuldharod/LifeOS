@@ -15,7 +15,9 @@
     "updated_by_device": { "type": "string", "minLength": 1 },
     "archived_at": { "type": "string", "format": "date-time" },
     "deleted_at": { "type": "string", "format": "date-time" },
-    "area": { "type": "string" },
+    "origin": { "enum": ["app", "user-dictated", "agent-extracted", "calendar", "imported", "external"], "default": "app", "description": "Where the object came from. Set at creation and never changed; missing means app." },
+    "sensitivity": { "enum": ["normal", "restricted"], "default": "normal", "description": "Restricted objects are kept away from Agents, Daily Focus, Work Orders and Slack (ADR 0010). Missing means normal." },
+    "area": { "enum": ["work", "maintenance", "household", "learning", "personal-projects", "personal-growth"], "description": "New writes must use one of these. Older files with other values still load and get a System Health warning." },
     "subjects": { "type": "array", "items": { "type": "string" } },
     "tags": { "type": "array", "items": { "type": "string" } }
   },

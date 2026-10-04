@@ -3,6 +3,8 @@
 // there is no separate Save step; a failed save puts the previous value back.
 import React, { useEffect, useRef, useState } from "react";
 import { noteDetailsChanges, noteDetailsForm, type NoteDetailsForm } from "./noteDetailsForm.js";
+import { EnvelopeBadges } from "./EnvelopeBadges.js";
+import { isRestricted } from "./envelope.js";
 import { SearchSelect } from "./SearchSelect.js";
 import type { SearchOption } from "./searchOptions.js";
 
@@ -22,7 +24,14 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
   const [form, setForm] = useState<NoteDetailsForm>(() => noteDetailsForm(note.frontmatter));
   const [editingTitle, setEditingTitle] = useState(false);
   const titleInput = useRef<HTMLInputElement>(null);
-  useEffect(() => { setForm(noteDetailsForm(note.frontmatter)); }, [note.frontmatter.id, note.contentHash]);
+  // Local so the unsaved "NEW NOTE" header (whose changes are held until the note exists) shows the choice too.
+  const [restricted, setRestricted] = useState(() => isRestricted(note.frontmatter));
+  useEffect(() => { setForm(noteDetailsForm(note.frontmatter)); setRestricted(isRestricted(note.frontmatter)); }, [note.frontmatter.id, note.contentHash]);
+
+  async function toggleRestricted(next: boolean) {
+    setRestricted(next);
+    if (!(await onSave({ sensitivity: next ? "restricted" : "normal" }))) setRestricted(!next);
+  }
   useEffect(() => { if (editingTitle) titleInput.current?.select(); }, [editingTitle]);
 
   async function change(next: NoteDetailsForm) {
@@ -49,6 +58,10 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
                 onChange={(event) => setForm({ ...form, title: event.target.value })} onBlur={commitTitle}
                 onKeyDown={(event) => { if (event.key === "Enter") commitTitle(); else if (event.key === "Escape") { setForm({ ...form, title: note.frontmatter.title }); setEditingTitle(false); } }} />
             : <h3><button type="button" className="title-button" disabled={disabled} title="Click to rename" onClick={() => setEditingTitle(true)}>{note.frontmatter.title}<i aria-hidden>✎</i></button></h3>}
+          <div className="envelope-badges">
+            <EnvelopeBadges frontmatter={{ ...note.frontmatter, sensitivity: restricted ? "restricted" : "normal" }} />
+            <label className="sensitivity-toggle"><input type="checkbox" checked={restricted} disabled={disabled} onChange={(event) => void toggleRestricted(event.target.checked)} /> Mark restricted</label>
+          </div>
         </div>
         {children}
       </div>

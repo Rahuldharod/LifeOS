@@ -7,6 +7,16 @@ export const objectTypes = [
   "agent-run", "audit-event", "connector-account", "sync-run", "daily-focus", "recurring-item", "app-setting"
 ] as const;
 
+/** Where an object came from (ADR 0010). Set at creation, never changed; missing reads as `app`. */
+export const origins = ["app", "user-dictated", "agent-extracted", "calendar", "imported", "external"] as const;
+/** `restricted` keeps an object away from Agents, Daily Focus, Work Orders and Slack (ADR 0010). Missing reads as `normal`. */
+export const sensitivities = ["normal", "restricted"] as const;
+/** The agreed Area vocabulary. New writes must use one; older files with other values still load, with a System Health warning. */
+export const areas = ["work", "maintenance", "household", "learning", "personal-projects", "personal-growth"] as const;
+export type Origin = typeof origins[number];
+export type Sensitivity = typeof sensitivities[number];
+export type Area = typeof areas[number];
+
 export const envelopeSchema = z.object({
   id: z.uuid(),
   type: z.enum(objectTypes),
@@ -18,6 +28,9 @@ export const envelopeSchema = z.object({
   updated_by_device: z.string().min(1),
   archived_at: z.iso.datetime().optional(),
   deleted_at: z.iso.datetime().optional(),
+  origin: z.enum(origins).optional(),
+  sensitivity: z.enum(sensitivities).optional(),
+  // Read leniently: legacy values must still load. New writes are checked by `envelopeWriteProblem`.
   area: z.string().optional(),
   subjects: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional()
@@ -71,6 +84,34 @@ const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
 export type ObjectType = typeof objectTypes[number];
 export type ObjectEnvelope = z.infer<typeof envelopeSchema>;
 export type LifeOSObject = { frontmatter: ObjectEnvelope; body: string; relativePath: string; contentHash: string };
+
+export function originOf(frontmatter: { origin?: unknown }): Origin {
+  return (frontmatter.origin as Origin | undefined) ?? "app";
+}
+
+export function sensitivityOf(frontmatter: { sensitivity?: unknown }): Sensitivity {
+  return (frontmatter.sensitivity as Sensitivity | undefined) ?? "normal";
+}
+
+export function isArea(value: unknown): value is Area {
+  return areas.includes(value as Area);
+}
+
+export function areaProblem(value: unknown) {
+  return `Area "${String(value)}" is not one of ${areas.join(", ")}`;
+}
+
+/**
+ * Envelope rules for a write, given the object's previous front matter (`undefined` when new).
+ * Origin may never change. Sensitivity must be a known value. Area must be in the vocabulary
+ * unless it is the unchanged legacy value of an existing object, so old objects stay editable.
+ */
+export function envelopeWriteProblem(next: { origin?: unknown; sensitivity?: unknown; area?: unknown }, previous?: { origin?: unknown; area?: unknown }): string | undefined {
+  if (previous && originOf(next) !== originOf(previous)) return `Origin cannot change (was ${originOf(previous)}, got ${String(next.origin)})`;
+  if (next.sensitivity !== undefined && !sensitivities.includes(next.sensitivity as Sensitivity)) return `Sensitivity must be normal or restricted, got "${String(next.sensitivity)}"`;
+  if (next.area !== undefined && !isArea(next.area) && next.area !== previous?.area) return areaProblem(next.area);
+  return undefined;
+}
 
 export function uuidV7(now = Date.now()): string {
   const bytes = randomBytes(16);

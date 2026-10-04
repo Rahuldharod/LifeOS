@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ObjectStore } from "@lifeos/application";
-import { validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { areaProblem, isArea, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
 
 export class ObjectConflictError extends Error {
@@ -113,6 +113,8 @@ export class MarkdownObjectStore implements ObjectStore {
       try {
         const object = decode(content, relativePath);
         result.push(object);
+        // #30: a legacy Area still loads; it is only flagged so the user can pick an agreed one.
+        if (object.frontmatter.area !== undefined && !isArea(object.frontmatter.area)) diagnostics.push(`${relativePath} (id ${object.frontmatter.id}): legacy ${areaProblem(object.frontmatter.area)}; choose one when you next edit it`);
         diagnostics.push(...await this.imageDiagnostics(object));
       }
       catch (error) { diagnostics.push(error instanceof Error ? error.message : `${relativePath}: unreadable object`); }

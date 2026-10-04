@@ -4,6 +4,7 @@ import { CaptureModule } from "./capture.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
+import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
 import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
@@ -41,6 +42,7 @@ export class LifeOSApplication {
   listObjects() { return this.system.listObjects(); }
   object(id: string) { return this.system.object(id); }
   archiveObject(id: string, expectedHash: string) { return this.system.archiveObject(id, expectedHash); }
+  setSensitivity(id: string, sensitivity: Sensitivity, expectedHash: string) { return this.system.setSensitivity(id, sensitivity, expectedHash); }
 
   // Notes
   notes() { return this.notesModule.notes(); }

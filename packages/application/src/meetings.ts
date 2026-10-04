@@ -60,7 +60,7 @@ export class MeetingsModule {
     await ctx.objects.write({
       relativePath: `meetings/${markdownFileName(event.title, meetingId, event.startsAt, event.timezone)}`,
       frontmatter: {
-        ...ctx.envelope(meetingId, "meeting", event.title, now),
+        ...ctx.envelope(meetingId, "meeting", event.title, now, "calendar"),
         status: "scheduled",
         starts_at: event.startsAt,
         ends_at: event.endsAt,
@@ -104,9 +104,9 @@ export class MeetingsModule {
     const existing = this.findMeetingForEvent(event.externalId, event.calendarId);
     if (existing) return this.meetingWorkspace(existing.frontmatter.id);
     const now = new Date().toISOString();
-    const synthetic = (type: ObjectEnvelope["type"], title: string): LifeOSObject => ({ frontmatter: { ...this.ctx.envelope(`preview:${type}:${externalId}:${title}`, type, title, now) }, body: "", relativePath: "", contentHash: "" });
+    const synthetic = (type: ObjectEnvelope["type"], title: string): LifeOSObject => ({ frontmatter: { ...this.ctx.envelope(`preview:${type}:${externalId}:${title}`, type, title, now, "calendar") }, body: "", relativePath: "", contentHash: "" });
     const meeting: LifeOSObject = {
-      frontmatter: { ...this.ctx.envelope(`preview:${externalId}`, "meeting", event.title, now), status: "scheduled", starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone, is_all_day: event.isAllDay ?? false },
+      frontmatter: { ...this.ctx.envelope(`preview:${externalId}`, "meeting", event.title, now, "calendar"), status: "scheduled", starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone, is_all_day: event.isAllDay ?? false },
       body: "", relativePath: "", contentHash: ""
     };
     return {
@@ -267,7 +267,7 @@ export class MeetingsModule {
     const folders = { client: "clients", product: "products", project: "projects", person: "people" } as const;
     return this.ctx.objects.write({
       relativePath: `${folders[type]}/${markdownFileName(title, id, timestamp)}`,
-      frontmatter: { ...this.ctx.envelope(id, type, title, timestamp), ...fields },
+      frontmatter: { ...this.ctx.envelope(id, type, title, timestamp, "calendar"), ...fields },
       body: `# ${title}\n`
     });
   }

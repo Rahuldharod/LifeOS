@@ -73,6 +73,9 @@ export class NotesModule {
       live(value, type, label);
       selected[field] = value;
     }
+    // #30: Area and sensitivity are validated centrally on write (AppContext.assertEnvelope); origin is never editable.
+    if ("area" in changes) selected.area = changes.area === null || changes.area === "" ? undefined : changes.area;
+    if ("sensitivity" in changes) selected.sensitivity = changes.sensitivity;
     if (current.frontmatter.type === "meeting-note" && "people_ids" in changes) {
       const value = changes.people_ids;
       if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) throw new Error("People must be a list of ids");

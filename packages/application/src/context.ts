@@ -1,4 +1,4 @@
-import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { envelopeWriteProblem, uuidV7, type LifeOSObject, type ObjectEnvelope, type Origin } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
 
 /** Body for a meeting note created without user text (legacy callers and crash recovery of old operations). */
@@ -61,6 +61,7 @@ export class AppContext {
       read: (relativePath) => store.read(relativePath),
       write: (input) => {
         this.assertWritable(input.frontmatter.id);
+        this.assertEnvelope(input.frontmatter);
         return store.write(input);
       },
       prepareOperation: store.prepareOperation?.bind(store),
@@ -75,6 +76,12 @@ export class AppContext {
     if (paths) throw new ObjectConflictError(`Duplicate object ID ${id} in ${paths.join(" and ")}; remove or re-ID one copy, then try again`);
   }
 
+  /** #30: origin never changes, sensitivity is known, and new or changed Areas use the agreed vocabulary. */
+  assertEnvelope(frontmatter: ObjectEnvelope) {
+    const problem = envelopeWriteProblem(frontmatter, this.index.get(frontmatter.id)?.frontmatter);
+    if (problem) throw new Error(problem);
+  }
+
   async rebuildIndex() {
     const scan = this.objects.scan ? await this.objects.scan() : { objects: await this.objects.list(), diagnostics: [] };
     const objects = scan.objects;
@@ -82,8 +89,8 @@ export class AppContext {
     return { objectCount: objects.length, diagnostics: this.index.diagnostics() };
   }
 
-  envelope(id: string, type: ObjectEnvelope["type"], title: string, timestamp: string): ObjectEnvelope {
-    return { id, type, schema_version: 1, revision: 1, title, created_at: timestamp, updated_at: timestamp, updated_by_device: this.deviceId };
+  envelope(id: string, type: ObjectEnvelope["type"], title: string, timestamp: string, origin: Origin = "app"): ObjectEnvelope {
+    return { id, type, schema_version: 1, revision: 1, title, created_at: timestamp, updated_at: timestamp, updated_by_device: this.deviceId, origin };
   }
 
   /** Saves a new revision of an existing object: merges `changes`, bumps the revision and stamps the device. */
