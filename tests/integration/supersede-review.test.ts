@@ -116,3 +116,113 @@ describe("superseding a decision through an update Review Item", () => {
     expect(application.object(successor.frontmatter.id).frontmatter.revision).toBe(2);
   });
 });
+
+// Issue #70: recovery of an unfinished supersede never overwrites a decision edited after the crash, and a
+// successor deleted after the old decision's link landed leaves the Review Item resolvable, not stuck.
+describe("recovering an unfinished supersede", () => {
+  /** A store whose process "dies" right after the next supersede operation is prepared. */
+  class CrashAfterPrepare extends MarkdownObjectStore {
+    crash = false;
+    override async prepareOperation(kind: string, payload: Record<string, unknown>, operationId: string) {
+      const prepared = await super.prepareOperation(kind, payload, operationId);
+      if (this.crash && kind === "supersede-decision") { this.crash = false; throw new Error("power cut"); }
+      return prepared;
+    }
+  }
+
+  async function crashedAfterPrepare() {
+    let store!: CrashAfterPrepare;
+    const { root, application } = await vault((directory) => (store = new CrashAfterPrepare(directory)));
+    const raised = await raiseSupersede(root, application);
+    store.crash = true;
+    await expect(application.acceptReviewItem(raised.review.frontmatter.id)).rejects.toThrow(/power cut/);
+    return { root, application, store, ...raised };
+  }
+
+  it("records the old decision's base hash when the operation is prepared", async () => {
+    const { store, old } = await crashedAfterPrepare();
+    const [operation] = await store.incompleteOperations();
+    expect(operation).toMatchObject({ kind: "supersede-decision", payload: { oldId: old.frontmatter.id, baseHash: old.contentHash } });
+  });
+
+  it("writes nothing to a decision edited after the crash, closes the operation and leaves a conflict to resolve", async () => {
+    const { root, application, store, old, successor, review } = await crashedAfterPrepare();
+    await editOnDisk(root, old.relativePath, { rationale: "Edited in Obsidian after the crash" });
+    await application.rebuildIndex();
+    const edited = application.object(old.frontmatter.id);
+
+    expect(await application.recoverOperations()).toHaveLength(1);
+
+    expect(application.object(old.frontmatter.id).contentHash).toBe(edited.contentHash);
+    expect(application.object(old.frontmatter.id).frontmatter).toMatchObject({ status: "active", rationale: "Edited in Obsidian after the crash" });
+    expect(application.object(successor.frontmatter.id).contentHash).toBe(successor.contentHash);
+    expect(await store.incompleteOperations()).toHaveLength(0);
+    expect(await audits(application, "decision.superseded")).toHaveLength(0);
+    expect(await audits(application, "decision.supersede-abandoned")).toHaveLength(1);
+    expect(application.object(review.frontmatter.id).frontmatter.status).toBe("pending");
+    await expect(application.acceptReviewItem(review.frontmatter.id)).rejects.toMatchObject({ name: "ObjectConflictError", message: expect.stringMatching(/changed since this review item was raised/) });
+    expect((await application.rejectReviewItem(review.frontmatter.id)).frontmatter.status).toBe("rejected");
+    expect(application.object(old.frontmatter.id).contentHash).toBe(edited.contentHash);
+  });
+
+  it("finishes the supersede as before when the old decision is unchanged since prepare", async () => {
+    const { application, store, old, successor, review } = await crashedAfterPrepare();
+
+    expect(await application.recoverOperations()).toHaveLength(1);
+
+    expect(application.object(old.frontmatter.id).frontmatter).toMatchObject({ status: "superseded", superseded_by_decision_id: successor.frontmatter.id, revision: 2 });
+    expect(application.object(successor.frontmatter.id).frontmatter).toMatchObject({ supersedes_decision_id: old.frontmatter.id, revision: 2 });
+    expect(await store.incompleteOperations()).toHaveLength(0);
+    await application.acceptReviewItem(review.frontmatter.id);
+    expect(application.object(review.frontmatter.id).frontmatter.status).toBe("accepted");
+    expect(await audits(application, "decision.superseded")).toHaveLength(1);
+  });
+
+  it("does not supersede through the Decisions workspace path either when the old decision was edited after the crash", async () => {
+    let store!: CrashAfterPrepare;
+    const { root, application } = await vault((directory) => (store = new CrashAfterPrepare(directory)));
+    const old = await application.createDecision({ title: "Budget is 10k" });
+    store.crash = true;
+    await expect(application.supersedeDecision(old.frontmatter.id, { title: "Budget is 12k" }, old.contentHash)).rejects.toThrow(/power cut/);
+    await editOnDisk(root, old.relativePath, { rationale: "Edited after the crash" });
+    await application.rebuildIndex();
+    const edited = application.object(old.frontmatter.id);
+
+    expect(await application.recoverOperations()).toHaveLength(1);
+
+    expect(application.object(old.frontmatter.id).contentHash).toBe(edited.contentHash);
+    expect(application.decisions().map((decision) => decision.frontmatter.title)).toEqual(["Budget is 10k"]);
+    expect(await store.incompleteOperations()).toHaveLength(0);
+  });
+
+  it.each([
+    ["deleted", (root: string, relativePath: string) => editOnDisk(root, relativePath, { deleted_at: "2026-01-02T09:00:00Z" })],
+    ["removed from disk", (root: string, relativePath: string) => rm(path.join(root, relativePath))]
+  ])("lets the Review Item be rejected when the successor was %s after the old decision's link landed", async (_name, remove) => {
+    let failSuccessor = true;
+    class CrashingStore extends MarkdownObjectStore {
+      override async write(input: Parameters<MarkdownObjectStore["write"]>[0]) {
+        if (failSuccessor && input.frontmatter.type === "decision" && input.frontmatter.supersedes_decision_id) { failSuccessor = false; throw new Error("disk full"); }
+        return super.write(input);
+      }
+    }
+    let store!: CrashingStore;
+    const { root, application } = await vault((directory) => (store = new CrashingStore(directory)));
+    const { old, successor, review } = await raiseSupersede(root, application);
+    await expect(application.acceptReviewItem(review.frontmatter.id)).rejects.toThrow(/disk full/);
+    await remove(root, successor.relativePath);
+    await application.rebuildIndex();
+    const before = (await application.listObjects()).find((object) => object.frontmatter.id === successor.frontmatter.id)?.contentHash;
+
+    // Recovery closes the operation instead of failing on every start, and never writes to the deleted successor.
+    expect(await application.recoverOperations()).toHaveLength(1);
+    expect(await store.incompleteOperations()).toHaveLength(0);
+    expect((await application.listObjects()).find((object) => object.frontmatter.id === successor.frontmatter.id)?.contentHash).toBe(before);
+    expect(await audits(application, "decision.supersede-abandoned")).toHaveLength(1);
+
+    // Accepting explains why it cannot finish; rejecting resolves the item.
+    await expect(application.acceptReviewItem(review.frontmatter.id)).rejects.toThrow(/reject this review item/i);
+    expect((await application.rejectReviewItem(review.frontmatter.id)).frontmatter.status).toBe("rejected");
+    expect(application.object(old.frontmatter.id).frontmatter).toMatchObject({ status: "superseded", superseded_by_decision_id: successor.frontmatter.id });
+  });
+});

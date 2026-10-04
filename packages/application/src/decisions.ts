@@ -138,7 +138,8 @@ export class DecisionsModule {
     const defaults = Object.fromEntries(inherited.filter((key) => old.frontmatter[key] !== undefined).map((key) => [key, old.frontmatter[key]]));
     const prepared = this.prepare(input, { ...defaults, supersedes_decision_id: id }, now);
     const operationId = uuidV7();
-    await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, decision: prepared }, operationId);
+    // #70: the old decision's hash at prepare time, so recovery never writes over a later edit.
+    await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, baseHash: expectedHash, decision: prepared }, operationId);
     return this.finishSupersede(operationId, id, { decision: prepared }, expectedHash, now);
   }
 
@@ -155,10 +156,12 @@ export class DecisionsModule {
     if (linked && successor?.frontmatter.supersedes_decision_id === id) return { decision: successor, superseded: current };
     if (!linked) this.supersedable(id, expectedHash);
     const problem = successorProblem(id, successorId, successor);
+    // #70: the old decision already points at a successor that can no longer take the link (e.g. deleted after a crash).
+    if (problem && linked) throw new Error(`"${current.frontmatter.title}" was already marked as replaced by ${successorId}, but ${problem.replace(/; nothing was changed$|\. Nothing was changed$/, "").replace(/^The replacing decision/, "that decision")}. Reject this review item; the decision cannot be un-superseded`);
     if (problem) throw new Error(problem);
     const now = new Date().toISOString();
     const operationId = uuidV7();
-    await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, successorId, ...old }, operationId);
+    await this.ctx.objects.prepareOperation?.("supersede-decision", { oldId: id, baseHash: expectedHash, successorId, ...old }, operationId);
     return this.finishSupersede(operationId, id, { successorId, ...old }, expectedHash, now);
   }
 
@@ -171,21 +174,35 @@ export class DecisionsModule {
     return old;
   }
 
-  /** Crash recovery for an incomplete `supersede-decision` operation (a new successor, or an existing one, #67). */
+  /**
+   * Crash recovery for an incomplete `supersede-decision` operation (a new successor, or an existing one, #67).
+   * #70: the old decision is written only if its hash still matches the one recorded at prepare time, and an
+   * existing successor is linked back only while it is still a valid one. Otherwise nothing is written: the
+   * operation is closed and audited, and an update Review Item stays pending, so accepting it reports the
+   * conflict and rejecting it resolves it.
+   */
   async recoverSupersede(operation: { id: string; payload: Record<string, unknown> }) {
     await this.ctx.rebuildIndex();
-    const { oldId, decision, successorId, changes, body } = operation.payload as { oldId: string; decision?: PreparedDecision; successorId?: string } & SupersededWrite;
+    const { oldId, baseHash, decision, successorId, changes, body } = operation.payload as { oldId: string; baseHash?: string; decision?: PreparedDecision; successorId?: string } & SupersededWrite;
     const newId = successorId ?? decision!.frontmatter.id;
     const old = this.ctx.index.get(oldId);
-    // The old decision moved on some other way, or an existing successor stopped being a valid one before
-    // the old decision was written: nothing safe to finish, so close the operation.
-    if (!old || (old.frontmatter.status !== "active" && old.frontmatter.superseded_by_decision_id !== newId)
-      || (successorId && old.frontmatter.status === "active" && successorProblem(oldId, successorId, this.ctx.index.get(successorId)))) {
+    const written = old?.frontmatter.superseded_by_decision_id === newId;
+    const successor = successorId ? this.ctx.index.get(successorId) : undefined;
+    const reason = !old ? "The decision to supersede no longer exists"
+      : !written && old.frontmatter.status !== "active" ? `The decision is now ${String(old.frontmatter.status)}`
+      // Operations prepared before #70 carry no base hash: the edit cannot be ruled out, so nothing is written.
+      : !written && old.contentHash !== baseHash ? "The decision was edited after the supersede started"
+      : successorId && successor?.frontmatter.supersedes_decision_id !== oldId ? successorProblem(oldId, successorId, successor)
+      : undefined;
+    if (reason) {
+      const now = new Date().toISOString();
+      await this.ctx.writeAudit("decision.supersede-abandoned", oldId, now, { operation_id: operation.id, superseded_by_decision_id: newId, reason });
       await this.ctx.objects.completeOperation?.(operation.id);
+      await this.ctx.rebuildIndex();
       return undefined;
     }
     const next = successorId ? { successorId, changes, body } : { decision: decision! };
-    return this.finishSupersede(operation.id, oldId, next, old.contentHash, new Date().toISOString());
+    return this.finishSupersede(operation.id, oldId, next, old!.contentHash, new Date().toISOString());
   }
 
   private async finishSupersede(operationId: string, oldId: string, next: { decision: PreparedDecision } | ({ successorId: string } & SupersededWrite), expectedHash: string, now: string) {
