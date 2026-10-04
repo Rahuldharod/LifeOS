@@ -49,7 +49,10 @@ export interface RebuildResult { objectCount: number; diagnostics: string[] }
 export class AppContext {
   /** The object store with the application's write guards applied. Modules write only through this. */
   readonly objects: ObjectStore;
-  /** U4: the last version of each object this app wrote or observed; the baseline for spotting external edits. */
+  /**
+   * U4: the last version of each object this app wrote or observed; the baseline for spotting external edits.
+   * In memory only: #69 checks it against the versions store (which survives restarts) the first time each object is seen.
+   */
   readonly known = new Map<string, LifeOSObject>();
   /** Per ID: writes in flight and a counter bumped at each write's start and end, so detection can skip IDs the app is writing. */
   private readonly inFlight = new Map<string, number>();
@@ -83,6 +86,7 @@ export class AppContext {
         } finally { this.trackWrite(id, -1); }
       },
       keepVersion: store.keepVersion?.bind(store),
+      latestVersion: store.latestVersion?.bind(store),
       prepareOperation: store.prepareOperation?.bind(store),
       completeOperation: store.completeOperation?.bind(store),
       incompleteOperations: store.incompleteOperations?.bind(store)

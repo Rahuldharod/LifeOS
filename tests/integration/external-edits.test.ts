@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,8 +51,10 @@ describe("external edits", () => {
     expect(event?.frontmatter).toMatchObject({ action: "object.changed-externally", object_id: taskId, actor_type: "external" });
     const metadata = (event?.frontmatter as { metadata?: Record<string, unknown> }).metadata;
     expect(metadata).toMatchObject({ relative_path: "tasks/task.md", previous_hash: before.contentHash, current_hash: application.object(taskId).contentHash });
-    expect(await versions(root)).toHaveLength(1);
-    expect(metadata?.version_path).toBe(`.lifeos/versions/${taskId}/${(await versions(root))[0]}`);
+    // #69: the store keeps the last-known copy and the edited one (the new baseline, so a restart does not report it again).
+    expect(await versions(root)).toHaveLength(2);
+    expect(metadata?.version_path).toMatch(new RegExp(`^\\.lifeos/versions/${taskId}/000001--`));
+    expect(await readFile(path.join(root, String(metadata?.version_path)), "utf8")).toContain("title: Original");
   });
 
   it("records nothing for the app's own writes, even when the watcher fires late", async () => {
@@ -63,7 +65,7 @@ describe("external edits", () => {
     // A second watcher callback for the same writes is still not external.
     expect(await application.recordExternalChanges()).toEqual([]);
     expect(await externalEvents(application)).toEqual([]);
-    expect(await versions(root)).toHaveLength(1); // only the guarded write's own prior version
+    expect(await versions(root)).toHaveLength(2); // the guarded write's prior version and the revision it wrote (#69)
   });
 
   it("records nothing when nothing changed, and nothing for a file created outside the app", async () => {
@@ -95,7 +97,7 @@ describe("external edits", () => {
     const [first, second] = await Promise.all([application.recordExternalChanges(), application.recordExternalChanges()]);
     expect([...first, ...second]).toHaveLength(1);
     expect(await externalEvents(application)).toHaveLength(1);
-    expect(await versions(root)).toHaveLength(1);
+    expect(await versions(root)).toHaveLength(2); // last-known copy and the new baseline (#69)
 
     // A later observed edit is a new event against the new last-known version.
     await writeFile(file, task("Save 6"));
@@ -144,5 +146,100 @@ describe("external edits", () => {
     await writeFile(file, task("From the other Mac").replace("revision: 1", "revision: 2").replace("updated_by_device: test", "updated_by_device: other-mac"));
     expect(await application.recordExternalChanges()).toEqual([]);
     expect(application.object(taskId).frontmatter.title).toBe("From the other Mac");
+  });
+});
+
+// Issue #69: the last-known state survives a restart (it lives in the versions store), so edits made while the app was closed are caught.
+describe("external edits across restarts and sync", () => {
+  const reopen = async (root: string, deviceId = "this-mac") => {
+    const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), undefined, undefined, deviceId);
+    await application.rebuildIndex();
+    return application;
+  };
+
+  it("records an edit made while the app was closed and keeps the previous version", async () => {
+    const { root, application, file } = await vault();
+    expect(await application.recordExternalChanges()).toEqual([]); // first start: records the baseline
+    await writeFile(file, task("Edited while closed"));
+
+    const restarted = await reopen(root);
+    const recorded = await restarted.recordExternalChanges();
+    expect(recorded).toEqual([expect.objectContaining({ objectId: taskId, change: "changed", relativePath: "tasks/task.md" })]);
+    expect(await readFile(path.join(root, recorded[0]!.versionPath!), "utf8")).toContain("title: Original");
+    expect((await externalEvents(restarted))[0]?.frontmatter).toMatchObject({ action: "object.changed-externally", object_id: taskId });
+    // Recorded once: a further restart does not report it again.
+    expect(await (await reopen(root)).recordExternalChanges()).toEqual([]);
+  });
+
+  it("records an offline edit to an object the app wrote last", async () => {
+    const { root, application, file } = await vault();
+    await application.updateTask(taskId, { title: "Saved in the app" }, application.object(taskId).contentHash);
+    await writeFile(file, (await readFile(file, "utf8")).replace("title: Saved in the app", "title: Edited while closed"));
+
+    const restarted = await reopen(root);
+    const [recorded] = await restarted.recordExternalChanges();
+    expect(recorded).toMatchObject({ objectId: taskId, change: "changed" });
+    expect(await readFile(path.join(root, recorded!.versionPath!), "utf8")).toContain("title: Saved in the app");
+  });
+
+  it("never reports the app's own writes after a restart", async () => {
+    const { root, application } = await vault();
+    await application.updateTask(taskId, { status: "Next" }, application.object(taskId).contentHash);
+    await application.createEntity("project", { title: "New project" });
+    const restarted = await reopen(root);
+    expect(await restarted.recordExternalChanges()).toEqual([]);
+    expect(await externalEvents(restarted)).toEqual([]);
+  });
+
+  it("handles another device's sync followed by an Obsidian edit before the next pass", async () => {
+    const { root, application, file } = await vault();
+    expect(await application.recordExternalChanges()).toEqual([]);
+    const otherMac = await reopen(root, "other-mac");
+    await otherMac.updateTask(taskId, { title: "From the other Mac" }, otherMac.object(taskId).contentHash);
+    await writeFile(file, (await readFile(file, "utf8")).replace("title: From the other Mac", "title: Then edited in Obsidian"));
+
+    const [recorded, ...rest] = await application.recordExternalChanges();
+    expect(rest).toEqual([]);
+    expect(recorded).toMatchObject({ objectId: taskId, change: "changed" });
+    // The previous version is the other device's write, not this device's older baseline.
+    expect(await readFile(path.join(root, recorded!.versionPath!), "utf8")).toContain("title: From the other Mac");
+    expect(application.object(taskId).frontmatter.title).toBe("Then edited in Obsidian");
+  });
+
+  it("accepts another device's sync, then catches an Obsidian edit in a later pass", async () => {
+    const { root, application, file } = await vault();
+    expect(await application.recordExternalChanges()).toEqual([]);
+    const otherMac = await reopen(root, "other-mac");
+    await otherMac.updateTask(taskId, { title: "From the other Mac" }, otherMac.object(taskId).contentHash);
+    expect(await application.recordExternalChanges()).toEqual([]);
+
+    await writeFile(file, (await readFile(file, "utf8")).replace("title: From the other Mac", "title: Then edited in Obsidian"));
+    expect(await application.recordExternalChanges()).toEqual([expect.objectContaining({ objectId: taskId, change: "changed" })]);
+  });
+
+  it("catches an edit that reverts to an earlier recorded version", async () => {
+    const { application, file } = await vault();
+    const original = task("Original");
+    await writeFile(file, task("Edited"));
+    expect(await application.recordExternalChanges()).toHaveLength(1);
+    await writeFile(file, original);
+    expect(await application.recordExternalChanges()).toEqual([expect.objectContaining({ objectId: taskId, change: "changed" })]);
+  });
+
+  it("does not treat front-matter key order or YAML formatting as an external edit, live or after a restart", async () => {
+    const { root, application, file } = await vault();
+    expect(await application.recordExternalChanges()).toEqual([]);
+    const reordered = `---\ntitle: "Original"\nstatus: 'Inbox'\nid: ${taskId}\nowner_person_id: ${selfId}\ntype: task\nrevision: 1\nschema_version: 1\nupdated_by_device: "test"\ncreated_at: 2026-10-01T08:00:00Z\nupdated_at:   2026-10-01T08:00:00Z\n---\n# Original\n`;
+    await writeFile(file, reordered);
+    expect(await application.recordExternalChanges()).toEqual([]);
+
+    await application.updateTask(taskId, { status: "Next" }, application.object(taskId).contentHash);
+    const saved = await readFile(file, "utf8");
+    const lines = saved.split("\n");
+    const end = lines.indexOf("---", 1);
+    await writeFile(file, ["---", ...lines.slice(1, end).reverse(), ...lines.slice(end)].join("\n"));
+    const restarted = await reopen(root);
+    expect(await restarted.recordExternalChanges()).toEqual([]);
+    expect(await externalEvents(restarted)).toEqual([]);
   });
 });

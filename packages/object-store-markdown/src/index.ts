@@ -185,6 +185,9 @@ export class MarkdownObjectStore implements ObjectStore {
       await rm(temporary, { force: true });
       throw error;
     }
+    // #69: keep what was written as the last-known version, so edits made while the app is closed are caught at the next start.
+    // It is the same file the next guarded write would save as its prior version. Audit events are append-only and skipped.
+    if (input.frontmatter.type !== "audit-event") await this.saveVersion(input.frontmatter.id, input.frontmatter.revision, next);
     return decode(next, input.relativePath);
   }
 
@@ -217,6 +220,18 @@ export class MarkdownObjectStore implements ObjectStore {
    */
   keepVersion(object: LifeOSObject) {
     return this.saveVersion(object.frontmatter.id, object.frontmatter.revision, serialize(object.frontmatter, object.body));
+  }
+
+  async latestVersion(id: string) {
+    const folder = path.posix.join(".lifeos", "versions", id);
+    const names = await readdir(this.safePath(folder)).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? [] : Promise.reject(error));
+    const candidates = await Promise.all(names.filter((name) => /^\d+--[0-9a-f]+\.md$/.test(name)).map(async (name) => ({
+      relativePath: path.posix.join(folder, name),
+      revision: Number(name.split("--")[0]),
+      savedAt: (await stat(this.safePath(path.posix.join(folder, name)))).mtimeMs
+    })));
+    const newest = candidates.sort((a, b) => a.revision - b.revision || a.savedAt - b.savedAt).at(-1);
+    return newest ? this.read(newest.relativePath) : undefined;
   }
 
   /** Saves `content` as `.lifeos/versions/<id>/<revision>--<hash>.md` (idempotent) and returns that relative path. */

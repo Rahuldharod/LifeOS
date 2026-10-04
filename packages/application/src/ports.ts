@@ -7,6 +7,12 @@ export interface ObjectStore {
   write(input: { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string }): Promise<LifeOSObject>;
   /** Saves a copy of `object` in the versions store and returns its relative path (U4: external changes). */
   keepVersion?(object: LifeOSObject): Promise<string>;
+  /**
+   * #69: the newest copy of `id` in the versions store (highest revision, then most recently saved), read as an object
+   * whose `relativePath` is the version's path. The store also keeps each revision it writes, so this is the
+   * last-known state across restarts and devices. Undefined when nothing is stored for `id`.
+   */
+  latestVersion?(id: string): Promise<LifeOSObject | undefined>;
   prepareOperation?(kind: string, payload: Record<string, unknown>, operationId: string): Promise<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>;
   completeOperation?(operationId: string): Promise<void>;
   incompleteOperations?(): Promise<Array<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>>;
