@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, link, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, link, mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { inboxFolders, type AgentIndexFile, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
@@ -87,13 +87,23 @@ async function markdownFiles(root: string, diagnostics: string[], current = root
   return found;
 }
 
+export interface MarkdownObjectStoreOptions {
+  /** ADR 0012: version copies kept per object in `.lifeos/versions/` (default 10, at least 2). */
+  versionsToKeep?: number;
+}
+
+interface VersionFile { relativePath: string; revision: number; hashPrefix: string; savedAt: number }
+
 export class MarkdownObjectStore implements ObjectStore {
   private readonly root: string;
   private readonly operations: FilesystemOperationStore;
+  private readonly versionsToKeep: number;
 
-  constructor(root: string) {
+  constructor(root: string, options: MarkdownObjectStoreOptions = {}) {
     this.root = path.resolve(root);
     this.operations = new FilesystemOperationStore(this.root);
+    // Two at least: an external edit keeps the prior copy (named in its audit event) and the edited one (the new baseline).
+    this.versionsToKeep = Math.max(2, Math.floor(options.versionsToKeep ?? 10));
   }
 
   prepareOperation(kind: string, payload: Record<string, unknown>, operationId: string) { return this.operations.prepare(kind, payload, operationId); }
@@ -218,32 +228,74 @@ export class MarkdownObjectStore implements ObjectStore {
 
   /**
    * U4: keeps a last-known copy that is no longer on disk (changed or deleted outside the app).
-   * The copy is re-serialised from the parsed object, in the app's own write format.
+   * The copy is re-serialised from the parsed object, in the app's own write format, but named for the hash of the
+   * file it came from, so a later start can tell "unchanged" from the name alone (ADR 0012). A copy that is already
+   * a stored version keeps its name and is only marked as the most recently saved.
    */
   keepVersion(object: LifeOSObject) {
-    return this.saveVersion(object.frontmatter.id, object.frontmatter.revision, serialize(object.frontmatter, object.body));
+    const stored = this.versionFolder(object.frontmatter.id);
+    const name = object.relativePath.startsWith(`${stored}/`) ? path.posix.basename(object.relativePath) : undefined;
+    const nameHash = name && /^\d+--[0-9a-f]+\.md$/.test(name) ? name.slice(name.indexOf("--") + 2, -3) : object.contentHash;
+    return this.saveVersion(object.frontmatter.id, object.frontmatter.revision, serialize(object.frontmatter, object.body), nameHash);
+  }
+
+  /**
+   * #72: the newest stored version of `id` (highest revision, then most recently saved) from file names alone: its
+   * revision and the first 12 hex digits of the hash of the file it copies. Files are only stat'd to break a tie.
+   */
+  async latestVersionInfo(id: string) {
+    const newest = (await this.versionFiles(id)).at(0);
+    return newest ? { relativePath: newest.relativePath, revision: newest.revision, hashPrefix: newest.hashPrefix } : undefined;
   }
 
   async latestVersion(id: string) {
-    const folder = path.posix.join(".lifeos", "versions", id);
-    const names = await readdir(this.safePath(folder)).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? [] : Promise.reject(error));
-    const candidates = await Promise.all(names.filter((name) => /^\d+--[0-9a-f]+\.md$/.test(name)).map(async (name) => ({
-      relativePath: path.posix.join(folder, name),
-      revision: Number(name.split("--")[0]),
-      savedAt: (await stat(this.safePath(path.posix.join(folder, name)))).mtimeMs
-    })));
-    const newest = candidates.sort((a, b) => a.revision - b.revision || a.savedAt - b.savedAt).at(-1);
+    const newest = await this.latestVersionInfo(id);
     return newest ? this.read(newest.relativePath) : undefined;
   }
 
-  /** Saves `content` as `.lifeos/versions/<id>/<revision>--<hash>.md` (idempotent) and returns that relative path. */
-  private async saveVersion(id: string, revision: number, content: string) {
-    const relativePath = path.posix.join(".lifeos", "versions", id, `${String(revision).padStart(6, "0")}--${hash(content).slice(0, 12)}.md`);
+  private versionFolder(id: string) { return path.posix.join(".lifeos", "versions", id); }
+
+  /** The versions of `id`, newest first. Modification times are read only for revisions with more than one copy. */
+  private async versionFiles(id: string, timed = false): Promise<VersionFile[]> {
+    const folder = this.versionFolder(id);
+    const names = await readdir(this.safePath(folder)).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? [] : Promise.reject(error));
+    const files = names.filter((name) => /^\d+--[0-9a-f]+\.md$/.test(name)).map((name) => ({
+      relativePath: path.posix.join(folder, name),
+      revision: Number(name.split("--")[0]),
+      hashPrefix: name.slice(name.indexOf("--") + 2, -3)
+    }));
+    const copies = new Map<number, number>();
+    for (const file of files) copies.set(file.revision, (copies.get(file.revision) ?? 0) + 1);
+    const withTimes = await Promise.all(files.map(async (file) => ({
+      ...file,
+      savedAt: timed || copies.get(file.revision)! > 1 ? await stat(this.safePath(file.relativePath)).then((info) => info.mtimeMs, () => 0) : 0
+    })));
+    return withTimes.sort((a, b) => b.revision - a.revision || b.savedAt - a.savedAt);
+  }
+
+  /**
+   * Saves `content` as `.lifeos/versions/<id>/<revision>--<hash>.md` (idempotent) and returns that relative path.
+   * #72: the copy is marked as saved strictly after every other copy (so "most recently saved" is reliable within
+   * one clock tick), then the folder is pruned to the last `versionsToKeep` copies. The newest copy (the external-edit
+   * baseline) and the copy just saved are never pruned.
+   */
+  private async saveVersion(id: string, revision: number, content: string, nameHash = hash(content)) {
+    const relativePath = path.posix.join(this.versionFolder(id), `${String(revision).padStart(6, "0")}--${nameHash.slice(0, 12)}.md`);
     const versionPath = this.safePath(relativePath);
     await mkdir(path.dirname(versionPath), { recursive: true });
     await writeFile(versionPath, content, { encoding: "utf8", flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== "EEXIST") throw error;
     });
+    const others = (await this.versionFiles(id, true)).filter((file) => file.relativePath !== relativePath);
+    const savedAt = Math.max(Date.now(), ...others.map((file) => file.savedAt + 1));
+    await utimes(versionPath, savedAt / 1000, savedAt / 1000);
+    const ordered = [...others, { relativePath, revision, hashPrefix: "", savedAt }].sort((a, b) => b.revision - a.revision || b.savedAt - a.savedAt);
+    const keep = new Set([ordered[0]!.relativePath, relativePath]);
+    for (const file of ordered) {
+      if (keep.size >= this.versionsToKeep) break;
+      keep.add(file.relativePath);
+    }
+    await Promise.all(ordered.filter((file) => !keep.has(file.relativePath)).map((file) => rm(this.safePath(file.relativePath), { force: true })));
     return relativePath;
   }
 
