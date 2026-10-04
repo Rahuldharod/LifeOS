@@ -15,6 +15,8 @@ export interface IndexStore {
   all(): LifeOSObject[];
   get(id: string): LifeOSObject | undefined;
   diagnostics(): string[];
+  /** Every file path claiming `id` when more than one does (U3); undefined when the ID is unique. */
+  duplicatePaths?(id: string): string[] | undefined;
 }
 
 export interface CalendarConnector {

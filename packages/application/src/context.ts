@@ -41,14 +41,39 @@ export function markdownFileName(title: string, id: string, timestamp: string, t
  * What every feature module shares: the adapters, plus the helpers for building envelopes,
  * guarded writes, audit events and lookups. Keep cross-cutting write rules here, not in modules.
  */
+/** Same name as the object store's conflict error, which the server maps to HTTP 409 (the application cannot import adapters). */
+export class ObjectConflictError extends Error { override name = "ObjectConflictError"; }
+
 export class AppContext {
+  /** The object store with the application's write guards applied. Modules write only through this. */
+  readonly objects: ObjectStore;
+
   constructor(
-    readonly objects: ObjectStore,
+    store: ObjectStore,
     readonly index: IndexStore,
     readonly calendar: CalendarConnector | undefined,
     readonly ai: AiProvider | undefined,
     readonly deviceId: string
-  ) {}
+  ) {
+    this.objects = {
+      list: () => store.list(),
+      scan: store.scan?.bind(store),
+      read: (relativePath) => store.read(relativePath),
+      write: (input) => {
+        this.assertWritable(input.frontmatter.id);
+        return store.write(input);
+      },
+      prepareOperation: store.prepareOperation?.bind(store),
+      completeOperation: store.completeOperation?.bind(store),
+      incompleteOperations: store.incompleteOperations?.bind(store)
+    };
+  }
+
+  /** U3: an ID claimed by several files cannot be written until the user resolves the duplicate. */
+  assertWritable(id: string) {
+    const paths = this.index.duplicatePaths?.(id);
+    if (paths) throw new ObjectConflictError(`Duplicate object ID ${id} in ${paths.join(" and ")}; remove or re-ID one copy, then try again`);
+  }
 
   async rebuildIndex() {
     const scan = this.objects.scan ? await this.objects.scan() : { objects: await this.objects.list(), diagnostics: [] };

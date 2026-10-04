@@ -1,13 +1,11 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
-import { markdownFileName, type AppContext } from "./context.js";
+import { markdownFileName, ObjectConflictError as SettingsConflictError, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { CalendarPreferences } from "./ports.js";
 
 /** An identical failed sync within this window does not write another Sync Run file (PB-022a). */
 const FAILED_SYNC_RUN_THROTTLE_MS = 60 * 60 * 1000;
 
-/** Same name as the object store's conflict error, which the server maps to HTTP 409 (the application cannot import adapters). */
-class SettingsConflictError extends Error { override name = "ObjectConflictError"; }
 
 const calendarPreferencesPath = "settings/calendar-preferences.md";
 

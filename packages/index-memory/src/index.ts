@@ -3,18 +3,29 @@ import type { LifeOSObject } from "@lifeos/domain";
 
 export class MemoryIndex implements IndexStore {
   private objects = new Map<string, LifeOSObject>();
+  private duplicates = new Map<string, string[]>();
   private issues: string[] = [];
 
   rebuild(objects: LifeOSObject[], diagnostics: string[] = []) {
     this.objects.clear();
+    this.duplicates.clear();
     this.issues = [...diagnostics];
-    for (const object of objects) {
+    // U3: when two files share an ID, the oldest created_at wins, then path order, so the winner is stable across restarts.
+    const ordered = [...objects].sort((left, right) =>
+      Date.parse(left.frontmatter.created_at) - Date.parse(right.frontmatter.created_at) || left.relativePath.localeCompare(right.relativePath));
+    for (const object of ordered) {
       const id = object.frontmatter.id;
-      if (this.objects.has(id)) this.issues.push(`Duplicate object ID: ${id}`);
-      else this.objects.set(id, object);
+      const winner = this.objects.get(id);
+      if (!winner) { this.objects.set(id, object); continue; }
+      this.duplicates.set(id, [...(this.duplicates.get(id) ?? [winner.relativePath]), object.relativePath]);
+    }
+    for (const [id, paths] of this.duplicates) {
+      this.issues.push(`Duplicate object ID ${id}: ${paths.join(", ")}. Reading ${paths[0]}; writes are blocked until one copy is removed or given a new ID.`);
     }
     this.validateGraph();
   }
+
+  duplicatePaths(id: string) { return this.duplicates.get(id); }
 
   all() { return [...this.objects.values()]; }
   get(id: string) { return this.objects.get(id); }
