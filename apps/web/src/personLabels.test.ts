@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, personLabel, personOption, type PersonLabel } from "./personLabels.js";
+import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, parseEmails, personLabel, personOption, type PersonLabel } from "./personLabels.js";
 
 const labels = labelMap([
   { id: "a", name: "Kim", label: "Kim - ext", suffix: " - ext", isExternal: true, externalSource: "email" },
@@ -19,7 +19,11 @@ describe("person labels (#39)", () => {
   });
 
   it("splits a domains field on commas, spaces and new lines", () => {
-    expect(parseDomains(" eagleeye.com,untienots.com\nacme.fr ;  ")).toEqual(["eagleeye.com", "untienots.com", "acme.fr"]);
+    expect(parseDomains(" example.com,example.org\nacme.fr ;  ")).toEqual(["example.com", "example.org", "acme.fr"]);
+  });
+
+  it("splits a self-email field the same way (#54)", () => {
+    expect(parseEmails(" me@example.com,\nMe@example.org ;  ")).toEqual(["me@example.com", "Me@example.org"]);
   });
 
   it("maps the External choice to the API value and back", () => {

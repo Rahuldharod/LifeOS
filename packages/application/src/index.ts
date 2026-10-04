@@ -22,7 +22,7 @@ import { TodayModule, type TodaySettings } from "./today.js";
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
 export type { ExternalChange } from "./history.js";
-export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
+export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
@@ -154,6 +154,8 @@ export class LifeOSApplication {
   setPersonExternal(id: string, isExternal: boolean | null, expectedHash: string) { return this.people.setExternal(id, isExternal, expectedHash); }
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
+  getSelfEmails() { return this.people.getSelfEmails(); }
+  saveSelfEmails(emails: unknown[], expectedHash?: string) { return this.people.saveSelfEmails(emails, expectedHash); }
 
   // Open Points (#42)
   openPoints(filters: OpenPointFilters = {}) { return this.openPointsModule.openPoints(filters); }

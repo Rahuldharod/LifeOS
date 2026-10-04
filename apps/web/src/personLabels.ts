@@ -18,8 +18,10 @@ export function personOption(labels: Map<string, PersonLabel>, person: PersonLik
   return { id: person.frontmatter.id, title: name, ...(suffix ? { suffix } : {}) };
 }
 
-/** "eagleeye.com, untienots.com\nacme.fr" → ["eagleeye.com", "untienots.com", "acme.fr"]; the server validates. */
+/** "example.com, example.org\nacme.fr" → ["example.com", "example.org", "acme.fr"]; the server validates. */
 export const parseDomains = (text: string) => text.split(/[\s,;]+/).map((domain) => domain.trim()).filter(Boolean);
+/** "me@example.com, me@example.org" → ["me@example.com", "me@example.org"] (#54); the server lowercases and validates. */
+export const parseEmails = parseDomains;
 
 /** The External choice shown on a person card: Auto follows the email domain rule. */
 export type ExternalChoice = "auto" | "external" | "internal";

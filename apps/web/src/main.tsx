@@ -21,7 +21,7 @@ import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
 import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
-import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
+import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, parseEmails, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
 import { awaitingAdoptionLabel, daysBetween, visibleRows } from "./todayPanels.js";
@@ -353,6 +353,7 @@ function App() {
   // #39: short, unambiguous names; recomputed by the server on every load.
   const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
   const [internalDomains, setInternalDomains] = useState<{ domains: string[]; contentHash?: string }>();
+  const [selfEmails, setSelfEmails] = useState<{ emails: string[]; contentHash?: string }>();
   const [focusSettings, setFocusSettings] = useState<{ maxMustDos: number; contentHash?: string }>();
   const [reviews, setReviews] = useState<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>([]);
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
@@ -536,6 +537,19 @@ function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) { await loadInternalDomains(); return "The internal domains were changed on another device. The latest version is loaded; make your change again."; }
       return error instanceof Error ? error.message : "Could not save internal domains";
+    }
+  };
+
+  const loadSelfEmails = async () => setSelfEmails(await api<{ emails: string[]; contentHash?: string }>("/api/v1/settings/self-emails").catch(() => undefined));
+
+  /** #54: saves the synced self-email setting; resolves to an error message, or undefined on success. */
+  const saveSelfEmails = async (emails: string[]): Promise<string | undefined> => {
+    try {
+      setSelfEmails(await api<{ emails: string[]; contentHash?: string }>("/api/v1/settings/self-emails", { method: "PUT", body: JSON.stringify({ emails, expectedHash: selfEmails?.contentHash }) }));
+      return undefined;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) { await loadSelfEmails(); return "Your email addresses were changed on another device. The latest version is loaded; make your change again."; }
+      return error instanceof Error ? error.message : "Could not save your email addresses";
     }
   };
 
@@ -1204,7 +1218,7 @@ function App() {
       setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
     } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
-  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); void loadFocusSettings(); void loadTodaySettings(); } }, [view]);
+  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); } }, [view]);
 
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
@@ -1444,7 +1458,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
     </section>
   </main>;
 }
@@ -1680,8 +1694,32 @@ function InternalDomainsCard({ setting, disabled, onSave }: { setting?: { domain
   };
   return <article className="internal-domains-setting"><span>PEOPLE</span><h3>Internal domains</h3>
     <p className="muted">Email domains of your own organisations, separated by commas. Anyone with addresses only on other domains is shown as "Name<span className="ext-suffix"> - ext</span>". You can override this on each person.</p>
-    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Internal domains" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="eagleeye.com, untienots.com" /><button type="button" disabled={disabled || saving || !dirty || !domains.length} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
-    {setting && !domains.length && <p className="calendar-error" role="alert">Enter at least one domain.</p>}
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Internal domains" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="example.com, example.org" /><button type="button" disabled={disabled || saving || !dirty || !domains.length} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
+    {setting && !setting.domains.length && !text.trim() && <p className="muted" role="status">Not set yet: nobody is marked External automatically.</p>}
+    {setting && setting.domains.length > 0 && !domains.length && <p className="calendar-error" role="alert">Enter at least one domain.</p>}
+    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
+  </article>;
+}
+
+/** #54: the user's own addresses, a synced setting. Attendees with one of them are you; unset means nobody is matched as you by email. */
+function SelfEmailsCard({ setting, disabled, onSave }: { setting?: { emails: string[]; contentHash?: string }; disabled: boolean; onSave: (emails: string[]) => Promise<string | undefined> }) {
+  const saved = setting?.emails.join(", ") ?? "";
+  const [text, setText] = useState(saved);
+  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setText(saved), [saved]);
+  const emails = parseEmails(text);
+  const dirty = emails.map((email) => email.toLowerCase()).join("|") !== (setting?.emails ?? []).join("|");
+  const save = async () => {
+    setSaving(true);
+    const error = await onSave(emails);
+    setSaving(false);
+    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: emails.length ? "Saved. Attendees with these addresses are now you." : "Saved. No address is matched to you." });
+  };
+  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>My email addresses</h3>
+    <p className="muted">Every address you use, separated by commas. Calendar attendees with one of these addresses are linked to you instead of creating a new person.</p>
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
+    {setting && !setting.emails.length && !status && <p className="muted" role="status">Not set yet: no attendee is recognised as you by email.</p>}
     {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
   </article>;
 }

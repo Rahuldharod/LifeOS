@@ -107,8 +107,9 @@ describe("Today task panels", () => {
   it("groups waiting tasks by person, most-waited-on first, with the external marker and an unknown-person group last", async () => {
     const { store, application } = await vault();
     const joel = await person(store, "Joel Martin", "joel@client.example");
-    const anna = await person(store, "Anna Roux", "anna@eagleeye.com");
+    const anna = await person(store, "Anna Roux", "anna@example.com");
     await application.rebuildIndex();
+    await application.saveInternalDomains(["example.com", "example.org"], undefined);
     await task(application, "Signed DPA", { status: "Waiting", waiting_for_person_id: joel });
     await task(application, "Pilot data", { status: "Waiting", waiting_for_person_id: joel });
     await task(application, "Budget sign-off", { status: "Waiting", waiting_for_person_id: anna });
@@ -188,7 +189,7 @@ describe("Today meetings panels", () => {
   it("lists open points linked to today's meetings: raised there, same project or client, or shared non-self attendees", async () => {
     const { store, application } = await vault();
     const joel = await person(store, "Joel Martin", "joel@client.example");
-    const anna = await person(store, "Anna Roux", "anna@eagleeye.com");
+    const anna = await person(store, "Anna Roux", "anna@example.com");
     const project = (await application.createEntity("project", { title: "Pilot" })).frontmatter.id;
     const client = (await application.createEntity("client", { title: "Carrefour" })).frontmatter.id;
     await task(application, "Creates the self person");

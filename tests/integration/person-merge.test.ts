@@ -60,8 +60,9 @@ const operationFiles = async (root: string) => Promise.all((await readdir(path.j
 describe("person drafts (#40)", () => {
   it("creates an unreviewed Person from a dictated or agent-extracted draft", async () => {
     const { root, application } = await setup();
+    await application.saveInternalDomains(["example.com", "example.org"], undefined);
     await dropDraft(root, "lea.md", { draft_key: "p1", title: "Léa Martin-Dubois", email: "Lea.Martin@Acme-Corp.fr", job_title: "Buyer", tags: ["retail"] }, "Met at the Paris trade show.\n");
-    await dropDraft(root, "kim.md", { draft_key: "p2", origin: "agent-extracted", title: "Kim", given_name: "Kim", family_name: "Lee", emails: ["kim.lee@eagleeye.com", "kim@gmail.com"] });
+    await dropDraft(root, "kim.md", { draft_key: "p2", origin: "agent-extracted", title: "Kim", given_name: "Kim", family_name: "Lee", emails: ["kim.lee@example.com", "kim@gmail.com"] });
 
     const batch = await application.adoptDrafts();
     expect(batch.drafts.map((draft) => draft.outcome)).toEqual(["adopted", "adopted"]);
@@ -70,7 +71,7 @@ describe("person drafts (#40)", () => {
     expect(lea.frontmatter).toMatchObject({ title: "Léa Martin-Dubois", family_name: "Martin-Dubois", origin: "user-dictated", review_state: "unreviewed", is_external: true, organization_name: "Acme-Corp", job_title: "Buyer", tags: ["retail"], identifiers: [{ kind: "email", value: "lea.martin@acme-corp.fr" }] });
     expect(lea.relativePath).toMatch(/^people\/.*lea-martin-dubois--/);
     expect(application.object(lea.frontmatter.id).body).toContain("Met at the Paris trade show.");
-    expect(kim.frontmatter).toMatchObject({ title: "Kim", family_name: "Lee", origin: "agent-extracted", review_state: "unreviewed", is_external: false, identifiers: [{ kind: "email", value: "kim.lee@eagleeye.com" }, { kind: "email", value: "kim@gmail.com" }] });
+    expect(kim.frontmatter).toMatchObject({ title: "Kim", family_name: "Lee", origin: "agent-extracted", review_state: "unreviewed", is_external: false, identifiers: [{ kind: "email", value: "kim.lee@example.com" }, { kind: "email", value: "kim@gmail.com" }] });
     expect(await merges(application)).toHaveLength(0);
   });
 
@@ -110,9 +111,10 @@ describe("person-merge suggestions (#40)", () => {
 
   it("suggests a merge when the email local part matches across internal domains, but not across other domains", async () => {
     const { root, calendar, application } = await setup();
-    calendar.events = [event("e1", [{ email: "joel.smith@eagleeye.com" }, { email: "sam.lee@acme.com" }])];
+    await application.saveInternalDomains(["example.com", "example.org"], undefined);
+    calendar.events = [event("e1", [{ email: "joel.smith@example.com" }, { email: "sam.lee@acme.com" }])];
     await application.createMeetingFromEvent("e1");
-    await dropDraft(root, "j.md", { draft_key: "j", title: "J. Smith", email: "Joel.Smith@untienots.com" });
+    await dropDraft(root, "j.md", { draft_key: "j", title: "J. Smith", email: "Joel.Smith@example.org" });
     await dropDraft(root, "s.md", { draft_key: "s", title: "S. Lee", email: "sam.lee@other.com" });
     await application.adoptDrafts();
 
@@ -125,7 +127,7 @@ describe("person-merge suggestions (#40)", () => {
   it("covers calendar-created people against older people, once per pair, and never re-proposes a rejected pair", async () => {
     const { calendar, application } = await setup();
     const older = await application.createEntity("person", { title: "Marie Curie" });
-    calendar.events = [event("e1", [{ email: "marie.curie@eagleeye.com" }])];
+    calendar.events = [event("e1", [{ email: "marie.curie@example.com" }])];
     await application.createMeetingFromEvent("e1");
 
     const created = await application.suggestPersonMerges();
@@ -150,7 +152,7 @@ describe("accepting a person merge (#40)", () => {
     const context = await setup();
     const { calendar, application } = context;
     const keep = await application.createEntity("person", { title: "Marie Curie" });
-    calendar.events = [event("e1", [{ displayName: "Marie Curie" }, { email: "marie.curie@eagleeye.com", displayName: "Marie Curie" }])];
+    calendar.events = [event("e1", [{ displayName: "Marie Curie" }, { email: "marie.curie@example.com", displayName: "Marie Curie" }])];
     const workspace = await application.createMeetingFromEvent("e1");
     const dup = (await people(application)).find((person) => person.frontmatter.origin === "calendar")!;
     expect(workspace.meeting.frontmatter.attendee_ids).toEqual([keep.frontmatter.id, dup.frontmatter.id]);
@@ -169,7 +171,7 @@ describe("accepting a person merge (#40)", () => {
     expect(application.object(s.taskId).frontmatter.owner_person_id).toBe(keep.frontmatter.id);
     expect(application.object(s.clientId).frontmatter.primary_contact_person_id).toBe(keep.frontmatter.id);
     expect(application.object(dup.frontmatter.id).frontmatter).toMatchObject({ merged_into_person_id: keep.frontmatter.id, deleted_at: expect.any(String) });
-    expect(application.object(keep.frontmatter.id).frontmatter).toMatchObject({ identifiers: [{ kind: "email", value: "marie.curie@eagleeye.com" }], family_name: "Curie" });
+    expect(application.object(keep.frontmatter.id).frontmatter).toMatchObject({ identifiers: [{ kind: "email", value: "marie.curie@example.com" }], family_name: "Curie" });
     expect(application.object(s.reviewId).frontmatter).toMatchObject({ status: "accepted", resolved_object_id: keep.frontmatter.id });
     expect(application.entities("person").map((person) => person.frontmatter.id)).not.toContain(dup.frontmatter.id);
   }
@@ -239,7 +241,7 @@ describe("accepting a person merge (#40)", () => {
   it("refuses a suggestion whose person was already merged, and rejecting changes nothing", async () => {
     const { calendar, application } = await setup();
     const keep = await application.createEntity("person", { title: "Ada Byron" });
-    calendar.events = [event("e1", [{ email: "ada.byron@eagleeye.com" }, { email: "ada.byron@untienots.com" }])];
+    calendar.events = [event("e1", [{ email: "ada.byron@example.com" }, { email: "ada.byron@example.org" }])];
     await application.createMeetingFromEvent("e1");
     await application.suggestPersonMerges();
     const reviews = await merges(application);
