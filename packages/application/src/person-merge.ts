@@ -1,6 +1,6 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
-import { DEFAULT_INTERNAL_DOMAINS, personEmails } from "./people.js";
+import { internalDomainsOf, personEmails } from "./people.js";
 
 /**
  * Person merges (#40, PRD "People → Merge"). Likely duplicates become `person-merge` Review Items;
@@ -82,7 +82,7 @@ export class PersonMergeModule {
   private match(left: LifeOSObject, right: LifeOSObject): PersonMergeMatch | undefined {
     const leftEmails = personEmails(left), rightEmails = personEmails(right);
     if (leftEmails.some((email) => rightEmails.includes(email))) return "email";
-    const internal = (emails: string[]) => emails.filter((email) => DEFAULT_INTERNAL_DOMAINS.includes(email.split("@")[1]!));
+    const internal = (emails: string[]) => emails.filter((email) => internalDomainsOf(this.ctx.index).includes(email.split("@")[1]!));
     const rightInternal = internal(rightEmails);
     if (internal(leftEmails).some((email) => rightInternal.some((other) => other.split("@")[1] !== email.split("@")[1] && localPart(other) === localPart(email)))) return "email-local-part";
     const names = (person: LifeOSObject) => [nameKey(person.frontmatter.title), nameKey(`${String(person.frontmatter.given_name ?? "")} ${String(person.frontmatter.family_name ?? "")}`)].filter(Boolean);

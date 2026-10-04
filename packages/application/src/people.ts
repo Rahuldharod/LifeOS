@@ -1,9 +1,13 @@
-import { uuidV7, type LifeOSObject } from "@lifeos/domain";
-import { DEFAULT_SELF_EMAILS, markdownFileName, type AppContext } from "./context.js";
+import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { DEFAULT_SELF_EMAILS, foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
 
-/** Email domains of the user's own organisations; anyone else is an External person. A setting later (PRD Phase A). */
+/** Email domains of the user's own organisations; anyone else is an External person. Editable in Settings (#39). */
 export const DEFAULT_INTERNAL_DOMAINS = ["eagleeye.com", "untienots.com"];
+/** The synced internal-domains setting (ADR 0005): one fixed file. */
+const internalDomainsPath = "settings/internal-domains.md";
+/** Appended to an External person's label. The words are always there, so red styling is never the only signal. */
+export const EXTERNAL_SUFFIX = " - ext";
 export { DEFAULT_SELF_EMAILS };
 /** Personal mail providers: the domain names a mailbox, not an organisation. */
 const FREE_MAIL_DOMAINS = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "hotmail.fr", "live.com", "live.fr", "msn.com", "yahoo.com", "yahoo.fr", "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "gmx.com", "gmx.fr", "orange.fr", "wanadoo.fr", "free.fr", "sfr.fr", "laposte.net"]);
@@ -55,6 +59,76 @@ export function organizationFromDomain(domain: string) {
   return name ? titleCase(name) : undefined;
 }
 
+/** "  @EagleEye.com. " → "eagleeye.com"; undefined when it is not a plausible domain name. */
+export function normalizeDomain(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const domain = value.trim().toLowerCase().replace(/^@/, "").replace(/\.$/, "");
+  return /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/.test(domain) ? domain : undefined;
+}
+
+/** Domains stored in a setting file; hand edits may leave junk, which is dropped. */
+function domainsFrom(frontmatter: ObjectEnvelope | undefined) {
+  const raw = Array.isArray(frontmatter?.internal_domains) ? frontmatter.internal_domains as unknown[] : [];
+  return [...new Set(raw.map(normalizeDomain).filter((domain): domain is string => Boolean(domain)))];
+}
+
+/** How a Person's External flag was decided, for the UI and the Agent Index. */
+export type ExternalSource = "self" | "override" | "email" | "stored";
+
+/**
+ * Whether a person is outside the company. The self person never is; a manual override
+ * (`is_external_override`) wins; otherwise any internal email address makes the person internal
+ * (colleagues may also list a personal address). Without any email, the stored `is_external` stands.
+ */
+export function externalStatus(person: Pick<LifeOSObject, "frontmatter">, internalDomains: readonly string[]): { isExternal: boolean; source: ExternalSource } {
+  const { frontmatter } = person;
+  if (frontmatter.is_self === true) return { isExternal: false, source: "self" };
+  if (typeof frontmatter.is_external_override === "boolean") return { isExternal: frontmatter.is_external_override, source: "override" };
+  const emails = personEmails(person as LifeOSObject);
+  if (emails.length) return { isExternal: !emails.some((email) => internalDomains.includes(email.split("@")[1]!)), source: "email" };
+  return { isExternal: frontmatter.is_external === true, source: "stored" };
+}
+
+/**
+ * The display-label read model (#39), used by badges, pickers and the Agent Index (#43).
+ * `name` is the short, unambiguous name; `label` is the text to show: `name` plus `suffix` for External people.
+ */
+export type PersonLabel = { id: string; name: string; label: string; suffix?: typeof EXTERNAL_SUFFIX; isExternal: boolean; externalSource: ExternalSource };
+
+const isActivePerson = (person: Pick<LifeOSObject, "frontmatter">) => person.frontmatter.type === "person" && !person.frontmatter.deleted_at && !person.frontmatter.archived_at;
+const cleanText = (value: unknown) => typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+
+/**
+ * Labels for every person among `objects`. The first name by default; first + last name while another
+ * active person shares the first name (compared ignoring case and accents). Pure: callers pass the
+ * current index, so labels change as soon as people are added, renamed or deleted.
+ */
+/** Internal domains from the indexed setting file, else the defaults (#39). Every "is this person external?" check uses this. */
+export function internalDomainsOf(index: Pick<AppContext["index"], "all">) {
+  const setting = index.all().find((object) => object.frontmatter.type === "app-setting" && object.relativePath === internalDomainsPath);
+  const domains = domainsFrom(setting?.frontmatter);
+  return domains.length ? domains : [...DEFAULT_INTERNAL_DOMAINS];
+}
+
+export function personDisplayLabels(objects: ReadonlyArray<Pick<LifeOSObject, "frontmatter">>, internalDomains: readonly string[]): PersonLabel[] {
+  const people = objects.filter((object) => object.frontmatter.type === "person");
+  const firstName = (person: Pick<LifeOSObject, "frontmatter">) => cleanText(person.frontmatter.given_name) || cleanText(person.frontmatter.title).split(" ")[0] || "Unnamed";
+  const holders = new Map<string, Set<string>>();
+  for (const person of people.filter(isActivePerson)) {
+    const key = foldForSearch(firstName(person));
+    holders.set(key, (holders.get(key) ?? new Set<string>()).add(person.frontmatter.id));
+  }
+  return people.map((person) => {
+    const first = firstName(person);
+    const shared = [...holders.get(foldForSearch(first)) ?? []].some((id) => id !== person.frontmatter.id);
+    const family = cleanText(person.frontmatter.family_name);
+    // Without a family name, the title is the best longer name there is (it may equal the first name).
+    const name = !shared ? first : family ? `${first} ${family}` : cleanText(person.frontmatter.title) || first;
+    const { isExternal, source } = externalStatus(person, internalDomains);
+    return { id: person.frontmatter.id, name, label: isExternal ? name + EXTERNAL_SUFFIX : name, ...(isExternal ? { suffix: EXTERNAL_SUFFIX } : {}), isExternal, externalSource: source };
+  });
+}
+
 /** One attendee as the matcher sees it. Name-only connectors give strings; a bare address counts as an email. */
 function attendeesOf(event: CalendarEvent): CalendarAttendee[] {
   if (event.attendeeDetails) return event.attendeeDetails;
@@ -67,6 +141,75 @@ export class PeopleModule {
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly ctx: AppContext) {}
+
+  /** Internal domains from the indexed setting file, else the defaults. Synchronous so labels stay a cheap read. */
+  internalDomains() {
+    return internalDomainsOf(this.ctx.index);
+  }
+
+  /** Display labels for all people, deleted ones included so old references still read well. */
+  labels() {
+    return personDisplayLabels(this.ctx.index.all(), this.internalDomains());
+  }
+
+  /** Read from disk so another device's edit is seen at once (as for calendar preferences). */
+  async getInternalDomains(): Promise<{ domains: string[]; contentHash?: string }> {
+    const current = await this.readSetting();
+    const domains = domainsFrom(current?.frontmatter);
+    return { domains: domains.length ? domains : [...DEFAULT_INTERNAL_DOMAINS], ...(current ? { contentHash: current.contentHash } : {}) };
+  }
+
+  /** Saves the internal domains (lowercased, "@" stripped, de-duplicated). Blank entries are ignored; invalid ones are named in the error. */
+  async saveInternalDomains(input: unknown[], expectedHash?: string) {
+    const { ctx } = this;
+    const entries = (Array.isArray(input) ? input : []).filter((value) => typeof value !== "string" || value.trim());
+    const invalid = entries.filter((value) => !normalizeDomain(value)).map(String);
+    if (invalid.length) throw new Error(`Not a domain name: ${invalid.join(", ")}`);
+    const domains = [...new Set(entries.map((value) => normalizeDomain(value)!))];
+    if (!domains.length) throw new Error("Enter at least one internal domain");
+    const current = await this.readSetting();
+    if (current && current.contentHash !== expectedHash) throw new ObjectConflictError("Internal domains changed on another device; reload and try again");
+    if (!current && expectedHash) throw new ObjectConflictError("Internal domains setting was removed; reload and try again");
+    const now = new Date().toISOString();
+    const written = await ctx.objects.write({
+      relativePath: internalDomainsPath,
+      expectedHash: current?.contentHash,
+      frontmatter: {
+        ...current?.frontmatter,
+        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: ctx.deviceId } : ctx.envelope(uuidV7(), "app-setting", "Internal domains", now)),
+        setting_key: "internal-domains",
+        internal_domains: domains
+      } as ObjectEnvelope,
+      body: current?.body ?? "# Internal domains\n\nEmail domains of your own organisations. People with addresses only on other domains are shown as External (\"Name - ext\").\n"
+    });
+    await ctx.rebuildIndex();
+    return { domains, contentHash: written.contentHash };
+  }
+
+  /**
+   * Manual override of the External flag: `true` or `false` pins it, `null` returns to the email rule.
+   * `is_external` is rewritten to the effective value so the file reads correctly outside the app.
+   */
+  async setExternal(id: string, value: boolean | null, expectedHash: string) {
+    if (value !== true && value !== false && value !== null) throw new Error("External must be true, false or null");
+    const { ctx } = this;
+    const person = ctx.required(id, "person");
+    if (person.frontmatter.is_self === true) throw new Error("The self person is always internal");
+    const before = typeof person.frontmatter.is_external_override === "boolean" ? person.frontmatter.is_external_override : null;
+    if (value === before) return person;
+    const override = value ?? undefined;
+    const isExternal = externalStatus({ frontmatter: { ...person.frontmatter, is_external_override: override } }, this.internalDomains()).isExternal;
+    const now = new Date().toISOString();
+    const updated = await ctx.update(person, { is_external_override: override, is_external: isExternal }, { expectedHash, now });
+    await ctx.writeAudit("person.external-changed", id, now, { from: before, to: value, is_external: isExternal });
+    await ctx.rebuildIndex();
+    return updated;
+  }
+
+  private async readSetting() {
+    try { return await this.ctx.objects.read(internalDomainsPath); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+  }
 
   /** Read-only: the existing person, or an unsaved stand-in with the name a real one would get. */
   previewAttendees(event: CalendarEvent, synthetic: (title: string) => LifeOSObject) {
@@ -148,7 +291,7 @@ export class PeopleModule {
         ...names,
         identifiers: [{ kind: "email", value: email } satisfies PersonIdentifier],
         review_state: "unreviewed",
-        is_external: !DEFAULT_INTERNAL_DOMAINS.includes(domain),
+        is_external: !this.internalDomains().includes(domain),
         ...(organization ? { organization_name: organization } : {})
       },
       body: `# ${title}\n`

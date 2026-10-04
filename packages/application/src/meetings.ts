@@ -12,7 +12,8 @@ export class MeetingsModule {
 
   private readonly people: PeopleModule;
 
-  constructor(private readonly ctx: AppContext) { this.people = new PeopleModule(ctx); }
+  /** `people` is shared with the facade, so attendee resolution and label reads use one module (one queue). */
+  constructor(private readonly ctx: AppContext, people?: PeopleModule) { this.people = people ?? new PeopleModule(ctx); }
 
   /**
    * Materializes the canonical meeting + note for a calendar event. The web UI calls this only on

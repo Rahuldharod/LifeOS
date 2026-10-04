@@ -2,7 +2,7 @@ import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
 import type { PatchModule } from "./patches.js";
 import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
-import { DEFAULT_INTERNAL_DOMAINS, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
+import { internalDomainsOf, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver } from "./resolution.js";
 
@@ -352,7 +352,7 @@ export class AdoptionModule {
     if (family.length && fields.family_name === undefined && fields.given_name === undefined) extra.family_name = family.join(" ");
     const domain = emails[0]?.split("@")[1];
     if (fields.is_external !== undefined) { if (typeof fields.is_external === "boolean") extra.is_external = fields.is_external; else issues.push("is_external: must be true or false"); }
-    else if (domain) extra.is_external = !DEFAULT_INTERNAL_DOMAINS.includes(domain);
+    else if (domain) extra.is_external = !internalDomainsOf(this.ctx.index).includes(domain);
     if (domain && extra.organization_name === undefined) { const organization = organizationFromDomain(domain); if (organization) extra.organization_name = organization; }
     for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) extra[key] = fields[key];
     for (const key of ["subjects", "tags", "aliases"]) if (fields[key] !== undefined) { if (stringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }

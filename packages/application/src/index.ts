@@ -9,6 +9,7 @@ import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
 import { PatchModule } from "./patches.js";
+import { PeopleModule } from "./people.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
 import { ReviewModule } from "./review.js";
@@ -16,7 +17,8 @@ import { SystemModule } from "./system.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { ExternalChange } from "./history.js";
-export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, personEmails } from "./people.js";
+export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
+export type { ExternalSource, PersonLabel } from "./people.js";
 export type { AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
@@ -43,13 +45,15 @@ export class LifeOSApplication {
   private readonly enrichment: EnrichmentModule;
   private readonly decisionsModule: DecisionsModule;
   private readonly patches: PatchModule;
+  private readonly people: PeopleModule;
 
   /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.patches = new PatchModule(ctx);
     this.adoption = new AdoptionModule(ctx, inbox, this.patches);
-    this.meetings = new MeetingsModule(ctx);
+    this.people = new PeopleModule(ctx);
+    this.meetings = new MeetingsModule(ctx, this.people);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
     this.decisionsModule = new DecisionsModule(ctx);
@@ -98,6 +102,12 @@ export class LifeOSApplication {
   createDecision(fields: Record<string, unknown>) { return this.decisionsModule.createDecision(fields); }
   updateDecision(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.decisionsModule.updateDecision(id, fields, expectedHash); }
   supersedeDecision(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.decisionsModule.supersedeDecision(id, fields, expectedHash); }
+
+  // People (#39): display labels (also the Agent Index's source, #43), the External override, internal domains
+  personLabels() { return this.people.labels(); }
+  setPersonExternal(id: string, isExternal: boolean | null, expectedHash: string) { return this.people.setExternal(id, isExternal, expectedHash); }
+  getInternalDomains() { return this.people.getInternalDomains(); }
+  saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
 
   // Calendar
   listCalendarEvents(from?: Date, to?: Date) { return this.calendarModule.listCalendarEvents(from, to); }

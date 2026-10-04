@@ -2,7 +2,8 @@
 // ignoring case and accents, so "joh" or "jose" shortlists "John" or "José". Names that start a
 // word with the query come first, then the rest alphabetically.
 
-export type SearchOption = { id: string; title: string };
+/** `suffix` is extra text shown after the title (the red " - ext" marker, #39); it is not searched. */
+export type SearchOption = { id: string; title: string; suffix?: string };
 
 export const foldText = (value: string) => value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
