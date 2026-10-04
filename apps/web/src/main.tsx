@@ -209,9 +209,13 @@ const reviewEditable: Record<string, string[]> = {
   "open-point": ["owner_person_id", "primary_project_id", "primary_client_id", "primary_product_id"]
 };
 
-/** The text of the `## Summary` section of a meeting body (written by accepting a summary Review Item, #45). */
+/**
+ * The text of the Summary section of a meeting body (written by accepting a summary Review Item, #45): between
+ * the #66 markers, so the summary's own headings are shown; an older unmarked one ends at the next heading.
+ */
 function meetingSummary(body: string | undefined) {
-  const match = body?.match(/^##\s+Summary\s*\n([\s\S]*?)(?=^#{1,2}\s|(?![\s\S]))/m);
+  const marked = body?.match(/^<!-- lifeos:summary:start -->\s*\n##\s+Summary[^\n]*\n([\s\S]*?)^<!-- lifeos:summary:end -->/m);
+  const match = marked ?? body?.match(/^##\s+Summary\s*\n([\s\S]*?)(?=^#{1,2}\s|(?![\s\S]))/m);
   return match?.[1]?.trim() || undefined;
 }
 

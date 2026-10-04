@@ -293,15 +293,42 @@ export class MeetingMaterialModule {
   }
 }
 
-/** Replaces the `## Summary` section of a meeting body (up to the next heading of level 1–2), or appends one. */
+/**
+ * The Summary section of a meeting body is fenced by these markers (#66), so finding its end never depends on
+ * the headings the summary itself contains. Everything outside the markers is the user's and is never changed.
+ */
+export const summaryStartMarker = "<!-- lifeos:summary:start -->";
+export const summaryEndMarker = "<!-- lifeos:summary:end -->";
+const markerPattern = /<!--\s*lifeos:summary:(?:start|end)\s*-->/gi;
+const isMarkerLine = (line: string, marker: string) => line.trim() === marker;
+
+/**
+ * Writes `summary` as the meeting body's Summary section, replacing the one already there, or appending one.
+ * - Marked section: everything from the start marker to the end marker is replaced, nothing else.
+ * - Unmarked `## Summary` (written before #66), or a start marker whose end marker is gone: migrated to a
+ *   marked section, replacing up to the next heading of level 1–2 as before (an older summary's own headings
+ *   past that point cannot be told apart from the user's, so they are left alone).
+ * Deterministic: writing the same summary again returns the body unchanged.
+ */
 export function withSummarySection(body: string, summary: string) {
-  const section = `## Summary\n\n${summary.trim()}\n`;
+  const text = summary.replace(markerPattern, "").trim();
+  const section = [summaryStartMarker, "## Summary", "", ...(text ? text.split("\n") : []), summaryEndMarker];
   const lines = body.split("\n");
-  const start = lines.findIndex((line) => /^##\s+Summary\s*$/i.test(line));
-  if (start < 0) return `${body.trimEnd()}\n\n${section}`;
-  const nextHeading = lines.findIndex((line, index) => index > start && /^#{1,2}\s/.test(line));
-  const after = nextHeading < 0 ? "" : `\n${lines.slice(nextHeading).join("\n")}`;
-  return `${lines.slice(0, start).join("\n")}${start ? "\n" : ""}${section}${after}`;
+  const start = lines.findIndex((line) => isMarkerLine(line, summaryStartMarker));
+  const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && isMarkerLine(line, summaryEndMarker));
+  if (end >= 0) return [...lines.slice(0, start), ...section, ...lines.slice(end + 1)].join("\n");
+
+  const isSummaryHeading = (line: string) => /^##\s+Summary\s*$/i.test(line);
+  // A start marker without its end marker owns only the heading right under it, never a later one.
+  const from = start >= 0 ? start : lines.findIndex(isSummaryHeading);
+  const heading = start >= 0 ? (isSummaryHeading(lines[start + 1] ?? "") ? start + 1 : start) : from;
+  if (from < 0) {
+    const separator = !body ? "" : /\r?\n\r?\n$/.test(body) ? "" : /\n$/.test(body) ? "\n" : "\n\n";
+    return `${body}${separator}${section.join("\n")}\n`;
+  }
+  const next = lines.findIndex((line, index) => index > heading && /^#{1,2}\s/.test(line));
+  const after = next < 0 ? [""] : ["", ...lines.slice(next)];
+  return [...lines.slice(0, from), ...section, ...after].join("\n");
 }
 
 /**
