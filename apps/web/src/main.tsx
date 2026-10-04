@@ -38,8 +38,9 @@ import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, ty
 import { SettingsPage } from "./SettingsPage.js";
 import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
-import { roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
+import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
 import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
+import { ImageLossNotice } from "./ImageLossNotice.js";
 import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { CalendarOfflineBanner, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
@@ -49,7 +50,7 @@ type CrepeInstance = {
   getMarkdown(): string;
   destroy(): Promise<unknown>;
   setReadonly(value: boolean): unknown;
-  editor: { config(configure: (ctx: { set(slice: string, value: unknown): void }) => void): unknown };
+  editor: { config(configure: (ctx: { set(slice: string, value: unknown): void; update(slice: string, updater: (value: never) => unknown): void }) => void): unknown };
   on(callback: (listener: { markdownUpdated(callback: (context: unknown, markdown: string, previousMarkdown: string) => void): unknown }) => void): unknown;
 };
 type CrepeConstructor = new (config: { root: Node; defaultValue: string; features?: Record<string, boolean>; featureConfigs?: Record<string, unknown> }) => CrepeInstance;
@@ -162,6 +163,9 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
   const engaged = useRef(false);
   // #89: whether saving from this editor would rewrite Markdown the user did not edit.
   const [roundTrip, setRoundTrip] = useState<RoundTripReport>();
+  // #91: images this editor would drop if it saved. When any, the editor stays read-only and never saves.
+  const [lost, setLost] = useState<string[]>();
+  const blocked = useRef(false);
 
   useEffect(() => {
     if (!root.current) return;
@@ -169,8 +173,10 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
     let instance: CrepeInstance | undefined;
     const editorRoot = root.current;
     engaged.current = false;
+    blocked.current = false;
     setRoundTrip(undefined);
-    void import("@milkdown/crepe").then(async (crepePackage) => {
+    setLost(undefined);
+    void Promise.all([import("@milkdown/crepe"), import("./visualEditorImages.js")]).then(async ([crepePackage, { preserveImages }]) => {
       if (!active) return;
       const Crepe = (crepePackage as unknown as { Crepe: CrepeConstructor }).Crepe;
       const uploadManagedImage = async (file: File) => {
@@ -186,23 +192,28 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
         featureConfigs: { "image-block": { onUpload: uploadManagedImage, inlineOnUpload: uploadManagedImage, blockOnUpload: uploadManagedImage, proxyDomURL: imagePreviewSource } }
       });
       crepe.current = instance;
+      preserveImages(instance);
       // Milkdown blanks the href of links it does not consider safe, which includes lifeos://. Keep the
       // target on a data attribute so the app's click handler can still follow it (PB-007).
       instance.editor.config((ctx) => ctx.set("linkAttr", (mark: { attrs: { href?: string } }) => (lifeosLinkId(mark.attrs.href) ? { "data-lifeos-href": mark.attrs.href } : {})));
       instance.on((listener) => listener.markdownUpdated((_context, nextMarkdown) => {
-        if (!engaged.current) return;
-        latest.current.onChange(storedMarkdown(nextMarkdown, latest.current.owner?.relativePath ?? "meetings/pending.md"));
+        if (!engaged.current || blocked.current) return;
+        latest.current.onChange(storedMarkdown(nextMarkdown, latest.current.owner?.relativePath ?? "meetings/pending.md", markdown));
       }));
       await instance.create();
       if (!active) return;
-      instance.setReadonly(latest.current.readOnly);
-      setRoundTrip(roundTripReport(markdown, storedMarkdown(instance.getMarkdown(), latest.current.owner?.relativePath ?? "meetings/pending.md")));
+      const unedited = storedMarkdown(instance.getMarkdown(), latest.current.owner?.relativePath ?? "meetings/pending.md", markdown);
+      const missing = lostImages(markdown, unedited);
+      blocked.current = missing.length > 0;
+      instance.setReadonly(latest.current.readOnly || blocked.current);
+      setLost(missing);
+      setRoundTrip(roundTripReport(markdown, unedited));
     });
     return () => { active = false; crepe.current = undefined; if (instance) void instance.destroy(); };
   }, [editorKey]);
 
-  useEffect(() => { crepe.current?.setReadonly(readOnly); }, [readOnly]);
-  return <><UnprovenFormattingLabel report={roundTrip} /><div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
+  useEffect(() => { crepe.current?.setReadonly(readOnly || blocked.current); }, [readOnly]);
+  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }
 
 type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };

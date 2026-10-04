@@ -7,16 +7,81 @@
 /** The Crepe features the visual editor runs with. The round-trip suite uses the same set. */
 export const visualEditorFeatures: Record<string, boolean> = { "top-bar": true, latex: false, ai: false };
 
-/** Note body → the Markdown the visual editor loads (managed images are shown through the API). */
-export function visualMarkdown(markdown: string) {
-  return markdown.replace(/(!\[[^\]]*\]\()(?:\.\.\/)*assets\/([^\s)>]+)(\))/g, (_match, before: string, fileName: string, after: string) => `${before}/api/v1/assets/${encodeURIComponent(decodeURIComponent(fileName))}${after}`);
+const managedImage = /(!\[[^\]]*\]\()((?:\.\.\/)*assets\/([^\s()<>]+))(\))/g; // a name with brackets is left for the editor to show as written
+const apiAsset = /\/api\/v1\/assets\/([^\s)>"]+)/g;
+
+/** The address the visual editor shows a managed image at, or undefined if the file name is not valid percent-encoding. */
+function apiAssetPath(fileName: string) {
+  try { return `/api/v1/assets/${encodeURIComponent(decodeURIComponent(fileName))}`; } catch { return undefined; }
 }
 
-/** What the visual editor emits → the note body that is saved (managed image links relative again). */
-export function storedMarkdown(markdown: string, ownerRelativePath: string) {
+/** Note body → the Markdown the visual editor loads (managed images are shown through the API). */
+export function visualMarkdown(markdown: string) {
+  return markdown.replace(managedImage, (match, before: string, _path: string, fileName: string, after: string) => {
+    const api = apiAssetPath(fileName);
+    return api ? `${before}${api}${after}` : match;
+  });
+}
+
+/**
+ * What the visual editor emits → the note body that is saved (managed image links relative again).
+ * Pass the body the editor was loaded with as `original`: an image it already had is written back with
+ * exactly the path it was written with (#91), so `assets/x.png`, `../assets/x.png` and percent-encoded
+ * names all survive. Only images added in the editor get a new path, relative to `ownerRelativePath`.
+ */
+export function storedMarkdown(markdown: string, ownerRelativePath: string, original = "") {
+  const known = new Map<string, string>();
+  for (const [, , path, fileName] of original.matchAll(managedImage)) {
+    const api = apiAssetPath(fileName!);
+    if (api && !known.has(api)) known.set(api, path!);
+  }
   const depth = Math.max(0, ownerRelativePath.split("/").length - 1);
   const prefix = depth ? "../".repeat(depth) : "";
-  return markdown.replace(/\/api\/v1\/assets\/([^\s)>]+)/g, (_match, encoded: string) => `${prefix}assets/${decodeURIComponent(encoded)}`);
+  return markdown.replace(apiAsset, (match, encoded: string) => known.get(match) ?? `${prefix}assets/${encoded}`);
+}
+
+/** An image in a note, as `alt → target`, for checking that saving did not lose any. */
+const imageReference = /!\[((?:\\.|[^\]\\])*)\](?:\(\s*(<[^>]*>|(?:\\.|\([^\s()]*\)|[^\s()\\])*)|\[([^\]]*)\])?/g;
+
+/** Images in `markdown` (outside code), normalised so escaping, `<…>` wrapping, reference style and formatting inside the description do not matter. */
+export function imagesIn(markdown: string): string[] {
+  const prose = markdown
+    .replace(/\r/g, "")
+    .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm, "")
+    .replace(/(`+)[^`]*?\1/g, "");
+  const definitions = new Map<string, string>();
+  for (const [, label, target] of prose.matchAll(/^ {0,3}\[([^\]]+)\]:\s*(<[^>]*>|\S+)/gm)) {
+    const key = label!.trim().toLowerCase();
+    if (!definitions.has(key)) definitions.set(key, target!);
+  }
+  const plain = (value: string) => value.replace(/\\(.)/g, "$1").replace(/[*_`~]/g, "").replace(/\s+/g, " ").trim();
+  const images: string[] = [];
+  for (const match of prose.matchAll(imageReference)) {
+    if (match.index > 0 && prose[match.index - 1] === "\\") continue;
+    const alt = match[1]!;
+    const label = match[3] || alt;
+    const written = match[2] ?? definitions.get(label.trim().toLowerCase()) ?? `[${label}]`;
+    const target = written.replace(/^<|>$/g, "").replace(/\\(.)/g, "$1");
+    let decoded = target;
+    try { decoded = decodeURI(target); } catch { /* keep as written */ }
+    images.push(`${plain(alt)} → ${decoded}`);
+  }
+  return images;
+}
+
+/**
+ * Images in `original` that are missing from `saved` (#91). Visual mode refuses to save a note when this
+ * is not empty: losing an image silently is never acceptable, so a false alarm here is the safe failure.
+ */
+export function lostImages(original: string, saved: string): string[] {
+  const remaining = imagesIn(saved);
+  const lost: string[] = [];
+  for (const image of imagesIn(original)) {
+    const index = remaining.indexOf(image);
+    if (index === -1) lost.push(image);
+    else remaining.splice(index, 1);
+  }
+  return lost;
 }
 
 /** Named when a note does not round-trip but none of the known constructs below explain why. */
@@ -65,7 +130,11 @@ export function unprovenConstructs(markdown: string): string[] {
     const next = lines[index + 1] ?? "";
     if (!text.trim()) { continue; }
     if (/[ \t]+$/.test(text)) add("trailing spaces (including two-space line breaks)");
-    if (/!\[[^\]]*\]\(/.test(text)) add("images");
+    // #91: images themselves survive; only these ways of writing them are rewritten.
+    if (/!\[[^\]]*\]\((?:<[^>]*>|[^<)\s][^)\s]*)\s+(?:'|\(|""\s*\))/.test(text)) add("image titles not in double quotes");
+    if (/!\[[^\]]*[*_`~][^\]]*\]/.test(text)) add("formatting inside image descriptions");
+    if (/!\[[^\]]*\]\((?!<)[^\s)]*\(/.test(text)) add("brackets in image paths");
+    if (/^ {0,3}\|/.test(text) && text.includes("![")) add("images inside tables");
     if (/^ {0,3}\[(?!\^)[^\]]+\]:/.test(text)) add("reference-style links");
     if (/(?<![<(])\bhttps?:\/\//.test(text)) add("bare web addresses");
     if (/&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);/.test(text)) add("HTML entities such as &amp;amp;");
