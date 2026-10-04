@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-04
-- Source: issue #74 (review of the fix tickets #53–#73)
+- Source: issue #74 (review of the fix tickets #53–#73); amended by #78 (audit once on every journalled path, exceptions list)
 
 A step is **replay-safe** when running it again after a crash, or twice at once, ends in the same files as running it once. Every step that writes more than one file must be replay-safe. Pick the mechanisms below by what the step does. Each has one helper; do not hand-write another.
 
@@ -20,6 +20,15 @@ A step is **replay-safe** when running it again after a crash, or twice at once,
 
 **Audit once.** The match rule is the metadata keys that identify "the same audit", e.g. `draft_key` for an adopted draft, `superseded_by` for a superseded brief, none for a merge suggestion. Replays rebuild the index first, so they see what the first attempt wrote.
 
-**Sharing one in-flight run** is a different need and stays hand-written: `rebuildIndex` coalesces callers into one follow-up scan, and `ensureSelfPerson` shares one creation.
+Every audit written while an operation is open (between `prepareOperation` and `completeOperation`, or on a recovery or rollback path) uses `writeAuditOnce`, so a crash after the audit and before the operation closes never writes it twice. Match on the operation's ID (`operation_id` in the metadata), or on `review_id` for `review.accepted`, or on the draft's `draft_key` (and `content_hash` for a patch) for adoption. Plain `writeAudit` is for single-write steps that no journal replays.
+
+**Allowed exceptions.** These stay hand-written; anything else uses the helpers above.
+
+| Exception | Where | Why it is not a helper |
+|---|---|---|
+| Rebuild coalescing | `rebuildIndex` | Shares one in-flight scan and one follow-up scan between callers; not one-at-a-time |
+| Self person creation | `ensureSelfPerson` | Shares one in-flight creation until the index holds it |
+| Adoption trigger coalescing | `startAutoAdoption` (`waiting`) | At most one trigger batch waits in the queue; later watcher events are covered by it, so they are dropped, not queued |
+| Ledger reads that skip a whole step | `findAudits` in adoption replay, `recoverJournal` and `undoPatch` | They decide whether a step still has work (a patch already applied, raised for review, or undone), not whether to write an audit |
 
 Why: the fix tickets added five overlapping ways to do this, in several hand-written copies that had started to drift. One of them missed a case: a merge suggestion replayed after a crash lost its `review.proposed` audit. One documented pattern keeps new code from adding a sixth.

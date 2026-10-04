@@ -250,9 +250,9 @@ export class PatchModule {
 
   /** The `patch.applied` audit (the patch's idempotency ledger and Undo record), then closes the patch's journal. */
   private async audit(patch: ParsedPatch, target: LifeOSObject, values: PatchJournal, run: AdoptionRun) {
-    await this.ctx.writeAudit(appliedAction, target.frontmatter.id, run.now, {
+    await this.ctx.writeAuditOnce(appliedAction, target.frontmatter.id, run.now, {
       ...this.auditFields(patch, run), before: values.before, after: values.after, ...(values.appended_text ? { append_note: patch.appendNote, appended_text: values.appended_text } : {})
-    });
+    }, { matchOn: ["draft_key", "content_hash"] });
     await this.closeJournals(patch);
     return { objectId: target.frontmatter.id, outcome: "applied" as const };
   }
@@ -281,13 +281,13 @@ export class PatchModule {
   async recoverJournal(operation: Operation) {
     const journal = operation.payload as unknown as StoredPatchJournal;
     const { ctx } = this;
-    // Already audited, or raised for review: the patch's own ledger (ADR 0013) says nothing is left to record.
+    // The patch's ledger: already audited, or raised for review (#61), so the target need not be checked.
     if (!ctx.findAudits([appliedAction, reviewRaisedAction], { draft_key: journal.draft_key, content_hash: journal.content_hash }).length) {
       const target = ctx.index.get(String(journal.target_id));
       if (!target || ctx.index.duplicatePaths?.(target.frontmatter.id)) throw new Error(`the patch's target ${String(journal.target_id)} is ${target ? "a duplicate object ID" : "missing"}, so whether patch ${journal.draft_key} was applied cannot be checked; restore the target or close the entry by hand`);
       if (holdsChange(target, journal)) {
         const { target_id: _target, base_hash: _base, before, after, appended_text, now, append_note, ...fields } = journal;
-        await ctx.writeAudit(appliedAction, target.frontmatter.id, now ?? new Date().toISOString(), { ...fields, before, after, ...(appended_text ? { append_note, appended_text } : {}) });
+        await ctx.writeAuditOnce(appliedAction, target.frontmatter.id, now ?? new Date().toISOString(), { ...fields, before, after, ...(appended_text ? { append_note, appended_text } : {}) }, { matchOn: ["draft_key", "content_hash"] });
         await ctx.rebuildIndex();
       }
     }
@@ -333,7 +333,7 @@ export class PatchModule {
       },
       body: `# ${title}\n\n${reasons.map((reason) => `- ${reason}`).join("\n")}${table}${note}\n`
     });
-    await this.ctx.writeAudit(reviewRaisedAction, id, run.now, { draft_key: patch.draftKey, content_hash: patch.contentHash, draft_path: patch.file.relativePath, agent_run_id: run.id, origin: patch.origin, captured_at: patch.capturedAt, target_object_id: target.frontmatter.id, reasons });
+    await this.ctx.writeAuditOnce(reviewRaisedAction, id, run.now, { draft_key: patch.draftKey, content_hash: patch.contentHash, draft_path: patch.file.relativePath, agent_run_id: run.id, origin: patch.origin, captured_at: patch.capturedAt, target_object_id: target.frontmatter.id, reasons }, { matchOn: ["draft_key", "content_hash"] });
     return id;
   }
 
