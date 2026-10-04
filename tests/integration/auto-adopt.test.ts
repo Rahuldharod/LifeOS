@@ -425,5 +425,120 @@ describe("crash replay for every adoption handler (merged with #33, #34, #36, #4
       expect((await (await open(root)).adoptDrafts()).drafts).toEqual([]);
       expect(await new MarkdownObjectStore(root).incompleteOperations()).toEqual([]);
     });
+
+    // #71: a journalled patch counts as written only when the target really holds the change.
+    describe("patch journal recovery (#71)", () => {
+      const isPatchJournal = ((id: string) => id.startsWith("apply-patch-")) as never;
+      const onTaskWrite = ((input: { frontmatter: Record<string, unknown> }) => input.frontmatter.type === "task") as never;
+      const patchJournals = async (root: string) => (await new MarkdownObjectStore(root).incompleteOperations()).filter((operation) => operation.kind === "apply-patch");
+      const appliedAudits = (application: LifeOSApplication) => ofType(application, "audit-event").then((audits) => audits.filter((audit) => audit.frontmatter.action === "patch.applied"));
+      /** The process dies after journalling the patch and before writing the target: the journal stays open. */
+      async function crashBeforeWrite(root: string) {
+        const objects = crashing(crashing(new MarkdownObjectStore(root), "write", onTaskWrite), "completeOperation", isPatchJournal);
+        await (await open(root, objects)).adoptDrafts().catch(() => undefined);
+        expect(await patchJournals(root)).toHaveLength(1);
+      }
+      /** The process dies after the write and its audit, before closing the journal. */
+      async function crashBeforeJournalClosed(root: string) {
+        await (await open(root, crashing(new MarkdownObjectStore(root), "completeOperation", isPatchJournal))).adoptDrafts().catch(() => undefined);
+        expect(await patchJournals(root)).toHaveLength(1);
+      }
+
+      it("crash before the write, target edited since on another field: replay applies the patch for real, no phantom audit", async () => {
+        const { root, taskId } = await withTask();
+        await dropPatch(root, { id: taskId, set: { priority: "High" }, append_note: "Joel wants it in French." });
+        await crashBeforeWrite(root);
+        const editor = await open(root);
+        await editor.setSensitivity(taskId, "restricted", editor.object(taskId).contentHash);
+
+        const restarted = await open(root);
+        expect((await restarted.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "applied", objectIds: [taskId] });
+        const patched = restarted.object(taskId);
+        expect(patched.frontmatter).toMatchObject({ priority: "High", sensitivity: "restricted" });
+        expect(patched.body.match(/Joel wants it in French\./g)).toHaveLength(1);
+        expect(restarted.appliedPatches()).toHaveLength(1);
+        expect(restarted.appliedPatches()[0]).toMatchObject({ before: { priority: null }, after: { priority: "High" } });
+        expect(await patchJournals(root)).toEqual([]);
+      });
+
+      it("crash before the write, then the same field edited after capture: routed to review, no patch.applied audit", async () => {
+        const { root, taskId } = await withTask();
+        // Captured well before the task's own audits, so the test does not depend on the time of day it runs.
+        await dropPatch(root, { id: taskId, set: { priority: "High" }, captured_at: "2026-01-01T09:00:00Z" });
+        await crashBeforeWrite(root);
+        // The user changes the same field after the patch was captured: the conflict rule must see it.
+        const editor = await open(root);
+        await editor.updateTask(taskId, { priority: "Low" }, editor.object(taskId).contentHash);
+
+        const restarted = await open(root);
+        expect((await restarted.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "review" });
+        expect(await appliedAudits(restarted)).toEqual([]);
+        expect(restarted.object(taskId).frontmatter.priority).toBe("Low");
+        expect(await patchJournals(root)).toEqual([]);
+      });
+
+      it("startup recovery closes the journal of a patch that was never written, and adoption then applies it once", async () => {
+        const { root, taskId } = await withTask();
+        await dropPatch(root, { id: taskId, set: { priority: "High" }, append_note: "Joel wants it in French." });
+        await crashBeforeWrite(root);
+
+        const restarted = await open(root);
+        await restarted.recoverOperations();
+        expect(await patchJournals(root)).toEqual([]);
+        expect(await appliedAudits(restarted)).toEqual([]);
+        expect((await restarted.health()).diagnostics.filter((line) => line.includes("apply-patch"))).toEqual([]);
+        expect((await restarted.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "applied", objectIds: [taskId] });
+        expect(restarted.object(taskId).body.match(/Joel wants it in French\./g)).toHaveLength(1);
+        expect(restarted.appliedPatches()).toHaveLength(1);
+      });
+
+      it("startup recovery audits a patch written before the crash, and Undo restores the original", async () => {
+        const { root, taskId, original } = await withTask();
+        await dropPatch(root, { id: taskId, set: { priority: "High" }, append_note: "Joel wants it in French." });
+        await (await open(root, crashing(new MarkdownObjectStore(root), "write", auditOf("patch.applied")))).adoptDrafts().catch(() => undefined);
+        expect(await patchJournals(root)).toHaveLength(1);
+
+        const restarted = await open(root);
+        expect(await restarted.recoverOperations()).toHaveLength(1);
+        expect(await patchJournals(root)).toEqual([]);
+        const [applied] = restarted.appliedPatches();
+        expect(restarted.appliedPatches()).toHaveLength(1);
+        expect(applied).toMatchObject({ objectId: taskId, draftKey: "note-1", before: { priority: null }, after: { priority: "High" }, appendedNote: "Joel wants it in French." });
+        // Adoption then files the patch as applied without changing the task again.
+        expect((await restarted.adoptDrafts()).drafts[0]).toMatchObject({ outcome: "applied", objectIds: [taskId] });
+        expect(restarted.object(taskId).frontmatter.revision).toBe(2);
+        expect(restarted.appliedPatches()).toHaveLength(1);
+        expect((await restarted.undoPatch(applied!.auditEventId)).body).toBe(original.body);
+      });
+
+      it("a stale journal (patch already audited) is closed by startup recovery", async () => {
+        const { root, taskId } = await withTask();
+        await dropPatch(root, { id: taskId, set: { priority: "High" } });
+        await crashBeforeJournalClosed(root);
+
+        const restarted = await open(root);
+        await restarted.adoptDrafts();
+        expect(restarted.appliedPatches()).toHaveLength(1);
+        await restarted.recoverOperations();
+        expect(await patchJournals(root)).toEqual([]);
+        expect(restarted.appliedPatches()).toHaveLength(1);
+        expect((await restarted.health()).diagnostics.filter((line) => line.includes("apply-patch"))).toEqual([]);
+      });
+
+      it("a journal whose target is gone stays open and is listed in System Health", async () => {
+        const { root, taskId } = await withTask();
+        await dropPatch(root, { id: taskId, set: { priority: "High" } });
+        await crashBeforeWrite(root);
+        const [taskFile] = await filesIn(root, "tasks");
+        await rm(path.join(root, "tasks", taskFile!));
+
+        const restarted = await open(root);
+        expect(await restarted.recoverOperations()).toEqual([]);
+        expect(await patchJournals(root)).toHaveLength(1);
+        const health = await restarted.health();
+        expect(health.status).toBe("attention");
+        expect(health.diagnostics.some((line) => line.includes("apply-patch") && line.includes(taskId))).toBe(true);
+      });
+    });
   });
 });

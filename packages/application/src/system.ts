@@ -6,11 +6,12 @@ import type { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import { personMergeOperation } from "./person-merge.js";
 import type { OpenPointsModule } from "./open-points.js";
+import { patchJournalKind, type PatchModule } from "./patches.js";
 import type { ReviewModule } from "./review.js";
 
 /** Index, health, crash recovery and generic object access. */
 export class SystemModule {
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly adoption: AdoptionModule, private readonly decisions: DecisionsModule, private readonly enrichment?: EnrichmentModule, private readonly openPoints?: OpenPointsModule) {}
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly adoption: AdoptionModule, private readonly decisions: DecisionsModule, private readonly enrichment?: EnrichmentModule, private readonly openPoints?: OpenPointsModule, private readonly patches?: PatchModule) {}
 
   rebuildIndex() {
     return this.ctx.rebuildIndex();
@@ -52,6 +53,7 @@ export class SystemModule {
     else if (operation.kind === "create-meeting" && typeof operation.payload.externalId === "string" && this.ctx.calendar) await this.meetings.createMeetingFromEvent(operation.payload.externalId);
     else if (operation.kind === "supersede-decision") await this.decisions.recoverSupersede(operation);
     else if (operation.kind === "resolve-open-point" && this.openPoints) await this.openPoints.recoverResolve(operation);
+    else if (operation.kind === patchJournalKind && this.patches) await this.patches.recoverJournal(operation);
     else return false;
     return true;
   }
