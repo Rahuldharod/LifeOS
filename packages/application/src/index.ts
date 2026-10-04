@@ -2,12 +2,14 @@ import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
+import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
 import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
 import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
 
+export type { ExternalChange } from "./history.js";
 export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, ObjectStore, SecretStore } from "./ports.js";
 
 /**
@@ -22,6 +24,7 @@ export class LifeOSApplication {
   private readonly calendarModule: CalendarModule;
   private readonly review: ReviewModule;
   private readonly capture: CaptureModule;
+  private readonly history: HistoryModule;
 
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development") {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
@@ -32,6 +35,7 @@ export class LifeOSApplication {
     this.entitiesModule = new EntitiesModule(ctx);
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
+    this.history = new HistoryModule(ctx);
   }
 
   // System
@@ -41,6 +45,8 @@ export class LifeOSApplication {
   listObjects() { return this.system.listObjects(); }
   object(id: string) { return this.system.object(id); }
   archiveObject(id: string, expectedHash: string) { return this.system.archiveObject(id, expectedHash); }
+  /** Called by the file watcher (U4, U5). */
+  recordExternalChanges() { return this.history.recordExternalChanges(); }
 
   // Notes
   notes() { return this.notesModule.notes(); }

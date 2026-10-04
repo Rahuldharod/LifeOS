@@ -5,6 +5,8 @@ export interface ObjectStore {
   scan?(): Promise<{ objects: LifeOSObject[]; diagnostics: string[] }>;
   read(relativePath: string): Promise<LifeOSObject>;
   write(input: { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string }): Promise<LifeOSObject>;
+  /** Saves a copy of `object` in the versions store and returns its relative path (U4: external changes). */
+  keepVersion?(object: LifeOSObject): Promise<string>;
   prepareOperation?(kind: string, payload: Record<string, unknown>, operationId: string): Promise<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>;
   completeOperation?(operationId: string): Promise<void>;
   incompleteOperations?(): Promise<Array<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>>;
