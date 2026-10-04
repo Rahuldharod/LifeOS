@@ -98,13 +98,13 @@ describe("resolving draft references by name", () => {
 
   it("matches people by email first, then by name; owner, waiting_for and people all resolve", async () => {
     const { root, store, application } = await vault();
-    const joel = await seed(store, "person", "Joel Martin", { identifiers: [{ kind: "email", value: "Joel.Martin@EagleEye.com" }] });
+    const joel = await seed(store, "person", "Joel Martin", { identifiers: [{ kind: "email", value: "Joel.Martin@example.com" }] });
     // Another person titled with the email text would win a name match, but email matching comes first.
-    await seed(store, "person", "joel.martin@eagleeye.com");
+    await seed(store, "person", "joel.martin@example.com");
     const anna = await seed(store, "person", "Anna Kowalska", { aliases: ["Ania"] });
     const marc = await seed(store, "person", "Marc Dubois");
     await application.rebuildIndex();
-    await dropDraft(root, "people.md", { owner: "joel.martin@eagleeye.com", status: "Waiting", waiting_for: "ania", people: ["Marc Dubois", "JOEL.MARTIN@eagleeye.com"] });
+    await dropDraft(root, "people.md", { owner: "joel.martin@example.com", status: "Waiting", waiting_for: "ania", people: ["Marc Dubois", "JOEL.MARTIN@example.com"] });
 
     const { task } = await adoptOne(application);
     expect(task.frontmatter).toMatchObject({ owner_person_id: joel.frontmatter.id, waiting_for_person_id: anna.frontmatter.id, people_ids: [marc.frontmatter.id, joel.frontmatter.id] });

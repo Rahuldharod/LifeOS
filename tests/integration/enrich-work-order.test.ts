@@ -19,7 +19,7 @@ const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000).
 
 /** An ended one-hour event that started `startedHoursAgo` before `now`. */
 function event(externalId: string, startedHoursAgo: number, extra: Partial<CalendarEvent> = {}): CalendarEvent {
-  return { externalId, calendarId: "work", calendarName: "Work", title: `Meeting ${externalId}`, startsAt: hoursAgo(startedHoursAgo), endsAt: hoursAgo(startedHoursAgo - 1), timezone: "Europe/Paris", attendees: ["joel@client.example", "Rahul Dharod"], ...extra };
+  return { externalId, calendarId: "work", calendarName: "Work", title: `Meeting ${externalId}`, startsAt: hoursAgo(startedHoursAgo), endsAt: hoursAgo(startedHoursAgo - 1), timezone: "Europe/Paris", attendees: ["joel@client.example", "Robin Doe"], ...extra };
 }
 
 class FakeCalendar implements CalendarConnector {
@@ -61,7 +61,7 @@ describe("Enrich last 48h Work Order", () => {
   it("selects ended, timed, accepted events from selected calendars in the last 48 h, with or without a meeting", async () => {
     const { root, application, calendar } = await vault([
       event("with-meeting", 3),
-      event("no-meeting", 30, { attendees: ["anna@eagleeye.example", "Bob Builder", "ANNA@eagleeye.example"] }),
+      event("no-meeting", 30, { attendees: ["anna@example.com", "Bob Builder", "ANNA@example.com"] }),
       event("too-old", 50),
       event("in-progress", 0.5),
       event("future", -2),
@@ -85,7 +85,7 @@ describe("Enrich last 48h Work Order", () => {
     expect(entries).toHaveLength(2);
     expect(entries[0]).toEqual({
       calendar_event_id: "no-meeting", calendar_id: "work", title: "Meeting no-meeting", starts_at: hoursAgo(30), ends_at: hoursAgo(29), timezone: "Europe/Paris",
-      attendee_emails: ["anna@eagleeye.example"], existing_sources: [], missing_material: ["meet-transcript", "meet-recording", "gong-call", "gong-summary-email"]
+      attendee_emails: ["anna@example.com"], existing_sources: [], missing_material: ["meet-transcript", "meet-recording", "gong-call", "gong-summary-email"]
     });
     expect(entries[1]).toMatchObject({ meeting_id: meeting.frontmatter.id, calendar_event_id: "with-meeting", note_path: expect.stringMatching(/^meetings\/.+-notes--.+\.md$/), attendee_emails: ["joel@client.example"] });
     // The body tells the Agent what to do, in plain words.

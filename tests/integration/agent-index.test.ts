@@ -39,9 +39,12 @@ async function vault(writer?: AgentIndexWriter, debounceMs = 60_000) {
 /** A small vault covering every Agent Index file. */
 async function populated() {
   const { root, application } = await vault();
-  const me = await seed(root, "people", "person", "Rahul Dharod", { given_name: "Rahul", family_name: "Dharod", is_self: true, identifiers: [{ kind: "email", value: "rahul.dharod@eagleeye.com" }] });
+  // #54: internal domains come from the synced setting, written directly so no rebuild runs yet.
+  await mkdir(path.join(root, "settings"), { recursive: true });
+  await writeFile(path.join(root, "settings", "internal-domains.md"), `---\n${stringify({ id: uuidV7(), type: "app-setting", schema_version: 1, revision: 1, title: "Internal domains", created_at: at(-60), updated_at: at(-60), updated_by_device: "test", setting_key: "internal-domains", internal_domains: ["example.com"] }).trimEnd()}\n---\n# Internal domains\n`);
+  const me = await seed(root, "people", "person", "Robin Doe", { given_name: "Robin", family_name: "Doe", is_self: true, identifiers: [{ kind: "email", value: "me@example.com" }] });
   const joel = await seed(root, "people", "person", "Joel Martin", { given_name: "Joel", family_name: "Martin", identifiers: [{ kind: "email", value: "joel@acme.fr" }] });
-  const anna = await seed(root, "people", "person", "Anna Lee", { given_name: "Anna", family_name: "Lee", identifiers: [{ kind: "email", value: "anna.lee@eagleeye.com" }] });
+  const anna = await seed(root, "people", "person", "Anna Lee", { given_name: "Anna", family_name: "Lee", identifiers: [{ kind: "email", value: "anna.lee@example.com" }] });
   const project = await seed(root, "projects", "project", "Retail Media", { status: "active" });
   await seed(root, "projects", "project", "Old Pilot", { status: "completed" });
   const client = await seed(root, "clients", "client", "Acme", { status: "active" });
@@ -123,7 +126,7 @@ describe("Agent Index (#43)", () => {
 
     const people = await read(root, "people.md");
     expect(people).toMatch(/\*\*Joel - ext\*\*\n {2}id: [^\n]+ · name: Joel Martin · emails: joel@acme\.fr · external: yes/);
-    expect(people).toMatch(/\*\*Anna\*\*\n {2}id: [^\n]+ · emails: anna\.lee@eagleeye\.com · external: no/);
+    expect(people).toMatch(/\*\*Anna\*\*\n {2}id: [^\n]+ · emails: anna\.lee@example\.com · external: no/);
     expect(people).toContain("self: yes");
 
     const meetings = await read(root, "meetings.md");
@@ -131,7 +134,7 @@ describe("Agent Index (#43)", () => {
     expect(section(meetings, "## Last 14 days")).toContain("enrichment: partial");
     expect(section(meetings, "## Last 14 days")).toContain(`note: ${ids.note.relativePath}`);
     expect(section(meetings, "## Last 14 days")).toContain("calendar_event: evt-1");
-    expect(section(meetings, "## Last 14 days")).toContain("attendees: Rahul, Joel - ext");
+    expect(section(meetings, "## Last 14 days")).toContain("attendees: Robin, Joel - ext");
     expect(section(meetings, "## Next 7 days")).toContain(ids.next.id);
     expect(section(meetings, "## Next 7 days")).toContain("enrichment: none");
     expect(meetings).not.toContain("Too old");

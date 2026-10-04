@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_INTERNAL_DOMAINS, LifeOSApplication, personDisplayLabels, type CalendarAttendee, type CalendarConnector, type CalendarEvent } from "@lifeos/application";
+import { LifeOSApplication, personDisplayLabels, type CalendarAttendee, type CalendarConnector, type CalendarEvent } from "@lifeos/application";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 
@@ -38,7 +38,8 @@ const personId = async (application: LifeOSApplication, title: string) => (await
 describe("display labels (#39)", () => {
   it("shows the first name, and first + last only while another active person shares the first name", async () => {
     const { calendar, application } = await setup();
-    calendar.events = [event("e1", [{ email: "jean.dupont@eagleeye.com" }, { email: "marie.curie@eagleeye.com" }])];
+    await application.saveInternalDomains(["example.com"], undefined);
+    calendar.events = [event("e1", [{ email: "jean.dupont@example.com" }, { email: "marie.curie@example.com" }])];
     await application.createMeetingFromEvent("e1");
     const jean = await personId(application, "Jean Dupont");
     expect(labelOf(application, jean)).toMatchObject({ name: "Jean", label: "Jean", isExternal: false });
@@ -63,13 +64,14 @@ describe("display labels (#39)", () => {
       person("b", "elodie (Acme)", { given_name: "elodie" }),
       person("c", "Sam", {}),
       person("d", "Sam", { given_name: "Sam", archived_at: "2026-10-02T00:00:00Z" })
-    ], DEFAULT_INTERNAL_DOMAINS);
+    ], ["example.com"]);
     expect(labels.map((label) => label.name)).toEqual(["Élodie Roux", "elodie (Acme)", "Sam", "Sam"]);
   });
 
   it("marks external people with a ' - ext' suffix that is part of the label text", async () => {
     const { calendar, application } = await setup();
-    calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }, { email: "lea@untienots.com" }])];
+    await application.saveInternalDomains(["example.org"], undefined);
+    calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }, { email: "lea@example.org" }])];
     await application.createMeetingFromEvent("e1");
     expect(labelOf(application, await personId(application, "Kim Lee"))).toMatchObject({ name: "Kim", label: "Kim - ext", suffix: " - ext", isExternal: true });
     expect(labelOf(application, await personId(application, "lea"))).toMatchObject({ label: "lea", isExternal: false });
@@ -77,7 +79,8 @@ describe("display labels (#39)", () => {
 
   it("never marks the self person external, though it carries a personal address", async () => {
     const { calendar, application } = await setup();
-    calendar.events = [event("e1", [{ email: "baloo.rahul@gmail.com", self: true }])];
+    await application.saveInternalDomains(["example.com"], undefined);
+    calendar.events = [event("e1", [{ email: "me.personal@example.net", self: true }])];
     await application.createMeetingFromEvent("e1");
     const self = (await application.listObjects()).find((object) => object.frontmatter.is_self === true)!;
     expect(labelOf(application, self.frontmatter.id)).toMatchObject({ isExternal: false, label: "You" });
@@ -87,8 +90,9 @@ describe("display labels (#39)", () => {
     const id = "01995d3e-912b-7357-8aa6-9816c1ad90b1";
     const { application } = await setup(async (root) => {
       await mkdir(path.join(root, "people"), { recursive: true });
-      await writeFile(path.join(root, "people", `alex--${id}.md`), `---\nid: ${id}\ntype: person\nschema_version: 1\nrevision: 1\ntitle: Alex Morgan\ncreated_at: 2026-10-01T08:00:00Z\nupdated_at: 2026-10-01T08:00:00Z\nupdated_by_device: test\ngiven_name: Alex\nis_external: true\nidentifiers:\n  - alex@gmail.com\n  - kind: email\n    value: Alex.Morgan@EagleEye.com\n---\n# Alex Morgan\n`);
+      await writeFile(path.join(root, "people", `alex--${id}.md`), `---\nid: ${id}\ntype: person\nschema_version: 1\nrevision: 1\ntitle: Alex Morgan\ncreated_at: 2026-10-01T08:00:00Z\nupdated_at: 2026-10-01T08:00:00Z\nupdated_by_device: test\ngiven_name: Alex\nis_external: true\nidentifiers:\n  - alex@gmail.com\n  - kind: email\n    value: Alex.Morgan@Example.com\n---\n# Alex Morgan\n`);
     });
+    await application.saveInternalDomains(["example.com"], undefined);
     expect(labelOf(application, id)).toMatchObject({ label: "Alex", isExternal: false });
   });
 
@@ -102,6 +106,7 @@ describe("display labels (#39)", () => {
 describe("manual external override (#39)", () => {
   it("overrides the derived flag both ways, writes the file and an audit event, and can be cleared", async () => {
     const { root, calendar, application } = await setup();
+    await application.saveInternalDomains(["example.com"], undefined);
     calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }])];
     await application.createMeetingFromEvent("e1");
     const kim = await personId(application, "Kim Lee");
@@ -128,7 +133,7 @@ describe("manual external override (#39)", () => {
     // An internal colleague can be marked external (e.g. a contractor on a company address).
     const forced = await application.setPersonExternal(kim, true, cleared.contentHash);
     expect(forced.frontmatter.is_external_override).toBe(true);
-    await application.saveInternalDomains(["acme.fr"], undefined);
+    await application.saveInternalDomains(["acme.fr"], (await application.getInternalDomains()).contentHash);
     expect(labelOf(application, kim)!.isExternal).toBe(true);
   });
 
@@ -146,24 +151,28 @@ describe("manual external override (#39)", () => {
 });
 
 describe("internal-domains setting (#39)", () => {
-  it("defaults to eagleeye.com and untienots.com without writing a file", async () => {
-    const { application } = await setup();
-    expect(await application.getInternalDomains()).toEqual({ domains: DEFAULT_INTERNAL_DOMAINS });
-    expect(DEFAULT_INTERNAL_DOMAINS).toEqual(["eagleeye.com", "untienots.com"]);
+  it("is empty on a fresh vault (#54), so nobody is marked External by email and no file is written", async () => {
+    const { root, calendar, application } = await setup();
+    expect(await application.getInternalDomains()).toEqual({ domains: [] });
+    calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }])];
+    const workspace = await application.createMeetingFromEvent("e1");
+    expect(workspace.context.people[0]!.frontmatter.is_external).toBe(false);
+    expect(labelOf(application, workspace.context.people[0]!.frontmatter.id)).toMatchObject({ label: "Kim", isExternal: false });
+    await expect(readFile(path.join(root, "settings", "internal-domains.md"), "utf8")).rejects.toThrow();
   });
 
   it("saves a normalized list to settings/internal-domains.md and re-derives labels live", async () => {
     const { root, calendar, application } = await setup();
-    calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }, { email: "lea.roux@untienots.com" }])];
+    calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }, { email: "lea.roux@example.org" }])];
     await application.createMeetingFromEvent("e1");
     const kim = await personId(application, "Kim Lee");
     const lea = await personId(application, "Lea Roux");
 
-    const saved = await application.saveInternalDomains([" EagleEye.com ", "@acme.fr", "acme.fr", ""], undefined);
-    expect(saved.domains).toEqual(["eagleeye.com", "acme.fr"]);
+    const saved = await application.saveInternalDomains([" Example.com ", "@acme.fr", "acme.fr", ""], undefined);
+    expect(saved.domains).toEqual(["example.com", "acme.fr"]);
     const file = await readFile(path.join(root, "settings", "internal-domains.md"), "utf8");
     expect(file).toContain("setting_key: internal-domains");
-    expect(file).toMatch(/internal_domains:\n\s+- eagleeye.com\n\s+- acme.fr/);
+    expect(file).toMatch(/internal_domains:\n\s+- example.com\n\s+- acme.fr/);
     expect(labelOf(application, kim)).toMatchObject({ label: "Kim", isExternal: false });
     expect(labelOf(application, lea)).toMatchObject({ label: "Lea - ext", isExternal: true });
 
@@ -173,20 +182,20 @@ describe("internal-domains setting (#39)", () => {
     expect(workspace.context.people[0]!.frontmatter.is_external).toBe(false);
 
     // Stale hash is a conflict; a fresh one succeeds.
-    await expect(application.saveInternalDomains(["eagleeye.com"], "stale")).rejects.toThrow(/another device/);
-    await expect(application.saveInternalDomains(["eagleeye.com"], undefined)).rejects.toThrow(/another device/);
-    const next = await application.saveInternalDomains(["eagleeye.com"], saved.contentHash);
-    expect(next.domains).toEqual(["eagleeye.com"]);
+    await expect(application.saveInternalDomains(["example.com"], "stale")).rejects.toThrow(/another device/);
+    await expect(application.saveInternalDomains(["example.com"], undefined)).rejects.toThrow(/another device/);
+    const next = await application.saveInternalDomains(["example.com"], saved.contentHash);
+    expect(next.domains).toEqual(["example.com"]);
     expect((await application.getInternalDomains()).contentHash).toBe(next.contentHash);
   });
 
   it("rejects an empty list and invalid domains, naming them", async () => {
     const { application } = await setup();
     await expect(application.saveInternalDomains(["", "  "], undefined)).rejects.toThrow(/at least one/i);
-    await expect(application.saveInternalDomains(["eagleeye.com", "not a domain", "foo@bar.com", "localhost"], undefined)).rejects.toThrow(/not a domain.*foo@bar\.com.*localhost/);
+    await expect(application.saveInternalDomains(["example.com", "not a domain", "foo@bar.com", "localhost"], undefined)).rejects.toThrow(/not a domain.*foo@bar\.com.*localhost/);
   });
 
-  it("ignores a hand-edited setting with no valid domains and uses the defaults", async () => {
+  it("ignores a hand-edited setting with no valid domains: nobody is External by email", async () => {
     const id = "01995d3e-912b-7357-8aa6-9816c1ad90b2";
     const { application } = await setup(async (root) => {
       await mkdir(path.join(root, "settings"), { recursive: true });
@@ -194,6 +203,6 @@ describe("internal-domains setting (#39)", () => {
     });
     const person = await application.createEntity("person", { title: "Ann" });
     expect(labelOf(application, person.frontmatter.id)!.isExternal).toBe(false);
-    expect((await application.getInternalDomains()).domains).toEqual(DEFAULT_INTERNAL_DOMAINS);
+    expect((await application.getInternalDomains()).domains).toEqual([]);
   });
 });

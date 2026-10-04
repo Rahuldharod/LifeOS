@@ -19,7 +19,7 @@ export class MockCalendarConnector implements CalendarConnector {
       calendarName: "LifeOS Demo",
       calendarColor: "#5f8b7c",
       attendees: ["Alex Morgan", "Jamie Chen"],
-      attendeeDetails: [{ email: "alex.morgan@example.com", displayName: "Alex Morgan" }, { email: "jamie.chen@eagleeye.com", displayName: "Jamie Chen" }],
+      attendeeDetails: [{ email: "alex.morgan@example.com", displayName: "Alex Morgan" }, { email: "jamie.chen@example.com", displayName: "Jamie Chen" }],
       clientName: "Example Client",
       productName: "LifeOS",
       projectName: "LifeOS MVP"

@@ -6,7 +6,7 @@ import type { MeetingsModule } from "./meetings.js";
 import { MeetingMaterialModule } from "./meeting-material.js";
 import type { PatchModule } from "./patches.js";
 import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
-import { internalDomainsOf, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
+import { internalDomainsOf, isExternalDomain, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver, type ReferenceField } from "./resolution.js";
 import { contextLinkFields, inheritContextLinks, isStringList } from "./support.js";
@@ -860,7 +860,7 @@ export class AdoptionModule {
     if (family.length && fields.family_name === undefined && fields.given_name === undefined) extra.family_name = family.join(" ");
     const domain = emails[0]?.split("@")[1];
     if (fields.is_external !== undefined) { if (typeof fields.is_external === "boolean") extra.is_external = fields.is_external; else issues.push("is_external: must be true or false"); }
-    else if (domain) extra.is_external = !internalDomainsOf(this.ctx.index).includes(domain);
+    else if (domain) extra.is_external = isExternalDomain(internalDomainsOf(this.ctx.index), domain);
     if (domain && extra.organization_name === undefined) { const organization = organizationFromDomain(domain); if (organization) extra.organization_name = organization; }
     for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) extra[key] = fields[key];
     for (const key of ["subjects", "tags", "aliases"]) if (fields[key] !== undefined) { if (isStringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }

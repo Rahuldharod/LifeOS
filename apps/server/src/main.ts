@@ -96,6 +96,13 @@ server.put<{ Body: { domains?: unknown[]; expectedHash?: string } }>("/api/v1/se
   if (!Array.isArray(domains)) return reply.status(400).send({ error: "domains must be a list" });
   return application.saveInternalDomains(domains, expectedHash);
 });
+// #54: the user's own addresses live in a synced setting, never in code.
+server.get("/api/v1/settings/self-emails", async () => application.getSelfEmails());
+server.put<{ Body: { emails?: unknown[]; expectedHash?: string } }>("/api/v1/settings/self-emails", async (request, reply) => {
+  const { emails, expectedHash } = request.body ?? {};
+  if (!Array.isArray(emails)) return reply.status(400).send({ error: "emails must be a list" });
+  return application.saveSelfEmails(emails, expectedHash);
+});
 // #48: meeting-hours threshold and brief time; invalid values answer 400 with every problem named.
 server.get("/api/v1/settings/today", async () => application.getTodaySettings());
 server.put<{ Body: { meetingHoursThreshold?: number; briefTime?: string; briefTimeZone?: string; briefDays?: Weekday[]; expectedHash?: string } }>("/api/v1/settings/today", async (request) => {
