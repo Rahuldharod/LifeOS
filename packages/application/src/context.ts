@@ -1,6 +1,6 @@
 import { envelopeWriteProblem, lifecycleWriteProblem, uuidV7, type LifeOSObject, type ObjectEnvelope, type Origin } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
-import { sameValue } from "./support.js";
+import { OneAtATime, sameValue } from "./support.js";
 
 /** Body for a meeting note created without user text (legacy callers and crash recovery of old operations). */
 export const DEFAULT_NOTE_BODY = "# Notes\n\n";
@@ -58,6 +58,12 @@ export class AppContext {
    */
   readonly known = new Map<string, LifeOSObject>();
   /** Per ID: writes in flight and a counter bumped at each write's start and end, so detection can skip IDs the app is writing. */
+  /**
+   * #95 (ADR 0013): adoption batches and backups run one at a time in this one queue, so a backup never snapshots
+   * an adoption half done (an object filed while its draft is still in `_inbox/drafts/` would duplicate on restore).
+   */
+  private readonly snapshotQueue = new OneAtATime();
+  runExclusive<T>(work: () => Promise<T>): Promise<T> { return this.snapshotQueue.run("adoption-and-backups", work); }
   private readonly inFlight = new Map<string, number>();
   private readonly writeTicks = new Map<string, number>();
 

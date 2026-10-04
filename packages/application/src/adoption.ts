@@ -8,7 +8,7 @@ import { operationKinds, type InboxDocument, type InboxFile, type InboxFolder, t
 import { internalDomainsOf, isExternalDomain, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver, type ReferenceField } from "./resolution.js";
-import { contextLinkFields, inheritContextLinks, isStringList, OneAtATime, replayableId, replayRoles, replayScope, type ReplayRole } from "./support.js";
+import { contextLinkFields, inheritContextLinks, isStringList, replayableId, replayRoles, replayScope, type ReplayRole } from "./support.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -122,7 +122,8 @@ export interface AutoAdoption {
   notify(): void;
   /** Runs a batch now (startup); resolves undefined when this device may not write. */
   runNow(): Promise<AdoptionBatch | undefined>;
-  stop(): void;
+  /** Stops the triggers, then resolves once the batch in progress (and anything queued before it) has finished. */
+  stop(): Promise<void>;
 }
 
 /** Drafts modified more recently than this may still be being written (or synced) and wait for the next trigger. */
@@ -194,8 +195,6 @@ export class AdoptionModule {
   private personMerges?: PersonMergeModule;
   /** Unparsable drafts by name → content hash: the first sighting may be a partial sync, so it is skipped once. */
   private readonly unparsableSeen = new Map<string, string>();
-  /** Batches run one at a time, so startup, the watcher and "Adopt now" can never adopt one draft twice. */
-  private readonly queue = new OneAtATime();
 
   private readonly resolver: ReferenceResolver;
   /** #45: `meeting-material` drafts; its proposals go through `proposeExtracted` like any extracted draft. */
@@ -210,8 +209,9 @@ export class AdoptionModule {
     return this.enqueue(() => this.runBatch(options.now ?? new Date()));
   }
 
+  /** Batches run one at a time, so startup, the watcher and "Adopt now" can never adopt one draft twice; they share the queue with backups (#95). */
   private enqueue<T>(work: () => Promise<T>): Promise<T> {
-    return this.queue.run("batch", work);
+    return this.ctx.runExclusive(work);
   }
 
   /** #32: adopts automatically after watcher events (debounced), retries drafts still being written, and sweeps periodically. */
@@ -237,7 +237,10 @@ export class AdoptionModule {
     return {
       notify: () => schedule(debounceMs),
       runNow,
-      stop: () => { stopped = true; clearTimeout(timer); clearInterval(sweep); }
+      stop: async () => {
+        stopped = true; clearTimeout(timer); clearInterval(sweep);
+        await this.enqueue(async () => undefined);
+      }
     };
   }
 
