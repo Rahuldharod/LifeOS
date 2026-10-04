@@ -51,7 +51,8 @@ export class DraftError extends Error {
   constructor(readonly issues: string[]) { super(issues.join("; ")); }
 }
 
-export type DraftOutcome = "adopted" | "applied" | "duplicate" | "failed" | "skipped";
+/** `review`: a Patch Draft became an `update` Review Item (#37); its ID is in `objectIds`. */
+export type DraftOutcome = "adopted" | "applied" | "review" | "duplicate" | "failed" | "skipped";
 export interface DraftResult {
   /** Where the draft was found, e.g. `_inbox/drafts/x.md` or `_inbox/patches/x.md`. */
   draft: string;
@@ -70,7 +71,7 @@ export interface AdoptionBatch {
   retrySoon: boolean;
 }
 /** What `file()` records in the `.result.md` sidecar; no `outcome` means failed (then `errors` is required). */
-export interface FilingResult { draftKey: string; objectIds: string[]; errors?: string[]; outcome?: "adopted" | "applied" | "duplicate" }
+export interface FilingResult { draftKey: string; objectIds: string[]; errors?: string[]; outcome?: "adopted" | "applied" | "review" | "duplicate" }
 /** Files one inbox document from its reader's folder into `processed/` or `failed/` with its sidecar. */
 export type FileDocument = (document: InboxDocument, folder: "processed" | "failed", result: FilingResult) => Promise<DraftResult>;
 
@@ -179,11 +180,11 @@ export class AdoptionModule {
 
     const filed = results.filter((result) => result.outcome !== "skipped");
     if (!filed.length) return { drafts: results, retrySoon };
-    const created = [...new Set(filed.flatMap((result) => result.outcome === "adopted" || result.outcome === "applied" ? result.objectIds : []))];
+    const created = [...new Set(filed.flatMap((result) => result.outcome === "adopted" || result.outcome === "applied" || result.outcome === "review" ? result.objectIds : []))];
     const count = (outcome: DraftOutcome) => filed.filter((result) => result.outcome === outcome).length;
     await ctx.objects.write({
       relativePath: `agent-runs/${markdownFileName("Inbox adoption", run.id, timestamp)}`,
-      frontmatter: { ...ctx.envelope(run.id, "agent-run", "Inbox adoption", timestamp), operation: "inbox-adoption", provider: "lifeos", model: "rules", prompt_version: `draft-contract-${draftContractVersion}`, status: "succeeded", started_at: timestamp, completed_at: new Date().toISOString(), output_summary: `${count("adopted")} adopted, ${count("applied") ? `${count("applied")} applied, ` : ""}${count("duplicate")} duplicate, ${count("failed")} failed`, related_object_ids: created },
+      frontmatter: { ...ctx.envelope(run.id, "agent-run", "Inbox adoption", timestamp), operation: "inbox-adoption", provider: "lifeos", model: "rules", prompt_version: `draft-contract-${draftContractVersion}`, status: "succeeded", started_at: timestamp, completed_at: new Date().toISOString(), output_summary: `${count("adopted")} adopted, ${count("applied") ? `${count("applied")} applied, ` : ""}${count("review") ? `${count("review")} to review, ` : ""}${count("duplicate")} duplicate, ${count("failed")} failed`, related_object_ids: created },
       body: "# Inbox adoption\n"
     });
     await ctx.rebuildIndex();
@@ -248,7 +249,7 @@ export class AdoptionModule {
     const outcome = result.outcome ?? "failed";
     const filed = await this.inbox!.move(from, document.name, folder);
     const ids = result.objectIds.join(", ");
-    const heading = outcome === "adopted" ? `# Adopted\n\nCreated ${ids}.\n` : outcome === "applied" ? `# Applied\n\nChanged ${ids}. The change can be undone in LifeOS.\n` : outcome === "duplicate" ? from === "patches" ? `# Already applied\n\nThis patch was applied before to ${ids}; nothing was changed again.\n` : `# Already adopted\n\nThis draft was adopted before as ${ids}; nothing new was created.\n` : `# Not ${from === "patches" ? "applied" : "adopted"}\n\n${result.errors!.map((error) => `- ${error}`).join("\n")}\n\nFix the draft and send it again; this file is kept and never deleted automatically.\n`;
+    const heading = outcome === "adopted" ? `# Adopted\n\nCreated ${ids}.\n` : outcome === "applied" ? `# Applied\n\nChanged ${ids}. The change can be undone in LifeOS.\n` : outcome === "review" ? `# Waiting for review\n\nThis change needs a second look, so LifeOS raised Review Item ${ids}. Nothing changes until it is accepted in LifeOS.\n` : outcome === "duplicate" ? from === "patches" ? `# Already received\n\nThis patch was handled before (${ids}); nothing was changed again.\n` : `# Already adopted\n\nThis draft was adopted before as ${ids}; nothing new was created.\n` : `# Not ${from === "patches" ? "applied" : "adopted"}\n\n${result.errors!.map((error) => `- ${error}`).join("\n")}\n\nFix the draft and send it again; this file is kept and never deleted automatically.\n`;
     await this.inbox!.writeDocument(folder, resultName(filed.name), {
       lifeos_result: draftContractVersion, outcome, draft: document.relativePath, filed_as: filed.relativePath,
       ...(result.draftKey ? { draft_key: result.draftKey } : {}), content_hash: document.contentHash,

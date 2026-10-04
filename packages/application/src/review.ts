@@ -1,6 +1,9 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
-import { markdownFileName, type AppContext } from "./context.js";
+import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
+import { appendedText, type UpdateProposal } from "./patches.js";
+
+const same = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
 export class ReviewModule {
@@ -58,6 +61,7 @@ export class ReviewModule {
     const { ctx } = this;
     const review = ctx.required(reviewId, "review-item");
     if (review.frontmatter.review_type === "link-resolution") return this.acceptLinkResolution(review, options.linkTo);
+    if (review.frontmatter.review_type === "update") return this.acceptUpdate(review);
     if (review.frontmatter.status === "accepted" && typeof review.frontmatter.resolved_object_id === "string") {
       if (typeof review.frontmatter.operation_id === "string") await ctx.objects.completeOperation?.(review.frontmatter.operation_id);
       return ctx.required(review.frontmatter.resolved_object_id);
@@ -118,9 +122,45 @@ export class ReviewModule {
     return updated;
   }
 
+  /**
+   * #37: applies an `update` item's fields (and note) to its target with the revision check: if the target
+   * changed in any way since the item was raised, accepting fails as a conflict and nothing is written.
+   * The guarded write also enforces the envelope and decision lifecycle rules. Retrying after a crash
+   * between the two writes finds the change already on the target, one revision on, and just finishes.
+   */
+  private async acceptUpdate(review: LifeOSObject) {
+    const { ctx } = this;
+    const targetId = String(review.frontmatter.target_object_id);
+    if (review.frontmatter.status === "accepted") return ctx.required(targetId);
+    if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
+    const proposal = review.frontmatter.proposed_fields as unknown as UpdateProposal;
+    const target = ctx.required(targetId);
+    if (target.frontmatter.deleted_at) throw new Error("The object to change was deleted");
+    const note = proposal.append_note;
+    const landed = target.frontmatter.revision === proposal.base_revision + 1 && proposal.changes.every((change) => same(target.frontmatter[change.field], change.proposed)) && (!note || target.body.endsWith(`\n${note}\n`));
+    const now = new Date().toISOString();
+    let updated = target;
+    if (!landed) {
+      if (target.frontmatter.revision !== proposal.base_revision || target.contentHash !== proposal.base_hash) {
+        throw new ObjectConflictError(`${target.frontmatter.title} changed since this review item was raised (revision ${proposal.base_revision}, now ${target.frontmatter.revision}); reject it and send the change again`);
+      }
+      const changes = Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed ?? undefined]));
+      updated = await ctx.update(target, changes, { expectedHash: proposal.base_hash, now, ...(note ? { body: target.body + appendedText(target.body, note) } : {}) });
+    }
+    await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId }, { expectedHash: review.contentHash, now });
+    await ctx.writeAudit("review.accepted", targetId, now, {
+      review_id: review.frontmatter.id, draft_key: proposal.draft_key,
+      before: Object.fromEntries(proposal.changes.map((change) => [change.field, change.current])), after: Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed])),
+      ...(note ? { append_note: note } : {})
+    });
+    await ctx.rebuildIndex();
+    return updated;
+  }
+
   async updateReviewTitle(reviewId: string, title: string) {
     const review = this.ctx.required(reviewId, "review-item");
     if (review.frontmatter.status !== "pending") throw new Error("Only pending review items can be edited");
+    if (review.frontmatter.review_type === "update") throw new Error("A proposed change cannot be renamed; accept or reject it");
     const nextTitle = title.trim();
     if (!nextTitle) throw new Error("Proposal title is required");
     const now = new Date().toISOString();

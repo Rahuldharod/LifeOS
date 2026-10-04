@@ -24,7 +24,7 @@ export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./res
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
 export type { EnrichmentEntry, EnrichmentRequest, EnrichmentState, EnrichmentStatus } from "./enrichment.js";
 export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial } from "./enrichment.js";
-export type { AppliedPatch } from "./patches.js";
+export type { AppliedPatch, UpdateChange, UpdateProposal } from "./patches.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature

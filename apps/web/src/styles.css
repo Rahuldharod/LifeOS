@@ -158,6 +158,8 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .review-card input { width: 100%; margin-bottom: 5px; padding: 9px 10px; border: 1px solid #c9c8be; border-radius: 7px; background: white; font-weight: 700; }
 .review-card b, .review-card small { display: block; }
 .review-card small { margin: 5px 0 12px; }
+.review-changes { width: 100%; margin-bottom: 12px; border-collapse: collapse; font-size: 13px; }
+.review-changes th, .review-changes td { padding: 5px 8px; border-bottom: 1px solid #dedbcf; text-align: left; vertical-align: top; }
 .object-row { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid #e2e0d7; }
 .object-row:last-child { border-bottom: 0; }
 .object-row > i { width: 17px; height: 17px; margin-top: 2px; border: 2px solid #5f8b7c; border-radius: 50%; }

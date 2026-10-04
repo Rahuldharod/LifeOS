@@ -7,7 +7,7 @@ export type DecisionEvidence = { field: string; sourceId: string; sourceTitle?: 
 type PreparedDecision = { relativePath: string; frontmatter: ObjectEnvelope; body: string };
 
 /** Fields a person may set by hand. `status` is edit-only (to `reversed`); `origin` is never accepted (#30). */
-const fields = ["title", "decision_text", "rationale", "decided_at", "primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
+export const decisionFields = ["title", "decision_text", "rationale", "decided_at", "primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
 /** Context a successor inherits from the decision it supersedes, unless the user overrides it. */
 const inherited = ["primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "area", "sensitivity"];
 
@@ -87,7 +87,7 @@ export class DecisionsModule {
   async updateDecision(id: string, input: Record<string, unknown>, expectedHash: string) {
     if (!expectedHash) throw new Error("expectedHash is required to edit a decision");
     const current = this.ctx.required(id, "decision");
-    const changes = this.pick(input, [...fields, "status"]);
+    const changes = this.pick(input, [...decisionFields, "status"]);
     if ("title" in changes && !String(changes.title ?? "").trim()) throw new Error("Title is required");
     if (changes.status === "superseded" && current.frontmatter.status !== "superseded") throw new Error("Use Supersede to replace a decision, so the new one is linked");
     const now = new Date().toISOString();
@@ -160,7 +160,7 @@ export class DecisionsModule {
   private prepare(input: Record<string, unknown>, defaults: Record<string, unknown>, now: string): PreparedDecision {
     const title = typeof input.title === "string" ? input.title.trim() : "";
     if (!title) throw new Error("Title is required");
-    const chosen = { ...defaults, ...this.pick(input, fields) };
+    const chosen = { ...defaults, ...this.pick(input, decisionFields) };
     const text = typeof chosen.decision_text === "string" && chosen.decision_text.trim() ? chosen.decision_text.trim() : title;
     const id = uuidV7();
     const frontmatter = { ...chosen, ...this.ctx.envelope(id, "decision", title, now, "app"), status: "active", decision_text: text, decided_at: chosen.decided_at ?? now } as ObjectEnvelope;
