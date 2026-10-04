@@ -1,12 +1,13 @@
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
 import { ObjectConflictError, type AppContext } from "./context.js";
-import { OneAtATime } from "./support.js";
 
 /**
  * #84 (PRD stories 81–83, ADR 0004): automatic backups at app start, at a clean stop and daily while running; a weekly
  * checksum-verified copy to a folder outside Google Drive; and a warning when a backup fails or is overdue.
- * Backups run only while this device holds the lease (ADR 0003), one at a time, in the background.
+ * Backups run only while this device holds the lease (ADR 0003), in the background, one at a time in the queue they
+ * share with adoption (#95, ADR 0013), so a snapshot never captures an adoption half done.
  */
 
 export interface BackupSummary { backupId: string; createdAt: string; fileCount: number; totalBytes: number }
@@ -18,6 +19,8 @@ export interface BackupService {
   verify(backupId: string): Promise<{ valid: boolean; diagnostics: string[] }>;
   copyTo(backupId: string, folder: string): Promise<BackupSummary>;
   listCopies(folder: string): Promise<BackupSummary[]>;
+  /** Removes unfinished `.creating-*` snapshots a killed backup left behind (#95). */
+  sweepStaging?(): Promise<unknown>;
 }
 
 export type BackupTrigger = "start" | "stop" | "daily" | "manual";
@@ -40,6 +43,8 @@ export interface AutoBackupOptions {
   /** How often the daily trigger looks at the age of the latest backup (default hourly). */
   checkMs?: number;
   onError?: (error: unknown, trigger: BackupTrigger) => void;
+  /** How long `stop()` waits for the stop backup (default `stopBackupTimeoutMs`). */
+  stopTimeoutMs?: number;
 }
 
 export interface AutoBackups {
@@ -47,7 +52,10 @@ export interface AutoBackups {
   runNow(): Promise<BackupSummary>;
   /** The daily trigger: backs up when the latest backup is 24 hours old. Called by the timer; exposed for tests. */
   check(): Promise<void>;
-  /** The clean-stop backup, taken once however often it is called; then the timer stops. */
+  /**
+   * The clean-stop backup, taken once however often it is called; then the timer stops. Gives up after
+   * `stopTimeoutMs` (the backup is then never started later); the next start sweeps what it left behind.
+   */
   stop(): Promise<void>;
   /** Stops the timer without a backup. */
   dispose(): void;
@@ -55,7 +63,14 @@ export interface AutoBackups {
   status(): Promise<BackupStatus>;
 }
 
+/** `offDriveFolder` is this device's folder only (#95, ADR 0005); other devices' folders are kept but not shown. */
 export interface BackupSettings { offDriveFolder?: string; contentHash?: string }
+
+/**
+ * #95: the stop backup gives up after this long. With the server's other bounded stop waits (`shutdownLimits`) it
+ * stays below the kill timeout in `scripts/lifeos.mjs`, so the lease is still released after a slow backup.
+ */
+export const stopBackupTimeoutMs = 35_000;
 
 const backupSettingsPath = "settings/backups.md";
 const day = 24 * 60 * 60 * 1000;
@@ -70,29 +85,70 @@ function insideGoogleDrive(folder: string) {
   return /\/Library\/CloudStorage\/Google|\/(Google Drive|My Drive|Shared drives)(\/|$)|\/GoogleDrive-/i.test(folder);
 }
 
+/** The folder with symbolic links resolved (#95); a folder not created yet resolves through its nearest existing parent. */
+async function resolveReal(folder: string): Promise<string> {
+  const absolute = path.resolve(folder);
+  const parent = path.dirname(absolute);
+  try { return await realpath(absolute); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || parent === absolute) throw error;
+    return path.join(await resolveReal(parent), path.basename(absolute));
+  }
+}
+
+/** Refuses a folder inside Google Drive, as typed or once its symbolic links are resolved. */
+async function assertOffDrive(folder: string) {
+  const outside = "Choose a folder outside Google Drive, so a Drive problem cannot take both data and backups";
+  if (insideGoogleDrive(folder) || insideGoogleDrive(await resolveReal(folder))) throw new Error(outside);
+}
+
+type FolderMap = Record<string, string>;
+const foldersOf = (frontmatter: Record<string, unknown> | undefined): FolderMap => {
+  const raw = frontmatter?.off_drive_folders;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== ""));
+};
+/** A folder saved before #95 (`off_drive_folder`) belongs to the device that last saved the setting. */
+const legacyFolders = (frontmatter: Record<string, unknown> | undefined): FolderMap => {
+  const folder = frontmatter?.off_drive_folder;
+  const device = frontmatter?.updated_by_device;
+  return typeof folder === "string" && folder && typeof device === "string" ? { [device]: folder } : {};
+};
+
 export class BackupModule {
   constructor(private readonly ctx: AppContext) {}
 
-  /** Read from disk so another device's edit is seen at once (ADR 0005). */
+  /**
+   * Read from disk so another device's edit is seen at once (ADR 0005). The folder is a local path, so it is stored
+   * per device (keyed by device ID, #95): each device sees and uses only its own.
+   */
   async settings(): Promise<BackupSettings> {
     const current = await this.readSetting();
-    const folder = current?.frontmatter.off_drive_folder;
-    return { ...(typeof folder === "string" && folder ? { offDriveFolder: folder } : {}), ...(current ? { contentHash: current.contentHash } : {}) };
+    const frontmatter = current?.frontmatter as Record<string, unknown> | undefined;
+    const folder = { ...legacyFolders(frontmatter), ...foldersOf(frontmatter) }[this.ctx.deviceId];
+    return { ...(folder ? { offDriveFolder: folder } : {}), ...(current ? { contentHash: current.contentHash } : {}) };
   }
 
-  /** Saves the off-Drive folder: a full local path outside Google Drive; empty clears it. A guarded write (409 when stale). */
+  /**
+   * Saves this device's off-Drive folder: a full local path outside Google Drive (symbolic links resolved); empty
+   * clears it. Other devices' folders are kept. A guarded write (409 when stale).
+   */
   async saveSettings(input: { offDriveFolder?: unknown }, expectedHash?: string): Promise<BackupSettings> {
     const { ctx } = this;
     const raw = input.offDriveFolder;
     if (raw !== undefined && raw !== null && typeof raw !== "string") throw new Error("Off-Drive backup folder must be text");
     const folder = typeof raw === "string" ? raw.trim() : "";
     if (folder && !path.isAbsolute(folder)) throw new Error("Enter the folder's full path, starting with /");
-    if (folder && insideGoogleDrive(folder)) throw new Error("Choose a folder outside Google Drive, so a Drive problem cannot take both data and backups");
+    if (folder) await assertOffDrive(folder);
     const current = await this.readSetting();
     if (current && current.contentHash !== expectedHash) throw new ObjectConflictError("Backup settings changed on another device; reload and try again");
     if (!current && expectedHash) throw new ObjectConflictError("Backup settings were removed; reload and try again");
     const now = new Date().toISOString();
-    const { off_drive_folder: _previous, ...rest } = (current?.frontmatter ?? {}) as ObjectEnvelope & { off_drive_folder?: unknown };
+    const previous = current?.frontmatter as Record<string, unknown> | undefined;
+    const { off_drive_folder: _legacy, off_drive_folders: _folders, ...rest } = (previous ?? {}) as ObjectEnvelope & { off_drive_folder?: unknown; off_drive_folders?: unknown };
+    const folders = { ...legacyFolders(previous), ...foldersOf(previous) };
+    if (folder) folders[ctx.deviceId] = path.normalize(folder);
+    else delete folders[ctx.deviceId];
     const written = await ctx.objects.write({
       relativePath: backupSettingsPath,
       expectedHash: current?.contentHash,
@@ -100,18 +156,19 @@ export class BackupModule {
         ...rest,
         ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: ctx.deviceId } : ctx.envelope(uuidV7(), "app-setting", "Backups", now)),
         setting_key: "backups",
-        ...(folder ? { off_drive_folder: path.normalize(folder) } : {})
+        ...(Object.keys(folders).length ? { off_drive_folders: folders } : {})
       } as ObjectEnvelope,
-      body: current?.body ?? "# Backups\n\nA weekly copy of the latest backup goes to this folder outside Google Drive (four generations are kept).\n"
+      body: current?.body ?? "# Backups\n\nEach device's weekly copy of the latest backup goes to its own folder outside Google Drive (four generations are kept).\n"
     });
     await ctx.rebuildIndex();
     return { ...(folder ? { offDriveFolder: path.normalize(folder) } : {}), contentHash: written.contentHash };
   }
 
   start(service: BackupService, options: AutoBackupOptions = {}): AutoBackups {
-    const { canWrite = () => true, now = () => new Date(), checkMs = 60 * 60 * 1000, onError } = options;
-    const queue = new OneAtATime();
+    const { canWrite = () => true, now = () => new Date(), checkMs = 60 * 60 * 1000, onError, stopTimeoutMs = stopBackupTimeoutMs } = options;
     let pending = 0;
+    let swept = false;
+    let stopAbandoned = false;
     let idle: Promise<unknown> = Promise.resolve();
     let lastBackup: BackupStatus["lastBackup"];
     let lastOffDriveCopy: BackupStatus["lastOffDriveCopy"];
@@ -128,6 +185,7 @@ export class BackupModule {
       const { offDriveFolder } = await this.settings();
       if (!offDriveFolder) { offDriveFailure = undefined; return; }
       try {
+        await assertOffDrive(offDriveFolder);
         const copies = await service.listCopies(offDriveFolder);
         const newest = copies[0];
         if (!force && newest && now().getTime() - Date.parse(newest.createdAt) < offDriveEveryMs) { offDriveFailure = undefined; return; }
@@ -147,9 +205,11 @@ export class BackupModule {
     /** One backup at a time; `when` decides, once the backup's turn comes, whether it is still needed. */
     const backUp = (trigger: BackupTrigger, when: () => Promise<boolean> = async () => true) => {
       pending += 1;
-      const work = queue.run("backup", async () => {
+      const work = this.ctx.runExclusive(async () => {
         try {
           if (!canWrite() || !(await when())) return undefined;
+          // A backup killed part-way (e.g. by the stop script's timeout) leaves a `.creating-*` folder; swept once per run.
+          if (!swept) { swept = true; await service.sweepStaging?.().catch((error: unknown) => onError?.(error, trigger)); }
           let created: BackupSummary;
           try {
             created = await service.create();
@@ -193,7 +253,17 @@ export class BackupModule {
       check,
       stop: () => stopping ??= (async () => {
         clearInterval(timer);
-        await backUp("stop").catch(() => undefined);
+        let limit: NodeJS.Timeout | undefined;
+        const finished = await Promise.race([
+          backUp("stop", async () => !stopAbandoned).then(() => true, () => true),
+          new Promise<false>((resolve) => { limit = setTimeout(() => resolve(false), stopTimeoutMs); limit.unref?.(); })
+        ]);
+        clearTimeout(limit);
+        if (finished) return;
+        stopAbandoned = true;
+        const reason = `The stop backup did not finish within ${Math.round(stopTimeoutMs / 1000)} s; the next start backs up again and clears what it left.`;
+        backupFailure = { kind: "backup-failed", message: "Backup failed", reason, at: now().toISOString() };
+        onError?.(new Error(reason), "stop");
       })(),
       dispose: () => clearInterval(timer),
       whenIdle: async () => { while (pending) await idle; },
@@ -215,6 +285,13 @@ export class BackupModule {
         };
       }
     };
+  }
+
+  /** #95: the status before automatic backups start (or when they are off): always a JSON state, never empty. */
+  async idleStatus(service: BackupService): Promise<BackupStatus> {
+    const newest = (await service.list().catch(() => []))[0];
+    const { offDriveFolder } = await this.settings().catch(() => ({ offDriveFolder: undefined }));
+    return { running: false, ...(newest ? { latestBackupAt: newest.createdAt } : {}), ...(offDriveFolder ? { offDriveFolder } : {}) };
   }
 
   private async readSetting() {

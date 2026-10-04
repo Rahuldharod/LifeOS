@@ -16,6 +16,7 @@ import { KnownSecrets, MacOSKeychainSecretStore } from "@lifeos/secrets";
 import { connectionSettings, googleConnectionStatus, secretRefs } from "./connections.js";
 import { calendarSource } from "./calendar-source.js";
 import { httpError } from "./http-errors.js";
+import { shutDown } from "./shutdown.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
@@ -46,6 +47,8 @@ const application = new LifeOSApplication(store, index, calendar, new MockAiProv
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 // #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
 let autoBackups: AutoBackups | undefined;
+/** #95: set when a stop begins; writes then answer 503 so the stop backup sees settled data. */
+let stopping = false;
 const backupWarning = async () => {
   const warning = (await autoBackups?.status().catch(() => undefined))?.warning;
   return warning ? { backupWarning: warning } : {};
@@ -56,6 +59,7 @@ await server.register(cors, { origin: ["http://127.0.0.1:5174", "http://localhos
 
 server.addHook("preHandler", async (request, reply) => {
   const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
+  if (mutating && stopping) return reply.status(503).send({ error: "LifeOS is stopping; your change was not saved" });
   const allowedWithoutLease = request.url === "/api/v1/session/take-over" || request.url === "/api/v1/index/rebuild" || request.url === "/api/v1/settings/connections/retry";
   if (mutating && !allowedWithoutLease && !(await session.refresh()).writeAllowed) {
     return reply.status(423).send({ error: session.status().warning ?? "LifeOS is read-only because another device lease is active" });
@@ -329,7 +333,8 @@ server.post<{ Params: { id: string }; Body: { versionPath?: string; expectedHash
 server.get("/api/v1/backups", async () => backups.list());
 // "Back up now" (System and the backup warning): recorded like the automatic ones, so a success clears the warning.
 server.post("/api/v1/backups", async () => autoBackups ? autoBackups.runNow() : backups.create());
-server.get("/api/v1/backups/status", async () => autoBackups?.status());
+// #95: always a JSON state, including before automatic backups start.
+server.get("/api/v1/backups/status", async () => autoBackups ? autoBackups.status() : application.backupStatus(backups));
 server.get("/api/v1/settings/backups", async () => application.getBackupSettings());
 server.put<{ Body: { offDriveFolder?: unknown; expectedHash?: string } }>("/api/v1/settings/backups", async (request) => application.saveBackupSettings({ offDriveFolder: request.body?.offDriveFolder }, request.body?.expectedHash));
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
@@ -376,25 +381,28 @@ try {
   // Backups (#84): at start, daily while running and at a clean stop; only while this device holds the lease (ADR 0003).
   autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
   let reconcileTimer: NodeJS.Timeout | undefined;
+  let reconciling: Promise<unknown> = Promise.resolve();
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
     if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
     if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/") || filename.startsWith("_inbox/patches/")) autoAdoption.notify(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
     const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();
-    reconcileTimer = setTimeout(() => void reconcile().catch((error) => server.log.error(error)), 250);
+    reconcileTimer = setTimeout(() => { reconciling = reconcile().catch((error) => server.log.error(error)); }, 250);
   });
   const heartbeat = setInterval(() => void session.touch(), 60_000);
   heartbeat.unref();
+  // #95: writes stop, HTTP and adoption go idle, then the clean-stop backup, then the lease is released.
   const shutdown = async () => {
-    clearInterval(heartbeat);
-    clearTimeout(reconcileTimer);
-    autoAdoption.stop();
-    watcher.close();
-    // The clean-stop backup, taken before the lease is released.
-    await autoBackups?.stop().catch((error) => server.log.error(error));
-    await session.close();
-    await server.close();
+    await shutDown({
+      stopWrites: () => { stopping = true; },
+      stopTriggers: () => { clearInterval(heartbeat); clearTimeout(reconcileTimer); watcher.close(); },
+      closeHttp: () => server.close(),
+      waitForIdle: async () => { await autoAdoption.stop(); await reconciling; },
+      stopBackup: async () => { await autoBackups?.stop(); },
+      closeSession: () => session.close(),
+      log: (error, step) => server.log.error({ err: error, step }, "Stop step failed")
+    });
     process.exit(0);
   };
   process.once("SIGINT", () => void shutdown());

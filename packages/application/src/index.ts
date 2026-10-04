@@ -42,6 +42,7 @@ export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySe
 export { defaultTodaySettings, weekdays } from "./today.js";
 export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
 export type { AgentIndexOptions, AgentIndexStatus } from "./agent-index.js";
+export { stopBackupTimeoutMs } from "./backups.js";
 export type { AutoBackupOptions, AutoBackups, BackupService, BackupSettings, BackupStatus, BackupSummary, BackupTrigger, BackupWarning, BackupWarningKind } from "./backups.js";
 
 /**
@@ -236,5 +237,7 @@ export class LifeOSApplication {
   // Backups (#84, ADR 0004): automatic at start, clean stop and daily; a weekly off-Drive copy; a warning on failure
   startAutoBackups(service: BackupService, options?: AutoBackupOptions) { return this.backups.start(service, options); }
   getBackupSettings() { return this.backups.settings(); }
+  /** The backup status before automatic backups start, so `/backups/status` always answers JSON (#95). */
+  backupStatus(service: BackupService) { return this.backups.idleStatus(service); }
   saveBackupSettings(input: { offDriveFolder?: unknown }, expectedHash?: string) { return this.backups.saveSettings(input, expectedHash); }
 }

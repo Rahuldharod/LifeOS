@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -114,6 +114,14 @@ export class FilesystemBackupService {
     return listIn(this.backupRoot);
   }
 
+  /**
+   * #95: removes unfinished `.creating-*` snapshots that a killed backup left behind. Call it only while no backup of
+   * this root is being written (the application runs it inside the backup queue, before the run's first backup).
+   */
+  sweepStaging(): Promise<string[]> {
+    return sweepStagingIn(this.backupRoot);
+  }
+
   /** Checks a snapshot against its manifest in place (sizes and SHA-256), without a restoration drill. */
   async verify(backupId: string): Promise<{ valid: boolean; diagnostics: string[] }> {
     const diagnostics = await verifyIn(this.backupRoot, backupId);
@@ -148,11 +156,14 @@ export class FilesystemBackupService {
    */
   async copyTo(backupId: string, folder: string, generations = offDriveGenerations): Promise<BackupSummary> {
     const target = path.resolve(folder);
-    for (const inside of [this.dataRoot, this.backupRoot]) {
-      if (target === inside || target.startsWith(`${inside}${path.sep}`)) throw new Error(`Off-Drive backup folder must be outside ${inside}`);
-    }
     const info = await stat(target).catch(() => undefined);
     if (!info?.isDirectory()) throw new Error(`Off-Drive backup folder not found: ${target}`);
+    // Symbolic links resolved (#95): a link into the data or backup folder is still inside it.
+    const realTarget = await realpath(target);
+    for (const inside of [this.dataRoot, this.backupRoot]) {
+      const realInside = await realpath(inside).catch(() => inside);
+      if (realTarget === realInside || realTarget.startsWith(`${realInside}${path.sep}`)) throw new Error(`Off-Drive backup folder must be outside ${inside}`);
+    }
     const problems = await verifyIn(this.backupRoot, backupId);
     if (problems.length) throw new Error(`Backup ${backupId} failed verification: ${problems.join("; ")}`);
     const manifest = await readManifestIn(this.backupRoot, backupId);
@@ -164,7 +175,8 @@ export class FilesystemBackupService {
     }
     const staging = path.join(target, `.creating-${backupId}`);
     try {
-      await rm(staging, { recursive: true, force: true });
+      // Unfinished copies from an earlier, interrupted run (#95), this backup's included.
+      await sweepStagingIn(target);
       for (const entry of manifest.files) {
         const to = path.join(staging, "data", entry.path);
         await mkdir(path.dirname(to), { recursive: true });
@@ -207,6 +219,22 @@ async function listIn(root: string): Promise<BackupSummary[]> {
     if (manifest) backups.push(summaryOf(manifest));
   }
   return backups.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+async function sweepStagingIn(root: string) {
+  const entries = await readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return [];
+    throw error;
+  });
+  const swept: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(".creating-")) continue;
+    const target = path.join(root, entry.name);
+    await makeWritable(target);
+    await rm(target, { recursive: true, force: true });
+    swept.push(entry.name);
+  }
+  return swept;
 }
 
 async function verifyIn(root: string, backupId: string) {
