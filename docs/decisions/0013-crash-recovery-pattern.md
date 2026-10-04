@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-04
-- Source: issue #74 (review of the fix tickets #53–#73); amended by #78 (audit once on every journalled path, exceptions list)
+- Source: issue #74 (review of the fix tickets #53–#73); amended by #78 (audit once on every journalled path, exceptions list) and #82 (`reject-review`: a recorded intent wins over the operation it undoes)
 
 A step is **replay-safe** when running it again after a crash, or twice at once, ends in the same files as running it once. Every step that writes more than one file must be replay-safe. Pick the mechanisms below by what the step does. Each has one helper; do not hand-write another.
 
@@ -15,6 +15,8 @@ A step is **replay-safe** when running it again after a crash, or twice at once,
 | creates a file that must not already exist | Publish it exclusively, with the fallback for file systems that refuse hard links | `createExclusive` (object store) |
 
 **Operations journal.** `operationKinds` (ports.ts) lists every kind; `Operation` is the one shape. Each kind has a startup recovery handler in `SystemModule.recovery`, except those in `notRecoveredAtStartup`: adoption replays `adopt-draft` and `adopt-batch` itself at the start of its next batch. A new kind does not compile until it gets a handler or joins that list.
+
+**A recorded intent wins.** When a user action undoes another open operation (rejecting a Review Item whose accept or merge was interrupted), the action is journalled as its own kind (`reject-review`) before the first undo write. Recovery of the undone kind checks for that intent first and finishes the undo instead, so a crash part-way through never completes the opposite of what the user chose. The same check runs when the user tries to accept an item whose reject is still open. `review.rejected` is then written once, matched on the reject operation's ID.
 
 **Role keys.** A role names what an ID is for (`main`, `summary`, `merge:<pair>`), never what an attempt found already written. Build roles only with `replayRoles`. Their text is stored data, since each ID is derived from it, so an existing role's text never changes.
 

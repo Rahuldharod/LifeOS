@@ -60,7 +60,8 @@ export class SystemModule {
    */
   private readonly recovery: Record<Exclude<OperationKind, typeof notRecoveredAtStartup[number]>, (operation: Operation) => Promise<boolean>> = {
     [operationKinds.acceptReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverAccept(operation), true),
-    [operationKinds.mergePerson]: async (operation) => (await this.review.merges.recover(operation), true),
+    [operationKinds.mergePerson]: async (operation) => (await this.review.recoverMerge(operation), true),
+    [operationKinds.rejectReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverReject(operation), true),
     [operationKinds.createMeeting]: async (operation) => typeof operation.payload.externalId === "string" && !!this.ctx.calendar && (await this.meetings.createMeetingFromEvent(operation.payload.externalId), true),
     [operationKinds.supersedeDecision]: async (operation) => (await this.decisions.recoverSupersede(operation), true),
     [operationKinds.resolveOpenPoint]: async (operation) => !!this.openPoints && (await this.openPoints.recoverResolve(operation), true),
