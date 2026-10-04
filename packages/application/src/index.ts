@@ -1,4 +1,4 @@
-import { AdoptionModule } from "./adoption.js";
+import { AdoptionModule, type AutoAdoptionOptions } from "./adoption.js";
 import { AgentIndexModule, type AgentIndexOptions } from "./agent-index.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
@@ -25,7 +25,7 @@ export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, EXTERN
 export type { ExternalSource, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
-export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
+export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
 export type { ReviewEdits, ReviewEvidence } from "./review.js";
 export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./resolution.js";
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
@@ -185,6 +185,8 @@ export class LifeOSApplication {
   /** Also refreshes the Agent Index's pending-adoption list: filing a draft may not rebuild the index. */
   async adoptDrafts(options?: { now?: Date }) { const batch = await this.adoption.adoptDrafts(options); this.agentIndex.schedule(); return batch; }
   inboxStatus() { return this.adoption.inboxStatus(); }
+  /** #32: debounced adoption on `_inbox/drafts/` watcher events, retries for half-written drafts, and a periodic sweep. */
+  startAutoAdoption(options?: AutoAdoptionOptions) { return this.adoption.startAutoAdoption(options); }
 
   // Enrichment Work Orders (#44)
   requestEnrichment(options?: { now?: Date }) { return this.enrichment.requestEnrichment(options); }

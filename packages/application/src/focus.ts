@@ -139,7 +139,7 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
   // Briefs adopted earlier in this batch are not in the index yet; the rebuild below keeps the next one honest.
   const others = ctx.index.all().filter((object) => object.frontmatter.type === "daily-focus" && isLive(object) && dateText(object.frontmatter.focus_on) === focusOn);
   const newer = others.filter((object) => String(object.frontmatter.generated_at ?? "") > generatedAt!).sort((left, right) => String(right.frontmatter.generated_at).localeCompare(String(left.frontmatter.generated_at)))[0];
-  const id = uuidV7();
+  const id = run.newId();
   await ctx.objects.write({
     relativePath: `daily-focus/${markdownFileName(draft.title, id, run.now)}`,
     frontmatter: {
