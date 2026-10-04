@@ -53,9 +53,11 @@ export class ReviewModule {
     return created;
   }
 
-  async acceptReviewItem(reviewId: string) {
+  /** `linkTo` is the object chosen for a `link-resolution` item; other review types ignore it. */
+  async acceptReviewItem(reviewId: string, options: { linkTo?: string } = {}) {
     const { ctx } = this;
     const review = ctx.required(reviewId, "review-item");
+    if (review.frontmatter.review_type === "link-resolution") return this.acceptLinkResolution(review, options.linkTo);
     if (review.frontmatter.status === "accepted" && typeof review.frontmatter.resolved_object_id === "string") {
       if (typeof review.frontmatter.operation_id === "string") await ctx.objects.completeOperation?.(review.frontmatter.operation_id);
       return ctx.required(review.frontmatter.resolved_object_id);
@@ -86,6 +88,34 @@ export class ReviewModule {
     await ctx.objects.completeOperation?.(requestedOperationId);
     await ctx.rebuildIndex();
     return created;
+  }
+
+  /**
+   * Sets the chosen link on the target through a guarded write (revision + content hash of the version
+   * just read), appending for list fields. Idempotent: an accepted item returns the target unchanged.
+   */
+  private async acceptLinkResolution(review: LifeOSObject, linkTo: string | undefined) {
+    const { ctx } = this;
+    const targetId = String(review.frontmatter.target_object_id);
+    if (review.frontmatter.status === "accepted") return ctx.required(targetId);
+    if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
+    const proposed = review.frontmatter.proposed_fields as { link_field: string; list?: boolean; candidate_type: ObjectEnvelope["type"]; candidates?: Array<{ id: string }> };
+    const candidates = proposed.candidates ?? [];
+    const chosenId = linkTo ?? (candidates.length === 1 ? candidates[0]!.id : undefined);
+    if (!chosenId) throw new Error(`Choose the ${proposed.candidate_type} to link`);
+    const chosen = ctx.index.get(chosenId);
+    if (!chosen || chosen.frontmatter.type !== proposed.candidate_type || chosen.frontmatter.deleted_at) throw new Error(`Choose an existing ${proposed.candidate_type} to link`);
+    const target = ctx.required(targetId);
+    if (target.frontmatter.deleted_at) throw new Error("The object to link was deleted");
+    const current = target.frontmatter[proposed.link_field];
+    const value = proposed.list ? [...(Array.isArray(current) ? current as string[] : []).filter((id) => id !== chosenId), chosenId] : chosenId;
+    const now = new Date().toISOString();
+    const unchanged = proposed.list ? Array.isArray(current) && current.includes(chosenId) : current === chosenId;
+    const updated = unchanged ? target : await ctx.update(target, { [proposed.link_field]: value }, { expectedHash: target.contentHash, now });
+    await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, chosen_object_id: chosenId }, { expectedHash: review.contentHash, now });
+    await ctx.writeAudit("review.accepted", targetId, now, { review_id: review.frontmatter.id, link_field: proposed.link_field, linked_object_id: chosenId });
+    await ctx.rebuildIndex();
+    return updated;
   }
 
   async updateReviewTitle(reviewId: string, title: string) {
