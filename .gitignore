@@ -1,4 +1,6 @@
 node_modules/
+# Google Drive sync conflict copies of dependency folders.
+node_modules (*)/
 dist/
 coverage/
 .env
