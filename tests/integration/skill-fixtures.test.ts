@@ -159,3 +159,164 @@ describe("skills pack stays in step with the code (#49)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// #51 morning routine (`skills/lifeos-morning`). Kept in its own section so other skills' tests merge cleanly.
+// Every `daily-focus` example is adopted again in a vault holding the objects it names (fixed IDs), then put
+// through the self-check the skill documents. The DM example is checked against the brief it summarises.
+// ---------------------------------------------------------------------------------------------------------
+
+/** Fields the morning fixtures add to the shared fixture comment. */
+interface MorningExpectation extends Expectation {
+  /** What the skill's documented self-check must say about the example (default `pass`). */
+  selfCheck?: "pass" | "fail";
+  /** The max must-dos setting the example was written for (default 3). */
+  maxMustDos?: number;
+}
+
+const morningSkill = "lifeos-morning/SKILL.md";
+const morningFixtures = skills.fixtures.filter((fixture) => frontmatterOf(fixture.content).kind === "daily-focus");
+const morningNow = (fields: Record<string, unknown>) => new Date(String(fields.generated_at));
+
+/** Synthetic objects the morning examples reference, by fixed ID (example.com data only). */
+const morningIds = {
+  self: "0192f000-0000-7000-8000-000000000001",
+  camille: "0192f000-0000-7000-8000-000000000002",
+  joel: "0192f000-0000-7000-8000-000000000003",
+  deck: "0192f000-0000-7000-8000-000000000101",
+  budget: "0192f000-0000-7000-8000-000000000102",
+  storeList: "0192f000-0000-7000-8000-000000000103",
+  pricingPaper: "0192f000-0000-7000-8000-000000000104",
+  venue: "0192f000-0000-7000-8000-000000000105",
+  privateTask: "0192f000-0000-7000-8000-000000000199",
+  storeCount: "0192f000-0000-7000-8000-000000000201",
+  pilotDecision: "0192f000-0000-7000-8000-000000000301",
+  pilotStores: "0192f000-0000-7000-8000-000000000401",
+  weekly: "0192f000-0000-7000-8000-000000000501",
+  steering: "0192f000-0000-7000-8000-000000000502"
+} as const;
+
+async function morningVault(now: Date) {
+  const root = await mkdtemp(path.join(tmpdir(), "lifeos-skill-morning-"));
+  roots.push(root);
+  const written: { files: Array<{ name: string; content: string }> } = { files: [] };
+  const writer = { write: async (files: Array<{ name: string; content: string }>) => { written.files = files; } };
+  const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), undefined, undefined, "test", new FilesystemInboxStore(root), writer, { agentIndexDebounceMs: 60_000, timeZone: "Europe/Paris" });
+  const seed = async (folder: string, type: string, id: string, title: string, fields: Record<string, unknown> = {}) => {
+    const frontmatter = { id, type, schema_version: 1, revision: 1, title, created_at: "2026-09-01T08:00:00.000Z", updated_at: "2026-09-01T08:00:00.000Z", updated_by_device: "test", ...fields };
+    await mkdir(path.join(root, folder), { recursive: true });
+    // JSON is valid YAML, so no extra import is needed to write front matter.
+    await writeFile(path.join(root, folder, `${id}.md`), `---\n${JSON.stringify(frontmatter)}\n---\n# ${title}\n`);
+  };
+  const mine = { status: "Next", owner_person_id: morningIds.self };
+  await seed("people", "person", morningIds.self, "Robin Example", { given_name: "Robin", family_name: "Example", is_self: true, identifiers: [{ kind: "email", value: "me@example.com" }] });
+  await seed("people", "person", morningIds.camille, "Camille Dubois", { given_name: "Camille", family_name: "Dubois", identifiers: [{ kind: "email", value: "camille@example.com" }] });
+  await seed("people", "person", morningIds.joel, "Joel Martin", { given_name: "Joel", family_name: "Martin", identifiers: [{ kind: "email", value: "joel@example.com" }] });
+  await seed("tasks", "task", morningIds.deck, "Send Joel the sizing deck", { ...mine, priority: "High", due_on: "2026-10-02" });
+  await seed("tasks", "task", morningIds.budget, "Approve the Spring Promo budget", { ...mine, priority: "High", due_on: "2026-10-05" });
+  await seed("tasks", "task", morningIds.storeList, "Draft the pilot store list", { ...mine, priority: "Medium", due_on: "2026-10-05" });
+  await seed("tasks", "task", morningIds.pricingPaper, "Read the loyalty pricing paper", { ...mine, priority: "Low" });
+  await seed("tasks", "task", morningIds.venue, "Book the supplier day venue", { ...mine, priority: "Medium", due_on: "2026-10-09" });
+  await seed("tasks", "task", morningIds.privateTask, "Private appointment", { ...mine, priority: "High", due_on: "2026-10-05", sensitivity: "restricted" });
+  await seed("tasks", "task", morningIds.storeCount, "Camille to confirm the store count", { status: "Waiting", owner_person_id: morningIds.self, waiting_for_person_id: morningIds.camille, updated_at: "2026-09-29T08:00:00.000Z" });
+  await seed("decisions", "decision", morningIds.pilotDecision, "Pilot runs in 12 stores", { status: "active", decision_text: "The spring pilot runs in 12 stores.", decided_at: "2026-10-01T08:00:00.000Z" });
+  await seed("open-points", "open-point", morningIds.pilotStores, "Which stores join the pilot?", { status: "open", created_at: "2026-10-01T08:00:00.000Z" });
+  await seed("meetings", "meeting", morningIds.weekly, "Example Grocer weekly", { status: "confirmed", starts_at: "2026-10-05T07:00:00.000Z", ends_at: "2026-10-05T08:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [morningIds.self, morningIds.joel] });
+  await seed("meetings", "meeting", morningIds.steering, "Spring Promo steering", { status: "confirmed", starts_at: "2026-10-05T12:00:00.000Z", ends_at: "2026-10-05T13:30:00.000Z", timezone: "Europe/Paris", attendee_ids: [morningIds.self, morningIds.camille] });
+  await application.rebuildIndex();
+  await application.writeAgentIndex({ now });
+  return { root, application, agentIndex: () => written.files };
+}
+
+/**
+ * The self-check `lifeos-morning` tells the routine to run before it writes the draft (section "Self-check
+ * before writing"). Returns the problems found; an empty list means the draft may be written.
+ */
+function morningSelfCheck(brief: string, agentIndex: Array<{ name: string; content: string }>, maxMustDos: number) {
+  const fields = frontmatterOf(brief);
+  const body = brief.replace(/^---\n[\s\S]*?\n---\n?/, "");
+  const listed = new Set(agentIndex.flatMap((file) => [...file.content.matchAll(/\bid: ([0-9a-f-]{36})\b/g)].map((match) => match[1])));
+  const problems: string[] = [];
+  const sections: Array<[string, string]> = [["i_owe", "task_id"], ["top3", "task_id"], ["waiting_and_decisions", "object_id"], ["meeting_prep", "meeting_id"], ["defer_candidates", "task_id"]];
+  for (const [section, idField] of sections) {
+    for (const entry of (fields[section] as Array<Record<string, unknown>> | undefined) ?? []) {
+      const id = String(entry[idField]);
+      if (!listed.has(id)) problems.push(`${section}: ${id} is not listed in _agent/`);
+    }
+  }
+  const count = (section: string) => ((fields[section] as unknown[] | undefined) ?? []).length;
+  if (count("top3") < 1 || count("top3") > maxMustDos) problems.push(`top3: has ${count("top3")} entries; 1 to ${maxMustDos}`);
+  if (count("meeting_prep") > 3) problems.push("meeting_prep: more than 3");
+  if (count("defer_candidates") > 3) problems.push("defer_candidates: more than 3");
+  const words = body.trim().split(/\s+/).filter(Boolean).length;
+  if (words > 300) problems.push(`body: ${words} words; at most 300`);
+  if (/\(restricted\)/i.test(body)) problems.push("body: names a restricted item");
+  return problems;
+}
+
+describe("morning routine skill (#51)", () => {
+  it("has a valid SKILL.md front matter at the pack version", async () => {
+    const front = frontmatterOf(await readFile(path.join(skillsRoot, morningSkill), "utf8"));
+    expect(front.name).toBe("lifeos-morning");
+    expect(String(front.description).length).toBeGreaterThan(20);
+    expect(String(front.description).length).toBeLessThanOrEqual(1024);
+    expect(String(front.description)).not.toMatch(/[<>]/);
+    expect((front.metadata as Record<string, unknown>).version).toBe((frontmatterOf(await readFile(path.join(skillsRoot, "lifeos-object-contract/SKILL.md"), "utf8")).metadata as Record<string, unknown>).version);
+  });
+
+  it("documents passing briefs and a restricted counter-example, all from the morning skill", () => {
+    expect(morningFixtures.every((fixture) => fixture.file === morningSkill)).toBe(true);
+    expect(morningFixtures.filter((fixture) => (fixture.expect as MorningExpectation).selfCheck !== "fail").length).toBeGreaterThanOrEqual(2);
+    expect(morningFixtures.filter((fixture) => (fixture.expect as MorningExpectation).selfCheck === "fail")).toHaveLength(1);
+  });
+
+  it("states the brief-time default and the open connector question", async () => {
+    const text = await readFile(path.join(skillsRoot, morningSkill), "utf8");
+    expect(text).toContain("06:00");
+    expect(text).toContain("Europe/Paris");
+    expect(text).toContain("[TBD — verify cloud routines can use Slack/Gong connectors]");
+  });
+
+  it.each(morningFixtures.map((fixture) => [fixture.expect.name, fixture] as const))("%s: adopts against the objects it names and meets the self-check as documented", async (_name, fixture) => {
+    const want = fixture.expect as MorningExpectation;
+    const fields = frontmatterOf(fixture.content);
+    const now = morningNow(fields);
+    const { root, application, agentIndex } = await morningVault(now);
+    if (want.maxMustDos) await application.saveFocusSettings({ maxMustDos: want.maxMustDos });
+
+    const problems = morningSelfCheck(fixture.content, agentIndex(), want.maxMustDos ?? 3);
+    if ((want.selfCheck ?? "pass") === "pass") expect(problems).toEqual([]);
+    else expect(problems.join("; ")).toContain(`${morningIds.privateTask} is not listed in _agent/`);
+
+    await drop(root, "drafts", `${want.name}.md`, fixture.content);
+    const batch = await application.adoptDrafts({ now });
+    expect(batch.drafts[0], batch.drafts[0]?.reason).toMatchObject({ outcome: "adopted" });
+    // Adoption accepts a restricted reference (Today hides and counts it), which is why the self-check exists.
+    const focus = application.today({ date: String(fields.focus_on), now }).focus;
+    expect(focus.restrictedHidden).toBe((want.selfCheck ?? "pass") === "pass" ? 0 : 1);
+    if ((want.selfCheck ?? "pass") === "pass") expect(focus.top3.every((item) => item.state !== "missing")).toBe(true);
+  });
+
+  it("the Slack DM example is 5 lines that match its brief and name nothing restricted", async () => {
+    const text = await readFile(path.join(skillsRoot, morningSkill), "utf8");
+    const dms = [...text.matchAll(/<!--\s*slack-dm:\s*(\{[\s\S]*?\})\s*-->\s*\n```[\w-]*\n([\s\S]*?)\n```/g)].map((match) => ({ ...(JSON.parse(match[1]!) as { brief: string }), lines: match[2]!.split("\n") }));
+    expect(dms.length).toBeGreaterThan(0);
+    for (const dm of dms) {
+      const brief = morningFixtures.find((fixture) => fixture.expect.name === dm.brief);
+      expect(brief, dm.brief).toBeDefined();
+      const fields = frontmatterOf(brief!.content);
+      const { application } = await morningVault(morningNow(fields));
+      const title = (id: unknown) => application.object(String(id)).frontmatter.title;
+      expect(dm.lines).toHaveLength(5);
+      const [, top3, iOwe, day, link] = dm.lines;
+      for (const entry of fields.top3 as Array<Record<string, unknown>>) expect(top3).toContain(title(entry.task_id));
+      expect(top3).toMatch(/^Top 3: /);
+      const owed = fields.i_owe as Array<Record<string, unknown>>;
+      expect(iOwe).toBe(`I owe: ${owed.length} (${owed.filter((entry) => entry.overdue === true).length} overdue)`);
+      const shape = fields.day_shape as Record<string, number>;
+      expect(day).toBe(`Day: ${shape.meeting_hours} h meetings · ${shape.free_hours} h free`);
+      expect(link).toMatch(/^Brief: .*_inbox\/drafts\/[\w.-]+\.md/);
+      expect(dm.lines.join("\n")).not.toContain("Private appointment");
+    }
+  });
+});
