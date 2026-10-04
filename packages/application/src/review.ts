@@ -4,7 +4,7 @@ import { markdownFileName, ObjectConflictError, type AppContext } from "./contex
 import { acceptSummary, summaryReviewType } from "./meeting-material.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
-import { PersonMergeModule, personMergeOperation, personMergeReviewType } from "./person-merge.js";
+import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeOperation, personMergeReviewType, survivingPersonId } from "./person-merge.js";
 import { contextLinkFields, inheritContextLinks, sameValue, validTimeZone } from "./support.js";
 
 
@@ -29,8 +29,13 @@ export class ReviewModule {
     finally { if (this.queues.get(reviewId) === tail) this.queues.delete(reviewId); }
   }
 
+  /** #65: pending link-resolution items list person candidates as they stand after merges (read-time only; files unchanged). */
   reviews() {
-    return this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item");
+    return this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item").map((review) => {
+      const proposed = review.frontmatter.proposed_fields as { candidate_type?: unknown; candidates?: unknown } | undefined;
+      if (review.frontmatter.review_type !== "link-resolution" || review.frontmatter.status !== "pending" || proposed?.candidate_type !== "person" || !Array.isArray(proposed.candidates)) return review;
+      return { ...review, frontmatter: { ...review.frontmatter, proposed_fields: { ...proposed, candidates: followMergesInCandidates(this.ctx.index, proposed.candidates as Array<{ id: string; title: string }>) } } };
+    });
   }
 
   async processMeeting(meetingId: string) {
@@ -96,7 +101,8 @@ export class ReviewModule {
     const requestedOperationId = typeof review.frontmatter.operation_id === "string" ? review.frontmatter.operation_id : uuidV7();
     const operation = await ctx.objects.prepareOperation?.("accept-review", { reviewId, objectId: uuidV7() }, requestedOperationId);
     const objectId = typeof operation?.payload.objectId === "string" ? operation.payload.objectId : uuidV7();
-    const proposed = review.frontmatter.proposed_fields as Record<string, unknown>;
+    // #65: people merged since the proposal was written are replaced by the person they were merged into.
+    const proposed = followMergesInProposal(ctx.index, review.frontmatter.proposed_fields as Record<string, unknown>);
     const title = typeof proposed.title === "string" ? proposed.title : review.frontmatter.title;
     const targetType = String(review.frontmatter.target_object_type);
     const folder = targetType === "task" ? "tasks" : targetType === "decision" ? "decisions" : targetType === "open-point" ? "open-points" : targetType === "knowledge-note" ? "knowledge" : undefined;
@@ -135,8 +141,10 @@ export class ReviewModule {
     if (review.frontmatter.status === "accepted") return ctx.required(targetId);
     if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
     const proposed = review.frontmatter.proposed_fields as { link_field: string; list?: boolean; candidate_type: ObjectEnvelope["type"]; candidates?: Array<{ id: string }> };
-    const candidates = proposed.candidates ?? [];
-    const chosenId = linkTo ?? (candidates.length === 1 ? candidates[0]!.id : undefined);
+    // #65: merged people stand for the person they were merged into, so a merged pair is one candidate.
+    const candidates = proposed.candidate_type === "person" ? followMergesInCandidates(ctx.index, (proposed.candidates ?? []) as Array<{ id: string; title: string }>) : proposed.candidates ?? [];
+    const picked = linkTo ?? (candidates.length === 1 ? candidates[0]!.id : undefined);
+    const chosenId = picked && proposed.candidate_type === "person" ? survivingPersonId(ctx.index, picked) : picked;
     if (!chosenId) throw new Error(`Choose the ${proposed.candidate_type} to link`);
     const chosen = ctx.index.get(chosenId);
     if (!chosen || chosen.frontmatter.type !== proposed.candidate_type || chosen.frontmatter.deleted_at) throw new Error(`Choose an existing ${proposed.candidate_type} to link`);
