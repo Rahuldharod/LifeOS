@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { api, ApiError } from "./api.js";
 import type { CalendarOption, CalendarPrefs } from "./calendarPrefs.js";
+import { ConnectionsNotice, type ConnectionsState } from "./connections.js";
 import { PageHeader } from "./pageParts.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
@@ -10,11 +11,10 @@ import { internalDomainsCardId, selfEmailsCardId } from "./SelfEmailWarning.js";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export type TodaySettings = { meetingHoursThreshold: number; briefTime: string; briefTimeZone: string; briefDays: Weekday[]; contentHash?: string };
-type ConnectionSettings = { calendar: { configured: boolean; connected: boolean }; drive: { configured: boolean; connected: boolean } };
 type Props = {
   displayTimeZone: string; onDisplayTimeZoneChange: (zone: string) => void;
   calendarCatalog: CalendarOption[]; calendarCatalogLoaded: boolean; calendarPrefs: CalendarPrefs; onLoadCalendars: () => Promise<void>; onSaveCalendarPrefs: (prefs: CalendarPrefs) => Promise<string | undefined>;
-  connectionSettings?: ConnectionSettings; busy: boolean; readOnly: boolean;
+  connections?: ConnectionsState; onRetryConnections: () => Promise<void>; busy: boolean; readOnly: boolean;
   onSaveGoogleSecrets: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean>;
   /** Reloads App's shared data after a save that changes other pages (labels, Today). */
   onChanged: () => Promise<void>;
@@ -25,7 +25,7 @@ const availableTimeZones = (() => {
   return supportedValuesOf ? supportedValuesOf("timeZone") : ["Europe/Paris", "UTC", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
 })();
 
-export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connectionSettings, busy, readOnly, onSaveGoogleSecrets, onChanged }: Props) {
+export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged }: Props) {
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [internalDomains, setInternalDomains] = useState<{ domains: string[]; contentHash?: string }>();
   const [selfEmails, setSelfEmails] = useState<{ emails: string[]; contentHash?: string }>();
@@ -89,7 +89,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   // Opening Settings reloads every setting it shows, since another device may have changed them.
   useEffect(() => { void onLoadCalendars(); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); }, []);
 
-  return <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => onDisplayTimeZoneChange(event.target.value)}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={onSaveCalendarPrefs} /><SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>;
+  return <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => onDisplayTimeZoneChange(event.target.value)}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={onSaveCalendarPrefs} /><SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /><ConnectionsNotice state={connections} busy={busy} onRetry={() => void onRetryConnections()} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connections?.settings?.calendar} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connections?.settings?.drive} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>;
 }
 
 /** #47: the synced max must-dos setting: how many items Today's Top 3 shows. */
