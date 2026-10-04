@@ -2,6 +2,8 @@
 
 > **Status:** ready-for-agent · **Date:** 3 October 2026 · **Baseline:** Solution Design v0.5 + GitHub `main` @ `e981138` · **Source:** grilling session of 3 October 2026 (Q1–Q41, C1–C5)
 >
+> **Build status (updated 4 October 2026):** the app side is built on branch `feature/phase-a-21` (tickets #23–#48 and fixes #53–#82, not yet merged to `main`). The agent side (skills pack, morning routine, Slack DM) and the backup/runtime epic are not built. See *Build status*, *Decisions made during the build* and *Known gaps* below. Current design: Solution Design v0.7.
+>
 > This spec supersedes the following charting decisions on map #1: direct agent writes (now Inbox Drafts + Adoption), the in-app Claude API provider (now deferred; agents do the AI work), and the `actions.md` import (fresh start for work; personal rows stay Phase B). Vocabulary follows `CONTEXT.md`; new terms are defined in *Further Notes → Glossary additions*.
 
 ## Problem Statement
@@ -129,7 +131,7 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
 68. As Rahul, I want unknown attendees created as People with first and last name derived from their email (calendar display name wins when present), so that I don't type names.
 69. As Rahul, I want names like `jean-pierre.dupont@` to become "Jean-Pierre Dupont", and addresses without a dot to fall back to the calendar display name, so that names are correct.
 70. As Rahul, I want badges and pickers to show first names, and full names when two people share a first name, so that labels are short but unambiguous.
-71. As Rahul, I want people outside `eagleeye.com` and `untienots.com` marked external and shown as "Name - ext" in red, so that I can see at a glance who's outside the company.
+71. As Rahul, I want people outside my internal domains (set in Settings → **Internal domains**) marked external and shown as "Name - ext" in red, so that I can see at a glance who's outside the company.
 72. As Rahul, I want automatically created people flagged "unreviewed" with merge suggestions for likely duplicates, so that my people list stays clean without auto-merging.
 73. As Rahul, I want all my own addresses (work and personal) to resolve to my single self person, so that My Tasks and ownership work everywhere.
 
@@ -148,7 +150,7 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
 81. As Rahul, I want backups to run automatically at app start, at app stop and daily while running, so that I never rely on remembering.
 82. As Rahul, I want a weekly backup copy in a local folder outside Google Drive (4 generations), so that a Drive or employer-account problem can't take both data and backups.
 83. As Rahul, I want a visible warning when a backup fails, so that silent failure is impossible.
-84. As Rahul, I want a documented exit plan for taking my vault with me, so that leaving Eagle Eye never costs me my system.
+84. As Rahul, I want a documented exit plan for taking my vault with me, so that leaving my employer never costs me my system.
 85. As Rahul, I want to start LifeOS by double-clicking an app and have it start at login, so that I never use the terminal.
 86. As Rahul, I want the calendar to show the last synced events (marked stale) when Google is unreachable, so that my day never goes blank.
 87. As Rahul, I want the visual editor to save Markdown without changing it (headings, lists, task lists, tables, code, links, inline HTML, images), so that I can trust visual mode.
@@ -274,7 +276,7 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
 - **`focus-override`** (a new app-owned type): one per date, holding pinned, replaced (old → new) and dismissed task IDs. The effective Top 3 is the brief's `top3` with overrides applied. With no brief, the existing deterministic rule (priority, then due date) applies, with its visible reason.
 - **Live overlay:** Today renders the brief using live index state. Completed or cancelled tasks are struck through and sink. Past meetings are marked. "Generated at HH:MM" is shown. Refresh writes a `replan` Work Order to `_inbox/requests/`.
 - **Live panels** stay computed by the app: overdue, due today, upcoming high priority, waiting by person, next meetings, open points linked to today's meetings, review count, drafts awaiting adoption, failed drafts, stale work orders.
-- **Settings** (synced app-setting): max must-dos (default 3), meeting-hours information threshold (default 5), brief time (default 06:00 Europe/Paris on workdays, confirmed by Rahul 2026-10-03), internal domains (default `eagleeye.com`, `untienots.com`), weekly off-Drive backup folder.
+- **Settings** (synced app-setting): max must-dos (default 3), meeting-hours information threshold (default 5), brief time (default 06:00 Europe/Paris on workdays, confirmed by Rahul 2026-10-03), internal domains (no default: set in Settings → **Internal domains**, e.g. `example.com`), the user's own addresses (no default: Settings → **My email addresses**), weekly off-Drive backup folder (not built).
 - **The morning routine** (a cloud routine; a desktop scheduled task is the fallback) reads the Agent Index, calendar and pending drafts, writes the `daily-focus` draft, and sends a read-only Slack DM to self. The DM has 5 lines: Top 3, the I-owe count with the overdue count, day shape, and a path or link to the brief. The order is I owe → Top 3 → waiting/decisions → meeting prep → day shape. Restricted objects are never included. Inbox triage stays in Steve's separate brief.
 
 ### Decisions and Open Points workspace
@@ -295,7 +297,7 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
   - first name by default
   - first and last name when another active person shares the first name, recomputed live
   - external people get the suffix " - ext", styled red, with the text always present
-- **Self person:** carries all of the user's addresses (`rahul.dharod@eagleeye.com`, `rahul.dharod@untienots.com`, `baloo.rahul@gmail.com`), so it is never duplicated.
+- **Self person:** carries all of the user's addresses, so it is never duplicated. The addresses are not in code: the user enters them in Settings → **My email addresses** (stored as `settings/self-emails.md`, e.g. `me@example.com`, `me@example.org`). While this card or **Internal domains** is empty, Today and System Health show a warning with a button to the card (#54, #76).
 - **Merge:** `person-merge` Review Items are suggested when names match, or when the email local part matches across internal domains. Accepting re-points references through a recoverable multi-file operation and tombstones the merged person. Merges never happen automatically.
 
 ### Knowledge (Phase A level)
@@ -390,6 +392,65 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
 - Goals and Habits. Running finance, investing or health in LifeOS.
 - Todoist (parked). Jira coexists and is never written from LifeOS.
 
+## Build status (4 October 2026)
+
+Status of the user stories on branch `feature/phase-a-21` (head `897c0e1`). **Built** means the app side works and has integration tests. The agent side (skills, routines) is listed separately because it is not code in this repository yet.
+
+| **Stories** | **Topic** | **Status** | **Notes** |
+| --- | --- | --- | --- |
+| 1–16 | Capture and agent writes | **Built** (app side) | Adoption, auto-adopt, name resolution, routing by origin, Knowledge Note and Source drafts (#31–#35). Phone dictation and the language rule depend on the skills pack (not built). |
+| 17–22 | Patch drafts | **Built** | Auto-apply, review routing, conflict rule, undo (#36, #37, #61, #71, #81). See *Known gaps* for undo limits. |
+| 23–27 | Agent Index | **Built** | `_agent/` files, freshness stamp, pending drafts, restricted counted only (#43, #63). |
+| 28–41 | Post-meeting enrichment | **Built** (app side) | Work Order, enrichment state, Give up, stale Work Orders, meeting-material adoption, summary between markers (#44, #45, #66). The enrichment skill is not built. |
+| 42–44 | Review | **Built** | Editable proposals; `update`, `link-resolution` (with candidate picker), `person-merge` and `summary` types; atomic, double-click-safe accept (#57, #62). |
+| 45–57 | Today and the Daily Focus brief | **Built** (app side) | Brief with live overlay, Refresh writes a `replan` Work Order, Focus Overrides, live panels, settings (#46–#48, #64). |
+| 58–59 | Slack DM | **Not built** | Part of the morning routine (agent side). |
+| 60 | Inbox triage stays in Steve | No build needed | — |
+| 61–66 | Decisions and Open Points | **Built** | Lists, filters, create/edit, supersede, resolve/close (#41, #42, #67). |
+| 67–73 | People | **Built** | Email matching, names, labels, external marker, merge suggestions, self addresses in Settings (#38–#40, #54, #65, #76). |
+| 74–80 | Safety, sensitivity and data integrity | **Built** | Path diagnostics, duplicate-ID blocking, revision check, external-edit history, Origin/Sensitivity/Area, subject normalisation (#26–#30, #58, #63, #69, #72, #79, #80). |
+| 81–83 | Automatic backups, off-Drive copy, failure banner | **Not built** | Backups are still manual (System view). |
+| 84 | Exit plan | Documented only | See *Further Notes*. |
+| 85 | macOS launcher, start at login | **Not built** | Terminal commands only (ADR 0006). |
+| 86 | Calendar offline fallback (PB-022b) | **Not built** | — |
+| 87 | Editor round-trip suite (PB-003) | **Not built** | — |
+| 88–91 | Accessibility and interface | **Partial** | Built: lists capped with "Show N more", lock badges with text, keyboard-reachable warnings and pickers. Not built: optional dyslexia-friendly font, dark theme. |
+| 92–95 | Steve and the skills pack | **Not built** | No skills pack or skill-fixture CI job yet. |
+
+Also built, outside the stories: the Keychain helper now lives in an owner-only folder (#23); a single crash-recovery pattern (#74, ADR 0013); bounded version history (#72, ADR 0012). Not built from *Testing Decisions*: Playwright browser tests (S2), the 10,000-object performance fixture, and the skill-fixture CI job.
+
+## Decisions made during the build
+
+Product decisions taken while building, not in the original spec. Each is now how the app behaves.
+
+| **Topic** | **Decision** | **Source** |
+| --- | --- | --- |
+| Top 3 size | A brief may list **up to 5** Top 3 items. Today shows at most the **Max must-dos** setting (1–5, default 3). A brief longer than the setting is accepted, not refused, and pinned tasks count towards the limit. | Commits `0c4bdab`, `f1696af` |
+| Long brief | A brief over about 300 words is **adopted with a length warning** on Today, not rejected. | Commit `0c4bdab` |
+| Material that does not exist | A `meeting-material` draft can list `unavailable` material (e.g. no Gong call). It counts as done, so the meeting can reach `enriched` and Work Orders stop asking for it. | Commit `0c4bdab` |
+| Restricted meetings | A meeting is restricted when the meeting **or its note** is restricted. The interface restricts the note, so this is the rule every exclusion uses. | ADR 0010, #63 |
+| Restricted items on Today | Today's live panels, Decisions and Open Points **show** restricted items with a lock badge (text, not colour alone). The brief sections never name restricted objects; they show a hidden count. A restricted task can never be in the Top 3. | ADR 0010, #46, #64 |
+| Summary of a restricted meeting | Accepting a `summary` Review Item for a meeting restricted after it was raised is refused with a message. | #63 |
+| Version history | The app keeps the **last 10 copies per object**. An older copy is pruned; restoring it says "This version is no longer kept (only the last 10 are)" and changes nothing. | ADR 0012, #72, #79 |
+| Crash recovery | One recovery pattern for every multi-file step. When the user rejects an item whose accept was interrupted, **the recorded intent wins**: a crash part-way through never turns the reject into an accept. | ADR 0013, #74, #78, #82 |
+| Superseding a decision | A decision gains its `supersedes` link **once**, and only while it is active. Accepting an `update` Review Item that supersedes A with B sets both links, and is refused if B was deleted, archived, is not active, or already replaces another decision. | #67 |
+| Self addresses and internal domains | No real addresses or domains in code. The user fills two Settings cards: **My email addresses** and **Internal domains**. While either is empty, Today and System Health show a warning with a button to the card; with no internal domains, nobody is marked External. | #54, #76 |
+| Keychain prompts | Connection status **never reads secret values**. LifeOS checks once at start, and again only when the user clicks Retry or starts an action that needs a secret. If the user clicks Deny, the Connections card says "Keychain access denied" with a **Retry** button; no other page or save fails. | #77 |
+| Link-resolution card | A link-resolution Review Item has its own card: the unresolved text, a keyboard-operable candidate picker (display labels with the external marker), and a **Create "<name>" and link** button that creates the missing object (person, project, client or product) from the unresolved text and links it. The toast after accept names the item type. | #57 |
+| Meeting summary | The accepted summary is written into the **meeting** body between `<!-- lifeos:summary:start -->` and `<!-- lifeos:summary:end -->` markers. A retry writes it once; a newer summary replaces the old one whole; text outside the markers and the meeting note are never changed. | #66 |
+| Long lists | Lists show up to 7 rows. Longer lists show the first 6 and a keyboard-operable "Show N more" button. | #48, #64 |
+
+## Known gaps
+
+Known limits of the current build. None loses data; each needs a decision or a ticket.
+
+| **Gap** | **Effect today** | **Source** |
+| --- | --- | --- |
+| No restore button for version copies | Restoring a version copy named by an external-edit audit works only through the API (`POST /api/v1/history/:id/restore`). There is no button in the app. Deleted notes do have a Restore button. | #79 |
+| Undo is refused if text was added below the note | Undo removes exactly the note a patch appended. If the user has typed anything after it, Undo is refused ("change it by hand"), so it never deletes the user's text. | #61, #81 |
+| Calendar sync still reads the Keychain each time | Loading and saving no longer prompt, but each calendar sync or connect reads the Google tokens and client secret, which can show a Keychain prompt if access was not set to "Always Allow". | #77 |
+| Two-device limits | If another device's version copy never arrives over Drive, edits made on top of it are not flagged as external. A version copy pruned after 10 saves can no longer be restored or used by the patch conflict rule (then only audit events decide). | ADR 0012, #80, #81 |
+
 ## Further Notes
 
 - **Glossary additions for `CONTEXT.md`:**
@@ -404,11 +465,11 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
   - **Origin:** how an object came to exist.
   - **Sensitivity:** whether agents and exports may use an object.
   - **External person:** a person whose email domain is not internal.
-- **Policy assumption:** sending work meeting content to Claude is acceptable because the provider does not train on company data (the user's statement). Whether client contracts allow third-party processing of client meeting content is `[TBD - confirm with Eagle Eye IT/legal]`.
+- **Policy assumption:** sending work meeting content to Claude is acceptable because the provider does not train on company data (the user's statement). Whether client contracts allow third-party processing of client meeting content is `[TBD - confirm with employer IT/legal]`.
 - **To verify:**
   - whether cloud routines can use the Gong and Slack connectors `[TBD - verify]`
   - whether macOS file-watch events fire reliably for Drive-synced files (restart and full rescan is the fallback) `[TBD - verify on Rahul's Mac]`
 - **Exit plan:** copy the data folder and the latest verified backup to a personal location, re-enter OAuth credentials in Settings on the new machine, and point the data root there. This is part of the 31 October 2026 data-root review.
 - **Dated reminders:** data-root and employer-account review by **31 Oct 2026**. CI check on or after **19 Oct 2026** (the `ubuntu-latest` move to Ubuntu 26). The user still needs to connect the Gong and Slack connectors in Claude.
 - **Superseded charting decisions (map #1):** direct agent writes, the in-app Claude API, and the Markor/FolderSync Android capture. Resolved here: #4 (Object Contract), #5 (deferred), #7 (Phase A sources: Calendar, Meet/Drive, Gong, Gmail summaries; Slack is output only; Jira, Confluence and Aha! stay outside), #8 (exit gate plus quality gate).
-- **Design document:** Solution Design v0.5 should be bumped to v0.6 to reflect this spec once tickets land.
+- **Design document:** Solution Design v0.6 reflected this spec; v0.7 (4 October 2026) records the build.
