@@ -2,6 +2,7 @@ import { AdoptionModule } from "./adoption.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
+import { EnrichmentModule } from "./enrichment.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
@@ -18,6 +19,8 @@ export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
 export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./resolution.js";
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
+export type { EnrichmentEntry, EnrichmentRequest, EnrichmentState, EnrichmentStatus } from "./enrichment.js";
+export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial } from "./enrichment.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -33,6 +36,7 @@ export class LifeOSApplication {
   private readonly capture: CaptureModule;
   private readonly history: HistoryModule;
   private readonly adoption: AdoptionModule;
+  private readonly enrichment: EnrichmentModule;
 
   /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
@@ -41,7 +45,8 @@ export class LifeOSApplication {
     this.meetings = new MeetingsModule(ctx);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
-    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption);
+    this.enrichment = new EnrichmentModule(ctx, this.meetings, this.calendarModule, inbox);
+    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.enrichment);
     this.entitiesModule = new EntitiesModule(ctx);
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
@@ -110,4 +115,9 @@ export class LifeOSApplication {
   // Inbox Drafts (ADR 0007)
   adoptDrafts(options?: { now?: Date }) { return this.adoption.adoptDrafts(options); }
   inboxStatus() { return this.adoption.inboxStatus(); }
+
+  // Enrichment Work Orders (#44)
+  requestEnrichment(options?: { now?: Date }) { return this.enrichment.requestEnrichment(options); }
+  markEnrichmentGaveUp(meetingId: string, expectedHash: string) { return this.enrichment.markGaveUp(meetingId, expectedHash); }
+  enrichmentStatus(options?: { now?: Date }) { return this.enrichment.status(options); }
 }

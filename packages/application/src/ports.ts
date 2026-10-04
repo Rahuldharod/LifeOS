@@ -52,6 +52,8 @@ export interface CalendarEvent {
   endsAt: string;
   timezone: string;
   isAllDay?: boolean;
+  /** The user declined the invitation; declined events are never enriched (#44). */
+  declined?: boolean;
   /** Display labels (name, else email). Kept for the UI and name-only connectors. */
   attendees: string[];
   /** Attendees with email when the connector knows it (#38); people are matched on these when present. */

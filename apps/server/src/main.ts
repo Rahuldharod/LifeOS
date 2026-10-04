@@ -188,6 +188,12 @@ server.get("/api/v1/projects", async () => application.projects());
 server.get("/api/v1/review-items", async () => application.reviews());
 server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());
 server.post("/api/v1/inbox/adopt", async () => application.adoptDrafts());
+server.get("/api/v1/enrichment", async () => application.enrichmentStatus());
+server.post("/api/v1/enrichment/work-orders", async () => application.requestEnrichment());
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/meetings/:id/enrichment/gave-up", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.markEnrichmentGaveUp(request.params.id, request.body.expectedHash);
+});
 server.get("/api/v1/backups", async () => backups.list());
 server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
