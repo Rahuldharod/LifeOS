@@ -8,6 +8,7 @@ import { EntitiesModule, type EntityType } from "./entities.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
+import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
@@ -15,6 +16,7 @@ import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
+export type { OpenPointFilters } from "./open-points.js";
 export type { ExternalChange } from "./history.js";
 export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, personEmails } from "./people.js";
 export type { AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
@@ -42,6 +44,7 @@ export class LifeOSApplication {
   private readonly adoption: AdoptionModule;
   private readonly enrichment: EnrichmentModule;
   private readonly decisionsModule: DecisionsModule;
+  private readonly openPointsModule: OpenPointsModule;
   private readonly patches: PatchModule;
 
   /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
@@ -53,8 +56,9 @@ export class LifeOSApplication {
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
     this.decisionsModule = new DecisionsModule(ctx);
+    this.openPointsModule = new OpenPointsModule(ctx, this.decisionsModule);
     this.enrichment = new EnrichmentModule(ctx, this.meetings, this.calendarModule, inbox);
-    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment);
+    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment, this.openPointsModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
@@ -98,6 +102,15 @@ export class LifeOSApplication {
   createDecision(fields: Record<string, unknown>) { return this.decisionsModule.createDecision(fields); }
   updateDecision(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.decisionsModule.updateDecision(id, fields, expectedHash); }
   supersedeDecision(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.decisionsModule.supersedeDecision(id, fields, expectedHash); }
+
+  // Open Points (#42)
+  openPoints(filters: OpenPointFilters = {}) { return this.openPointsModule.openPoints(filters); }
+  openPoint(id: string) { return this.openPointsModule.openPoint(id); }
+  createOpenPoint(fields: Record<string, unknown>) { return this.openPointsModule.createOpenPoint(fields); }
+  updateOpenPoint(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.openPointsModule.updateOpenPoint(id, fields, expectedHash); }
+  resolveOpenPoint(id: string, fields: { resolution_summary?: unknown; resolution_decision_id?: unknown }, expectedHash: string) { return this.openPointsModule.resolveOpenPoint(id, fields, expectedHash); }
+  resolveOpenPointWithDecision(id: string, decisionFields: Record<string, unknown>, expectedHash: string) { return this.openPointsModule.resolveOpenPointWithDecision(id, decisionFields, expectedHash); }
+  closeOpenPoint(id: string, fields: { reason?: unknown }, expectedHash: string) { return this.openPointsModule.closeOpenPoint(id, fields, expectedHash); }
 
   // Calendar
   listCalendarEvents(from?: Date, to?: Date) { return this.calendarModule.listCalendarEvents(from, to); }

@@ -312,7 +312,7 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .decision-row small { margin-top: 4px; }
 .decision-row.selected { background: #eef3ef; box-shadow: inset 3px 0 0 #245646; }
 .status-label { display: inline-block; padding: 0 6px; border: 1px solid #9fb3a8; border-radius: 999px; font-size: 11px; font-weight: 750; letter-spacing: 0; color: #23483c; }
-.status-label.status-superseded, .status-label.status-reversed { border-style: dashed; color: #5d665f; }
+.status-label.status-superseded, .status-label.status-reversed, .status-label.status-resolved, .status-label.status-closed { border-style: dashed; color: #5d665f; }
 .decision-chain { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid #b9a77a; background: #f7f1e3; }
 .decision-fields { margin-top: 14px; }
 .decision-fields .wide { grid-column: 1 / -1; }
