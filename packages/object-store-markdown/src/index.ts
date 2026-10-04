@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ObjectStore } from "@lifeos/application";
-import { validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
 
 export class ObjectConflictError extends Error {
@@ -113,6 +113,7 @@ export class MarkdownObjectStore implements ObjectStore {
       try {
         const object = decode(content, relativePath);
         result.push(object);
+        if (!isUuidV7(object.frontmatter.id)) diagnostics.push(`${relativePath} (id ${object.frontmatter.id}): ID is not a UUIDv7; new objects must use UUIDv7`);
         diagnostics.push(...await this.imageDiagnostics(object));
       }
       catch (error) { diagnostics.push(error instanceof Error ? error.message : `${relativePath}: unreadable object`); }
@@ -145,9 +146,13 @@ export class MarkdownObjectStore implements ObjectStore {
   async write(input: { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string }) {
     validateFrontmatter(input.frontmatter);
     const target = this.safePath(input.relativePath);
+    const current = await readFile(target, "utf8").catch(() => undefined);
+    if (current === undefined && !isUuidV7(input.frontmatter.id)) throw new Error(`${input.relativePath}: object ID ${input.frontmatter.id} is not a UUIDv7; new objects must use UUIDv7 IDs`);
     if (input.expectedHash) {
-      const current = await readFile(target, "utf8").catch(() => undefined);
       if (!current || hash(current) !== input.expectedHash) throw new ObjectConflictError(`Object changed since it was opened: ${input.relativePath}`);
+      // A guarded save must also follow the revision on disk, as the design requires (hash and revision).
+      const onDisk = decode(current, input.relativePath).frontmatter.revision;
+      if (onDisk !== input.frontmatter.revision - 1) throw new ObjectConflictError(`Object changed since it was opened: ${input.relativePath} (revision ${onDisk} on disk, expected ${input.frontmatter.revision - 1})`);
       const versionPath = path.join(this.root, ".lifeos", "versions", input.frontmatter.id, `${String(input.frontmatter.revision - 1).padStart(6, "0")}--${hash(current).slice(0, 12)}.md`);
       await mkdir(path.dirname(versionPath), { recursive: true });
       await writeFile(versionPath, current, { encoding: "utf8", flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
