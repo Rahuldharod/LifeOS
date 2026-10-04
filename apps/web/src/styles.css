@@ -359,3 +359,9 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .focus-dismissed { margin-top: 10px; }
 .focus-dismissed .object-row { align-items: center; padding: 8px 0; }
 .focus-dismissed .object-row > div { flex: 1; color: #758078; }
+/* #57: link-resolution candidate picker and in-card errors. */
+.link-candidates { display: grid; gap: 6px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid #dedbcf; border-radius: 7px; background: white; }
+.link-candidates legend { padding: 0 4px; font-size: 12px; font-weight: 750; }
+.link-candidates label { display: flex; align-items: center; gap: 8px; }
+.review-card .link-candidates input { width: auto; margin: 0; padding: 0; }
+.review-error { margin: 0 0 12px; color: #954b38; font-weight: 750; }

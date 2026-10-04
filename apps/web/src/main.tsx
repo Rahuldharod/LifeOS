@@ -25,6 +25,8 @@ import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, personLa
 import { PersonName } from "./PersonName.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
 import { awaitingAdoptionLabel, daysBetween, visibleRows } from "./todayPanels.js";
+import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
+import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -245,7 +247,7 @@ function meetingSummary(body: string | undefined) {
   return match?.[1]?.trim() || undefined;
 }
 
-function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choices }: {
+function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choices, labels, linkActions }: {
   review: LifeObject;
   busy: boolean;
   onAccept: () => void;
@@ -254,6 +256,9 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
   /** Evidence per proposed field; a source that cannot be found is shown as unresolved. */
   evidence?: Record<string, ReviewEvidence[]>;
   choices?: ReviewChoices;
+  /** #57: display labels and actions for the link-resolution card. */
+  labels: Map<string, PersonLabel>;
+  linkActions: LinkCardActions;
 }) {
   const proposed = (review.frontmatter.proposed_fields ?? {}) as Record<string, unknown>;
   const target = String(review.frontmatter.target_object_type ?? "task");
@@ -263,6 +268,7 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
   const [title, setTitle] = useState(review.frontmatter.title);
   const [fields, setFields] = useState<Record<string, string>>(() => Object.fromEntries(editable.map((key) => [key, current(key)])));
   const pending = review.frontmatter.status === "pending";
+  if (review.frontmatter.review_type === "link-resolution") return <LinkResolutionCard review={review} labels={labels} busy={busy} actions={linkActions} />;
   // #37: a change to an existing object (from a Patch Draft) shows current vs proposed per field; it cannot be renamed.
   if (review.frontmatter.review_type === "update") {
     const proposal = review.frontmatter.proposed_fields as { changes?: Array<{ field: string; current: unknown; proposed: unknown }>; append_note?: string; reasons?: string[] };
@@ -718,11 +724,27 @@ function App() {
     } finally { setBusy(false); }
   };
 
-  const accept = (reviewId: string) => run(async () => {
-    await api(`/api/v1/review-items/${reviewId}/accept`, { method: "POST" });
+  const accept = (review: LifeObject) => run(async () => {
+    await api(`/api/v1/review-items/${review.frontmatter.id}/accept`, { method: "POST" });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
-  }, "Task accepted and published");
+  }, acceptToast(review.frontmatter));
+
+  /** #57: like `run`, but rethrows so the link card shows the server's error itself (role=alert). */
+  const reviewStep = async (action: () => Promise<unknown>, success: string) => {
+    setBusy(true);
+    try {
+      await action();
+      if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
+      await loadCollections();
+      setMessage(success);
+    } finally { setBusy(false); }
+  };
+  const linkActionsFor = (reviewId: string): LinkCardActions => ({
+    onLink: (linkTo) => reviewStep(() => acceptLink(api, reviewId, linkTo), "Link saved"),
+    onCreate: async (type, title) => { setBusy(true); try { return await createLinkTarget(api, type, title); } finally { setBusy(false); } },
+    onReject: () => reviewStep(() => api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" }), "Proposal rejected")
+  });
 
   const reject = (reviewId: string) => run(async () => {
     await api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" });
@@ -1347,7 +1369,7 @@ function App() {
               {meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
               <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
-                {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
+                {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
               </article>
             </>}
           </div>
@@ -1420,7 +1442,7 @@ function App() {
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
         {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
-        {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
+        {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
       </>}
 
       {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text, then review a linked Knowledge Note before publishing it." /><article><span>ADD RAW TEXT SOURCE</span><div className="knowledge-form"><input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} placeholder="Source title" /><textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} placeholder="Paste source text or Markdown…" /><button className="primary" disabled={busy || readOnly || !sourceTitle.trim() || !sourceText.trim()} onClick={ingestSource}>Preserve & process</button></div></article><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
