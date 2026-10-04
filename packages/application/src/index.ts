@@ -1,4 +1,5 @@
 import { AdoptionModule } from "./adoption.js";
+import { AgentIndexModule, type AgentIndexOptions } from "./agent-index.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
@@ -13,7 +14,7 @@ import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
 import { PeopleModule } from "./people.js";
 import type { Sensitivity } from "@lifeos/domain";
-import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
+import type { AgentIndexWriter, AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
 import { ReviewModule, type ReviewEdits } from "./review.js";
 import { SystemModule } from "./system.js";
 
@@ -22,7 +23,7 @@ export type { OpenPointFilters } from "./open-points.js";
 export type { ExternalChange } from "./history.js";
 export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PersonLabel } from "./people.js";
-export type { AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
+export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
 export type { ReviewEdits, ReviewEvidence } from "./review.js";
@@ -33,6 +34,8 @@ export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial }
 export type { AppliedPatch } from "./patches.js";
 export type { DailyFocusView, FocusItem, FocusItemState, ReplanRequest } from "./focus.js";
 export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords } from "./focus.js";
+export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
+export type { AgentIndexOptions, AgentIndexStatus } from "./agent-index.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -54,9 +57,13 @@ export class LifeOSApplication {
   private readonly patches: PatchModule;
   private readonly people: PeopleModule;
   private readonly focus: DailyFocusModule;
+  private readonly agentIndex: AgentIndexModule;
 
-  /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
-  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
+  /**
+   * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
+   * `agentIndex` writes the derived Agent Index to `_agent/` after index rebuilds (ADR 0009); without it nothing is written.
+   */
+  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string } = {}) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.patches = new PatchModule(ctx);
     this.adoption = new AdoptionModule(ctx, inbox, this.patches);
@@ -73,11 +80,18 @@ export class LifeOSApplication {
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
     this.history = new HistoryModule(ctx);
+    const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone };
+    this.agentIndex = new AgentIndexModule(ctx, this.decisionsModule, this.adoption, inbox, agentIndex, agentIndexOptions);
+    ctx.onRebuild = () => this.agentIndex.schedule();
   }
 
   // System
   rebuildIndex() { return this.system.rebuildIndex(); }
-  health() { return this.system.health(); }
+  async health() {
+    const health = await this.system.health();
+    const diagnostics = [...health.diagnostics, ...this.agentIndex.diagnostics()];
+    return { ...health, status: diagnostics.length ? "attention" : "healthy", diagnostics };
+  }
   recoverOperations() { return this.system.recoverOperations(); }
   listObjects() { return this.system.listObjects(); }
   object(id: string) { return this.system.object(id); }
@@ -168,13 +182,18 @@ export class LifeOSApplication {
   ingestTextSource(title: string, text: string) { return this.capture.ingestTextSource(title, text); }
 
   // Inbox Drafts (ADR 0007)
-  adoptDrafts(options?: { now?: Date }) { return this.adoption.adoptDrafts(options); }
+  /** Also refreshes the Agent Index's pending-adoption list: filing a draft may not rebuild the index. */
+  async adoptDrafts(options?: { now?: Date }) { const batch = await this.adoption.adoptDrafts(options); this.agentIndex.schedule(); return batch; }
   inboxStatus() { return this.adoption.inboxStatus(); }
 
   // Enrichment Work Orders (#44)
   requestEnrichment(options?: { now?: Date }) { return this.enrichment.requestEnrichment(options); }
   markEnrichmentGaveUp(meetingId: string, expectedHash: string) { return this.enrichment.markGaveUp(meetingId, expectedHash); }
   enrichmentStatus(options?: { now?: Date }) { return this.enrichment.status(options); }
+
+  // Agent Index (#43, ADR 0009): written debounced after each index rebuild; these write now / report the last write.
+  writeAgentIndex(options?: { now?: Date }) { return this.agentIndex.write(options); }
+  agentIndexStatus() { return this.agentIndex.status(); }
 
   // Patch Drafts: applied by adoption; listed and undone here
   appliedPatches() { return this.patches.appliedPatches(); }

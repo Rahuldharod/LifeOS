@@ -111,12 +111,16 @@ export class AppContext {
     if (problem) throw new Error(problem);
   }
 
+  /** Called after every index rebuild; the Agent Index (#43) schedules its debounced regeneration here. */
+  onRebuild?: () => void;
+
   async rebuildIndex() {
     const scan = this.objects.scan ? await this.objects.scan() : { objects: await this.objects.list(), diagnostics: [] };
     const objects = scan.objects;
     this.index.rebuild(objects, scan.diagnostics);
     // A rescan does not move the baseline of an object already known: only external-change detection does.
     for (const object of this.index.all()) if (!this.known.has(object.frontmatter.id)) this.known.set(object.frontmatter.id, object);
+    this.onRebuild?.();
     return { objectCount: objects.length, diagnostics: this.index.diagnostics() };
   }
 

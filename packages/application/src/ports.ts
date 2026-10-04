@@ -119,3 +119,15 @@ export interface InboxStore {
   /** Atomically writes a Markdown file with YAML front matter, replacing any file of that name. */
   writeDocument(folder: InboxFolder, name: string, frontmatter: Record<string, unknown>, body: string): Promise<InboxFile>;
 }
+
+/** One derived Agent Index file: a plain file name in `_agent/` and its Markdown content. */
+export interface AgentIndexFile { name: string; content: string }
+
+/**
+ * Writes the derived Agent Index into `_agent/` (ADR 0009). Write-only on purpose: the application
+ * never reads `_agent/` back, so deleting the folder, or an Agent scribbling in it, changes nothing.
+ */
+export interface AgentIndexWriter {
+  /** Atomically replaces each named file; other files in `_agent/` are left alone. */
+  write(files: AgentIndexFile[]): Promise<void>;
+}
