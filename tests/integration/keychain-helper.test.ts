@@ -42,7 +42,9 @@ describe("Keychain helper location and verification", () => {
 
     expect(path.dirname(binary)).toBe(helperFolder(home));
     expect(path.basename(binary)).toMatch(/^keychain-helper-[0-9a-f]{16}$/);
-    expect(binary.startsWith("/tmp") || binary.startsWith("/private/tmp")).toBe(false);
+    // Never directly in the shared temp folder; the fake home itself may live under /tmp on Linux CI.
+    expect(path.dirname(binary)).not.toBe(tmpdir());
+    expect(path.relative(home, binary).startsWith("..")).toBe(false);
     expect(calls).toHaveLength(1);
     expect(path.dirname(calls[0]!)).toBe(helperFolder(home));
     expect(calls[0]).not.toBe(binary); // compiled to a temporary name, then renamed into place
