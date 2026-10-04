@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { stringify } from "yaml";
 import { LifeOSApplication, type AgentIndexFile, type AgentIndexWriter } from "@lifeos/application";
 import { uuidV7 } from "@lifeos/domain";
@@ -184,17 +184,28 @@ describe("Agent Index (#43)", () => {
   });
 
   it("regenerates after index rebuilds, debounced, and never reads _agent/ back", async () => {
-    const writes: AgentIndexFile[][] = [];
-    const writer: AgentIndexWriter = { async write(files) { writes.push(files); } };
-    const { application } = await vault(writer, 100);
-    await application.rebuildIndex();
-    await application.rebuildIndex();
-    await application.createEntity("task", { title: "Fresh task" });
-    expect(writes).toHaveLength(0);
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(writes).toHaveLength(1);
-    expect(writes[0]!.find((file) => file.name === "tasks.md")!.content).toContain("Fresh task");
-    expect(application.agentIndexStatus().generatedAt).toBeDefined();
+    // #55: the debounce runs on a fake clock, so a slow machine cannot fire it early or late; the test awaits the write itself.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const writes: AgentIndexFile[][] = [];
+      let written!: () => void;
+      const firstWrite = new Promise<void>((resolve) => { written = resolve; });
+      const writer: AgentIndexWriter = { async write(files) { writes.push(files); written(); } };
+      const { application } = await vault(writer, 100);
+      await application.rebuildIndex();
+      vi.advanceTimersByTime(60);
+      await application.rebuildIndex();
+      vi.advanceTimersByTime(60);
+      await application.createEntity("task", { title: "Fresh task" });
+      vi.advanceTimersByTime(99);
+      expect(writes).toHaveLength(0); // each rebuild restarted the 100 ms wait
+      vi.advanceTimersByTime(1);
+      await firstWrite;
+      expect(writes).toHaveLength(1);
+      expect(writes[0]!.find((file) => file.name === "tasks.md")!.content).toContain("Fresh task");
+      await application.writeAgentIndex(); // serialized behind the debounced write, so its status is settled
+      expect(application.agentIndexStatus().generatedAt).toBeDefined();
+    } finally { vi.useRealTimers(); }
   });
 
   it("is disposable: deleting or scribbling on _agent/ is harmless and overwritten", async () => {

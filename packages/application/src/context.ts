@@ -46,6 +46,8 @@ export function markdownFileName(title: string, id: string, timestamp: string, t
 /** Same name as the object store's conflict error, which the server maps to HTTP 409 (the application cannot import adapters). */
 export class ObjectConflictError extends Error { override name = "ObjectConflictError"; }
 
+export interface RebuildResult { objectCount: number; diagnostics: string[] }
+
 export class AppContext {
   /** The object store with the application's write guards applied. Modules write only through this. */
   readonly objects: ObjectStore;
@@ -114,7 +116,30 @@ export class AppContext {
   /** Called after every index rebuild; the Agent Index (#43) schedules its debounced regeneration here. */
   onRebuild?: () => void;
 
-  async rebuildIndex() {
+  private rebuildRunning?: Promise<RebuildResult>;
+  private rebuildQueued?: Promise<RebuildResult>;
+
+  /**
+   * #55: scans run one at a time, so an older, slower scan can never swap in a stale index after a newer one.
+   * A call made while a scan runs may have written after that scan read the disk, so it waits for one more
+   * scan; every call made meanwhile shares that follow-up scan. Each caller's result therefore comes from a
+   * scan that started after the call.
+   */
+  rebuildIndex(): Promise<RebuildResult> {
+    if (!this.rebuildRunning) return this.startRebuild();
+    return this.rebuildQueued ??= this.rebuildRunning.catch(() => undefined).then(() => {
+      this.rebuildQueued = undefined;
+      return this.startRebuild();
+    });
+  }
+
+  private startRebuild() {
+    const run = this.scanIntoIndex().finally(() => { if (this.rebuildRunning === run) this.rebuildRunning = undefined; });
+    this.rebuildRunning = run;
+    return run;
+  }
+
+  private async scanIntoIndex() {
     const scan = this.objects.scan ? await this.objects.scan() : { objects: await this.objects.list(), diagnostics: [] };
     const objects = scan.objects;
     this.index.rebuild(objects, scan.diagnostics);
@@ -150,9 +175,16 @@ export class AppContext {
     await this.objects.write({ relativePath: `audit/${markdownFileName(action, id, timestamp)}`, frontmatter: { ...this.envelope(id, "audit-event", action, timestamp), occurred_at: timestamp, actor_type: actor.type, ...(actor.ref ? { actor_ref: actor.ref } : {}), action, object_id: objectId, metadata }, body: `# ${action}\n` });
   }
 
-  async ensureSelfPerson(timestamp: string) {
+  /** The self person being created, shared until the index holds it, so concurrent callers do not each create one (#55). */
+  private selfCreation?: Promise<LifeOSObject>;
+
+  ensureSelfPerson(timestamp: string): Promise<LifeOSObject> {
     const existing = this.index.all().find((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true);
-    if (existing) return existing;
+    if (existing) { this.selfCreation = undefined; return Promise.resolve(existing); }
+    return this.selfCreation ??= this.createSelfPerson(timestamp).catch((error: unknown) => { this.selfCreation = undefined; throw error; });
+  }
+
+  private async createSelfPerson(timestamp: string) {
     const id = uuidV7();
     const created = await this.objects.write({
       relativePath: `people/${markdownFileName("You", id, timestamp)}`,
