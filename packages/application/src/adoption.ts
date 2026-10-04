@@ -1,6 +1,7 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
-import type { InboxDocument, InboxFile, InboxStore } from "./ports.js";
+import type { PatchModule } from "./patches.js";
+import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -8,7 +9,8 @@ import type { InboxDocument, InboxFile, InboxStore } from "./ports.js";
  * One batch: read each draft → check the shared contract → check idempotency (draft_key + content
  * hash) → route by kind and origin to a handler that writes objects → file the draft in
  * `_inbox/processed/` or `_inbox/failed/` with a `.result.md` sidecar → one agent-run for the batch.
- * New draft kinds and origins plug in as entries in `routes`; patches and requests get their own readers.
+ * New draft kinds and origins plug in as entries in `routes`. Patch Drafts in `_inbox/patches/` are read by
+ * `PatchModule` (patches.ts) in the same batch, after the drafts; requests will get their own reader.
  */
 
 export const draftContractVersion = 1;
@@ -48,9 +50,9 @@ export class DraftError extends Error {
   constructor(readonly issues: string[]) { super(issues.join("; ")); }
 }
 
-export type DraftOutcome = "adopted" | "duplicate" | "failed" | "skipped";
+export type DraftOutcome = "adopted" | "applied" | "duplicate" | "failed" | "skipped";
 export interface DraftResult {
-  /** Where the draft was found, e.g. `_inbox/drafts/x.md`. */
+  /** Where the draft was found, e.g. `_inbox/drafts/x.md` or `_inbox/patches/x.md`. */
   draft: string;
   outcome: DraftOutcome;
   objectIds: string[];
@@ -66,6 +68,11 @@ export interface AdoptionBatch {
   /** True when a draft was skipped only because it may still be being written: trigger again in a few seconds. */
   retrySoon: boolean;
 }
+/** What `file()` records in the `.result.md` sidecar; no `outcome` means failed (then `errors` is required). */
+export interface FilingResult { draftKey: string; objectIds: string[]; errors?: string[]; outcome?: "adopted" | "applied" | "duplicate" }
+/** Files one inbox document from its reader's folder into `processed/` or `failed/` with its sidecar. */
+export type FileDocument = (document: InboxDocument, folder: "processed" | "failed", result: FilingResult) => Promise<DraftResult>;
+
 export interface InboxStatus {
   awaiting: number;
   failed: Array<{ path: string; reason: string }>;
@@ -76,12 +83,12 @@ export const partialFileGraceMs = 2000;
 const adoptedAction = "draft.adopted";
 const resultName = (name: string) => `${name.replace(/\.md$/, "")}.result.md`;
 const isResult = (file: InboxFile) => file.name.endsWith(".result.md");
-const text = (value: unknown) => typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
+export const text = (value: unknown) => typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
 const stringList = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === "string");
 
 // Any ISO 8601 date or date-time; a time must carry `Z` or an offset so the instant is unambiguous.
 const isoInstant = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?))?$/i;
-function toUtc(value: unknown) {
+export function toUtc(value: unknown) {
   const raw = value instanceof Date ? value.toISOString() : text(value);
   const match = raw.match(isoInstant);
   if (!match) return undefined;
@@ -90,10 +97,10 @@ function toUtc(value: unknown) {
   const parsed = new Date(time ? `${date}T${time.replace(",", ".")}${offset}` : `${date}T00:00:00Z`);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
-const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 
 /** Zod issues (from the object store's validation) as "field: reason"; anything else is not the draft's fault. */
-function validationIssues(error: unknown) {
+export function validationIssues(error: unknown) {
   const issues = (error as { issues?: Array<{ path: PropertyKey[]; message: string }> }).issues;
   return error instanceof DraftError ? error.issues : Array.isArray(issues) ? issues.map((issue) => `${issue.path.map(String).join(".") || "front matter"}: ${issue.message}`) : undefined;
 }
@@ -108,7 +115,7 @@ export class AdoptionModule {
   /** Batches run one at a time, so startup, the watcher and "Adopt now" can never adopt one draft twice. */
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore) {}
+  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore, private readonly patches?: PatchModule) {}
 
   adoptDrafts(options: { now?: Date } = {}): Promise<AdoptionBatch> {
     const next = this.queue.then(() => this.runBatch(options.now ?? new Date()));
@@ -118,14 +125,14 @@ export class AdoptionModule {
 
   async inboxStatus(): Promise<InboxStatus> {
     if (!this.inbox) return { awaiting: 0, failed: [] };
-    const [drafts, failed] = await Promise.all([this.inbox.list("drafts"), this.inbox.list("failed")]);
+    const [drafts, patches, failed] = await Promise.all([this.inbox.list("drafts"), this.inbox.list("patches"), this.inbox.list("failed")]);
     const names = new Set(failed.map((file) => file.name));
     const reasons = await Promise.all(failed.filter((file) => !isResult(file)).map(async (file) => {
       const sidecar = names.has(resultName(file.name)) ? await this.inbox!.read("failed", resultName(file.name)).catch(() => undefined) : undefined;
       const errors = sidecar?.frontmatter?.errors;
       return { path: file.relativePath, reason: Array.isArray(errors) && errors.length ? errors.map(String).join("; ") : `no readable ${resultName(file.name)} sidecar` };
     }));
-    return { awaiting: drafts.length, failed: reasons };
+    return { awaiting: drafts.length + patches.length, failed: reasons };
   }
 
   /** System Health lines for failed drafts: they stay listed until the user removes or fixes them. */
@@ -145,26 +152,35 @@ export class AdoptionModule {
     const results: DraftResult[] = [];
     let retrySoon = false;
 
-    for (const file of await inbox.list("drafts")) {
-      if (now.getTime() - file.modifiedAt < partialFileGraceMs) { retrySoon = true; results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: modified less than 2 seconds ago; will retry` }); continue; }
-      const document = await inbox.read("drafts", file.name);
-      if (document.error && this.unparsableSeen.get(file.name) !== document.contentHash) {
-        this.unparsableSeen.set(file.name, document.contentHash);
-        retrySoon = true;
-        results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: ${document.error}; will retry once in case it is still syncing` });
-        continue;
+    // Drafts first, so a patch can target an object created by a draft in the same batch.
+    for (const folder of ["drafts", "patches"] as const) {
+      let read = (document: InboxDocument) => this.adoptOne(document, run, ledger);
+      if (folder === "patches") {
+        if (!this.patches) break;
+        await ctx.rebuildIndex();
+        read = this.patches.reader(run, (document, outcome, result) => this.file("patches", document, outcome, result, run));
       }
-      this.unparsableSeen.delete(file.name);
-      results.push(await this.adoptOne(document, run, ledger));
+      for (const file of await inbox.list(folder)) {
+        if (now.getTime() - file.modifiedAt < partialFileGraceMs) { retrySoon = true; results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: modified less than 2 seconds ago; will retry` }); continue; }
+        const document = await inbox.read(folder, file.name);
+        if (document.error && this.unparsableSeen.get(file.relativePath) !== document.contentHash) {
+          this.unparsableSeen.set(file.relativePath, document.contentHash);
+          retrySoon = true;
+          results.push({ draft: file.relativePath, outcome: "skipped", objectIds: [], reason: `${file.relativePath}: ${document.error}; will retry once in case it is still syncing` });
+          continue;
+        }
+        this.unparsableSeen.delete(file.relativePath);
+        results.push(await read(document));
+      }
     }
 
     const filed = results.filter((result) => result.outcome !== "skipped");
     if (!filed.length) return { drafts: results, retrySoon };
-    const created = filed.flatMap((result) => result.outcome === "adopted" ? result.objectIds : []);
+    const created = [...new Set(filed.flatMap((result) => result.outcome === "adopted" || result.outcome === "applied" ? result.objectIds : []))];
     const count = (outcome: DraftOutcome) => filed.filter((result) => result.outcome === outcome).length;
     await ctx.objects.write({
       relativePath: `agent-runs/${markdownFileName("Inbox adoption", run.id, timestamp)}`,
-      frontmatter: { ...ctx.envelope(run.id, "agent-run", "Inbox adoption", timestamp), operation: "inbox-adoption", provider: "lifeos", model: "rules", prompt_version: `draft-contract-${draftContractVersion}`, status: "succeeded", started_at: timestamp, completed_at: new Date().toISOString(), output_summary: `${count("adopted")} adopted, ${count("duplicate")} duplicate, ${count("failed")} failed`, related_object_ids: created },
+      frontmatter: { ...ctx.envelope(run.id, "agent-run", "Inbox adoption", timestamp), operation: "inbox-adoption", provider: "lifeos", model: "rules", prompt_version: `draft-contract-${draftContractVersion}`, status: "succeeded", started_at: timestamp, completed_at: new Date().toISOString(), output_summary: `${count("adopted")} adopted, ${count("applied") ? `${count("applied")} applied, ` : ""}${count("duplicate")} duplicate, ${count("failed")} failed`, related_object_ids: created },
       body: "# Inbox adoption\n"
     });
     await ctx.rebuildIndex();
@@ -175,7 +191,7 @@ export class AdoptionModule {
     const fields = document.frontmatter ?? {};
     const draftKey = text(fields.draft_key);
     const prefix = `${document.relativePath}${draftKey ? ` (draft_key ${draftKey})` : ""}`;
-    const fail = (issues: string[]) => this.file(document, "failed", { draftKey, objectIds: [], errors: [`${prefix}: ${issues.join("; ")}`] }, run);
+    const fail = (issues: string[]) => this.file("drafts", document, "failed", { draftKey, objectIds: [], errors: [`${prefix}: ${issues.join("; ")}`] }, run);
 
     if (document.error) return fail([document.error]);
     const parsed = this.parse(document);
@@ -183,7 +199,7 @@ export class AdoptionModule {
     const draft = parsed.draft;
 
     const previous = ledger.get(draft.draftKey);
-    if (previous && previous.contentHash === draft.contentHash) return this.file(document, "processed", { draftKey, objectIds: previous.objectIds, outcome: "duplicate" }, run);
+    if (previous && previous.contentHash === draft.contentHash) return this.file("drafts", document, "processed", { draftKey, objectIds: previous.objectIds, outcome: "duplicate" }, run);
     if (previous) return fail([`draft_key: draft_key ${draft.draftKey} was already adopted from different content (object ${previous.objectIds.join(", ")}); use a new draft_key, or a Patch Draft to change it`]);
 
     const handler = this.routes[`${draft.kind}:${draft.origin}`];
@@ -198,7 +214,7 @@ export class AdoptionModule {
     }
     for (const id of objectIds) await this.ctx.writeAudit(adoptedAction, id, run.now, { draft_key: draft.draftKey, content_hash: draft.contentHash, draft_path: document.relativePath, agent_run_id: run.id, origin: draft.origin });
     ledger.set(draft.draftKey, { contentHash: draft.contentHash, objectIds });
-    return this.file(document, "processed", { draftKey, objectIds, outcome: "adopted" }, run);
+    return this.file("drafts", document, "processed", { draftKey, objectIds, outcome: "adopted" }, run);
   }
 
   /** The shared contract v1 checks; returns every issue at once so the Agent can fix them in one go. */
@@ -225,10 +241,11 @@ export class AdoptionModule {
   }
 
   /** Moves the draft to its outcome folder and writes the `.result.md` sidecar the Agent reads to confirm what happened. */
-  private async file(document: InboxDocument, folder: "processed" | "failed", result: { draftKey: string; objectIds: string[]; errors?: string[]; outcome?: "adopted" | "duplicate" }, run: AdoptionRun): Promise<DraftResult> {
+  private async file(from: InboxFolder, document: InboxDocument, folder: "processed" | "failed", result: FilingResult, run: AdoptionRun): Promise<DraftResult> {
     const outcome = result.outcome ?? "failed";
-    const filed = await this.inbox!.move("drafts", document.name, folder);
-    const heading = outcome === "adopted" ? `# Adopted\n\nCreated ${result.objectIds.join(", ")}.\n` : outcome === "duplicate" ? `# Already adopted\n\nThis draft was adopted before as ${result.objectIds.join(", ")}; nothing new was created.\n` : `# Not adopted\n\n${result.errors!.map((error) => `- ${error}`).join("\n")}\n\nFix the draft and send it again; this file is kept and never deleted automatically.\n`;
+    const filed = await this.inbox!.move(from, document.name, folder);
+    const ids = result.objectIds.join(", ");
+    const heading = outcome === "adopted" ? `# Adopted\n\nCreated ${ids}.\n` : outcome === "applied" ? `# Applied\n\nChanged ${ids}. The change can be undone in LifeOS.\n` : outcome === "duplicate" ? from === "patches" ? `# Already applied\n\nThis patch was applied before to ${ids}; nothing was changed again.\n` : `# Already adopted\n\nThis draft was adopted before as ${ids}; nothing new was created.\n` : `# Not ${from === "patches" ? "applied" : "adopted"}\n\n${result.errors!.map((error) => `- ${error}`).join("\n")}\n\nFix the draft and send it again; this file is kept and never deleted automatically.\n`;
     await this.inbox!.writeDocument(folder, resultName(filed.name), {
       lifeos_result: draftContractVersion, outcome, draft: document.relativePath, filed_as: filed.relativePath,
       ...(result.draftKey ? { draft_key: result.draftKey } : {}), content_hash: document.contentHash,

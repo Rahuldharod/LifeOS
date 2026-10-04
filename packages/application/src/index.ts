@@ -6,6 +6,7 @@ import { EntitiesModule, type EntityType } from "./entities.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
+import { PatchModule } from "./patches.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
 import { ReviewModule } from "./review.js";
@@ -15,6 +16,7 @@ export type { ExternalChange } from "./history.js";
 export type { AiProvider, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
+export type { AppliedPatch } from "./patches.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -30,11 +32,13 @@ export class LifeOSApplication {
   private readonly capture: CaptureModule;
   private readonly history: HistoryModule;
   private readonly adoption: AdoptionModule;
+  private readonly patches: PatchModule;
 
   /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
-    this.adoption = new AdoptionModule(ctx, inbox);
+    this.patches = new PatchModule(ctx);
+    this.adoption = new AdoptionModule(ctx, inbox, this.patches);
     this.meetings = new MeetingsModule(ctx);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
@@ -107,4 +111,8 @@ export class LifeOSApplication {
   // Inbox Drafts (ADR 0007)
   adoptDrafts(options?: { now?: Date }) { return this.adoption.adoptDrafts(options); }
   inboxStatus() { return this.adoption.inboxStatus(); }
+
+  // Patch Drafts: applied by adoption; listed and undone here
+  appliedPatches() { return this.patches.appliedPatches(); }
+  undoPatch(auditEventId: string) { return this.patches.undoPatch(auditEventId); }
 }
