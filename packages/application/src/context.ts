@@ -47,6 +47,11 @@ export class ObjectConflictError extends Error { override name = "ObjectConflict
 export class AppContext {
   /** The object store with the application's write guards applied. Modules write only through this. */
   readonly objects: ObjectStore;
+  /** U4: the last version of each object this app wrote or observed; the baseline for spotting external edits. */
+  readonly known = new Map<string, LifeOSObject>();
+  /** Per ID: writes in flight and a counter bumped at each write's start and end, so detection can skip IDs the app is writing. */
+  private readonly inFlight = new Map<string, number>();
+  private readonly writeTicks = new Map<string, number>();
 
   constructor(
     store: ObjectStore,
@@ -59,10 +64,17 @@ export class AppContext {
       list: () => store.list(),
       scan: store.scan?.bind(store),
       read: (relativePath) => store.read(relativePath),
-      write: (input) => {
-        this.assertWritable(input.frontmatter.id);
-        return store.write(input);
+      write: async (input) => {
+        const id = input.frontmatter.id;
+        this.assertWritable(id);
+        this.trackWrite(id, 1);
+        try {
+          const written = await store.write(input);
+          this.known.set(id, written);
+          return written;
+        } finally { this.trackWrite(id, -1); }
       },
+      keepVersion: store.keepVersion?.bind(store),
       prepareOperation: store.prepareOperation?.bind(store),
       completeOperation: store.completeOperation?.bind(store),
       incompleteOperations: store.incompleteOperations?.bind(store)
@@ -75,10 +87,26 @@ export class AppContext {
     if (paths) throw new ObjectConflictError(`Duplicate object ID ${id} in ${paths.join(" and ")}; remove or re-ID one copy, then try again`);
   }
 
+  private trackWrite(id: string, delta: 1 | -1) {
+    this.inFlight.set(id, (this.inFlight.get(id) ?? 0) + delta);
+    this.writeTicks.set(id, (this.writeTicks.get(id) ?? 0) + 1);
+  }
+
+  /** Snapshot of app write activity; `busySince(snapshot)` names IDs written in flight at, or since, the snapshot. */
+  writeActivity() {
+    return { inFlight: new Set([...this.inFlight].filter(([, count]) => count > 0).map(([id]) => id)), ticks: new Map(this.writeTicks) };
+  }
+
+  busySince(snapshot: ReturnType<AppContext["writeActivity"]>, id: string) {
+    return snapshot.inFlight.has(id) || (this.writeTicks.get(id) ?? 0) !== (snapshot.ticks.get(id) ?? 0);
+  }
+
   async rebuildIndex() {
     const scan = this.objects.scan ? await this.objects.scan() : { objects: await this.objects.list(), diagnostics: [] };
     const objects = scan.objects;
     this.index.rebuild(objects, scan.diagnostics);
+    // A rescan does not move the baseline of an object already known: only external-change detection does.
+    for (const object of this.index.all()) if (!this.known.has(object.frontmatter.id)) this.known.set(object.frontmatter.id, object);
     return { objectCount: objects.length, diagnostics: this.index.diagnostics() };
   }
 
@@ -102,9 +130,10 @@ export class AppContext {
     return object;
   }
 
-  async writeAudit(action: string, objectId: string, timestamp: string, metadata: Record<string, unknown>) {
+  /** `actor` defaults to the person on this device; external edits have no known actor, so no `actor_ref`. */
+  async writeAudit(action: string, objectId: string, timestamp: string, metadata: Record<string, unknown>, actor: { type: "person" | "agent" | "system" | "external"; ref?: string } = { type: "person", ref: this.deviceId }) {
     const id = uuidV7();
-    await this.objects.write({ relativePath: `audit/${markdownFileName(action, id, timestamp)}`, frontmatter: { ...this.envelope(id, "audit-event", action, timestamp), occurred_at: timestamp, actor_type: "person", actor_ref: this.deviceId, action, object_id: objectId, metadata }, body: `# ${action}\n` });
+    await this.objects.write({ relativePath: `audit/${markdownFileName(action, id, timestamp)}`, frontmatter: { ...this.envelope(id, "audit-event", action, timestamp), occurred_at: timestamp, actor_type: actor.type, ...(actor.ref ? { actor_ref: actor.ref } : {}), action, object_id: objectId, metadata }, body: `# ${action}\n` });
   }
 
   async ensureSelfPerson(timestamp: string) {

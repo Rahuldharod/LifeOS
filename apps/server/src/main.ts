@@ -221,7 +221,9 @@ try {
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
     if (!filename || filename.startsWith(".lifeos/")) return;
     clearTimeout(reconcileTimer);
-    reconcileTimer = setTimeout(() => void application.rebuildIndex().catch((error) => server.log.error(error)), 250);
+    // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
+    const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();
+    reconcileTimer = setTimeout(() => void reconcile().catch((error) => server.log.error(error)), 250);
   });
   const heartbeat = setInterval(() => void session.touch(), 60_000);
   heartbeat.unref();

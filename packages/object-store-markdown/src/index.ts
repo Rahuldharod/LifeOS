@@ -56,6 +56,10 @@ function decode(content: string, relativePath: string): LifeOSObject {
   return { frontmatter, body: match[2] ?? "", relativePath, contentHash: hash(content) };
 }
 
+function serialize(frontmatter: ObjectEnvelope, body: string) {
+  return `---\n${stringify(frontmatter).trimEnd()}\n---\n${body}`;
+}
+
 function unreadableReason(error: unknown) {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "EACCES" || code === "EPERM" ? "permission denied" : error instanceof Error ? error.message : String(error);
@@ -153,13 +157,9 @@ export class MarkdownObjectStore implements ObjectStore {
       // A guarded save must also follow the revision on disk, as the design requires (hash and revision).
       const onDisk = decode(current, input.relativePath).frontmatter.revision;
       if (onDisk !== input.frontmatter.revision - 1) throw new ObjectConflictError(`Object changed since it was opened: ${input.relativePath} (revision ${onDisk} on disk, expected ${input.frontmatter.revision - 1})`);
-      const versionPath = path.join(this.root, ".lifeos", "versions", input.frontmatter.id, `${String(input.frontmatter.revision - 1).padStart(6, "0")}--${hash(current).slice(0, 12)}.md`);
-      await mkdir(path.dirname(versionPath), { recursive: true });
-      await writeFile(versionPath, current, { encoding: "utf8", flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "EEXIST") throw error;
-      });
+      await this.saveVersion(input.frontmatter.id, input.frontmatter.revision - 1, current);
     }
-    const next = `---\n${stringify(input.frontmatter).trimEnd()}\n---\n${input.body}`;
+    const next = serialize(input.frontmatter, input.body);
     await mkdir(path.dirname(target), { recursive: true });
     const temporary = `${target}.${randomUUID()}.tmp`;
     const handle = await open(temporary, "wx");
@@ -174,6 +174,25 @@ export class MarkdownObjectStore implements ObjectStore {
       throw error;
     }
     return decode(next, input.relativePath);
+  }
+
+  /**
+   * U4: keeps a last-known copy that is no longer on disk (changed or deleted outside the app).
+   * The copy is re-serialised from the parsed object, in the app's own write format.
+   */
+  keepVersion(object: LifeOSObject) {
+    return this.saveVersion(object.frontmatter.id, object.frontmatter.revision, serialize(object.frontmatter, object.body));
+  }
+
+  /** Saves `content` as `.lifeos/versions/<id>/<revision>--<hash>.md` (idempotent) and returns that relative path. */
+  private async saveVersion(id: string, revision: number, content: string) {
+    const relativePath = path.posix.join(".lifeos", "versions", id, `${String(revision).padStart(6, "0")}--${hash(content).slice(0, 12)}.md`);
+    const versionPath = this.safePath(relativePath);
+    await mkdir(path.dirname(versionPath), { recursive: true });
+    await writeFile(versionPath, content, { encoding: "utf8", flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+    return relativePath;
   }
 
   private safePath(relativePath: string) {
