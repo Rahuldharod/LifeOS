@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { inboxFolders, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
+import { inboxFolders, type AgentIndexFile, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
 
@@ -270,6 +270,28 @@ export class FilesystemInboxStore implements InboxStore {
   private target(folder: InboxFolder, name: string) {
     if (!name || name !== path.basename(name) || name.startsWith(".")) throw new Error(`Invalid inbox file name: ${name}`);
     return path.join(this.folder(folder), name);
+  }
+}
+
+/**
+ * Writes the derived Agent Index into `_agent/` (ADR 0009). Each file is written atomically (temp file,
+ * then rename) so an Agent never reads half a file. Recreates `_agent/` if it was deleted, but never the
+ * data root itself: a missing root means the vault moved, and writing there would be wrong.
+ */
+export class FilesystemAgentIndexWriter implements AgentIndexWriter {
+  private readonly folder: string;
+
+  constructor(root: string) { this.folder = path.join(path.resolve(root), "_agent"); }
+
+  async write(files: AgentIndexFile[]) {
+    await mkdir(this.folder).catch((error: NodeJS.ErrnoException) => error.code === "EEXIST" ? undefined : Promise.reject(error));
+    for (const file of files) {
+      if (!file.name || file.name !== path.basename(file.name) || file.name.startsWith(".") || !file.name.endsWith(".md")) throw new Error(`Invalid Agent Index file name: ${file.name}`);
+      const target = path.join(this.folder, file.name);
+      const temporary = `${target}.${randomUUID()}.tmp`;
+      await writeFile(temporary, file.content, { encoding: "utf8", flag: "wx" });
+      await rename(temporary, target).catch(async (error) => { await rm(temporary, { force: true }); throw error; });
+    }
   }
 }
 
