@@ -167,6 +167,28 @@ describe("Agent Index (#43)", () => {
     expect(await read(root, "overview.md")).toContain("Restricted objects (counted, never listed): 5");
   });
 
+  it("leaves out a meeting whose note is restricted, and never names a restricted person's ID (#63)", async () => {
+    const { root, application, ids } = await populated();
+    const hushMeeting = await seed(root, "meetings", "meeting", "Board prep", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [ids.me.id] });
+    await seed(root, "meetings", "meeting-note", "Board prep notes", { meeting_id: hushMeeting.id, sensitivity: "restricted" });
+    await seed(root, "tasks", "task", "Follow up from board prep", { status: "Next", owner_person_id: ids.me.id, source_meeting_id: hushMeeting.id });
+    const hidden = await seed(root, "people", "person", "Hidden Person", { given_name: "Hidden", sensitivity: "restricted" });
+    await seed(root, "tasks", "task", "Waiting on someone private", { status: "Waiting", owner_person_id: ids.me.id, waiting_for_person_id: hidden.id, updated_at: at(-2) });
+    await application.rebuildIndex();
+    await application.writeAgentIndex({ now });
+
+    const meetings = await read(root, "meetings.md");
+    expect(meetings).not.toContain("Board prep");
+    expect(meetings).not.toContain(hushMeeting.id);
+    expect(meetings).toContain("1 restricted not listed");
+    expect(await read(root, "tasks.md")).toContain("meeting: (restricted)");
+    const waiting = await read(root, "waiting-on.md");
+    expect(waiting).toContain("Waiting on someone private");
+    expect(waiting).not.toContain(hidden.id);
+    const all = (await Promise.all(files.map((name) => read(root, name)))).join("\n");
+    for (const leaked of ["Board prep", hushMeeting.id, hidden.id]) expect(all).not.toContain(leaked);
+  });
+
   it("lists pending drafts and patches as \"pending adoption\", restricted drafts counted only", async () => {
     const { root, application } = await populated();
     await mkdir(path.join(root, "_inbox", "drafts"), { recursive: true });

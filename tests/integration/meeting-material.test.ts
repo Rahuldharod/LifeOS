@@ -165,6 +165,29 @@ describe("meeting-material adoption", () => {
     expect((await ofType(application, "meeting"))).toHaveLength(1);
   });
 
+  it("refuses to accept a summary for a meeting restricted after it was raised, by the meeting or its note (#63)", async () => {
+    const { root, application } = await vault([event("evt-1"), event("evt-2")]);
+    const first = await application.createMeetingFromEvent("evt-1", range.from, range.to, "work", "# Notes\n");
+    const second = await application.createMeetingFromEvent("evt-2", range.from, range.to, "work", "# Notes\n");
+    await dropDraft(root, "one.md", material({ key: "one", meeting: first.meeting.frontmatter.id }));
+    await dropDraft(root, "two.md", material({ key: "two", meeting: second.meeting.frontmatter.id }));
+    await application.adoptDrafts();
+    const summaryFor = (meetingId: string) => application.reviews().find((review) => review.frontmatter.review_type === "summary" && review.frontmatter.target_object_id === meetingId)!;
+    const firstSummary = summaryFor(first.meeting.frontmatter.id);
+    const secondSummary = summaryFor(second.meeting.frontmatter.id);
+    await application.setSensitivity(first.note!.frontmatter.id, "restricted", (await application.object(first.note!.frontmatter.id)).contentHash);
+    await application.setSensitivity(second.meeting.frontmatter.id, "restricted", (await application.object(second.meeting.frontmatter.id)).contentHash);
+
+    for (const [review, meetingId] of [[firstSummary, first.meeting.frontmatter.id], [secondSummary, second.meeting.frontmatter.id]] as const) {
+      const before = await application.object(meetingId);
+      await expect(application.acceptReviewItem(review.frontmatter.id)).rejects.toThrow("This meeting is now restricted, so its summary cannot be accepted");
+      const after = await application.object(meetingId);
+      expect(after.body).toBe(before.body);
+      expect(after.body).not.toContain("## Summary");
+      expect(application.reviews().find((item) => item.frontmatter.id === review.frontmatter.id)!.frontmatter.status).toBe("pending");
+    }
+  });
+
   it("a later summary replaces the Summary section rather than adding a second one", async () => {
     const { root, application } = await vault();
     await dropDraft(root, "one.md", material({ key: "one" }));

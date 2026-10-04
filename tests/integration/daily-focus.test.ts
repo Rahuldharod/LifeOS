@@ -264,6 +264,24 @@ describe("Today with the Daily Focus brief", () => {
     await expect(application.requestReplan("tomorrow", { now })).rejects.toThrow(/calendar date/);
   });
 
+  it("Refresh never names a restricted brief, even in a replan already waiting (#63)", async () => {
+    const { root, application } = await vault();
+    await dropDraft(root, "focus.md", brief());
+    await application.adoptDrafts({ now });
+    const current = application.today({ date, now }).focus.brief!;
+    const first = await application.requestReplan(date, { now });
+    expect(await readFile(path.join(root, first.workOrder), "utf8")).toContain(current.id);
+
+    await application.setSensitivity(current.id, "restricted", application.object(current.id).contentHash);
+    const again = await application.requestReplan(date, { now });
+    const files = await requestFiles(root);
+    expect(files).toHaveLength(1);
+    const raw = await readFile(path.join(root, again.workOrder), "utf8");
+    expect(raw).toContain("kind: replan");
+    expect(raw).not.toContain(current.id);
+    expect(raw).not.toContain(current.path);
+  });
+
   it("Refresh with no brief yet still asks Claude to plan the date", async () => {
     const { root, application } = await vault();
     await application.requestReplan(date, { now });

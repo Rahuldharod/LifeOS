@@ -3,7 +3,8 @@ import type { CalendarModule } from "./calendar.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, InboxStore } from "./ports.js";
-import { isLive, isRestricted } from "./support.js";
+import { personEmails } from "./people.js";
+import { isLive, isMeetingRestricted, isRestricted } from "./support.js";
 
 /**
  * Enrichment Work Orders (PRD "Enrichment Work Orders", ADR 0008): "Enrich last 48h" lists every ended
@@ -100,15 +101,21 @@ export class EnrichmentModule {
         !event.declined && !(event.calendarId && disabledCalendarIds.includes(event.calendarId));
     }).sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
 
+    // Emails of restricted People never appear in a Work Order (ADR 0010, #63).
+    const objects = ctx.index.all();
+    const meetingNotes = objects.filter((object) => object.frontmatter.type === "meeting-note");
+    const hiddenEmails = new Set(objects.filter((object) => object.frontmatter.type === "person" && isRestricted(object)).flatMap((person) => personEmails(person)));
     let restrictedExcluded = 0;
     const selected: Array<{ event: CalendarEvent; meeting?: LifeOSObject; entry: Record<string, unknown>; summary: EnrichmentEntry }> = [];
     for (const event of this.meetings.withNoteLinks(ended)) {
       const meeting = event.meetingId ? ctx.index.get(event.meetingId) : undefined;
-      if (meeting && isRestricted(meeting)) { restrictedExcluded += 1; continue; }
+      if (isMeetingRestricted(meeting, meetingNotes)) { restrictedExcluded += 1; continue; }
       if (meeting && ["enriched", "gave_up"].includes(enrichmentStateOf(meeting))) continue;
       const note = event.noteId ? ctx.index.get(event.noteId) : undefined;
-      const sources = meeting ? this.sourcesFor(meeting, note).filter((source) => !isRestricted(source)) : [];
-      const have = new Set(sources.map((source) => String(source.frontmatter.source_type)));
+      // A restricted Source still covers its material (so it is not fetched again); it is just never named.
+      const allSources = meeting ? this.sourcesFor(meeting, note) : [];
+      const sources = allSources.filter((source) => !isRestricted(source));
+      const have = new Set(allSources.map((source) => String(source.frontmatter.source_type)));
       const absent = meeting ? unavailableOf(meeting) : [];
       const missingMaterial = expectedMaterial.filter((kind) => !have.has(kind) && !absent.includes(kind));
       const entry: Record<string, unknown> = {
@@ -116,8 +123,8 @@ export class EnrichmentModule {
         calendar_event_id: event.externalId,
         ...(event.calendarId ? { calendar_id: event.calendarId } : {}),
         title: event.title, starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone,
-        attendee_emails: attendeeEmails([...(event.attendeeDetails ?? []), ...event.attendees]),
-        ...(note && !isRestricted(note) ? { note_path: note.relativePath } : {}),
+        attendee_emails: attendeeEmails([...(event.attendeeDetails ?? []), ...event.attendees]).filter((email) => !hiddenEmails.has(email.toLowerCase())),
+        ...(note ? { note_path: note.relativePath } : {}),
         existing_sources: sources.map((source) => ({
           id: source.frontmatter.id, source_type: String(source.frontmatter.source_type), path: source.relativePath,
           ...(typeof source.frontmatter.url === "string" ? { url: source.frontmatter.url } : {}),

@@ -4,7 +4,7 @@ import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
 import type { MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
-import { inheritContextLinks, isLive, isRestricted, objectIdPattern } from "./support.js";
+import { inheritContextLinks, isLive, isMeetingRestricted, objectIdPattern } from "./support.js";
 
 /**
  * Adoption of meeting material (#45, PRD "Enrichment Work Orders"). One `meeting-material` draft per meeting,
@@ -68,7 +68,7 @@ export class MeetingMaterialModule {
     const reference = text(fields.meeting);
     if (!reference) throw new DraftError(["meeting: missing; give the calendar event ID (or meeting ID) from the Work Order"]);
     let meeting = this.existingMeeting(reference);
-    if (meeting && isRestricted(meeting)) throw new DraftError([`meeting: ${meeting.frontmatter.id} is restricted; LifeOS does not enrich restricted meetings`]);
+    if (meeting && isMeetingRestricted(meeting, ctx.index.all())) throw new DraftError([`meeting: ${meeting.frontmatter.id} is restricted; LifeOS does not enrich restricted meetings`]);
 
     // 2. Every check up front, so a bad draft writes nothing (not even the meeting).
     const issues: string[] = [];
@@ -304,6 +304,8 @@ export async function acceptSummary(ctx: AppContext, review: LifeOSObject) {
   if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
   const meeting = ctx.required(meetingId, "meeting");
   if (meeting.frontmatter.deleted_at) throw new Error("The meeting for this summary was deleted");
+  // ADR 0010, #63: restricted since the summary was raised (the meeting or its note); nothing is written.
+  if (isMeetingRestricted(meeting, ctx.index.all())) throw new Error("This meeting is now restricted, so its summary cannot be accepted");
   const summary = text((review.frontmatter.proposed_fields as Record<string, unknown> | undefined)?.summary);
   if (!summary) throw new Error("This summary Review Item has no summary text");
   const now = new Date().toISOString();

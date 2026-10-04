@@ -128,7 +128,8 @@ describe("Enrich last 48h Work Order", () => {
     const result = await application.requestEnrichment({ now });
     const [entry] = (await frontmatterOf(path.join(root, result.workOrder!))).meetings as Array<Record<string, unknown>>;
     expect(entry!.existing_sources).toEqual([{ id: sourceId, source_type: "meet-transcript", path: `sources/transcript--${sourceId}.md`, url: "https://docs.example/t", external_id: "doc-1" }]);
-    expect(entry!.missing_material).toEqual(["meet-recording", "gong-call", "gong-summary-email"]);
+    // #63: a restricted Source still covers its material, so Claude is never sent to fetch it again.
+    expect(entry!.missing_material).toEqual(["gong-call", "gong-summary-email"]);
     expect(JSON.stringify(entry)).not.toContain(restrictedSourceId);
     expect(application.object(meeting.frontmatter.id).frontmatter.enrichment_state).toBe("requested");
 
@@ -138,20 +139,37 @@ describe("Enrich last 48h Work Order", () => {
     expect(await requestFiles(root)).toHaveLength(2);
   });
 
-  it("excludes restricted meetings and never names a restricted note", async () => {
-    const { root, application } = await vault([event("secret", 3), event("open", 4)]);
+  it("excludes a meeting when the meeting or its note is restricted (#63)", async () => {
+    const { root, application } = await vault([event("secret", 3), event("noted", 4), event("open", 5)]);
     const secret = await createMeeting(application, "secret");
-    const open = await application.createMeetingFromEvent("open", range.from, range.to, "work");
+    const noted = await application.createMeetingFromEvent("noted", range.from, range.to, "work");
+    await createMeeting(application, "open");
     await application.setSensitivity(secret.frontmatter.id, "restricted", application.object(secret.frontmatter.id).contentHash);
-    await application.setSensitivity(open.note!.frontmatter.id, "restricted", open.note!.contentHash);
+    await application.setSensitivity(noted.note!.frontmatter.id, "restricted", noted.note!.contentHash);
 
     const result = await application.requestEnrichment({ now });
     expect(result.meetings.map((entry) => entry.calendarEventId)).toEqual(["open"]);
-    expect(result.restrictedExcluded).toBe(1);
+    expect(result.restrictedExcluded).toBe(2);
     const content = await readFile(path.join(root, result.workOrder!), "utf8");
     expect(content).not.toContain("secret");
-    expect(content).not.toContain(open.note!.relativePath);
+    expect(content).not.toContain("noted");
+    expect(content).not.toContain(noted.meeting.frontmatter.id);
+    expect(content).not.toContain(noted.note!.relativePath);
     expect(application.object(secret.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
+    expect(application.object(noted.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
+  });
+
+  it("never lists the email of a restricted person (#63)", async () => {
+    const attendeeDetails = [{ email: "hidden@client.example", displayName: "Hidden Person" }, { email: "joel@client.example", displayName: "Joel Martin" }];
+    const { root, application } = await vault([event("a", 3, { attendees: ["Hidden Person", "Joel Martin"], attendeeDetails })]);
+    await createMeeting(application, "a");
+    const hidden = (await application.listObjects()).find((object) => object.frontmatter.type === "person" && JSON.stringify(object.frontmatter.identifiers ?? []).includes("hidden@client.example"))!;
+    await application.setSensitivity(hidden.frontmatter.id, "restricted", hidden.contentHash);
+
+    const result = await application.requestEnrichment({ now });
+    const [entry] = (await frontmatterOf(path.join(root, result.workOrder!))).meetings as Array<Record<string, unknown>>;
+    expect(entry!.attendee_emails).toEqual(["joel@client.example"]);
+    expect(await readFile(path.join(root, result.workOrder!), "utf8")).not.toContain("hidden@client.example");
   });
 
   it("writes no file and says so when no meeting qualifies", async () => {
