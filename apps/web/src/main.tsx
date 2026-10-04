@@ -24,7 +24,8 @@ import { DecisionsPage } from "./DecisionsPage.js";
 import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, parseEmails, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
-import { awaitingAdoptionLabel, daysBetween, visibleRows } from "./todayPanels.js";
+import { awaitingAdoptionLabel, daysBetween } from "./todayPanels.js";
+import { CappedRows, GiveUpRow, LivePanel, WaitingGroupRow, type WaitingGroup } from "./TodayLists.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
 
@@ -70,7 +71,7 @@ type TodaySettings = { meetingHoursThreshold: number; briefTime: string; briefTi
 /** #48: Today's live panels, computed by the server on each load (never from the brief). */
 type TodayPanels = {
   date: string; overdue: LifeObject[]; dueToday: LifeObject[]; upcomingHighPriority: LifeObject[];
-  waitingByPerson: Array<{ personId?: string; label: string; isExternal: boolean; tasks: LifeObject[] }>;
+  waitingByPerson: Array<WaitingGroup & { tasks: LifeObject[] }>;
   nextMeetings: Array<{ title: string; startsAt: string; endsAt: string; inProgress: boolean; meetingId?: string; noteId?: string; calendarEventId?: string; calendarName?: string; restricted: boolean }>;
   meetingHours: number; meetingHeavy: boolean; calendarError?: string;
   openPointsForMeetings: Array<{ openPoint: LifeObject; meetingId: string; meetingTitle: string; link: "raised-in" | "project" | "client" | "people" }>;
@@ -1278,16 +1279,16 @@ function App() {
           <Summary label="Today's events" value={events.length} detail="across connected calendars" />
         </div>
         <article className="quick-capture"><span>QUICK CAPTURE</span><div className="capture-row"><input value={capture} onChange={(event) => setCapture(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) submitCapture(); }} placeholder="Capture a task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={submitCapture}>Capture</button></div></article>
-        {today.focus ? <DailyFocusPanel focus={today.focus} tasks={today.tasks} disabled={busy || readOnly} onRefresh={() => void requestReplan()} onChange={(change) => void changeFocus(change)} />
-          : <article><span>SUGGESTED TOP 3</span>{!today.topThree.length && <p className="muted">No active commitments to rank.</p>}{today.topThree.map(({ task, reason }) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}</b><small>{reason}</small></div></div>)}</article>}
+        {/* #64: /today always returns `focus`, so the old "Suggested Top 3" fallback could never show. */}
+        {today.focus && <DailyFocusPanel focus={today.focus} tasks={today.tasks} disabled={busy || readOnly} onRefresh={() => void requestReplan()} onChange={(change) => void changeFocus(change)} />}
         <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void requestEnrichment()}>Enrich last 48h</button></div>
           {/* #48: stale Work Orders moved to the "Inbox and agents" live panel. */}
-          {enrichment.proposedGaveUp.map((meeting) => <div className="object-row" key={meeting.meetingId}><i /><div><b>{meeting.title}</b><small>No material 48 hours after the request</small></div><button disabled={busy || readOnly} onClick={() => void giveUpEnrichment(meeting.meetingId)}>Give up</button></div>)}</article>
+          <CappedRows items={enrichment.proposedGaveUp} row={(meeting) => <GiveUpRow key={meeting.meetingId} meeting={meeting} disabled={busy || readOnly} onGiveUp={(meetingId) => void giveUpEnrichment(meetingId)} />} /></article>
         {todayPanels ? <TodayLivePanels panels={todayPanels} onOpenInbox={() => setView("Inbox")} /> : <>
           {/* Until the live panels load (or if they fail), the basic lists from /today stand in. */}
-          <ObjectList title="Overdue" objects={today.overdue} empty="Nothing overdue." />
-          <ObjectList title="Due today" objects={today.dueToday} empty="Nothing due today." />
-          <ObjectList title="Waiting" objects={today.waiting} empty="Nothing waiting on someone else." />
+          <LivePanel title="Overdue" items={today.overdue} empty="Nothing overdue." row={objectRow} />
+          <LivePanel title="Due today" items={today.dueToday} empty="Nothing due today." row={objectRow} />
+          <LivePanel title="Waiting" items={today.waiting} empty="Nothing waiting on someone else." row={objectRow} />
         </>}
       </>}
 
@@ -1498,8 +1499,8 @@ function Summary({ label, value, detail }: { label: string; value: string | numb
  */
 function DailyFocusPanel({ focus, tasks, disabled, onRefresh, onChange }: { focus: DailyFocus; tasks: LifeObject[]; disabled: boolean; onRefresh: () => void; onChange: (change: FocusChange) => void }) {
   const stateLabel = { open: "", done: "Done", cancelled: "Cancelled", past: "Past", missing: "Missing: deleted or not found" } as const;
-  const row = (item: FocusItem, details: Array<string | undefined>) => <div className={`object-row focus-item ${item.state}`} key={item.id}><i /><div><b>{item.object?.frontmatter.title ?? "Missing item"}</b><small>{[stateLabel[item.state], ...details].filter(Boolean).join(" · ")}</small></div></div>;
-  const section = (title: string, items: FocusItem[], details: (item: FocusItem) => Array<string | undefined>, empty: string) => <div className="focus-section"><h4>{title}</h4>{items.length ? items.map((item) => row(item, details(item))) : <p className="muted">{empty}</p>}</div>;
+  const row = (item: FocusItem, details: Array<string | undefined>) => <div className={`object-row focus-item ${item.state}`} key={item.id}><i /><div><b>{item.object?.frontmatter.title ?? "Missing item"}{item.object && <LockBadge frontmatter={item.object.frontmatter} />}</b><small>{[stateLabel[item.state], ...details].filter(Boolean).join(" · ")}</small></div></div>;
+  const section = (title: string, items: FocusItem[], details: (item: FocusItem) => Array<string | undefined>, empty: string) => <div className="focus-section"><h4>{title}</h4>{items.length ? <CappedRows items={items} row={(item) => row(item, details(item))} /> : <p className="muted">{empty}</p>}</div>;
   const { brief } = focus;
   return <article className="daily-focus">
     <span>DAILY FOCUS</span>
@@ -1534,7 +1535,7 @@ function TopThreeSection({ focus, tasks, disabled, onChange, stateLabel }: { foc
     <h4>Top 3</h4>
     {!focus.top3.length && <p className="muted">No active commitments to rank.</p>}
     {focus.top3.map((item) => <div key={item.id}>
-      <div className={`object-row focus-item ${item.state}`}><i /><div><b>{title(item)}</b><small>{[item.pinned ? "Pinned" : undefined, stateLabel[item.state], item.whyToday, item.replaces ? `Replaces "${item.replaces.title}"` : undefined, item.ifThen].filter(Boolean).join(" · ")}</small></div>
+      <div className={`object-row focus-item ${item.state}`}><i /><div><b>{title(item)}{item.object && <LockBadge frontmatter={item.object.frontmatter} />}</b><small>{[item.pinned ? "Pinned" : undefined, stateLabel[item.state], item.whyToday, item.replaces ? `Replaces "${item.replaces.title}"` : undefined, item.ifThen].filter(Boolean).join(" · ")}</small></div>
         <div className="focus-controls">
           {item.object && <button type="button" aria-pressed={Boolean(item.pinned)} aria-label={`${item.pinned ? "Unpin" : "Pin"} ${title(item)}`} disabled={disabled} onClick={() => onChange({ action: item.pinned ? "unpin" : "pin", taskId: item.id })}>{item.pinned ? "Unpin" : "Pin"}</button>}
           <button type="button" aria-expanded={replacing === item.id} aria-label={`Replace ${title(item)}`} disabled={disabled || !candidates.length} onClick={() => replacing === item.id ? cancelReplace() : (setReplacing(item.id), setChoice(""))}>Replace</button>
@@ -1552,7 +1553,7 @@ function TopThreeSection({ focus, tasks, disabled, onChange, stateLabel }: { foc
       <button type="button" disabled={disabled || !toPin} onClick={() => { onChange({ action: "pin", taskId: toPin }); setToPin(""); }}>Pin</button>
     </div>}
     {focus.dismissedTop3.length > 0 && <div className="focus-dismissed"><small>Dismissed for today</small>
-      {focus.dismissedTop3.map((item) => <div className="object-row" key={item.id}><div><b>{title(item)}</b></div><button type="button" aria-label={`Restore ${title(item)} to today's Top 3`} disabled={disabled} onClick={() => onChange({ action: "restore", taskId: item.id })}>Restore</button></div>)}
+      <CappedRows items={focus.dismissedTop3} row={(item) => <div className="object-row" key={item.id}><div><b>{title(item)}</b></div><button type="button" aria-label={`Restore ${title(item)} to today's Top 3`} disabled={disabled} onClick={() => onChange({ action: "restore", taskId: item.id })}>Restore</button></div>} />
     </div>}
     {focus.override && <button type="button" className="link-button" disabled={disabled} onClick={() => onChange({ action: "reset" })}>Clear my Top 3 changes for today</button>}
   </div>;
@@ -1586,24 +1587,6 @@ function PeopleMeta({ label, people, labels, empty }: { label: string; people: L
   const text = people.map((person) => personLabel(labels, person).label).join(", ") || empty;
   return <div className="meta"><small>{label}</small><b title={text}>{people.length ? <PeopleList people={people} labels={labels} /> : empty}</b></div>;
 }
-/**
- * #48: one live panel. At most 6 rows show until "Show N more" (a real button, so keyboard and screen
- * readers reach it); the count sits in the heading as text.
- */
-function LivePanel<T>({ title, items, empty, row, note }: { title: string; items: readonly T[]; empty: string; row: (item: T) => React.ReactNode; note?: React.ReactNode }) {
-  const [expanded, setExpanded] = useState(false);
-  const id = React.useId();
-  const { rows, hidden } = visibleRows(items, expanded);
-  const collapsible = visibleRows(items, false).hidden > 0;
-  return <article className="live-panel" aria-labelledby={`${id}-title`}>
-    <span id={`${id}-title`}>{title.toUpperCase()} · {items.length}</span>
-    {note}
-    {!items.length && <p className="muted">{empty}</p>}
-    <div id={`${id}-rows`}>{rows.map(row)}</div>
-    {collapsible && <button type="button" className="show-more" aria-expanded={expanded} aria-controls={`${id}-rows`} onClick={() => setExpanded(!expanded)}>{expanded ? "Show fewer" : `Show ${hidden} more`}</button>}
-  </article>;
-}
-
 const dueText = (task: LifeObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
 const openPointLinkText = { "raised-in": "Raised in", project: "Same project as", client: "Same client as", people: "Same people as" } as const;
 
@@ -1622,7 +1605,7 @@ function TodayLivePanels({ panels, onOpenInbox }: { panels: TodayPanels; onOpenI
     <LivePanel title="Overdue" items={panels.overdue} empty="Nothing overdue." row={taskRow(overdueBy)} />
     <LivePanel title="Due today" items={panels.dueToday} empty="Nothing due today." row={taskRow((task) => `Due today${task.frontmatter.priority ? ` · ${String(task.frontmatter.priority)} priority` : ""}`)} />
     <LivePanel title="Upcoming high priority" items={panels.upcomingHighPriority} empty="No upcoming high-priority work." row={taskRow((task) => `High priority · ${dueText(task) ? `due ${dueText(task)}` : "no due date"}`)} />
-    <LivePanel title="Waiting by person" items={panels.waitingByPerson} empty="Nothing waiting on someone else." row={(group) => <div className="object-row" key={group.personId ?? "unknown"}><i /><div><b>{group.label}</b><small>{group.tasks.length} waiting: {group.tasks.map((task) => task.frontmatter.title).join(", ")}</small></div></div>} />
+    <LivePanel title="Waiting by person" items={panels.waitingByPerson} empty="Nothing waiting on someone else." row={(group) => <WaitingGroupRow key={group.personId ?? "unknown"} group={group} />} />
     <LivePanel title="Next meetings" items={panels.nextMeetings} empty={panels.calendarError ? "No meetings found in LifeOS for the rest of today." : "No more meetings today."}
       note={<>{panels.calendarError && <p className="muted" role="status">Calendar could not be read ({panels.calendarError}); showing meetings already in LifeOS.</p>}<p className="muted">{panels.meetingHours} h of meetings today{panels.meetingHeavy ? ` · Meeting-heavy day (${panels.settings.meetingHoursThreshold} h or more)` : ""}</p></>}
       row={(meeting) => <div className="object-row" key={meeting.meetingId ?? meeting.calendarEventId}><i /><div><b>{meeting.title}{meeting.restricted && <LockBadge frontmatter={{ sensitivity: "restricted" }} />}</b><small>{[meeting.inProgress ? "Now" : undefined, meetingTime(meeting), meeting.calendarName, meeting.noteId ? "Has notes" : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
@@ -1633,8 +1616,9 @@ function TodayLivePanels({ panels, onOpenInbox }: { panels: TodayPanels; onOpenI
   </>;
 }
 
+const objectRow = (object: LifeObject) => <div className="object-row" key={object.frontmatter.id}><i /><div><b>{object.frontmatter.title}<LockBadge frontmatter={object.frontmatter} /></b><small>{object.frontmatter.status ?? object.frontmatter.type} · Updated {formatDate(object.frontmatter.updated_at)}</small></div></div>;
 function ObjectList({ title, objects, empty }: { title: string; objects: LifeObject[]; empty: string }) {
-  return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map((object) => <div className="object-row" key={object.frontmatter.id}><i /><div><b>{object.frontmatter.title}<LockBadge frontmatter={object.frontmatter} /></b><small>{object.frontmatter.status ?? object.frontmatter.type} · Updated {formatDate(object.frontmatter.updated_at)}</small></div></div>)}</article>;
+  return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map(objectRow)}</article>;
 }
 
 const entityFields: Record<EntityType, Array<{ key: string; label: string; kind?: "select" | "date" | "person"; options?: string[] }>> = {

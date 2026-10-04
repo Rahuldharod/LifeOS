@@ -123,6 +123,8 @@ describe("Today task panels", () => {
     ]);
     expect(groups[0]!.personId).toBe(joel);
     expect(groups[2]!.personId).toBeUndefined();
+    // #64: the standard person label parts, so the web renders the " - ext" marker as styled text.
+    expect(groups.map((group) => [group.name, group.suffix])).toEqual([["Joel", " - ext"], ["Anna", undefined], ["No person recorded", undefined]]);
   });
 });
 

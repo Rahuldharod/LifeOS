@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
-import { EnvelopeBadges } from "./EnvelopeBadges.js";
+import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
 import { zonedDateTime, zonedInputValue } from "./zonedTime.js";
 
@@ -88,7 +88,7 @@ export function DecisionsPage({ projects, clients, products, people, busy, readO
           const value = decision.frontmatter;
           const context = [titleOf(value.primary_project_id, projects), titleOf(value.primary_client_id, clients), titleOf(value.primary_product_id, products)].filter(Boolean).join(" · ");
           return <li key={value.id}><button className={value.id === selectedId ? "decision-row selected" : "decision-row"} aria-current={value.id === selectedId ? "true" : undefined} onClick={() => setSelectedId(value.id)}>
-            <b>{value.title}</b>
+            <b>{value.title}<LockBadge frontmatter={value} /></b>
             <small><span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span> · {formatDate(value.decided_at)}{context ? ` · ${context}` : ""}</small>
           </button></li>;
         })}</ul>

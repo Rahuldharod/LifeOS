@@ -44,7 +44,8 @@ export interface NextMeeting {
 }
 export type OpenPointLink = "raised-in" | "project" | "client" | "people";
 export interface MeetingOpenPoint { openPoint: LifeOSObject; meetingId: string; meetingTitle: string; link: OpenPointLink }
-export interface WaitingGroup { personId?: string; label: string; isExternal: boolean; tasks: LifeOSObject[] }
+/** `name` + `suffix` are the standard person label parts (#39), so the web styles the external marker (#64). */
+export interface WaitingGroup { personId?: string; name: string; suffix?: string; label: string; isExternal: boolean; tasks: LifeOSObject[] }
 export interface TodayPanels {
   date: string;
   timeZone: string;
@@ -137,7 +138,7 @@ export class TodayModule {
       const personId = typeof task.frontmatter.waiting_for_person_id === "string" ? task.frontmatter.waiting_for_person_id : undefined;
       const label = personId ? labels.get(personId) : undefined;
       const key = label ? label.id : "";
-      const group = groups.get(key) ?? { ...(label ? { personId: label.id } : {}), label: label?.label ?? "No person recorded", isExternal: label?.isExternal ?? false, tasks: [] };
+      const group = groups.get(key) ?? { ...(label ? { personId: label.id } : {}), name: label?.name ?? "No person recorded", ...(label?.suffix ? { suffix: label.suffix } : {}), label: label?.label ?? "No person recorded", isExternal: label?.isExternal ?? false, tasks: [] };
       group.tasks.push(task);
       groups.set(key, group);
     }
