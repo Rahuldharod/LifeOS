@@ -12,7 +12,7 @@ import { PatchModule } from "./patches.js";
 import { PeopleModule } from "./people.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
-import { ReviewModule } from "./review.js";
+import { ReviewModule, type ReviewEdits } from "./review.js";
 import { SystemModule } from "./system.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
@@ -22,6 +22,7 @@ export type { ExternalSource, PersonLabel } from "./people.js";
 export type { AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
+export type { ReviewEdits, ReviewEvidence } from "./review.js";
 export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./resolution.js";
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
 export type { EnrichmentEntry, EnrichmentRequest, EnrichmentState, EnrichmentStatus } from "./enrichment.js";
@@ -130,6 +131,8 @@ export class LifeOSApplication {
   processMeeting(meetingId: string) { return this.review.processMeeting(meetingId); }
   acceptReviewItem(reviewId: string, options?: { linkTo?: string }) { return this.review.acceptReviewItem(reviewId, options); }
   updateReviewTitle(reviewId: string, title: string) { return this.review.updateReviewTitle(reviewId, title); }
+  updateReviewFields(reviewId: string, changes: ReviewEdits) { return this.review.updateReviewFields(reviewId, changes); }
+  reviewEvidence(reviewId: string) { return this.review.reviewEvidence(reviewId); }
   rejectReviewItem(reviewId: string) { return this.review.rejectReviewItem(reviewId); }
   /** #40: proposes `person-merge` Review Items for likely duplicate people; never merges by itself. */
   suggestPersonMerges() { return this.review.merges.suggest(); }

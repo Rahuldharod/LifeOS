@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { MockAiProvider } from "@lifeos/ai";
-import { LifeOSApplication } from "@lifeos/application";
+import { LifeOSApplication, type ReviewEdits } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
@@ -192,7 +192,8 @@ server.post<{ Params: { id: string }; Body: { sensitivity?: "normal" | "restrict
 });
 server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (request) => application.processMeeting(request.params.id));
 server.post<{ Params: { id: string }; Body: { linkTo?: string } | undefined }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
-server.patch<{ Params: { id: string }; Body: { title: string } }>("/api/v1/review-items/:id", async (request) => application.updateReviewTitle(request.params.id, request.body.title));
+// Edits a pending proposal: title, owner, due, priority and context links (#34); `null` clears a field.
+server.patch<{ Params: { id: string }; Body: ReviewEdits }>("/api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));
 server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/reject", async (request) => application.rejectReviewItem(request.params.id));
 server.get("/api/v1/today", async () => application.today());
 server.get("/api/v1/tasks", async () => application.tasks());
@@ -217,7 +218,8 @@ server.post<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; 
   if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
   return application.supersedeDecision(request.params.id, request.body.fields, request.body.expectedHash);
 });
-server.get("/api/v1/review-items", async () => application.reviews());
+// Each item carries its evidence per field, with sources looked up now (missing ones come back unresolved).
+server.get("/api/v1/review-items", async () => application.reviews().map((review) => ({ ...review, evidence: application.reviewEvidence(review.frontmatter.id) })));
 server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());
 server.post("/api/v1/inbox/adopt", async () => application.adoptDrafts());
 server.get("/api/v1/enrichment", async () => application.enrichmentStatus());

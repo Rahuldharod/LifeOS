@@ -1,10 +1,10 @@
-import { uuidV7, type LifeOSObject } from "@lifeos/domain";
-import { markdownFileName, type AppContext } from "./context.js";
+import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import type { PatchModule } from "./patches.js";
 import type { InboxDocument, InboxFile, InboxFolder, InboxStore } from "./ports.js";
 import { internalDomainsOf, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
-import { ReferenceResolver } from "./resolution.js";
+import { ReferenceResolver, type ReferenceField } from "./resolution.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -102,6 +102,20 @@ export function toUtc(value: unknown) {
 }
 export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 
+/** The Review Item body for a proposal: its title, then the Agent's narrative as written. */
+export function proposalBody(title: string, narrative?: unknown) {
+  const body = typeof narrative === "string" ? narrative.trim() : "";
+  return `# Proposal\n\n${title}\n${body ? `\n${body}\n` : ""}`;
+}
+
+/** Which by-name references (#33) each kind can carry; others are refused rather than silently dropped. */
+const kindReferences: Record<string, ReferenceField[]> = {
+  task: ["project", "client", "product", "people", "owner", "waiting_for", "meeting"],
+  decision: ["project", "client", "product", "people", "meeting"],
+  "open-point": ["project", "client", "product", "people", "owner", "meeting"]
+};
+const contextLinkFields = ["primary_client_id", "primary_product_id", "primary_project_id"];
+
 /** Zod issues (from the object store's validation) as "field: reason"; anything else is not the draft's fault. */
 export function validationIssues(error: unknown) {
   const issues = (error as { issues?: Array<{ path: PropertyKey[]; message: string }> }).issues;
@@ -111,7 +125,12 @@ export function validationIssues(error: unknown) {
 export class AdoptionModule {
   /** Handlers keyed `kind:origin`. Missing combinations fail with "not supported yet" so nothing is guessed. */
   private readonly routes: Partial<Record<`${DraftKind}:${DraftOrigin}`, DraftHandler>> = {
-    "task:user-dictated": (draft, run) => this.adoptDictatedTask(draft, run),
+    "task:user-dictated": (draft, run) => this.adoptDictated(draft, run),
+    "decision:user-dictated": (draft, run) => this.adoptDictated(draft, run),
+    "open-point:user-dictated": (draft, run) => this.adoptDictated(draft, run),
+    "task:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
+    "decision:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
+    "open-point:agent-extracted": (draft, run) => this.proposeExtracted(draft, run),
     "person:user-dictated": (draft, run) => this.adoptPerson(draft, run),
     "person:agent-extracted": (draft, run) => this.adoptPerson(draft, run)
   };
@@ -232,6 +251,8 @@ export class AdoptionModule {
     if (version === undefined) return { issues: ["lifeos_draft: missing; a draft must start with lifeos_draft: 1"] };
     if (version !== draftContractVersion) return { issues: [`lifeos_draft: unsupported contract version ${String(version)} (this LifeOS reads version ${draftContractVersion})`] };
     const issues: string[] = [];
+    // U7: only the application generates Review Item operation IDs, so a draft can never pre-empt or replay one.
+    if (fields.operation_id !== undefined) issues.push("operation_id: drafts must not carry an operation_id; LifeOS generates it at adoption");
     const kind = text(fields.kind);
     if (!kind) issues.push("kind: missing");
     else if (!(draftKinds as readonly string[]).includes(kind)) issues.push(`kind: unknown kind "${kind}" (expected one of ${draftKinds.join(", ")})`);
@@ -277,54 +298,159 @@ export class AdoptionModule {
     return ledger;
   }
 
-  /** `task` + `user-dictated`: an Inbox task owned by self, created without review (PRD story 2). */
-  private async adoptDictatedTask(draft: ParsedDraft, run: AdoptionRun) {
+  /**
+   * Kind-specific fields shared by dictated objects and extracted proposals, validated into their stored form.
+   * Envelope extras pass through; their values are validated by the envelope rules when the object is written.
+   */
+  private kindFields(draft: ParsedDraft) {
     const { fields } = draft;
     const issues: string[] = [];
-    const extra: Record<string, unknown> = {};
-    const status = text(fields.status) || "Inbox";
-    const statuses = ["Inbox", "Next", "Waiting", "Done", "Cancelled"];
-    if (!statuses.includes(status)) issues.push(`status: unknown status "${status}" (expected one of ${statuses.join(", ")})`);
-    if (status === "Done") extra.completed_at = draft.capturedAt;
-    if (status === "Cancelled") extra.cancelled_at = draft.capturedAt;
-    if (fields.priority !== undefined) {
-      const priority = text(fields.priority).toLowerCase();
-      const match = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === priority);
-      if (match) extra.priority = match; else issues.push(`priority: unknown priority "${text(fields.priority)}" (expected High, Medium or Low)`);
+    const out: Record<string, unknown> = { captured_at: draft.capturedAt };
+    if (draft.kind === "task") {
+      const status = text(fields.status) || "Inbox";
+      const statuses = ["Inbox", "Next", "Waiting", "Done", "Cancelled"];
+      if (!statuses.includes(status)) issues.push(`status: unknown status "${status}" (expected one of ${statuses.join(", ")})`);
+      out.status = status;
+      if (status === "Done") out.completed_at = draft.capturedAt;
+      if (status === "Cancelled") out.cancelled_at = draft.capturedAt;
+      if (fields.priority !== undefined) {
+        const priority = text(fields.priority).toLowerCase();
+        const match = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === priority);
+        if (match) out.priority = match; else issues.push(`priority: unknown priority "${text(fields.priority)}" (expected High, Medium or Low)`);
+      }
+      if (fields.due_on !== undefined && fields.due_at !== undefined) issues.push("due_on: use due_on or due_at, not both");
+      else if (fields.due_on !== undefined) {
+        const dueOn = text(fields.due_on);
+        if (isCalendarDate(dueOn)) out.due_on = dueOn; else issues.push(`due_on: not a calendar date YYYY-MM-DD ("${dueOn}")`);
+      } else if (fields.due_at !== undefined) {
+        const dueAt = text(fields.due_at).includes("T") ? toUtc(fields.due_at) : undefined;
+        if (dueAt) { out.due_at = dueAt; out.due_timezone = text(fields.due_timezone) || "UTC"; } else issues.push(`due_at: not an ISO 8601 date-time with Z or an offset ("${text(fields.due_at)}")`);
+      }
+      if (fields.expected_output !== undefined) {
+        if (typeof fields.expected_output === "string") out.expected_output = fields.expected_output.trim(); else issues.push("expected_output: must be text");
+      }
     }
-    if (fields.due_on !== undefined && fields.due_at !== undefined) issues.push("due_on: use due_on or due_at, not both");
-    else if (fields.due_on !== undefined) {
-      const dueOn = text(fields.due_on);
-      if (isCalendarDate(dueOn)) extra.due_on = dueOn; else issues.push(`due_on: not a calendar date YYYY-MM-DD ("${dueOn}")`);
-    } else if (fields.due_at !== undefined) {
-      const dueAt = text(fields.due_at).includes("T") ? toUtc(fields.due_at) : undefined;
-      if (dueAt) { extra.due_at = dueAt; extra.due_timezone = text(fields.due_timezone) || "UTC"; } else issues.push(`due_at: not an ISO 8601 date-time with Z or an offset ("${text(fields.due_at)}")`);
+    if (draft.kind === "decision") {
+      // `decision_text` is kept only when given, so a proposal whose title is edited is decided under the edited title.
+      if (fields.decision_text !== undefined) { if (text(fields.decision_text)) out.decision_text = text(fields.decision_text); else issues.push("decision_text: must be non-empty text"); }
+      if (fields.decided_at === undefined) out.decided_at = draft.capturedAt;
+      else { const decidedAt = toUtc(fields.decided_at); if (decidedAt) out.decided_at = decidedAt; else issues.push(`decided_at: not an ISO 8601 date-time with Z or an offset ("${text(fields.decided_at)}")`); }
     }
-    if (fields.expected_output !== undefined) {
-      if (typeof fields.expected_output === "string") extra.expected_output = fields.expected_output.trim(); else issues.push("expected_output: must be text");
-    }
-    // Envelope extras pass through; their values are validated by the envelope rules when the object is written.
-    for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) extra[key] = fields[key];
-    for (const key of ["subjects", "tags"]) if (fields[key] !== undefined) { if (stringList(fields[key])) extra[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
-    if (Array.isArray(extra.subjects)) extra.subjects = this.resolver.normaliseSubjects(extra.subjects as string[]);
-    // References by name or ID (#33): resolved ones become links; the rest become link-resolution Review Items.
-    const references = this.resolver.resolveDraft(fields);
-    issues.push(...references.issues);
-    if (fields.waiting_for !== undefined && status !== "Waiting") issues.push(`waiting_for: needs status Waiting (got ${status})`);
-    if (issues.length) throw new DraftError(issues);
+    if (draft.kind === "open-point") out.status = "open";
+    for (const key of ["area", "sensitivity"]) if (fields[key] !== undefined) out[key] = fields[key];
+    for (const key of ["subjects", "tags"]) if (fields[key] !== undefined) { if (stringList(fields[key])) out[key] = fields[key]; else issues.push(`${key}: must be a list of text`); }
+    if (Array.isArray(out.subjects)) out.subjects = this.resolver.normaliseSubjects(out.subjects as string[]);
 
+    // References by name or ID (#33). Fields the kind cannot carry are refused, never dropped silently.
+    const allowed = kindReferences[draft.kind] ?? [];
+    for (const field of ["project", "client", "product", "people", "owner", "waiting_for", "meeting"] as ReferenceField[]) {
+      if (fields[field] !== undefined && !allowed.includes(field)) issues.push(`${field}: not used on a ${draft.kind}`);
+    }
+    const references = this.resolver.resolveDraft(Object.fromEntries(allowed.map((field) => [field, fields[field]])));
+    issues.push(...references.issues);
+    if (draft.kind === "task" && fields.waiting_for !== undefined && out.status !== "Waiting") issues.push(`waiting_for: needs status Waiting (got ${String(out.status)})`);
     // Context not named explicitly is inherited from the referenced meeting.
     const meeting = typeof references.links.source_meeting_id === "string" ? this.ctx.index.get(references.links.source_meeting_id) : undefined;
-    const inherited = Object.fromEntries(["primary_client_id", "primary_product_id", "primary_project_id"].filter((key) => typeof meeting?.frontmatter[key] === "string").map((key) => [key, meeting!.frontmatter[key]]));
-    const ownerId = typeof references.links.owner_person_id === "string" ? references.links.owner_person_id : (await run.self()).frontmatter.id;
+    const inherited = Object.fromEntries(contextLinkFields.filter((key) => typeof meeting?.frontmatter[key] === "string").map((key) => [key, meeting!.frontmatter[key]]));
+    return { issues, fields: out, links: { ...inherited, ...references.links } as Record<string, unknown>, unresolved: references.unresolved };
+  }
+
+  /**
+   * `user-dictated` task, decision or open point: created directly with the resolved links, owned by self unless
+   * named (PRD story 2). Unresolved references never block it; each becomes a `link-resolution` Review Item.
+   */
+  private async adoptDictated(draft: ParsedDraft, run: AdoptionRun) {
+    const { issues, fields, links, unresolved } = this.kindFields(draft);
+    if (issues.length) throw new DraftError(issues);
+    const folder = ({ task: "tasks", decision: "decisions", "open-point": "open-points" } as Record<string, string>)[draft.kind]!;
+    const owner = draft.kind === "decision" ? {} : { owner_person_id: typeof links.owner_person_id === "string" ? links.owner_person_id : (await run.self()).frontmatter.id };
+    // A new decision is always active (#41 lifecycle rule).
+    const decision = draft.kind === "decision" ? { status: "active", decision_text: fields.decision_text ?? draft.title } : {};
     const id = uuidV7();
     const narrative = draft.body.trim();
-    const task = await this.ctx.objects.write({
-      relativePath: `tasks/${markdownFileName(draft.title, id, run.now)}`,
-      frontmatter: { ...this.ctx.envelope(id, "task", draft.title, run.now, draft.origin), status, captured_at: draft.capturedAt, source_ids: [], ...inherited, ...references.links, owner_person_id: ownerId, ...extra },
+    const created = await this.ctx.objects.write({
+      relativePath: `${folder}/${markdownFileName(draft.title, id, run.now)}`,
+      frontmatter: { ...this.ctx.envelope(id, draft.kind as "task" | "decision" | "open-point", draft.title, run.now, draft.origin), source_ids: [], ...links, ...owner, ...fields, ...decision },
       body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
     });
-    return [id, ...await this.resolver.raiseLinkReviews(task.frontmatter, references.unresolved, { now: run.now, origin: draft.origin, agentRunId: run.id })];
+    return [id, ...await this.resolver.raiseLinkReviews(created.frontmatter, unresolved, { now: run.now, origin: draft.origin, agentRunId: run.id })];
+  }
+
+  /**
+   * `agent-extracted` task, decision or open point: a pending create-type Review Item, never the object itself
+   * (PRD story 3). Proposed fields keep the Agent's wording and language verbatim; nothing is translated.
+   */
+  private async proposeExtracted(draft: ParsedDraft, run: AdoptionRun) {
+    const { fields: raw } = draft;
+    const { issues, fields, links, unresolved } = this.kindFields(draft);
+    const confidence = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === text(raw.confidence).toLowerCase());
+    if (raw.confidence === undefined) issues.push("confidence: missing; an extracted draft must say how sure the Agent is (High, Medium or Low)");
+    else if (!confidence) issues.push(`confidence: unknown confidence "${text(raw.confidence)}" (expected High, Medium or Low)`);
+    const narrative = draft.body.trim();
+    // Resolved references (#33): people links are proposed fields the user can change; context links and the
+    // meeting sit on the Review Item itself, where acceptance already reads them.
+    const reviewLinks = Object.fromEntries(Object.entries(links).filter(([key]) => [...contextLinkFields, "source_meeting_id"].includes(key)));
+    const personLinks = Object.fromEntries(Object.entries(links).filter(([key]) => !(key in reviewLinks)));
+    const proposed: Record<string, unknown> = { title: draft.title, ...fields, ...personLinks, ...(narrative ? { body: narrative } : {}) };
+    const evidence = this.evidence(raw.evidence, proposed, issues);
+    if (issues.length) throw new DraftError(issues);
+
+    const id = uuidV7();
+    const sourceIds = [...new Set(Object.values(evidence).flat().flatMap((entry) => entry.source_id ? [entry.source_id] : []))];
+    await this.ctx.objects.write({
+      relativePath: `review-items/${markdownFileName(draft.title, id, run.now)}`,
+      frontmatter: {
+        ...this.ctx.envelope(id, "review-item", draft.title, run.now, "agent-extracted"),
+        ...(fields.sensitivity !== undefined ? { sensitivity: fields.sensitivity as ObjectEnvelope["sensitivity"] } : {}),
+        review_type: "create", target_object_type: draft.kind, proposed_fields: proposed, field_evidence: evidence, confidence_label: confidence!,
+        status: "pending", agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...reviewLinks,
+        // Names that matched nothing or several objects stay visible here; the user picks the link while editing
+        // the proposal, so no separate link-resolution item is raised for an object that does not exist yet.
+        ...(unresolved.length ? { unresolved_references: unresolved } : {}),
+        // U7: generated here, at adoption, never taken from the draft.
+        operation_id: uuidV7()
+      },
+      body: proposalBody(draft.title, narrative)
+    });
+    return [id];
+  }
+
+  /**
+   * `evidence:` is a list of `{ field?, source, locator?, quote? }`; `field` defaults to `title` (the proposal as a whole).
+   * `source` is an object ID, or the exact title or URL of a source, meeting or note. A reference that matches nothing,
+   * or more than one object, is kept as `source_ref` only and shown as unresolved: it never blocks the proposal.
+   */
+  private evidence(value: unknown, proposed: Record<string, unknown>, issues: string[]) {
+    const evidence: Record<string, Array<{ source_ref: string; source_id?: string; locator?: string; quote?: string }>> = {};
+    if (value === undefined) return evidence;
+    if (!Array.isArray(value)) { issues.push("evidence: must be a list of { field, source, locator, quote } entries"); return evidence; }
+    // Fields an Agent may cite: everything proposed, plus the by-name references a draft can carry.
+    const citable = new Set([...Object.keys(proposed), "project", "client", "product", "people", "owner", "waiting_for", "meeting"]);
+    value.forEach((item: unknown, index) => {
+      const at = `evidence[${index}]`;
+      if (!item || typeof item !== "object" || Array.isArray(item)) { issues.push(`${at}: must be a { field, source, locator, quote } entry`); return; }
+      const entry = item as Record<string, unknown>;
+      const field = entry.field === undefined ? "title" : text(entry.field);
+      const source = text(entry.source);
+      const before = issues.length;
+      if (!citable.has(field)) issues.push(`${at}.field: "${field}" is not a proposed field (expected one of ${[...citable].join(", ")})`);
+      if (!source) issues.push(`${at}.source: missing; name the source by ID, title or URL`);
+      for (const key of ["locator", "quote"]) if (entry[key] !== undefined && typeof entry[key] !== "string" && typeof entry[key] !== "number") issues.push(`${at}.${key}: must be text`);
+      if (issues.length > before) return;
+      const sourceId = this.resolveSource(source);
+      (evidence[field] ??= []).push({ source_ref: source, ...(sourceId ? { source_id: sourceId } : {}), ...(entry.locator !== undefined ? { locator: text(entry.locator) } : {}), ...(entry.quote !== undefined ? { quote: text(entry.quote) } : {}) });
+    });
+    return evidence;
+  }
+
+  /** An exact match only (ID, folded title, or URL); none or several matches stay unresolved rather than guessed. */
+  private resolveSource(reference: string) {
+    const byId = this.ctx.index.get(reference);
+    if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id;
+    const folded = foldForSearch(reference);
+    const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
+      && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference));
+    return matches.length === 1 ? matches[0]!.frontmatter.id : undefined;
   }
 
   /**

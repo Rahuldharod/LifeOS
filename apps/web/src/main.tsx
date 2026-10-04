@@ -212,14 +212,33 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
   return <div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} />;
 }
 
-function ReviewCard({ review, busy, onAccept, onReject, onSave }: {
+type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };
+type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
+type ReviewEdits = Record<string, string | null>;
+/** Which proposal fields the user may edit before accepting, per target type (#34). */
+const reviewEditable: Record<string, string[]> = {
+  task: ["owner_person_id", "due_on", "priority", "primary_project_id", "primary_client_id", "primary_product_id"],
+  decision: ["primary_project_id", "primary_client_id", "primary_product_id"],
+  "open-point": ["owner_person_id", "primary_project_id", "primary_client_id", "primary_product_id"]
+};
+
+function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choices }: {
   review: LifeObject;
   busy: boolean;
   onAccept: () => void;
   onReject: () => void;
-  onSave: (title: string) => void;
+  onSave: (changes: ReviewEdits) => void;
+  /** Evidence per proposed field; a source that cannot be found is shown as unresolved. */
+  evidence?: Record<string, ReviewEvidence[]>;
+  choices?: ReviewChoices;
 }) {
+  const proposed = (review.frontmatter.proposed_fields ?? {}) as Record<string, unknown>;
+  const target = String(review.frontmatter.target_object_type ?? "task");
+  const current = (key: string) => String((key.startsWith("primary_") ? review.frontmatter[key] : proposed[key]) ?? "");
+  const editable = review.frontmatter.review_type === "create" ? reviewEditable[target] ?? [] : [];
+  const unresolvedNames = Array.isArray(review.frontmatter.unresolved_references) ? review.frontmatter.unresolved_references as Array<{ field: string; reference: string; problem: string }> : [];
   const [title, setTitle] = useState(review.frontmatter.title);
+  const [fields, setFields] = useState<Record<string, string>>(() => Object.fromEntries(editable.map((key) => [key, current(key)])));
   const pending = review.frontmatter.status === "pending";
   // #40: a merge suggestion has nothing to edit; it shows why it was proposed and what accepting does.
   if (review.frontmatter.review_type === "person-merge") return <div className="review-card">
@@ -231,12 +250,36 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave }: {
       <button className="danger" disabled={busy} onClick={onReject}>Keep separate</button>
     </div>}
   </div>;
+  const changes: ReviewEdits = Object.fromEntries([
+    ...(title.trim() !== review.frontmatter.title ? [["title", title]] : []),
+    ...editable.filter((key) => fields[key] !== current(key)).map((key) => [key, fields[key] || null])
+  ]);
+  const select = (key: string, label: string, options: Array<{ id: string; title: string }>) => <label key={key}>{label}
+    <select value={fields[key] ?? ""} disabled={!pending || busy} onChange={(event) => setFields({ ...fields, [key]: event.target.value })}>
+      <option value="">{key === "owner_person_id" ? "Me" : "None"}</option>
+      {options.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+    </select></label>;
+  const evidenceEntries = Object.values(evidence ?? {}).flat();
   return <div className="review-card">
-    {pending ? <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Proposed task title" /> : <b>{review.frontmatter.title}</b>}
-    <small>{String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}</small>
+    {pending ? <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Proposed title" /> : <b>{review.frontmatter.title}</b>}
+    <small>{target} · {String(review.frontmatter.confidence_label)} confidence · {review.frontmatter.status}{review.frontmatter.origin === "agent-extracted" ? " · agent-extracted" : ""}</small>
+    {pending && editable.length > 0 && <div className="review-fields">
+      {editable.includes("owner_person_id") && select("owner_person_id", "Owner", choices?.people ?? [])}
+      {editable.includes("due_on") && <label>Due<input type="date" value={fields.due_on ?? ""} disabled={busy} onChange={(event) => setFields({ ...fields, due_on: event.target.value })} /></label>}
+      {editable.includes("priority") && select("priority", "Priority", ["High", "Medium", "Low"].map((value) => ({ id: value, title: value })))}
+      {select("primary_project_id", "Project", choices?.projects ?? [])}
+      {select("primary_client_id", "Client", choices?.clients ?? [])}
+      {select("primary_product_id", "Product", choices?.products ?? [])}
+    </div>}
+    {unresolvedNames.length > 0 && <p className="review-evidence unresolved">Not linked yet: {unresolvedNames.map((entry) => `${entry.field} "${entry.reference}" (${entry.problem})`).join(", ")}</p>}
+    {evidenceEntries.length > 0 && <ul className="review-evidence">
+      {evidenceEntries.map((entry, index) => <li key={index}><em>{entry.field}</em>{" "}
+        {entry.resolved ? <span>{entry.source_title}</span> : <span className="unresolved">Unresolved source: {entry.source_ref ?? entry.source_id}</span>}
+        {entry.locator ? ` · ${entry.locator}` : ""}{entry.quote ? <q>{entry.quote}</q> : null}</li>)}
+    </ul>}
     {pending && <div className="review-actions">
-      <button disabled={busy || title.trim() === review.frontmatter.title} onClick={() => onSave(title)}>Save edit</button>
-      <button className="primary" disabled={busy} onClick={onAccept}>Accept task</button>
+      <button disabled={busy || !Object.keys(changes).length} onClick={() => onSave(changes)}>Save edit</button>
+      <button className="primary" disabled={busy || Object.keys(changes).length > 0} title={Object.keys(changes).length ? "Save your edits first" : undefined} onClick={onAccept}>Accept {target}</button>
       <button className="danger" disabled={busy} onClick={onReject}>Reject</button>
     </div>}
   </div>;
@@ -258,7 +301,7 @@ function App() {
   // #39: short, unambiguous names; recomputed by the server on every load.
   const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
   const [internalDomains, setInternalDomains] = useState<{ domains: string[]; contentHash?: string }>();
-  const [reviews, setReviews] = useState<LifeObject[]>([]);
+  const [reviews, setReviews] = useState<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>([]);
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
   const [notes, setNotes] = useState<LifeObject[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
@@ -401,7 +444,7 @@ function App() {
     const labelsRequest = api<PersonLabel[]>("/api/v1/people/labels").catch(() => [] as PersonLabel[]);
     const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextSettings, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
       api<Today>("/api/v1/today"), api<LifeObject[]>("/api/v1/tasks"),
-      api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
+      api<ProjectRollup[]>("/api/v1/projects"), api<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
     setAppliedPatches(await api<AppliedPatch[]>("/api/v1/inbox/patches"));
@@ -619,8 +662,8 @@ function App() {
     await loadCollections();
   }, "Proposal rejected");
 
-  const editReview = (reviewId: string, title: string) => run(async () => {
-    await api(`/api/v1/review-items/${reviewId}`, { method: "PATCH", body: JSON.stringify({ title }) });
+  const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
+    await api(`/api/v1/review-items/${reviewId}`, { method: "PATCH", body: JSON.stringify(changes) });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
   }, "Proposal updated");
@@ -1193,7 +1236,7 @@ function App() {
               </article>}
               <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
-                {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(title) => editReview(review.frontmatter.id, title)} />)}
+                {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
               </article>
             </>}
           </div>
@@ -1265,7 +1308,7 @@ function App() {
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
         {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
-        {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(title) => editReview(review.frontmatter.id, title)} />)}
+        {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
       </>}
 
       {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text, then review a linked Knowledge Note before publishing it." /><article><span>ADD RAW TEXT SOURCE</span><div className="knowledge-form"><input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} placeholder="Source title" /><textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} placeholder="Paste source text or Markdown…" /><button className="primary" disabled={busy || readOnly || !sourceTitle.trim() || !sourceText.trim()} onClick={ingestSource}>Preserve & process</button></div></article><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
