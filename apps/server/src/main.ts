@@ -4,7 +4,7 @@ import { watch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
-import Fastify from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { MockAiProvider } from "@lifeos/ai";
 import { LifeOSApplication, type ReviewEdits } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
@@ -227,6 +227,22 @@ server.post<{ Params: { id: string }; Body: { fields?: Record<string, unknown>; 
   if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
   return application.supersedeDecision(request.params.id, request.body.fields, request.body.expectedHash);
 });
+// #42 Open Points workspace: same filters as Decisions (from/to on raised_at); resolve, resolve with a new decision, close.
+server.get<{ Querystring: { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string } }>("/api/v1/open-points", async (request) => application.openPoints(request.query));
+server.get<{ Params: { id: string } }>("/api/v1/open-points/:id", async (request) => application.openPoint(request.params.id));
+server.post<{ Body: { fields?: Record<string, unknown> } }>("/api/v1/open-points", async (request, reply) => {
+  if (!request.body?.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields are required" });
+  return application.createOpenPoint(request.body.fields);
+});
+type OpenPointWrite = { Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } };
+const openPointWrite = (write: (id: string, fields: Record<string, unknown>, expectedHash: string) => Promise<unknown>) => async (request: FastifyRequest<OpenPointWrite>, reply: FastifyReply) => {
+  if (typeof request.body?.expectedHash !== "string" || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
+  return write(request.params.id, request.body.fields, request.body.expectedHash);
+};
+server.patch<OpenPointWrite>("/api/v1/open-points/:id", openPointWrite((id, fields, hash) => application.updateOpenPoint(id, fields, hash)));
+server.post<OpenPointWrite>("/api/v1/open-points/:id/resolve", openPointWrite((id, fields, hash) => application.resolveOpenPoint(id, fields, hash)));
+server.post<OpenPointWrite>("/api/v1/open-points/:id/resolve-with-decision", openPointWrite((id, fields, hash) => application.resolveOpenPointWithDecision(id, fields, hash)));
+server.post<OpenPointWrite>("/api/v1/open-points/:id/close", openPointWrite((id, fields, hash) => application.closeOpenPoint(id, fields, hash)));
 // Each item carries its evidence per field, with sources looked up now (missing ones come back unresolved).
 server.get("/api/v1/review-items", async () => application.reviews().map((review) => ({ ...review, evidence: application.reviewEvidence(review.frontmatter.id) })));
 server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());

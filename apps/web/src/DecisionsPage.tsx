@@ -1,6 +1,6 @@
 // Decisions workspace (#41): a filtered list beside a detail panel. The detail edits a decision with a
 // guarded save, supersedes it with a linked successor, and shows where it came from (meeting, sources,
-// evidence). Open Points (#42) can mirror this page with its own lifecycle actions.
+// evidence). Open Points (#42, OpenPointsPage.tsx) mirror this page with their own lifecycle actions.
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
@@ -10,7 +10,7 @@ import { zonedDateTime, zonedInputValue } from "./zonedTime.js";
 
 type LifeObject = { frontmatter: Record<string, unknown> & { id: string; type: string; title: string; revision: number }; body: string; relativePath: string; contentHash: string };
 type Evidence = { field: string; sourceId: string; sourceTitle?: string; fragmentId: string; text?: string; locator?: unknown };
-type DecisionDetail = { decision: LifeObject; supersedes?: LifeObject; supersededBy?: LifeObject; meeting?: LifeObject; sources: LifeObject[]; people: LifeObject[]; project?: LifeObject; client?: LifeObject; product?: LifeObject; review?: LifeObject; evidence: Evidence[] };
+type DecisionDetail = { decision: LifeObject; supersedes?: LifeObject; supersededBy?: LifeObject; meeting?: LifeObject; sources: LifeObject[]; people: LifeObject[]; project?: LifeObject; client?: LifeObject; product?: LifeObject; review?: LifeObject; evidence: Evidence[]; resolvesOpenPoints?: LifeObject[] };
 type Props = {
   projects: LifeObject[]; clients: LifeObject[]; products: LifeObject[]; people: LifeObject[];
   busy: boolean; readOnly: boolean; timeZone: string; highlightId?: string;
@@ -134,6 +134,7 @@ function DecisionPanel({ detail, projects, clients, products, people, busy, read
   return <article className="decision-detail" aria-label={`Decision: ${value.title}`}>
     <span>DECISION · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
     {detail.supersededBy && <p className="decision-chain" role="note">Superseded by <button className="link-button" onClick={() => onSelect(detail.supersededBy!.frontmatter.id)}>{detail.supersededBy.frontmatter.title}</button></p>}
+    {detail.resolvesOpenPoints?.map((point) => <p className="decision-chain" key={point.frontmatter.id}>Resolves open point <button className="link-button" onClick={() => onOpen(point.frontmatter.id)}>{point.frontmatter.title}</button></p>)}
     {detail.supersedes && <p className="decision-chain">Supersedes <button className="link-button" onClick={() => onSelect(detail.supersedes!.frontmatter.id)}>{detail.supersedes.frontmatter.title}</button></p>}
     <div className="crud-fields decision-fields">
       <label className="wide"><small>Title</small><input value={draft.title} disabled={locked} onChange={(event) => set("title", event.target.value)} /></label>

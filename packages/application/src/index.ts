@@ -9,6 +9,7 @@ import { DailyFocusModule } from "./focus.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
+import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
 import { PeopleModule } from "./people.js";
 import type { Sensitivity } from "@lifeos/domain";
@@ -17,6 +18,7 @@ import { ReviewModule, type ReviewEdits } from "./review.js";
 import { SystemModule } from "./system.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
+export type { OpenPointFilters } from "./open-points.js";
 export type { ExternalChange } from "./history.js";
 export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PersonLabel } from "./people.js";
@@ -48,6 +50,7 @@ export class LifeOSApplication {
   private readonly adoption: AdoptionModule;
   private readonly enrichment: EnrichmentModule;
   private readonly decisionsModule: DecisionsModule;
+  private readonly openPointsModule: OpenPointsModule;
   private readonly patches: PatchModule;
   private readonly people: PeopleModule;
   private readonly focus: DailyFocusModule;
@@ -62,8 +65,9 @@ export class LifeOSApplication {
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
     this.decisionsModule = new DecisionsModule(ctx);
+    this.openPointsModule = new OpenPointsModule(ctx, this.decisionsModule);
     this.enrichment = new EnrichmentModule(ctx, this.meetings, this.calendarModule, inbox);
-    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment);
+    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment, this.openPointsModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.focus = new DailyFocusModule(ctx, inbox);
     this.notesModule = new NotesModule(ctx);
@@ -121,6 +125,15 @@ export class LifeOSApplication {
   setPersonExternal(id: string, isExternal: boolean | null, expectedHash: string) { return this.people.setExternal(id, isExternal, expectedHash); }
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
+
+  // Open Points (#42)
+  openPoints(filters: OpenPointFilters = {}) { return this.openPointsModule.openPoints(filters); }
+  openPoint(id: string) { return this.openPointsModule.openPoint(id); }
+  createOpenPoint(fields: Record<string, unknown>) { return this.openPointsModule.createOpenPoint(fields); }
+  updateOpenPoint(id: string, fields: Record<string, unknown>, expectedHash: string) { return this.openPointsModule.updateOpenPoint(id, fields, expectedHash); }
+  resolveOpenPoint(id: string, fields: { resolution_summary?: unknown; resolution_decision_id?: unknown }, expectedHash: string) { return this.openPointsModule.resolveOpenPoint(id, fields, expectedHash); }
+  resolveOpenPointWithDecision(id: string, decisionFields: Record<string, unknown>, expectedHash: string) { return this.openPointsModule.resolveOpenPointWithDecision(id, decisionFields, expectedHash); }
+  closeOpenPoint(id: string, fields: { reason?: unknown }, expectedHash: string) { return this.openPointsModule.closeOpenPoint(id, fields, expectedHash); }
 
   // Calendar
   listCalendarEvents(from?: Date, to?: Date) { return this.calendarModule.listCalendarEvents(from, to); }

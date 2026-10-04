@@ -23,6 +23,7 @@ import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
+import { OpenPointsPage } from "./OpenPointsPage.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -71,9 +72,9 @@ type ConnectionSettings = { calendar: { configured: boolean; connected: boolean 
 type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
-type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
+type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Open Points" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
 
-const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
+const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
 
 function formatDate(value: unknown) {
   if (typeof value !== "string") return "—";
@@ -1112,7 +1113,7 @@ function App() {
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
   useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); } }, [view]);
 
-  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
+  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
   const offeredCalendars: CalendarOption[] = calendarCatalog.length
     ? enabledCalendars(calendarCatalog, calendarPrefs)
@@ -1307,11 +1308,12 @@ function App() {
 
       {view === "Projects" && <><PageHeader eyebrow="PROJECTS" title="Project roll-ups" description="Meetings and tasks are computed from stable relationships, not copied lists." />
         <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />
-        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.length ? <PeopleList people={projectPeople} labels={labels} /> : "None linked"}</p></article>)}</div>
+        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.filter((point) => point.frontmatter.status === "open").length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.length ? <PeopleList people={projectPeople} labels={labels} /> : "None linked"}</p></article>)}</div>
         {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
       </>}
 
       {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
+      {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
 
       {view === "Clients" && <EntityCrudPage labels={labels} highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}
       {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} />}

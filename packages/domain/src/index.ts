@@ -62,6 +62,9 @@ export const taskSchema = envelopeSchema.extend({
 /** Decision lifecycle (#41): `active` → `superseded` (via Supersede) or `reversed`; both are final. */
 export const decisionStatuses = ["active", "superseded", "reversed"] as const;
 export type DecisionStatus = typeof decisionStatuses[number];
+/** Open-point lifecycle (#42): `open` → `resolved` (with a summary or a decision) or `closed` (reason optional); both are final. */
+export const openPointStatuses = ["open", "resolved", "closed"] as const;
+export type OpenPointStatus = typeof openPointStatuses[number];
 
 const id = z.uuid();
 const ids = z.array(id);
@@ -86,7 +89,17 @@ const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
   }),
   // #46: the Agent-written morning brief (ADR 0011). Entries are kept loose; adoption checks them with path-aware reasons.
   "daily-focus": envelopeSchema.extend({ type: z.literal("daily-focus"), focus_on: z.iso.date(), generated_at: z.iso.datetime().optional(), top3: z.array(z.record(z.string(), z.unknown())).max(3).optional(), meeting_prep: z.array(z.record(z.string(), z.unknown())).max(3).optional(), defer_candidates: z.array(z.record(z.string(), z.unknown())).max(3).optional(), superseded_by_id: id.optional() }),
-  "open-point": envelopeSchema.extend({ type: z.literal("open-point"), status: z.enum(["open", "resolved", "closed"]), source_ids: ids.optional(), ...contextFields }),
+  // #42: `raised_at` is when the question came up (defaults to creation); the list date filter uses it.
+  "open-point": envelopeSchema.extend({ type: z.literal("open-point"), status: z.enum(openPointStatuses), importance: z.enum(["High", "Medium", "Low"]).optional(), owner_person_id: id.optional(), due_on: z.iso.date().optional(), raised_at: z.iso.datetime().optional(), resolved_at: z.iso.datetime().optional(), closed_at: z.iso.datetime().optional(), resolution_summary: z.string().optional(), resolution_decision_id: id.optional(), close_reason: z.string().optional(), source_meeting_id: id.optional(), source_ids: ids.optional(), people_ids: ids.optional(), ...contextFields }).superRefine((value, context) => {
+    const problem = (message: string) => context.addIssue({ code: "custom", message });
+    if (value.status === "resolved" && !value.resolved_at) problem("resolved_at is required for resolved open points");
+    if (value.status !== "resolved" && value.resolved_at) problem("resolved_at is allowed only for resolved open points");
+    if (value.status === "closed" && !value.closed_at) problem("closed_at is required for closed open points");
+    if (value.status !== "closed" && value.closed_at) problem("closed_at is allowed only for closed open points");
+    if (value.status === "resolved" && !value.resolution_summary?.trim() && !value.resolution_decision_id) problem("A resolved open point needs a resolution_summary or resolution_decision_id");
+    if (value.status !== "resolved" && (value.resolution_summary !== undefined || value.resolution_decision_id !== undefined)) problem("resolution_summary and resolution_decision_id are allowed only for resolved open points");
+    if (value.status !== "closed" && value.close_reason !== undefined) problem("close_reason is allowed only for closed open points");
+  }),
   "review-item": envelopeSchema.extend({ type: z.literal("review-item"), review_type: z.string().min(1), target_object_type: z.enum(objectTypes), proposed_fields: z.record(z.string(), z.unknown()), field_evidence: z.record(z.string(), z.array(evidenceSchema)).optional(), confidence_label: z.enum(["High", "Medium", "Low"]), status: z.enum(["pending", "accepted", "rejected"]), operation_id: id }),
   "agent-run": envelopeSchema.extend({ type: z.literal("agent-run"), operation: z.string().min(1), provider: z.string().min(1), model: z.string().min(1), prompt_version: z.string().min(1), status: z.enum(["running", "succeeded", "failed"]), started_at: z.iso.datetime(), completed_at: z.iso.datetime().optional(), related_object_ids: ids.optional() }),
   "audit-event": envelopeSchema.extend({ type: z.literal("audit-event"), occurred_at: z.iso.datetime(), actor_type: z.enum(["person", "agent", "system", "external"]), action: z.string().min(1), object_id: id.optional() }),
@@ -129,15 +142,25 @@ export function envelopeWriteProblem(next: { origin?: unknown; sensitivity?: unk
 /**
  * Lifecycle rules for an app write, given the previous front matter (`undefined` when new), which a
  * single-file schema cannot check. Decisions start `active`; only `active` may move, to `superseded`
- * or `reversed`; the supersede links, once written, never change. Open points (#42) belong here too.
+ * or `reversed`; the supersede links, once written, never change. Open points start `open`; only `open`
+ * may move, to `resolved` or `closed`; the stamps and the decision link, once written, never change.
  */
 export function lifecycleWriteProblem(next: Record<string, unknown>, previous?: Record<string, unknown>): string | undefined {
+  if (next.type === "open-point") return openPointWriteProblem(next, previous);
   if (next.type !== "decision") return undefined;
   if (!previous) return next.status === "active" ? undefined : `A new decision must be active, got "${String(next.status)}"`;
   if (next.status !== previous.status && previous.status !== "active") return `A ${String(previous.status)} decision is final and cannot become ${String(next.status)}`;
   if (previous.supersedes_decision_id !== undefined && next.supersedes_decision_id !== previous.supersedes_decision_id) return "supersedes_decision_id cannot change once set";
   if (previous.supersedes_decision_id === undefined && next.supersedes_decision_id !== undefined) return "supersedes_decision_id can only be set when the decision is created";
   if (previous.superseded_by_decision_id !== undefined && next.superseded_by_decision_id !== previous.superseded_by_decision_id) return "superseded_by_decision_id cannot change once set";
+  return undefined;
+}
+
+function openPointWriteProblem(next: Record<string, unknown>, previous?: Record<string, unknown>) {
+  if (!previous) return next.status === "open" ? undefined : `A new open point must be open, got "${String(next.status)}"`;
+  if (previous.status === "open") return undefined;
+  if (next.status !== previous.status) return `A ${String(previous.status)} open point is final and cannot become ${String(next.status)}`;
+  for (const key of ["resolved_at", "closed_at", "resolution_decision_id"]) if (next[key] !== previous[key]) return `${key} cannot change once the open point is ${String(previous.status)}`;
   return undefined;
 }
 

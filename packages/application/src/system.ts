@@ -5,11 +5,12 @@ import type { EnrichmentModule } from "./enrichment.js";
 import type { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import { personMergeOperation } from "./person-merge.js";
+import type { OpenPointsModule } from "./open-points.js";
 import type { ReviewModule } from "./review.js";
 
 /** Index, health, crash recovery and generic object access. */
 export class SystemModule {
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly adoption: AdoptionModule, private readonly decisions: DecisionsModule, private readonly enrichment?: EnrichmentModule) {}
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly adoption: AdoptionModule, private readonly decisions: DecisionsModule, private readonly enrichment?: EnrichmentModule, private readonly openPoints?: OpenPointsModule) {}
 
   rebuildIndex() {
     return this.ctx.rebuildIndex();
@@ -37,6 +38,9 @@ export class SystemModule {
         recovered.push(operation.id);
       } else if (operation.kind === "supersede-decision") {
         await this.decisions.recoverSupersede(operation);
+        recovered.push(operation.id);
+      } else if (operation.kind === "resolve-open-point" && this.openPoints) {
+        await this.openPoints.recoverResolve(operation);
         recovered.push(operation.id);
       }
     }

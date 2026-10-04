@@ -4,7 +4,7 @@ import { markdownFileName, ObjectConflictError, type AppContext } from "./contex
 /** List filters (#41). `from`/`to` are ISO instants, inclusive, on `decided_at`; the UI turns local days into instants. */
 export type DecisionFilters = { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string };
 export type DecisionEvidence = { field: string; sourceId: string; sourceTitle?: string; fragmentId: string; text?: string; locator?: unknown };
-type PreparedDecision = { relativePath: string; frontmatter: ObjectEnvelope; body: string };
+export type PreparedDecision = { relativePath: string; frontmatter: ObjectEnvelope; body: string };
 
 /** Fields a person may set by hand. `status` is edit-only (to `reversed`); `origin` is never accepted (#30). */
 const fields = ["title", "decision_text", "rationale", "decided_at", "primary_project_id", "primary_client_id", "primary_product_id", "people_ids", "source_meeting_id", "source_ids", "area", "sensitivity"];
@@ -19,9 +19,22 @@ export function decisionPeopleIds(ctx: AppContext, decision: LifeOSObject) {
   return [...new Set([...stringList(decision.frontmatter.people_ids), ...stringList(meeting?.frontmatter.attendee_ids)])];
 }
 
+/** Field evidence for an object, read from the accepted Review Item that created it. Shared with Open Points (#42). */
+export function reviewEvidence(ctx: AppContext, objectId: string) {
+  const { index } = ctx;
+  const review = index.all().find((object) => object.frontmatter.type === "review-item" && object.frontmatter.resolved_object_id === objectId);
+  const fieldEvidence = (review?.frontmatter.field_evidence ?? {}) as Record<string, Array<{ source_id: string; fragment_id: string }>>;
+  const evidence: DecisionEvidence[] = Object.entries(fieldEvidence).flatMap(([field, entries]) => (Array.isArray(entries) ? entries : []).map((entry) => {
+    const source = index.get(entry.source_id);
+    const fragment = (source?.frontmatter.fragments as Array<{ id: string; text: string; locator?: unknown }> | undefined)?.find((candidate) => candidate.id === entry.fragment_id);
+    return { field, sourceId: entry.source_id, sourceTitle: source?.frontmatter.title, fragmentId: entry.fragment_id, text: fragment?.text, locator: fragment?.locator };
+  }));
+  return { review, evidence };
+}
+
 /**
  * Decisions workspace (#41): filtered list, detail read model, manual create/edit and Supersede.
- * Open Points (#42) can mirror this module: same filters, same detail links, its own lifecycle.
+ * Open Points (#42, `open-points.ts`) mirror it: same filters, same detail links, their own lifecycle.
  */
 export class DecisionsModule {
   constructor(private readonly ctx: AppContext) {}
@@ -51,13 +64,7 @@ export class DecisionsModule {
     const value = decision.frontmatter;
     const get = (key: string) => typeof value[key] === "string" ? index.get(value[key] as string) : undefined;
     const supersededBy = get("superseded_by_decision_id") ?? this.all().find((other) => other.frontmatter.supersedes_decision_id === id);
-    const review = index.all().find((object) => object.frontmatter.type === "review-item" && object.frontmatter.resolved_object_id === id);
-    const fieldEvidence = (review?.frontmatter.field_evidence ?? {}) as Record<string, Array<{ source_id: string; fragment_id: string }>>;
-    const evidence: DecisionEvidence[] = Object.entries(fieldEvidence).flatMap(([field, entries]) => (Array.isArray(entries) ? entries : []).map((entry) => {
-      const source = index.get(entry.source_id);
-      const fragment = (source?.frontmatter.fragments as Array<{ id: string; text: string; locator?: unknown }> | undefined)?.find((candidate) => candidate.id === entry.fragment_id);
-      return { field, sourceId: entry.source_id, sourceTitle: source?.frontmatter.title, fragmentId: entry.fragment_id, text: fragment?.text, locator: fragment?.locator };
-    }));
+    const { review, evidence } = reviewEvidence(this.ctx, id);
     const objects = (list: string[]) => list.map((item) => index.get(item)).filter((object): object is LifeOSObject => Boolean(object));
     return {
       decision,
@@ -70,17 +77,26 @@ export class DecisionsModule {
       client: get("primary_client_id"),
       product: get("primary_product_id"),
       review,
-      evidence
+      evidence,
+      // #42: open points this decision resolved.
+      resolvesOpenPoints: index.all().filter((object) => object.frontmatter.type === "open-point" && object.frontmatter.resolution_decision_id === id && !object.frontmatter.deleted_at)
     };
   }
 
   /** Manual create: always `origin: app` and `active`, whatever the caller sends. */
   async createDecision(input: Record<string, unknown>) {
     const now = new Date().toISOString();
-    const prepared = this.prepare(input, {}, now);
-    const created = await this.ctx.objects.write(prepared);
-    await this.ctx.writeAudit("decision.created", created.frontmatter.id, now, {});
+    const created = await this.writePrepared(this.prepare(input, {}, now), now);
     await this.ctx.rebuildIndex();
+    return created;
+  }
+
+  /** Writes a decision built by `prepare`, unless a retry already wrote it. Used by "Resolve with decision" (#42). */
+  async writePrepared(prepared: PreparedDecision, now: string, metadata: Record<string, unknown> = {}) {
+    const existing = this.ctx.index.get(prepared.frontmatter.id);
+    if (existing) return existing;
+    const created = await this.ctx.objects.write(prepared);
+    await this.ctx.writeAudit("decision.created", created.frontmatter.id, now, metadata);
     return created;
   }
 
@@ -157,7 +173,7 @@ export class DecisionsModule {
   }
 
   /** Builds and validates a new decision before anything is written, so a bad field never leaves half an operation. */
-  private prepare(input: Record<string, unknown>, defaults: Record<string, unknown>, now: string): PreparedDecision {
+  prepare(input: Record<string, unknown>, defaults: Record<string, unknown>, now: string): PreparedDecision {
     const title = typeof input.title === "string" ? input.title.trim() : "";
     if (!title) throw new Error("Title is required");
     const chosen = { ...defaults, ...this.pick(input, fields) };
