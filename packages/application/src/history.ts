@@ -88,11 +88,42 @@ export class HistoryModule {
     return recorded;
   }
 
+  /**
+   * #79: puts back the copy an external-change audit event kept, through a guarded write (or a create when the
+   * file was deleted), audited as `object.restored-from-version`. Only the last copies are kept (ADR 0012), so a
+   * copy pruned since is refused with a plain message and nothing changes.
+   */
+  async restoreVersion(auditEventId: string, now = new Date()) {
+    const { ctx } = this;
+    const event = ctx.index.get(auditEventId);
+    const versionPath = event?.frontmatter.type === "audit-event" ? (event.frontmatter.metadata as Record<string, unknown> | undefined)?.version_path : undefined;
+    if (typeof versionPath !== "string") throw new Error(`Not an external change with a kept version: ${auditEventId}`);
+    const kept = await ctx.objects.read(versionPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") throw new Error(versionPrunedMessage);
+      throw error;
+    });
+    const id = String(event!.frontmatter.object_id);
+    const current = ctx.index.get(id);
+    const timestamp = now.toISOString();
+    const restored = await ctx.objects.write({
+      relativePath: current?.relativePath ?? String((event!.frontmatter.metadata as Record<string, unknown>).relative_path),
+      ...(current ? { expectedHash: current.contentHash } : {}),
+      frontmatter: { ...kept.frontmatter, revision: (current?.frontmatter.revision ?? kept.frontmatter.revision) + 1, updated_at: timestamp, updated_by_device: ctx.deviceId },
+      body: kept.body
+    });
+    await ctx.writeAudit("object.restored-from-version", id, timestamp, { audit_event_id: auditEventId, version_path: versionPath });
+    await ctx.rebuildIndex();
+    return restored;
+  }
+
   /** Stores `object` as the last-known version. Audit events are append-only and are not versioned. */
   private async persist(object: LifeOSObject) {
     if (object.frontmatter.type !== "audit-event") await this.ctx.objects.keepVersion?.(object);
   }
 }
+
+/** #79: shown when an audit names a version copy that retention (ADR 0012) has since deleted. */
+export const versionPrunedMessage = "This version is no longer kept (only the last 10 are)";
 
 /** Same front matter values and body. Key order and YAML formatting are not changes (#69). */
 function sameContent(a: LifeOSObject, b: LifeOSObject) {

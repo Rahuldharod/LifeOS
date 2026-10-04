@@ -295,9 +295,7 @@ export class MarkdownObjectStore implements ObjectStore {
     const relativePath = path.posix.join(this.versionFolder(id), `${String(revision).padStart(6, "0")}--${nameHash.slice(0, 12)}.md`);
     const versionPath = this.safePath(relativePath);
     await mkdir(path.dirname(versionPath), { recursive: true });
-    await writeFile(versionPath, content, { encoding: "utf8", flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error;
-    });
+    await this.publishVersion(versionPath, content);
     const others = (await this.versionFiles(id, true)).filter((file) => file.relativePath !== relativePath);
     const savedAt = Math.max(Date.now(), ...others.map((file) => file.savedAt + 1));
     await utimes(versionPath, savedAt / 1000, savedAt / 1000);
@@ -309,6 +307,28 @@ export class MarkdownObjectStore implements ObjectStore {
     }
     await Promise.all(ordered.filter((file) => !keep.has(file.relativePath)).map((file) => rm(this.safePath(file.relativePath), { force: true })));
     return relativePath;
+  }
+
+  /**
+   * #79: writes the copy to a temporary file, syncs it, then publishes it with `createExclusive`, so a crash never
+   * leaves a partial copy under a version name (temporary names are never listed as versions). A copy already there
+   * with other content (a partial one left by a non-atomic write before #79) is replaced in one rename.
+   */
+  private async publishVersion(versionPath: string, content: string) {
+    const temporary = `${versionPath}.${randomUUID()}.tmp`;
+    const handle = await open(temporary, "wx");
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.sync();
+      await handle.close();
+      if (await createExclusive(temporary, versionPath)) return;
+      if (await readFile(versionPath, "utf8").catch(() => undefined) !== content) await rename(temporary, versionPath);
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    } finally {
+      await rm(temporary, { force: true });
+    }
   }
 
   private safePath(relativePath: string) {

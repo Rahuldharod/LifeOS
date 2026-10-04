@@ -6,7 +6,9 @@
 
 **Per-save copies.** Each save keeps a copy of the object in `.lifeos/versions/<id>/<revision>--<hash>.md`. The hash part is the start of the hash of the file the copy came from. When the app notices an edit made outside it (Obsidian, an agent, another device), it also keeps the copy from before the edit.
 
-**Retention.** Only the last 10 copies per object are kept (configurable, at least 2). Older copies are deleted on save. "Last" means highest revision, then most recently saved. The newest copy and the copy just saved are never deleted. An old audit event may point at a copy that has since been pruned.
+**Retention.** Only the last 10 copies per object are kept (configurable, at least 2). Older copies are deleted on save. "Last" means highest revision, then most recently saved. The newest copy and the copy just saved are never deleted. An old audit event may point at a copy that has since been pruned. **Undo effect:** such a copy can no longer be restored; LifeOS says "This version is no longer kept (only the last 10 are)" and changes nothing.
+
+**Atomic copies.** A copy is written to a temporary file and published with `createExclusive` (ADR 0013), so a crash never leaves a partial copy under a version name (#79).
 
 **Baseline.** The newest copy is the baseline for external-edit detection: the last state the app knows about. If the file on disk differs from it, the edit is recorded as an `external` audit event, and the edited file becomes the new baseline.
 

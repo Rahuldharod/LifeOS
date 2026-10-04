@@ -106,6 +106,8 @@ export class LifeOSApplication {
   archiveObject(id: string, expectedHash: string) { return this.system.archiveObject(id, expectedHash); }
   /** Called by the file watcher (U4, U5). */
   recordExternalChanges() { return this.history.recordExternalChanges(); }
+  /** #79: restores the version copy an external-change audit event names. */
+  restoreVersion(auditEventId: string) { return this.history.restoreVersion(auditEventId); }
   setSensitivity(id: string, sensitivity: Sensitivity, expectedHash: string) { return this.system.setSensitivity(id, sensitivity, expectedHash); }
 
   // Notes
