@@ -31,8 +31,9 @@ export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from 
 export type { EnrichmentEntry, EnrichmentRequest, EnrichmentState, EnrichmentStatus } from "./enrichment.js";
 export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial } from "./enrichment.js";
 export type { AppliedPatch } from "./patches.js";
-export type { DailyFocusView, FocusItem, FocusItemState, ReplanRequest } from "./focus.js";
-export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords } from "./focus.js";
+export type { DailyFocusView, FocusItem, FocusItemState, FocusOverrideAction, FocusOverrideChange, FocusOverrideState, ReplanRequest } from "./focus.js";
+export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords, defaultMaxMustDos, maxMustDosLimit, focusOverrideActions } from "./focus.js";
+import type { FocusOverrideChange } from "./focus.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -106,8 +107,13 @@ export class LifeOSApplication {
   today(options: { date?: string; now?: Date } = {}) {
     const date = options.date ?? (options.now ?? new Date()).toISOString().slice(0, 10);
     const today = this.entitiesModule.today(date);
-    return { ...today, focus: this.focus.view(date, today.topThree, options.now) };
+    return { ...today, focus: this.focus.view(date, this.entitiesModule.ruleCandidates(date), options.now) };
   }
+  /** #47: pin, unpin, replace, dismiss, restore or reset on the date's Top 3; a guarded save (409 on a stale hash). Returns the new Daily Focus view. */
+  overrideFocus(date: string, change: FocusOverrideChange, expectedHash?: string, options?: { now?: Date }) { return this.focus.changeOverride(date, change, expectedHash, this.entitiesModule.ruleCandidates(date), options); }
+  /** #47: the synced max must-dos setting (default 3). */
+  getFocusSettings() { return this.focus.settings(); }
+  saveFocusSettings(input: { maxMustDos?: unknown }, expectedHash?: string) { return this.focus.saveSettings(input, expectedHash); }
   /** "Refresh" on Today: writes a `replan` Work Order for the date (#46). */
   requestReplan(date: string, options?: { now?: Date }) { return this.focus.requestReplan(date, options); }
   rollups(type: "client" | "product" | "person") { return this.entitiesModule.rollups(type); }

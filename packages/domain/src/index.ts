@@ -4,7 +4,8 @@ import { z } from "zod";
 export const objectTypes = [
   "person", "client", "product", "project", "meeting", "meeting-note",
   "knowledge-note", "task", "decision", "open-point", "source", "review-item",
-  "agent-run", "audit-event", "connector-account", "sync-run", "daily-focus", "recurring-item", "app-setting"
+  "agent-run", "audit-event", "connector-account", "sync-run", "daily-focus", "recurring-item", "app-setting",
+  "focus-override"
 ] as const;
 
 /** Where an object came from (ADR 0010). Set at creation, never changed; missing reads as `app`. */
@@ -89,6 +90,8 @@ const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
   }),
   // #46: the Agent-written morning brief (ADR 0011). Entries are kept loose; adoption checks them with path-aware reasons.
   "daily-focus": envelopeSchema.extend({ type: z.literal("daily-focus"), focus_on: z.iso.date(), generated_at: z.iso.datetime().optional(), top3: z.array(z.record(z.string(), z.unknown())).max(3).optional(), meeting_prep: z.array(z.record(z.string(), z.unknown())).max(3).optional(), defer_candidates: z.array(z.record(z.string(), z.unknown())).max(3).optional(), superseded_by_id: id.optional() }),
+  // #47: the user's changes to one date's Top 3 (ADR 0011), app-owned; one fixed-path file per date.
+  "focus-override": envelopeSchema.extend({ type: z.literal("focus-override"), focus_on: z.iso.date(), pinned: ids.optional(), replaced: z.array(z.object({ from: id, to: id }).loose()).optional(), dismissed: ids.optional() }),
   // #42: `raised_at` is when the question came up (defaults to creation); the list date filter uses it.
   "open-point": envelopeSchema.extend({ type: z.literal("open-point"), status: z.enum(openPointStatuses), importance: z.enum(["High", "Medium", "Low"]).optional(), owner_person_id: id.optional(), due_on: z.iso.date().optional(), raised_at: z.iso.datetime().optional(), resolved_at: z.iso.datetime().optional(), closed_at: z.iso.datetime().optional(), resolution_summary: z.string().optional(), resolution_decision_id: id.optional(), close_reason: z.string().optional(), source_meeting_id: id.optional(), source_ids: ids.optional(), people_ids: ids.optional(), ...contextFields }).superRefine((value, context) => {
     const problem = (message: string) => context.addIssue({ code: "custom", message });

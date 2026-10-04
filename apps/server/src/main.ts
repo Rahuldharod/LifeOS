@@ -205,6 +205,15 @@ server.post<{ Body: { date?: string } }>("/api/v1/focus/replan", async (request,
   if (typeof request.body?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(request.body.date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
   return application.requestReplan(request.body.date);
 });
+// #47: one change to the date's Top 3 (pin, unpin, replace, dismiss, restore, reset); 409 when expectedHash is stale.
+server.post<{ Body: { date?: string; action?: unknown; taskId?: unknown; replacementId?: unknown; expectedHash?: unknown } }>("/api/v1/focus/overrides", async (request, reply) => {
+  const { date, action, taskId, replacementId, expectedHash } = request.body ?? {};
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
+  if (expectedHash !== undefined && typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash must be text" });
+  return application.overrideFocus(date, { action, taskId, replacementId }, expectedHash);
+});
+server.get("/api/v1/settings/daily-focus", async () => application.getFocusSettings());
+server.put<{ Body: { maxMustDos?: unknown; expectedHash?: string } }>("/api/v1/settings/daily-focus", async (request) => application.saveFocusSettings({ maxMustDos: request.body?.maxMustDos }, request.body?.expectedHash));
 server.get("/api/v1/tasks", async () => application.tasks());
 server.patch<{ Params: { id: string }; Body: { changes: Record<string, unknown>; expectedHash: string } }>("/api/v1/tasks/:id", async (request) => application.updateTask(request.params.id, request.body.changes, request.body.expectedHash));
 server.post<{ Body: { text: string } }>("/api/v1/capture", async (request) => application.quickCapture(request.body.text));

@@ -101,7 +101,7 @@ export function toUtc(value: unknown) {
   const parsed = new Date(time ? `${date}T${time.replace(",", ".")}${offset}` : `${date}T00:00:00Z`);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
-export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
+export const isCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 
 /** The Review Item body for a proposal: its title, then the Agent's narrative as written. */
 export function proposalBody(title: string, narrative?: unknown) {
