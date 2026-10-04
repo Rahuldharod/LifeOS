@@ -5,7 +5,7 @@ import type { DecisionsModule } from "./decisions.js";
 import { enrichmentStateOf } from "./enrichment.js";
 import { personDisplayLabels, personEmails, internalDomainsOf } from "./people.js";
 import type { AgentIndexFile, AgentIndexWriter, InboxFolder, InboxStore } from "./ports.js";
-import { isLive, isRestricted } from "./support.js";
+import { isLive, isMeetingRestricted, isRestricted } from "./support.js";
 
 /**
  * The Agent Index (#43, ADR 0009): small Markdown summaries in `_agent/` that an Agent on a phone reads
@@ -80,6 +80,9 @@ export class AgentIndexModule {
   /** Builds every file from the in-memory index (and the raw `_inbox/` listing for pending drafts). */
   async build(now: Date): Promise<AgentIndexFile[]> {
     const objects = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at);
+    /** ADR 0010: restricted objects, and meetings whose note is restricted (#63), are never named. */
+    const meetingNotes = objects.filter((object) => object.frontmatter.type === "meeting-note");
+    const hidden = (object: LifeOSObject) => object.frontmatter.type === "meeting" ? isMeetingRestricted(object, meetingNotes) : isRestricted(object);
     const live = objects.filter(isLive);
     const labels = new Map(personDisplayLabels(this.ctx.index.all(), internalDomainsOf(this.ctx.index)).map((label) => [label.id, label]));
     const self = live.find((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true);
@@ -91,14 +94,16 @@ export class AgentIndexModule {
       if (typeof id !== "string") return undefined;
       const object = this.ctx.index.get(id);
       if (!object) return id;
-      if (isRestricted(object)) return "(restricted)";
+      if (hidden(object)) return "(restricted)";
       return object.frontmatter.type === "person" ? labels.get(id)?.label ?? clean(object.frontmatter.title) : clean(object.frontmatter.title);
     };
     const context = (object: LifeOSObject): Field[] => [["project", name(object.frontmatter.primary_project_id)], ["client", name(object.frontmatter.primary_client_id)], ["product", name(object.frontmatter.primary_product_id)]];
     const entry = (object: LifeOSObject, fields: Field[], title = clean(object.frontmatter.title)) =>
       `- **${title}**\n  ${[["id", object.frontmatter.id], ["path", object.relativePath], ...fields].filter(([, value]) => value !== undefined && value !== "").map(([key, value]) => `${key}: ${value}`).join(" · ")}`;
+    /** A linked object's ID, left out when that object is restricted. */
+    const visibleId = (id: unknown) => { const value = str(id); const object = value ? this.ctx.index.get(value) : undefined; return object && hidden(object) ? undefined : value; };
     /** Splits candidates into the listed ones and a restricted count. */
-    const visible = (candidates: LifeOSObject[]) => ({ shown: candidates.filter((object) => !isRestricted(object)), restricted: candidates.filter(isRestricted).length });
+    const visible = (candidates: LifeOSObject[]) => ({ shown: candidates.filter((object) => !hidden(object)), restricted: candidates.filter(hidden).length });
     const file = (fileName: string, heading: string, restricted: number, sections: Array<[string, string[]]>, intro?: string): AgentIndexFile => {
       const front = `---\nlifeos_agent_index: ${agentIndexContractVersion}\ngenerated_at: ${generated}\ntime_zone: ${this.timeZone}\nrestricted_excluded: ${restricted}\n---\n`;
       const lines = [`# ${heading}`, "", `Generated at ${generated} (day boundaries in ${this.timeZone}). Derived from LifeOS; edit objects through drafts, never here.`];
@@ -131,7 +136,7 @@ export class AgentIndexModule {
       groups.set(key, [...groups.get(key) ?? [], task]);
     }
     const waitingFile = file("waiting-on.md", "Waiting on", waiting.restricted, [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([person, entries]) => [person,
-      entries.sort((a, b) => String(since(a)).localeCompare(String(since(b)))).map((task) => entry(task, [["age", ageDays(since(task), now)], ["waiting_for_id", str(task.frontmatter.waiting_for_person_id)], ["due", str(task.frontmatter.due_at) ?? due(task)], ...context(task)]))]),
+      entries.sort((a, b) => String(since(a)).localeCompare(String(since(b)))).map((task) => entry(task, [["age", ageDays(since(task), now)], ["waiting_for_id", visibleId(task.frontmatter.waiting_for_person_id)], ["due", str(task.frontmatter.due_at) ?? due(task)], ...context(task)]))]),
     "Tasks in Waiting status, by person. Age counts from the task's last change.");
 
     const openPoints = visible(ofType("open-point").filter((point) => point.frontmatter.status === "open"));
@@ -141,7 +146,7 @@ export class AgentIndexModule {
     const recentDecisions = visible(this.decisions.decisions({ from: new Date(now.getTime() - 30 * day).toISOString() }).filter(isLive));
     const decisionsFile = file("decisions.md", "Decisions, last 30 days", recentDecisions.restricted, [["Decisions", recentDecisions.shown.map((decision) => entry(decision, [
       ["decided", this.localDate(String(decision.frontmatter.decided_at))], ["status", str(decision.frontmatter.status)], ...context(decision), ["meeting", name(decision.frontmatter.source_meeting_id)],
-      ["superseded_by", str(decision.frontmatter.superseded_by_decision_id)], ["text", clean(decision.frontmatter.decision_text, 240)]]))]], "Newest first.");
+      ["superseded_by", visibleId(decision.frontmatter.superseded_by_decision_id)], ["text", clean(decision.frontmatter.decision_text, 240)]]))]], "Newest first.");
 
     const active = (type: string) => visible(ofType(type).filter((object) => !closedStatus.test(String(object.frontmatter.status ?? ""))).sort((a, b) => String(a.frontmatter.title).localeCompare(String(b.frontmatter.title))));
     const [projects, clients, products] = [active("project"), active("client"), active("product")];

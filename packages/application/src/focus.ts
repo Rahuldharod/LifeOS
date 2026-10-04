@@ -388,17 +388,24 @@ export class DailyFocusModule {
   /**
    * "Refresh": asks Claude to re-plan the date by writing a `replan` Work Order to `_inbox/requests/`.
    * A replan for the same date still waiting there is returned instead of writing a second one.
-   * The Work Order names only the date and the current brief; restricted briefs are never named.
+   * The Work Order names only the date and the current brief; restricted briefs are never named. A waiting
+   * replan that names a brief restricted since it was written is rewritten without it (#63).
    */
   async requestReplan(date: string, options: { now?: Date } = {}): Promise<ReplanRequest> {
     if (!isCalendarDate(date)) throw new Error(`Not a calendar date YYYY-MM-DD: "${date}"`);
     if (!this.inbox) throw new Error("The inbox folder is not configured, so no Work Order can be written");
     await this.inbox.ensureFolders();
+    await this.ctx.rebuildIndex();
     for (const file of await this.inbox.list("requests")) {
       const document = await this.inbox.read("requests", file.name).catch(() => undefined);
-      if (document?.frontmatter?.kind === "replan" && dateText(document.frontmatter.focus_on) === date) return { workOrder: file.relativePath, alreadyRequested: true, message: `A re-plan for ${date} is already waiting for Claude` };
+      const fields = document?.frontmatter;
+      if (fields?.kind !== "replan" || dateText(fields.focus_on) !== date) continue;
+      if (isRestricted(this.ctx.index.get(text(fields.current_brief_id)))) {
+        const { current_brief_id: _id, current_brief_path: _path, current_generated_at: _generated, ...rest } = fields;
+        await this.inbox.writeDocument("requests", file.name, rest, document!.body);
+      }
+      return { workOrder: file.relativePath, alreadyRequested: true, message: `A re-plan for ${date} is already waiting for Claude` };
     }
-    await this.ctx.rebuildIndex();
     const brief = currentBrief(this.ctx, date);
     const now = options.now ?? new Date();
     const id = uuidV7();

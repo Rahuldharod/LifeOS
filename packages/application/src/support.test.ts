@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LifeOSObject } from "@lifeos/domain";
-import { contextLinkFields, dueDate, inheritContextLinks, isLive, isRestricted, isStringList, objectIdPattern, sameValue, stringsIn, validTimeZone } from "./support.js";
+import { contextLinkFields, dueDate, inheritContextLinks, isLive, isMeetingRestricted, isRestricted, isStringList, objectIdPattern, sameValue, stringsIn, validTimeZone } from "./support.js";
 
 const object = (frontmatter: Record<string, unknown>) => ({ frontmatter, body: "" }) as unknown as LifeOSObject;
 
@@ -12,6 +12,22 @@ describe("isRestricted (ADR 0010)", () => {
     expect(isRestricted(object({ sensitivity: null }))).toBe(false);
   });
   it("treats no object as not restricted", () => { expect(isRestricted(undefined)).toBe(false); });
+});
+
+describe("isMeetingRestricted (ADR 0010, #63)", () => {
+  const meeting = (extra: Record<string, unknown> = {}) => object({ id: "m1", type: "meeting", ...extra });
+  const note = (extra: Record<string, unknown> = {}) => object({ id: "n1", type: "meeting-note", meeting_id: "m1", ...extra });
+  it("is true when the meeting is restricted", () => { expect(isMeetingRestricted(meeting({ sensitivity: "restricted" }), [])).toBe(true); });
+  it("is true when the meeting's note is restricted", () => { expect(isMeetingRestricted(meeting(), [note({ sensitivity: "restricted" })])).toBe(true); });
+  it("ignores restricted notes of other meetings, deleted notes and non-notes", () => {
+    expect(isMeetingRestricted(meeting(), [note({ meeting_id: "m2", sensitivity: "restricted" })])).toBe(false);
+    expect(isMeetingRestricted(meeting(), [note({ sensitivity: "restricted", deleted_at: "2026-10-01T00:00:00.000Z" })])).toBe(false);
+    expect(isMeetingRestricted(meeting(), [object({ type: "task", meeting_id: "m1", sensitivity: "restricted" })])).toBe(false);
+  });
+  it("is false for a normal meeting with a normal note, and for no meeting", () => {
+    expect(isMeetingRestricted(meeting(), [note()])).toBe(false);
+    expect(isMeetingRestricted(undefined, [note({ sensitivity: "restricted" })])).toBe(false);
+  });
 });
 
 describe("isLive", () => {

@@ -8,6 +8,20 @@ type WithFrontmatter = Pick<LifeOSObject, "frontmatter">;
 export const isRestricted = (object: { frontmatter: { sensitivity?: unknown } } | undefined) =>
   object ? sensitivityOf(object.frontmatter) === "restricted" : false;
 
+/**
+ * ADR 0010, #63: a meeting counts as restricted when the meeting itself or any of its (non-deleted) meeting
+ * notes is restricted. The interface restricts the note, so every exclusion of a meeting goes through this
+ * one rule. `objects` is where to look for the notes (usually the whole index).
+ */
+export function isMeetingRestricted(meeting: WithFrontmatter | undefined, objects: Iterable<WithFrontmatter>) {
+  if (!meeting) return false;
+  if (isRestricted(meeting)) return true;
+  for (const object of objects) {
+    if (object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at && isRestricted(object)) return true;
+  }
+  return false;
+}
+
 /** Live = neither tombstoned (`deleted_at`) nor archived (`archived_at`). */
 export const isLive = (object: WithFrontmatter) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
 
