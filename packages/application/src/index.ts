@@ -5,6 +5,7 @@ import { EntitiesModule, type EntityType } from "./entities.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
+import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, ObjectStore } from "./ports.js";
 import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
@@ -47,6 +48,7 @@ export class LifeOSApplication {
   archiveObject(id: string, expectedHash: string) { return this.system.archiveObject(id, expectedHash); }
   /** Called by the file watcher (U4, U5). */
   recordExternalChanges() { return this.history.recordExternalChanges(); }
+  setSensitivity(id: string, sensitivity: Sensitivity, expectedHash: string) { return this.system.setSensitivity(id, sensitivity, expectedHash); }
 
   // Notes
   notes() { return this.notesModule.notes(); }

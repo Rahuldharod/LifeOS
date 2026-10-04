@@ -294,3 +294,7 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 /* PB-007: the object a LifeOS link pointed at, briefly marked after navigating to it. */
 .crud-card.highlighted { outline: 2px solid #c79a3b; outline-offset: 2px; transition: outline-color .6s; }
 .markdown-preview a[href^="lifeos:"], .visual-markdown-editor a[data-lifeos-href] { color: #245646; text-decoration-style: dotted; cursor: pointer; }
+.envelope-badges { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.origin-label { color: #6f776f; font-size: 11px; }
+.lock-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 2px 7px; border: 1px solid #b9a77a; border-radius: 999px; background: #f4ecd8; color: #5c4a1c; font-size: 10px; font-weight: 800; letter-spacing: .02em; vertical-align: middle; white-space: nowrap; }
+.sensitivity-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }

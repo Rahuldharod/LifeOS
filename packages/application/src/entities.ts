@@ -4,6 +4,8 @@ import { markdownFileName, type AppContext } from "./context.js";
 export type EntityType = "task" | "project" | "client" | "product" | "person";
 
 const entityTypes: EntityType[] = ["task", "project", "client", "product", "person"];
+/** Envelope fields the user may set on any entity (#30). `origin` is deliberately absent: it is fixed at creation. */
+const envelopeFields = ["area", "sensitivity"];
 
 /** Tasks, projects, clients, products and people: CRUD, the Today view and rollups. */
 export class EntitiesModule {
@@ -26,7 +28,7 @@ export class EntitiesModule {
       product: ["status", "description", "owner_person_id"],
       person: ["given_name", "family_name", "organization_name", "job_title", "timezone", "is_self"]
     };
-    const selected = Object.fromEntries(Object.entries(fields).filter(([key, value]) => allowed[type].includes(key) && value !== "" && value !== undefined));
+    const selected = Object.fromEntries(Object.entries(fields).filter(([key, value]) => [...allowed[type], ...envelopeFields].includes(key) && value !== "" && value !== undefined));
     if (type === "task") {
       selected.status ??= "Inbox";
       selected.owner_person_id ??= (await this.ctx.ensureSelfPerson(now)).frontmatter.id;
@@ -52,7 +54,8 @@ export class EntitiesModule {
       product: ["title", "status", "description", "owner_person_id"],
       person: ["title", "given_name", "family_name", "organization_name", "job_title", "timezone", "is_self"]
     };
-    const selected = Object.fromEntries(Object.entries(fields).filter(([key]) => allowed[type].includes(key)));
+    const selected = Object.fromEntries(Object.entries(fields).filter(([key]) => [...allowed[type], ...envelopeFields].includes(key)));
+    if (selected.area === "" || selected.area === null) selected.area = undefined;
     if (typeof selected.title === "string" && !selected.title.trim()) throw new Error("Title is required");
     const now = new Date().toISOString();
     if (type === "task") {

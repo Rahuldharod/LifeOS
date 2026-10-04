@@ -7,6 +7,9 @@ title: Example User
 created_at: 2026-09-20T08:00:00Z
 updated_at: 2026-09-20T08:00:00Z
 updated_by_device: synthetic-test
+origin: app
+sensitivity: normal
+area: personal-growth
 given_name: Example
 family_name: User
 is_self: true

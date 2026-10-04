@@ -1,3 +1,4 @@
+import { sensitivities, sensitivityOf, type Sensitivity } from "@lifeos/domain";
 import type { AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { ReviewModule } from "./review.js";
@@ -36,6 +37,18 @@ export class SystemModule {
 
   object(id: string) {
     return this.ctx.required(id);
+  }
+
+  /** #30: the user can mark any object restricted, or normal again. Repeating the same value writes nothing. */
+  async setSensitivity(id: string, sensitivity: Sensitivity, expectedHash: string) {
+    if (!sensitivities.includes(sensitivity)) throw new Error(`Sensitivity must be normal or restricted, got "${String(sensitivity)}"`);
+    const object = this.ctx.required(id);
+    if (sensitivityOf(object.frontmatter) === sensitivity) return object;
+    const now = new Date().toISOString();
+    const updated = await this.ctx.update(object, { sensitivity }, { expectedHash, now });
+    await this.ctx.writeAudit("object.sensitivity-changed", id, now, { from: sensitivityOf(object.frontmatter), to: sensitivity });
+    await this.ctx.rebuildIndex();
+    return updated;
   }
 
   async archiveObject(id: string, expectedHash: string) {
