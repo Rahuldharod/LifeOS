@@ -8,6 +8,7 @@ import { EntitiesModule, type EntityType } from "./entities.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule } from "./notes.js";
+import { PatchModule } from "./patches.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
 import { ReviewModule } from "./review.js";
@@ -23,6 +24,7 @@ export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./res
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
 export type { EnrichmentEntry, EnrichmentRequest, EnrichmentState, EnrichmentStatus } from "./enrichment.js";
 export { attendeeEmails, enrichmentStates, enrichmentStateOf, expectedMaterial } from "./enrichment.js";
+export type { AppliedPatch } from "./patches.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -40,11 +42,13 @@ export class LifeOSApplication {
   private readonly adoption: AdoptionModule;
   private readonly enrichment: EnrichmentModule;
   private readonly decisionsModule: DecisionsModule;
+  private readonly patches: PatchModule;
 
   /** `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op. */
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
-    this.adoption = new AdoptionModule(ctx, inbox);
+    this.patches = new PatchModule(ctx);
+    this.adoption = new AdoptionModule(ctx, inbox, this.patches);
     this.meetings = new MeetingsModule(ctx);
     this.calendarModule = new CalendarModule(ctx, this.meetings);
     this.review = new ReviewModule(ctx, this.meetings);
@@ -131,4 +135,8 @@ export class LifeOSApplication {
   requestEnrichment(options?: { now?: Date }) { return this.enrichment.requestEnrichment(options); }
   markEnrichmentGaveUp(meetingId: string, expectedHash: string) { return this.enrichment.markGaveUp(meetingId, expectedHash); }
   enrichmentStatus(options?: { now?: Date }) { return this.enrichment.status(options); }
+
+  // Patch Drafts: applied by adoption; listed and undone here
+  appliedPatches() { return this.patches.appliedPatches(); }
+  undoPatch(auditEventId: string) { return this.patches.undoPatch(auditEventId); }
 }

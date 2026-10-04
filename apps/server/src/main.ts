@@ -209,6 +209,8 @@ server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v
   if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
   return application.markEnrichmentGaveUp(request.params.id, request.body.expectedHash);
 });
+server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
+server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
 server.get("/api/v1/backups", async () => backups.list());
 server.post("/api/v1/backups", async () => backups.create());
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
@@ -243,7 +245,7 @@ try {
   await application.rebuildIndex();
   await application.recoverOperations();
   await application.rebuildIndex();
-  // Inbox Drafts (ADR 0007) are adopted at startup and shortly after one lands, but only while this device holds the lease.
+  // Inbox Drafts and Patch Drafts (ADR 0007) are adopted at startup and shortly after one lands, but only while this device holds the lease.
   let adoptTimer: NodeJS.Timeout | undefined;
   const adopt = async () => {
     if (!session.status().writeAllowed) return;
@@ -260,7 +262,7 @@ try {
   let reconcileTimer: NodeJS.Timeout | undefined;
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
     if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
-    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/")) scheduleAdoption(); return; }
+    if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/") || filename.startsWith("_inbox/patches/")) scheduleAdoption(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
     const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();

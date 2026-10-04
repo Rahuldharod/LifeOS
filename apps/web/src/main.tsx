@@ -56,8 +56,9 @@ type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeO
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
 type InboxDrafts = { awaiting: number; failed: Array<{ path: string; reason: string }> };
-type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "duplicate" | "failed" | "skipped" }> };
+type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "duplicate" | "failed" | "skipped" }> };
 type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
+type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
 type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus };
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
@@ -260,6 +261,7 @@ function App() {
   const [health, setHealth] = useState<SystemHealth>();
   const [inboxDrafts, setInboxDrafts] = useState<InboxDrafts>({ awaiting: 0, failed: [] });
   const [enrichment, setEnrichment] = useState<EnrichmentStatus>({ proposedGaveUp: [], staleWorkOrders: [] });
+  const [appliedPatches, setAppliedPatches] = useState<AppliedPatch[]>([]);
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
@@ -385,6 +387,7 @@ function App() {
       api<ProjectRollup[]>("/api/v1/projects"), api<LifeObject[]>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ConnectionSettings>("/api/v1/settings/connections"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setConnectionSettings(nextSettings); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
+    setAppliedPatches(await api<AppliedPatch[]>("/api/v1/inbox/patches"));
     // #44: loaded on its own so a failure here never blanks the other panels.
     void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
   };
@@ -617,7 +620,7 @@ function App() {
       const batch = await api<AdoptionBatch>("/api/v1/inbox/adopt", { method: "POST" });
       const count = (outcome: string) => batch.drafts.filter((draft) => draft.outcome === outcome).length;
       await loadCollections();
-      setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
+      setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("applied")} patches applied, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Adoption failed"); }
     finally { setBusy(false); }
   };
@@ -639,6 +642,11 @@ function App() {
     await api(`/api/v1/meetings/${meetingId}/enrichment/gave-up`, { method: "POST", body: JSON.stringify({ expectedHash: meeting.contentHash }) });
     await loadCollections();
   }, "Stopped waiting for material for this meeting");
+
+  const undoPatch = (patch: AppliedPatch) => run(async () => {
+    await api(`/api/v1/inbox/patches/${patch.auditEventId}/undo`, { method: "POST" });
+    await loadCollections();
+  }, `Undid the change to ${patch.title}`);
 
   const changeTask = (task: LifeObject, changes: Record<string, unknown>) => run(async () => {
     await api(`/api/v1/tasks/${task.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes, expectedHash: task.contentHash }) });
@@ -1217,6 +1225,7 @@ function App() {
       {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p><b>{inboxDrafts.awaiting}</b> {inboxDrafts.awaiting === 1 ? "draft" : "drafts"} awaiting adoption</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
+        {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
         {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review.frontmatter.id)} onReject={() => reject(review.frontmatter.id)} onSave={(title) => editReview(review.frontmatter.id, title)} />)}
       </>}
