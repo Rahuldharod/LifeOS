@@ -317,6 +317,8 @@ server.setErrorHandler((error, _request, reply) => {
 try {
   await session.start();
   await application.rebuildIndex();
+  // #69: record edits made while the app was closed before this start writes anything.
+  if (session.status().writeAllowed) await application.recordExternalChanges().catch((error) => server.log.error(error));
   // #56: an operation that cannot be recovered is logged and shown in System Health; the server still starts.
   await application.recoverOperations({ onError: (error, operation) => server.log.error({ err: error, operation: operation.id, kind: operation.kind }, "Operation recovery failed") });
   await application.rebuildIndex();
