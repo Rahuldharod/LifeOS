@@ -197,7 +197,7 @@ export class DecisionsModule {
       : undefined;
     if (reason) {
       const now = new Date().toISOString();
-      await this.ctx.writeAudit("decision.supersede-abandoned", oldId, now, { operation_id: operation.id, superseded_by_decision_id: newId, reason });
+      await this.ctx.writeAuditOnce("decision.supersede-abandoned", oldId, now, { operation_id: operation.id, superseded_by_decision_id: newId, reason }, { matchOn: ["operation_id"] });
       await this.ctx.objects.completeOperation?.(operation.id);
       await this.ctx.rebuildIndex();
       return undefined;
@@ -220,7 +220,7 @@ export class DecisionsModule {
       }
     }
     const decision = "decision" in next ? this.ctx.index.get(newId) ?? await this.ctx.objects.write(next.decision) : await this.linkBack(newId, oldId, now);
-    await this.ctx.writeAudit("decision.superseded", oldId, now, { superseded_by_decision_id: newId });
+    await this.ctx.writeAuditOnce("decision.superseded", oldId, now, { operation_id: operationId, superseded_by_decision_id: newId }, { matchOn: ["operation_id"] });
     await this.ctx.objects.completeOperation?.(operationId);
     await this.ctx.rebuildIndex();
     return { decision, superseded: old };

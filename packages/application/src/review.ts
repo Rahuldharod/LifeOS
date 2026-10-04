@@ -122,7 +122,7 @@ export class ReviewModule {
     const created = ctx.index.get(objectId) ?? await ctx.objects.write({ relativePath: `${folder}/${markdownFileName(title, objectId, now)}`, frontmatter: { ...ctx.envelope(objectId, targetType as ObjectEnvelope["type"], title, now, originOf(review.frontmatter)), ...fields }, body });
     await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: objectId }, { expectedHash: review.contentHash, now });
     await ctx.rebuildIndex();
-    await ctx.writeAudit("review.accepted", objectId, now, { review_id: reviewId });
+    await ctx.writeAuditOnce("review.accepted", objectId, now, { review_id: reviewId }, { matchOn: ["review_id"] });
     await ctx.objects.completeOperation?.(requestedOperationId);
     await ctx.rebuildIndex();
     return created;
@@ -153,7 +153,7 @@ export class ReviewModule {
     const unchanged = proposed.list ? Array.isArray(current) && current.includes(chosenId) : current === chosenId;
     const updated = unchanged ? target : await ctx.update(target, { [proposed.link_field]: value }, { expectedHash: target.contentHash, now });
     await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, chosen_object_id: chosenId }, { expectedHash: review.contentHash, now });
-    await ctx.writeAudit("review.accepted", targetId, now, { review_id: review.frontmatter.id, link_field: proposed.link_field, linked_object_id: chosenId });
+    await ctx.writeAuditOnce("review.accepted", targetId, now, { review_id: review.frontmatter.id, link_field: proposed.link_field, linked_object_id: chosenId }, { matchOn: ["review_id"] });
     await ctx.rebuildIndex();
     return updated;
   }
@@ -193,11 +193,11 @@ export class ReviewModule {
       updated = (await this.decisions.supersedeWith(targetId, successorId, target.contentHash)).superseded;
     }
     await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId }, { expectedHash: review.contentHash, now });
-    await ctx.writeAudit("review.accepted", targetId, now, {
+    await ctx.writeAuditOnce("review.accepted", targetId, now, {
       review_id: review.frontmatter.id, draft_key: proposal.draft_key,
       before: Object.fromEntries(proposal.changes.map((change) => [change.field, change.current])), after: Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed])),
       ...(note ? { append_note: note } : {})
-    });
+    }, { matchOn: ["review_id"] });
     await ctx.rebuildIndex();
     return updated;
   }
@@ -341,7 +341,7 @@ export class ReviewModule {
     const now = new Date().toISOString();
     const remove = !!created && !created.frontmatter.deleted_at && created.frontmatter.revision === 1;
     if (remove) await ctx.update(created, { deleted_at: now }, { expectedHash: created.contentHash, now });
-    await ctx.writeAudit("review.accept-rolled-back", review.frontmatter.id, now, { operation_id: operation.id, ...(remove ? { deleted_object_id: objectId } : {}) });
+    await ctx.writeAuditOnce("review.accept-rolled-back", review.frontmatter.id, now, { operation_id: operation.id, ...(remove ? { deleted_object_id: objectId } : {}) }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operation.id);
     await ctx.rebuildIndex();
   }

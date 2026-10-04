@@ -350,7 +350,7 @@ export async function acceptSummary(ctx: AppContext, review: LifeOSObject) {
   const body = withSummarySection(meeting.body, summary);
   const updated = body === meeting.body ? meeting : await ctx.update(meeting, {}, { expectedHash: meeting.contentHash, now, body });
   await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: meetingId }, { expectedHash: review.contentHash, now });
-  await ctx.writeAudit("review.accepted", meetingId, now, { review_id: review.frontmatter.id, review_type: summaryReviewType });
+  await ctx.writeAuditOnce("review.accepted", meetingId, now, { review_id: review.frontmatter.id, review_type: summaryReviewType }, { matchOn: ["review_id"] });
   await ctx.rebuildIndex();
   return updated;
 }

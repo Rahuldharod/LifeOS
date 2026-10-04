@@ -182,7 +182,7 @@ export class PersonMergeModule {
     await ctx.rebuildIndex();
     const latest = ctx.required(review.frontmatter.id);
     await ctx.update(latest, { status: "accepted", reviewed_at: now, resolved_object_id: proposal.keep_person_id, merge_problem: undefined }, { expectedHash: latest.contentHash, now });
-    await ctx.writeAudit("person.merged", proposal.keep_person_id, now, { review_id: review.frontmatter.id, merged_person_id: proposal.merge_person_id, changed_object_ids: plan.map((entry) => entry.id) });
+    await ctx.writeAuditOnce("person.merged", proposal.keep_person_id, now, { operation_id: operationId, review_id: review.frontmatter.id, merged_person_id: proposal.merge_person_id, changed_object_ids: plan.map((entry) => entry.id) }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operationId);
     await ctx.rebuildIndex();
     return ctx.required(proposal.keep_person_id);
@@ -253,7 +253,7 @@ export class PersonMergeModule {
     await ctx.rebuildIndex();
     const now = new Date().toISOString();
     await this.undo(operation.payload.plan as PlanEntry[] | undefined ?? [], now);
-    await ctx.writeAudit("person.merge-rolled-back", review.frontmatter.id, now, { operation_id: operation.id, reason: "rejected" });
+    await ctx.writeAuditOnce("person.merge-rolled-back", review.frontmatter.id, now, { operation_id: operation.id, reason: "rejected" }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operation.id);
     await ctx.rebuildIndex();
   }
@@ -274,7 +274,7 @@ export class PersonMergeModule {
     const message = `${changedPath} changed while the merge was in progress, so the merge was undone; review the suggestion again`;
     const latest = ctx.required(review.frontmatter.id);
     await ctx.update(latest, { operation_id: uuidV7(), merge_problem: message }, { expectedHash: latest.contentHash, now });
-    await ctx.writeAudit("person.merge-rolled-back", review.frontmatter.id, now, { operation_id: operationId, changed: changedPath });
+    await ctx.writeAuditOnce("person.merge-rolled-back", review.frontmatter.id, now, { operation_id: operationId, changed: changedPath }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operationId);
     await ctx.rebuildIndex();
     throw new PersonMergeConflictError(message);

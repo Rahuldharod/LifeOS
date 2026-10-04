@@ -122,7 +122,7 @@ export class MeetingsModule {
       },
       body: noteBody
     });
-    await ctx.writeAudit("meeting.created", meetingId, now, { external_id: externalId });
+    await ctx.writeAuditOnce("meeting.created", meetingId, now, { operation_id: operationId, external_id: externalId }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operationId);
     await ctx.rebuildIndex();
     return this.meetingWorkspace(meetingId);

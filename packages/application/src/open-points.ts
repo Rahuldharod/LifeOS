@@ -170,7 +170,7 @@ export class OpenPointsModule {
       }
     }
     const decision = await this.decisions.writePrepared(prepared, now, { resolves_open_point_id: pointId });
-    await this.ctx.writeAudit("open-point.resolved", pointId, now, { resolution_decision_id: decisionId });
+    await this.ctx.writeAuditOnce("open-point.resolved", pointId, now, { operation_id: operationId, resolution_decision_id: decisionId }, { matchOn: ["operation_id"] });
     await this.ctx.objects.completeOperation?.(operationId);
     await this.ctx.rebuildIndex();
     return { decision, openPoint };
