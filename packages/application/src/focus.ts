@@ -32,7 +32,7 @@ type RuleCandidate = { task: LifeOSObject; reason: string };
  * Drive syncs write the same file (the second save gets a 409) instead of two competing overrides.
  */
 const overridePath = (date: string) => `focus-overrides/${date}.md`;
-/** "About 300 words": a little slack, so a brief is refused only when it clearly no longer fits one screen. */
+/** "About 300 words": a little slack before a brief is flagged as too long for one screen (it is still adopted). */
 export const maxBriefWords = 330;
 
 export type FocusItemState = "open" | "done" | "cancelled" | "past" | "missing";
@@ -56,7 +56,7 @@ export interface FocusItem {
 export interface DailyFocusView {
   /** The calendar date shown (the user's local date). */
   date: string;
-  brief?: { id: string; title: string; path: string; generatedAt: string; body: string };
+  brief?: { id: string; title: string; path: string; generatedAt: string; body: string; lengthWarning?: string };
   iOwe: FocusItem[];
   /** The effective Top 3: the brief's, or the deterministic rule's when there is no brief. */
   top3: FocusItem[];
@@ -155,7 +155,9 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
     if (entry.overdue !== undefined && typeof entry.overdue !== "boolean") issues.push(`${at}.overdue: must be true or false`);
     return { overdue: entry.overdue === true };
   });
-  const top3 = section("top3", "task_id", ["task"], maxTopThree, (entry, at) => ({ why_today: requiredText(entry, at, "why_today"), ...optionalText(entry, "if_then") }));
+  // The brief may fill as many Top 3 slots as the user's max must-dos setting allows (default 3).
+  const topLimit = maxMustDosOf(ctx.index.all().find((object) => object.relativePath === focusSettingsPath && object.frontmatter.type === "app-setting")?.frontmatter);
+  const top3 = section("top3", "task_id", ["task"], topLimit, (entry, at) => ({ why_today: requiredText(entry, at, "why_today"), ...optionalText(entry, "if_then") }));
   const waiting = section("waiting_and_decisions", "object_id", ["task", "decision", "open-point"], undefined, (entry, at) => {
     const age = entry.age_days;
     if (age !== undefined && !(typeof age === "number" && Number.isInteger(age) && age >= 0)) issues.push(`${at}.age_days: must be a whole number of days`);
@@ -177,7 +179,8 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
     }
   }
   const words = draft.body.trim().split(/\s+/).filter(Boolean).length;
-  if (words > maxBriefWords) issues.push(`body: the brief is ${words} words; keep it to about 300 so it fits one screen`);
+  // An over-long brief is still adopted, so a wordy routine never costs the user their morning; Today shows the warning.
+  const lengthWarning = words > maxBriefWords ? `The brief is ${words} words; aim for about 300 so it fits one screen` : undefined;
   if (issues.length) throw new DraftError(issues);
 
   // Briefs adopted earlier in this batch are not in the index yet; the rebuild below keeps the next one honest.
@@ -189,7 +192,7 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
     frontmatter: {
       ...ctx.envelope(id, "daily-focus", draft.title, run.now, draft.origin), captured_at: draft.capturedAt,
       focus_on: focusOn, generated_at: generatedAt, i_owe: iOwe, top3, waiting_and_decisions: waiting, meeting_prep: meetingPrep,
-      ...(dayShape ? { day_shape: dayShape } : {}), defer_candidates: defer,
+      ...(dayShape ? { day_shape: dayShape } : {}), defer_candidates: defer, ...(lengthWarning ? { length_warning: lengthWarning } : {}),
       ...(newer ? { archived_at: run.now, superseded_by_id: newer.frontmatter.id } : {})
     },
     body: draft.body.trim() ? `${draft.body.trim()}\n` : ""
@@ -220,7 +223,7 @@ export class DailyFocusModule {
     const shape = record(brief?.frontmatter.day_shape);
     const view: DailyFocusView = {
       date,
-      ...(brief ? { brief: { id: brief.frontmatter.id, title: brief.frontmatter.title, path: brief.relativePath, generatedAt: String(brief.frontmatter.generated_at ?? brief.frontmatter.created_at), body: brief.body } } : {}),
+      ...(brief ? { brief: { id: brief.frontmatter.id, title: brief.frontmatter.title, path: brief.relativePath, generatedAt: String(brief.frontmatter.generated_at ?? brief.frontmatter.created_at), body: brief.body, ...(typeof brief.frontmatter.length_warning === "string" ? { lengthWarning: brief.frontmatter.length_warning } : {}) } } : {}),
       iOwe: items("i_owe", "task_id", (entry) => ({ overdue: entry.overdue === true })).map((item) => ({ ...item, overdue: item.overdue || this.dueBefore(item.object, date) })),
       ...this.effectiveTopThree(brief, ruleCandidates, now, hidden, override, maxMustDos),
       maxMustDos,

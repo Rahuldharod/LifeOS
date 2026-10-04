@@ -89,7 +89,7 @@ const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
     if (value.superseded_by_decision_id && value.status !== "superseded") context.addIssue({ code: "custom", message: "superseded_by_decision_id is allowed only for superseded decisions" });
   }),
   // #46: the Agent-written morning brief (ADR 0011). Entries are kept loose; adoption checks them with path-aware reasons.
-  "daily-focus": envelopeSchema.extend({ type: z.literal("daily-focus"), focus_on: z.iso.date(), generated_at: z.iso.datetime().optional(), top3: z.array(z.record(z.string(), z.unknown())).max(3).optional(), meeting_prep: z.array(z.record(z.string(), z.unknown())).max(3).optional(), defer_candidates: z.array(z.record(z.string(), z.unknown())).max(3).optional(), superseded_by_id: id.optional() }),
+  "daily-focus": envelopeSchema.extend({ type: z.literal("daily-focus"), focus_on: z.iso.date(), generated_at: z.iso.datetime().optional(), top3: z.array(z.record(z.string(), z.unknown())).max(5).optional(), meeting_prep: z.array(z.record(z.string(), z.unknown())).max(3).optional(), defer_candidates: z.array(z.record(z.string(), z.unknown())).max(3).optional(), superseded_by_id: id.optional() }),
   // #47: the user's changes to one date's Top 3 (ADR 0011), app-owned; one fixed-path file per date.
   "focus-override": envelopeSchema.extend({ type: z.literal("focus-override"), focus_on: z.iso.date(), pinned: ids.optional(), replaced: z.array(z.object({ from: id, to: id }).loose()).optional(), dismissed: ids.optional() }),
   // #42: `raised_at` is when the question came up (defaults to creation); the list date filter uses it.

@@ -53,6 +53,12 @@ export function enrichmentStateOf(meeting: LifeOSObject): EnrichmentState {
  * or the email when Google has no name, so only email-looking strings are kept. Objects with an
  * `email` field (the richer attendee shape #38 introduces) are read too.
  */
+/** Expected material recorded on a meeting as checked and not existing. */
+export function unavailableOf(meeting: LifeOSObject) {
+  const value = meeting.frontmatter.enrichment_unavailable_material;
+  return Array.isArray(value) ? value.filter((kind): kind is string => (expectedMaterial as readonly string[]).includes(String(kind))) : [];
+}
+
 export function attendeeEmails(attendees: unknown): string[] {
   const emails = (Array.isArray(attendees) ? attendees : []).map((attendee) => typeof attendee === "string" ? attendee : typeof attendee === "object" && attendee !== null ? (attendee as { email?: unknown }).email : undefined)
     .filter((value): value is string => typeof value === "string" && /^[^\s@]+@[^\s@]+$/.test(value.trim()))
@@ -104,7 +110,8 @@ export class EnrichmentModule {
       const note = event.noteId ? ctx.index.get(event.noteId) : undefined;
       const sources = meeting ? this.sourcesFor(meeting, note).filter((source) => !isRestricted(source)) : [];
       const have = new Set(sources.map((source) => String(source.frontmatter.source_type)));
-      const missingMaterial = expectedMaterial.filter((kind) => !have.has(kind));
+      const absent = meeting ? unavailableOf(meeting) : [];
+      const missingMaterial = expectedMaterial.filter((kind) => !have.has(kind) && !absent.includes(kind));
       const entry: Record<string, unknown> = {
         ...(meeting ? { meeting_id: meeting.frontmatter.id } : {}),
         calendar_event_id: event.externalId,

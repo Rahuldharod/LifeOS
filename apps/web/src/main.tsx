@@ -57,7 +57,7 @@ type Workspace = {
 };
 type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
 type FocusChange = { action: "pin" | "unpin" | "replace" | "dismiss" | "restore" | "reset"; taskId?: string; replacementId?: string };
-type DailyFocus = { date: string; brief?: { id: string; title: string; path: string; generatedAt: string; body: string }; iOwe: FocusItem[]; top3: FocusItem[]; top3Source: "brief" | "rule"; maxMustDos: number; override?: { contentHash: string }; dismissedTop3: FocusItem[]; waitingAndDecisions: FocusItem[]; meetingPrep: FocusItem[]; dayShape?: { meetingHours: number; freeHours: number }; deferCandidates: FocusItem[]; restrictedHidden: number };
+type DailyFocus = { date: string; brief?: { id: string; title: string; path: string; generatedAt: string; body: string; lengthWarning?: string }; iOwe: FocusItem[]; top3: FocusItem[]; top3Source: "brief" | "rule"; maxMustDos: number; override?: { contentHash: string }; dismissedTop3: FocusItem[]; waitingAndDecisions: FocusItem[]; meetingPrep: FocusItem[]; dayShape?: { meetingHours: number; freeHours: number }; deferCandidates: FocusItem[]; restrictedHidden: number };
 type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[]; upcoming: LifeObject[]; waiting: LifeObject[]; topThree: Array<{ task: LifeObject; reason: string }>; reviewCount: number; focus?: DailyFocus };
 type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
@@ -1468,6 +1468,7 @@ function DailyFocusPanel({ focus, tasks, disabled, onRefresh, onChange }: { focu
   return <article className="daily-focus">
     <span>DAILY FOCUS</span>
     <div className="capture-row"><p className="muted">{brief ? `Generated at ${formatTime(brief.generatedAt)}` : "No brief for today yet. Top 3 suggested by priority, then due date."}</p><button disabled={disabled} onClick={onRefresh} title="Ask Claude to re-plan today">Refresh</button></div>
+    {brief?.lengthWarning && <p className="muted" role="note">Note: {brief.lengthWarning}.</p>}
     {brief && section("I owe", focus.iOwe, (item) => [item.overdue && item.state === "open" ? "Overdue" : undefined], "Nothing owed today.")}
     <TopThreeSection focus={focus} tasks={tasks} disabled={disabled} onChange={onChange} stateLabel={stateLabel} />
     {brief && <>

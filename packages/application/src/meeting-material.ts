@@ -1,7 +1,7 @@
 import { sensitivityOf, uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
-import { expectedMaterial } from "./enrichment.js";
+import { expectedMaterial, unavailableOf } from "./enrichment.js";
 import type { MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
 
@@ -12,17 +12,32 @@ import { foldName, type ReferenceResolver } from "./resolution.js";
  *   meeting: <calendar event ID or meeting ID>   (optional calendar_id)
  *   sources: [{ source_type, url, external_id, occurred_at, provider?, title? }]
  *   proposals: [{ kind, title, confidence, missed_in_notes, evidence, key?, body?, …task/decision fields }]
+ *   unavailable: [gong-call, …]                  (optional: expected material the agent checked and found not to exist)
  *   summary_confidence: High | Medium | Low      (optional, default Medium)
  *   body: the proposed meeting summary (optional)
  *
  * Adoption creates the meeting from the calendar event if needed (never its note), upserts Sources by
  * provider + external ID, raises one `summary` Review Item and create-type Review Items for the proposals
- * (inheriting the meeting's project, client, product and people), then sets `enriched` or `partial`.
+ * (inheriting the meeting's project, client, product and people), then sets `enriched` (every expected kind is
+ * linked or known not to exist) or `partial`.
  * Re-runs are safe: sources, the summary and proposals (by `key`, else kind + title) are found, not re-added.
  * Restricted meetings are never enriched.
  */
 
 export const summaryReviewType = "summary";
+
+function parseUnavailable(value: unknown, sources: Array<{ sourceType: string }>, issues: string[]) {
+  if (value === undefined) return [] as string[];
+  if (!Array.isArray(value)) { issues.push(`unavailable: must be a list of material kinds (${expectedMaterial.join(", ")})`); return []; }
+  const kinds: string[] = [];
+  for (const item of value) {
+    const kind = text(item);
+    if (!(expectedMaterial as readonly string[]).includes(kind)) issues.push(`unavailable: unknown material "${kind}" (expected one of ${expectedMaterial.join(", ")})`);
+    else if (sources.some((source) => source.sourceType === kind)) issues.push(`unavailable: ${kind} is also listed in sources`);
+    else if (!kinds.includes(kind)) kinds.push(kind);
+  }
+  return kinds;
+}
 export const materialSourceTypes =[...expectedMaterial, "drive-doc"] as const;
 const defaultProvider: Record<string, string> = { "meet-transcript": "google-drive", "meet-recording": "google-drive", "drive-doc": "google-drive", "gong-call": "gong", "gong-summary-email": "gmail" };
 const sourceLabels: Record<string, string> = { "meet-transcript": "Meet transcript", "meet-recording": "Meet recording", "drive-doc": "Drive doc", "gong-call": "Gong call", "gong-summary-email": "Gong summary email" };
@@ -59,6 +74,7 @@ export class MeetingMaterialModule {
     // 2. Every check up front, so a bad draft writes nothing (not even the meeting).
     const issues: string[] = [];
     const sources = this.parseSources(fields.sources, issues);
+    const unavailable = parseUnavailable(fields.unavailable, sources, issues);
     const summary = draft.body.trim();
     const summaryConfidence = fields.summary_confidence === undefined ? "Medium" : confidences.find((value) => value.toLowerCase() === text(fields.summary_confidence).toLowerCase());
     if (!summaryConfidence) issues.push(`summary_confidence: unknown confidence "${text(fields.summary_confidence)}" (expected High, Medium or Low)`);
@@ -114,9 +130,11 @@ export class MeetingMaterialModule {
     const listed = idList(meeting.frontmatter.source_ids);
     const extraIds = elsewhere.filter((id) => !listed.includes(id));
     const have = new Set(this.sourcesFor(meeting, [...listed, ...extraIds]).map((source) => String(source.frontmatter.source_type)));
-    const missing = expectedMaterial.filter((kind) => !have.has(kind));
+    // Material the agent reported as not existing (e.g. no Gong call) counts as done, unless it turned up after all.
+    const absent = [...new Set([...unavailableOf(meeting), ...unavailable])].filter((kind) => !have.has(kind));
+    const missing = expectedMaterial.filter((kind) => !have.has(kind) && !absent.includes(kind));
     const state = missing.length ? "partial" : "enriched";
-    await ctx.update(meeting, { enrichment_state: state, enrichment_missing_material: missing, enrichment_adopted_at: run.now, ...(extraIds.length ? { source_ids: [...listed, ...extraIds] } : {}) }, { expectedHash: meeting.contentHash, now: run.now });
+    await ctx.update(meeting, { enrichment_state: state, enrichment_missing_material: missing, enrichment_unavailable_material: absent.length ? absent : undefined, enrichment_adopted_at: run.now, ...(extraIds.length ? { source_ids: [...listed, ...extraIds] } : {}) }, { expectedHash: meeting.contentHash, now: run.now });
     await ctx.writeAudit("meeting.enrichment-adopted", meetingId, run.now, { from: meeting.frontmatter.enrichment_state ?? "none", to: state, missing_material: missing, draft_key: draft.draftKey, agent_run_id: run.id }, { type: "agent", ref: run.id });
     await ctx.rebuildIndex();
     return [...new Set(objectIds)];

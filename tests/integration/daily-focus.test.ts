@@ -101,9 +101,29 @@ describe("adopting a daily-focus draft", () => {
     const reason = result!.reason!;
     expect(reason).toContain("_inbox/drafts/bad.md (draft_key focus-2026-10-05-0600)");
     for (const expected of ["focus_on: not a calendar date", "generated_at: not an ISO 8601", "top3: has 5 entries; at most 3", "top3.4.task_id: not an object ID", "top3.4.why_today: missing",
-      "meeting_prep: has 4 entries; at most 3", `defer_candidates.0.task_id: ${meetingId} is a meeting, expected task`, "day_shape.meeting_hours: must be a number", "day_shape.free_hours: missing", "body: the brief is 400 words"]) expect(reason).toContain(expected);
+      "meeting_prep: has 4 entries; at most 3", `defer_candidates.0.task_id: ${meetingId} is a meeting, expected task`, "day_shape.meeting_hours: must be a number", "day_shape.free_hours: missing"]) expect(reason).toContain(expected);
+    expect(reason).not.toContain("words");
     expect(await briefs(application)).toEqual([]);
     expect((await frontmatterOf(path.join(root, "_inbox", "failed", "bad.result.md"))).outcome).toBe("failed");
+  });
+
+  it("adopts an over-long brief with a length warning instead of losing the morning", async () => {
+    const { root, application } = await vault();
+    await dropDraft(root, "long.md", brief(), `${"word ".repeat(400)}\n`);
+    expect((await application.adoptDrafts({ now })).drafts[0]).toMatchObject({ outcome: "adopted" });
+    const [object] = await briefs(application);
+    expect(object!.frontmatter.length_warning).toBe("The brief is 400 words; aim for about 300 so it fits one screen");
+    expect((await application.today({ date, now })).focus.brief?.lengthWarning).toContain("400 words");
+  });
+
+  it("lets the brief's Top 3 grow to the max must-dos setting, and no further", async () => {
+    const { root, application } = await vault();
+    const ids = await Promise.all(["A", "B", "C", "D", "E", "F"].map((title) => task(application, title)));
+    await application.saveFocusSettings({ maxMustDos: 5 });
+    await dropDraft(root, "five.md", brief({ top3: ids.slice(0, 5).map((id) => ({ task_id: id, why_today: "because" })) }));
+    expect((await application.adoptDrafts({ now })).drafts[0]).toMatchObject({ outcome: "adopted" });
+    await dropDraft(root, "six.md", brief({ draft_key: "six", top3: ids.map((id) => ({ task_id: id, why_today: "because" })) }));
+    expect((await application.adoptDrafts({ now })).drafts[0]!.reason).toContain("top3: has 6 entries; at most 5");
   });
 
   it("archives the older brief for the same date in place when a newer one arrives", async () => {

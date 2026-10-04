@@ -232,6 +232,35 @@ describe("meeting-material adoption", () => {
     expect((await application.object(meeting!.frontmatter.id)).frontmatter).toMatchObject({ enrichment_state: "partial", enrichment_missing_material: ["gong-call", "gong-summary-email"] });
   });
 
+  it("counts material the agent checked and found not to exist, so a meeting without Gong can be enriched", async () => {
+    const { root, application, calendar } = await vault();
+    await dropDraft(root, "a.md", material({ key: "a", sources: ["meet-transcript", "meet-recording"], proposals: "proposals: []", extra: "unavailable: [gong-call, gong-summary-email]" }));
+    expect((await application.adoptDrafts()).drafts[0]!.outcome).toBe("adopted");
+    const [meeting] = await ofType(application, "meeting");
+    expect(meeting!.frontmatter).toMatchObject({ enrichment_state: "enriched", enrichment_missing_material: [], enrichment_unavailable_material: ["gong-call", "gong-summary-email"] });
+    // A later Work Order never asks for it again.
+    calendar.events = [event("evt-1"), event("evt-2")];
+    const request = await application.requestEnrichment();
+    expect(request.meetings.map((entry) => entry.calendarEventId)).not.toContain("evt-1");
+  });
+
+  it("refuses unknown or contradictory unavailable material", async () => {
+    const { root, application } = await vault();
+    await dropDraft(root, "a.md", material({ key: "a", sources: ["gong-call"], proposals: "proposals: []", extra: "unavailable: [gong-call, fax]" }));
+    const reason = (await application.adoptDrafts()).drafts[0]!.reason!;
+    expect(reason).toContain('unavailable: unknown material "fax"');
+    expect(reason).toContain("unavailable: gong-call is also listed in sources");
+  });
+
+  it("re-requests partial meetings only for material not yet marked unavailable", async () => {
+    const { root, application, calendar } = await vault();
+    await dropDraft(root, "a.md", material({ key: "a", sources: ["meet-transcript"], proposals: "proposals: []", extra: "unavailable: [gong-call]" }));
+    await application.adoptDrafts();
+    calendar.events = [event("evt-1")];
+    const request = await application.requestEnrichment();
+    expect(request.meetings.find((entry) => entry.calendarEventId === "evt-1")?.missingMaterial).toEqual(["meet-recording", "gong-summary-email"]);
+  });
+
   it("links an existing source by provider + external ID instead of creating another", async () => {
     const { root, application } = await vault();
     await dropDraft(root, "a.md", material({ key: "a", sources: ["drive-doc"], proposals: "proposals: []" }));
