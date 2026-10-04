@@ -347,4 +347,83 @@ describe("crash replay for every adoption handler (merged with #33, #34, #36, #4
     expect(restarted.appliedPatches()).toHaveLength(1);
     expect(await readdir(path.join(root, "_inbox/patches"))).toEqual([]);
   });
+
+  // #61: every crash point of a patch, applied or routed to review, recovers to the same result as an uninterrupted run.
+  describe("patch crash points (#61)", () => {
+    const dropPatch = async (root: string, fields: Record<string, unknown>) => {
+      const target = path.join(root, "_inbox", "patches", "note.md");
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, `---\n${stringify({ lifeos_patch: 1, draft_key: "note-1", origin: "user-dictated", captured_at: "2026-10-04T10:00:00+02:00", ...fields })}---\n`);
+      const past = new Date(Date.now() - 60_000);
+      await utimes(target, past, past);
+    };
+    async function withTask() {
+      const { root, application } = await vault();
+      await dropDraft(root, "task.md", dictatedTask());
+      const taskId = (await application.adoptDrafts()).drafts[0]!.objectIds[0]!;
+      return { root, taskId, original: application.object(taskId) };
+    }
+    const auditOf = (action: string) => ((input: { frontmatter: Record<string, unknown> }) => input.frontmatter.type === "audit-event" && input.frontmatter.action === action) as never;
+    const onPatches = ((from: string) => from === "patches") as never;
+    const onSidecar = ((folder: string, name: string) => name.endsWith(".result.md")) as never;
+
+    it.each([
+      ["after the update, before the patch.applied audit", "objects", auditOf("patch.applied")],
+      ["after the audit, before the patch was moved", "inbox:move", onPatches],
+      ["after the patch was moved, before its .result.md", "inbox:writeDocument", onSidecar]
+    ] as const)("an applied patch that crashed %s: note appended once, true before/after audited, Undo restores the original", async (_label, where, when) => {
+      const { root, taskId, original } = await withTask();
+      await dropPatch(root, { id: taskId, set: { priority: "High" }, append_note: "Joel wants it in French." });
+      const objects = where === "objects" ? crashing(new MarkdownObjectStore(root), "write", when) : new MarkdownObjectStore(root);
+      const inbox = where.startsWith("inbox:") ? crashing(new FilesystemInboxStore(root), where.slice(6) as keyof FilesystemInboxStore, when) : new FilesystemInboxStore(root);
+      const crashed = await open(root, objects, inbox);
+      // A write error inside the patch reader is reported as skipped (journal kept) rather than thrown; either way the process is gone.
+      await crashed.adoptDrafts().catch(() => undefined);
+
+      const restarted = await open(root);
+      const batch = await restarted.adoptDrafts();
+      expect(batch.drafts[0]).toMatchObject({ draft: "_inbox/patches/note.md", outcome: "applied", objectIds: [taskId] });
+      expect(await frontmatterOf(path.join(root, "_inbox/processed/note.result.md"))).toMatchObject({ outcome: "applied", object_ids: [taskId] });
+      const patched = restarted.object(taskId);
+      expect(patched.body.match(/Joel wants it in French\./g)).toHaveLength(1);
+      expect(patched.frontmatter).toMatchObject({ priority: "High", revision: 2 });
+      const [applied] = restarted.appliedPatches();
+      expect(restarted.appliedPatches()).toHaveLength(1);
+      expect(applied).toMatchObject({ before: { priority: null }, after: { priority: "High" }, appendedNote: "Joel wants it in French." });
+
+      const undone = await restarted.undoPatch(applied!.auditEventId);
+      expect(undone.frontmatter.priority).toBeUndefined();
+      expect(undone.body).toBe(original.body);
+      expect(await (await open(root)).adoptDrafts()).toMatchObject({ drafts: [] });
+      // Nothing is left half-done in the operation journal.
+      expect(await new MarkdownObjectStore(root).incompleteOperations()).toEqual([]);
+    });
+
+    it.each([
+      ["after the Review Item was written, before its patch.review-raised audit", "objects", auditOf("patch.review-raised")],
+      ["after the patch.review-raised audit, before the patch was moved", "inbox:move", onPatches],
+      ["after the patch was moved, before its .result.md", "inbox:writeDocument", onSidecar]
+    ] as const)("a review-routed patch that crashed %s is filed as review-raised with its one Review Item", async (_label, where, when) => {
+      const { root, taskId, original } = await withTask();
+      await dropPatch(root, { id: taskId, set: { title: "Send Joel the French sizing deck" } });
+      const objects = where === "objects" ? crashing(new MarkdownObjectStore(root), "write", when) : new MarkdownObjectStore(root);
+      const inbox = where.startsWith("inbox:") ? crashing(new FilesystemInboxStore(root), where.slice(6) as keyof FilesystemInboxStore, when) : new FilesystemInboxStore(root);
+      const crashed = await open(root, objects, inbox);
+      // A write error inside the patch reader is reported as skipped (journal kept) rather than thrown; either way the process is gone.
+      await crashed.adoptDrafts().catch(() => undefined);
+
+      const restarted = await open(root);
+      const batch = await restarted.adoptDrafts();
+      const reviews = (await ofType(restarted, "review-item")).filter((review) => review.frontmatter.review_type === "update");
+      expect(reviews).toHaveLength(1);
+      const reviewId = reviews[0]!.frontmatter.id;
+      expect(batch.drafts[0]).toMatchObject({ draft: "_inbox/patches/note.md", outcome: "review", objectIds: [reviewId] });
+      expect(await frontmatterOf(path.join(root, "_inbox/processed/note.result.md"))).toMatchObject({ outcome: "review", object_ids: [reviewId] });
+      expect((await ofType(restarted, "audit-event")).filter((audit) => audit.frontmatter.action === "patch.review-raised")).toHaveLength(1);
+      expect(restarted.object(taskId).frontmatter.title).toBe(original.frontmatter.title);
+      expect(restarted.appliedPatches()).toEqual([]);
+      expect((await (await open(root)).adoptDrafts()).drafts).toEqual([]);
+      expect(await new MarkdownObjectStore(root).incompleteOperations()).toEqual([]);
+    });
+  });
 });

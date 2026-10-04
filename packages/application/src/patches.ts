@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { envelopeWriteProblem, lifecycleWriteProblem, objectTypes, uuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DraftError, draftOrigins, isCalendarDate, text, toUtc, validationIssues, type AdoptionRun, type DraftOrigin, type DraftResult, type FileDocument } from "./adoption.js";
 import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
@@ -11,8 +12,9 @@ import { isLive, sameValue, validTimeZone } from "./support.js";
  * dropping a file in `_inbox/patches/`. Adoption reads them in the same batch as drafts, after them.
  *
  * One patch: check the contract → idempotency (draft_key + content hash, from `patch.applied` audit
- * events) → resolve the target → decide whether it may apply on its own → one guarded write → a
- * `patch.applied` audit event holding before/after values → filed with the shared `.result.md` sidecar.
+ * events) → resolve the target → decide whether it may apply on its own → journal the before/after (#61) →
+ * one guarded write → a `patch.applied` audit event holding those values → filed with the `.result.md` sidecar.
+ * A replay after a crash between the write and the audit finds the journal and audits instead of re-applying.
  * `undoPatch` puts the before values back through another guarded write, audited as `patch.undone`.
  *
  * #37: anything that may not apply on its own (meaning-changing fields, decisions, agent-extracted
@@ -73,6 +75,11 @@ export interface UpdateProposal {
 // Audit values use `null` for "absent" (YAML cannot hold `undefined`); writes use `undefined`, which removes the field.
 const stored = (value: unknown) => value === undefined ? null : value;
 const written = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value ?? undefined]));
+/** What an auto-applied patch is about to write (#61), journalled before the write so a replay can finish it. */
+interface PatchJournal { target_id: string; base_hash: string; before: Record<string, unknown>; after: Record<string, unknown>; appended_text?: string }
+const patchJournalKind = "apply-patch";
+/** One journal entry per patch (draft_key + content), so a replay after a crash finds the entry its first attempt wrote. */
+const patchJournalId = (patch: ParsedPatch) => `apply-patch-${createHash("sha256").update(`${patch.draftKey}\n${patch.contentHash}`).digest("hex").slice(0, 32)}`;
 const metadataOf = (object: LifeOSObject) => (object.frontmatter.metadata ?? {}) as Record<string, unknown>;
 const record = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
 
@@ -188,6 +195,11 @@ export class PatchModule {
   /** Applies one patch with a guarded write and audits it, or raises an `update` Review Item; returns the ID to report. */
   private async apply(patch: ParsedPatch, run: AdoptionRun): Promise<{ objectId: string; outcome: "applied" | "review" }> {
     const target = this.target(patch);
+    // #61: an earlier attempt journalled this exact change and then wrote it, but crashed before its audit:
+    // audit the journalled values instead of applying again (no second note, and Undo gets the true before).
+    const journalId = patchJournalId(patch);
+    const journal = (await this.ctx.objects.incompleteOperations?.())?.find((operation) => operation.id === journalId)?.payload as PatchJournal | undefined;
+    if (journal && journal.target_id === target.frontmatter.id && journal.base_hash !== target.contentHash) return this.audit(patch, target, journal, run);
     const reasons = this.reviewReasons(patch, target);
     const changes = this.changes(patch, target);
     const keys = Object.keys(changes).filter((key) => !sameValue(target.frontmatter[key], changes[key]));
@@ -200,13 +212,29 @@ export class PatchModule {
 
     // The exact text appended, so undo can remove precisely that and nothing the user wrote after it.
     const appended = patch.appendNote ? appendedText(target.body, patch.appendNote) : undefined;
+    const planned: PatchJournal = { target_id: target.frontmatter.id, base_hash: target.contentHash, before, after, ...(appended ? { appended_text: appended } : {}) };
     // A patch that changes nothing ("mark it done" when it already is) writes no revision, but is still audited so a re-send is recognised.
-    if (keys.length || appended) await this.ctx.update(target, written(after), { expectedHash: target.contentHash, now: run.now, ...(appended ? { body: target.body + appended } : {}) });
+    if (keys.length || appended) {
+      // Journal the true before/after first, so a crash between the write and its audit is finished, not re-applied.
+      await this.ctx.objects.prepareOperation?.(patchJournalKind, { ...planned, draft_key: patch.draftKey, content_hash: patch.contentHash }, journalId);
+      try { await this.ctx.update(target, written(after), { expectedHash: target.contentHash, now: run.now, ...(appended ? { body: target.body + appended } : {}) }); }
+      catch (error) {
+        // Not written (a guarded write is all or nothing): drop the journal so a retry starts from the target as it then is.
+        await this.ctx.objects.completeOperation?.(journalId);
+        throw error;
+      }
+    }
+    return this.audit(patch, target, planned, run);
+  }
+
+  /** The `patch.applied` audit (the patch's idempotency ledger and Undo record), then closes the patch's journal. */
+  private async audit(patch: ParsedPatch, target: LifeOSObject, values: PatchJournal, run: AdoptionRun) {
     await this.ctx.writeAudit(appliedAction, target.frontmatter.id, run.now, {
       draft_key: patch.draftKey, content_hash: patch.contentHash, draft_path: patch.file.relativePath, agent_run_id: run.id, origin: patch.origin,
-      captured_at: patch.capturedAt, before, after, ...(appended ? { append_note: patch.appendNote, appended_text: appended } : {})
+      captured_at: patch.capturedAt, before: values.before, after: values.after, ...(values.appended_text ? { append_note: patch.appendNote, appended_text: values.appended_text } : {})
     });
-    return { objectId: target.frontmatter.id, outcome: "applied" };
+    await this.ctx.objects.completeOperation?.(patchJournalId(patch));
+    return { objectId: target.frontmatter.id, outcome: "applied" as const };
   }
 
   /**

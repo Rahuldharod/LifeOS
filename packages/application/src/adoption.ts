@@ -412,16 +412,19 @@ export class AdoptionModule {
     const draftPath = `_inbox/${from}/${name}`;
     const waiting = (await inbox.list(from)).find((file) => file.name === name);
     const document = waiting ? await inbox.read(from, name) : undefined;
-    // The patch's own ledger: a `patch.applied` audit for this key and content means the change itself was made.
-    const patched = from === "patches" ? this.ctx.index.all().filter((object) => {
+    // The patch's own ledger: a `patch.applied` audit for this key and content means the change itself was made,
+    // a `patch.review-raised` one (#61) that its update Review Item was raised (the audit's object is the item).
+    const ledgered = from === "patches" ? this.ctx.index.all().filter((object) => {
       const metadata = object.frontmatter.metadata as Record<string, unknown> | undefined;
-      return object.frontmatter.type === "audit-event" && object.frontmatter.action === "patch.applied" && metadata?.draft_key === draftKey && metadata.content_hash === contentHash;
-    }).map((object) => String(object.frontmatter.object_id)) : [];
-    // Still in its folder, unchanged: replay it (a draft onto the same IDs), or just file a patch that was applied.
+      return object.frontmatter.type === "audit-event" && (object.frontmatter.action === "patch.applied" || object.frontmatter.action === "patch.review-raised") && metadata?.draft_key === draftKey && metadata.content_hash === contentHash;
+    }) : [];
+    const patched = ledgered.map((object) => String(object.frontmatter.object_id));
+    const patchOutcome = ledgered.some((object) => object.frontmatter.action === "patch.review-raised") ? "review" as const : "applied" as const;
+    // Still in its folder, unchanged: replay it (a draft onto the same IDs), or just file a patch that was applied or raised for review.
     if (document?.contentHash === contentHash) {
       if (from === "drafts") return this.adoptOne(document, run, this.ledger(), operation);
       if (!patched.length) { await this.ctx.rebuildIndex(); return this.journalledPatch(run, operation)(document); }
-      const result = await this.file("patches", document, "processed", { draftKey, objectIds: patched, outcome: "applied" }, run);
+      const result = await this.file("patches", document, "processed", { draftKey, objectIds: patched, outcome: patchOutcome }, run);
       await this.ctx.objects.completeOperation?.(operation.id);
       return result;
     }
@@ -440,7 +443,7 @@ export class AdoptionModule {
       for (const file of files.filter((candidate) => !isResult(candidate) && !names.has(resultName(candidate.name)))) {
         const moved = await inbox.read(folder, file.name);
         if (moved.contentHash !== contentHash) continue;
-        const filing: FilingResult = folder === "failed" ? { draftKey, objectIds: [], errors: [`${draftPath}: adoption was interrupted before the reason was recorded; send it again to see why it was refused`] } : { draftKey, objectIds, outcome: from === "patches" ? "applied" : "adopted" };
+        const filing: FilingResult = folder === "failed" ? { draftKey, objectIds: [], errors: [`${draftPath}: adoption was interrupted before the reason was recorded; send it again to see why it was refused`] } : { draftKey, objectIds, outcome: from === "patches" ? patchOutcome : "adopted" };
         result = await this.writeResult(from, moved, draftPath, file, folder, filing, run);
         break;
       }
