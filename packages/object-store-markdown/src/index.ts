@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, link, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { inboxFolders, type AgentIndexFile, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
@@ -164,6 +164,11 @@ export class MarkdownObjectStore implements ObjectStore {
       const onDisk = decode(current, input.relativePath).frontmatter.revision;
       if (onDisk !== input.frontmatter.revision - 1) throw new ObjectConflictError(`Object changed since it was opened: ${input.relativePath} (revision ${onDisk} on disk, expected ${input.frontmatter.revision - 1})`);
       await this.saveVersion(input.frontmatter.id, input.frontmatter.revision - 1, current);
+    } else {
+      // #58: a create (no expected hash) never overwrites a file, nor reuses an ID a sibling file name already carries.
+      if (current !== undefined) throw new ObjectConflictError(`Cannot create ${input.relativePath}: a file already exists there`);
+      const claimed = await this.siblingWithId(target, input.frontmatter.id);
+      if (claimed) throw new ObjectConflictError(`Duplicate object ID ${input.frontmatter.id}: already used by ${claimed}; nothing was written`);
     }
     const next = serialize(input.frontmatter, input.body);
     await mkdir(path.dirname(target), { recursive: true });
@@ -173,13 +178,37 @@ export class MarkdownObjectStore implements ObjectStore {
       await handle.writeFile(next, "utf8");
       await handle.sync();
       await handle.close();
-      await rename(temporary, target);
+      if (input.expectedHash) await rename(temporary, target);
+      else await this.publishNew(temporary, target, input.relativePath);
     } catch (error) {
       await handle.close().catch(() => undefined);
       await rm(temporary, { force: true });
       throw error;
     }
     return decode(next, input.relativePath);
+  }
+
+  /** Another file in the target's folder named for `id` (ADR 0002: `…--<id>.md`), as a data-root relative path. */
+  private async siblingWithId(target: string, id: string) {
+    const names = await readdir(path.dirname(target)).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? [] : Promise.reject(error));
+    const name = names.find((candidate) => candidate.endsWith(`--${id}.md`) && candidate !== path.basename(target));
+    return name ? path.relative(this.root, path.join(path.dirname(target), name)).split(path.sep).join("/") : undefined;
+  }
+
+  /** Moves a finished temporary file to a path that must not exist yet. A hard link fails atomically if it does. */
+  private async publishNew(temporary: string, target: string, relativePath: string) {
+    try {
+      await link(temporary, target);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") throw new ObjectConflictError(`Cannot create ${relativePath}: a file already exists there`);
+      // Some synced or network file systems refuse hard links: check, then rename (only this app writes new paths).
+      if (code !== "EPERM" && code !== "ENOTSUP" && code !== "ENOSYS" && code !== "EXDEV" && code !== "EOPNOTSUPP") throw error;
+      if (await access(target).then(() => true, () => false)) throw new ObjectConflictError(`Cannot create ${relativePath}: a file already exists there`);
+      await rename(temporary, target);
+      return;
+    }
+    await rm(temporary, { force: true });
   }
 
   /**
