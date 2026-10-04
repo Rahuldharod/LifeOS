@@ -5,29 +5,25 @@ import { acceptSummary, summaryReviewType } from "./meeting-material.js";
 import { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
-import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeOperation, personMergeReviewType, survivingPersonId } from "./person-merge.js";
-import { contextLinkFields, inheritContextLinks, sameValue, validTimeZone } from "./support.js";
+import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeReviewType, survivingPersonId } from "./person-merge.js";
+import { operationKinds, type Operation } from "./ports.js";
+import { contextLinkFields, inheritContextLinks, OneAtATime, sameValue, validTimeZone } from "./support.js";
 
 
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
 export class ReviewModule {
   /** `person-merge` Review Items (#40): suggesting, accepting and recovering merges. */
   readonly merges: PersonMergeModule;
-  /** #62: the tail of the queue of accept/reject/recover calls per Review Item, so they run one at a time. */
-  private readonly queues = new Map<string, Promise<unknown>>();
+  /** #62: accept, reject and recover calls run one at a time per Review Item (ADR 0013). */
+  private readonly queues = new OneAtATime();
   constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly decisions = new DecisionsModule(ctx)) { this.merges = new PersonMergeModule(ctx); }
 
   /**
    * #62: runs `work` after every earlier accept, reject or recovery of the same Review Item has settled, so a
    * double-click or two tabs resolve to one outcome: the later call sees the first one's result.
    */
-  private async serialise<T>(reviewId: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.queues.get(reviewId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(work);
-    const tail = current.catch(() => undefined);
-    this.queues.set(reviewId, tail);
-    try { return await current; }
-    finally { if (this.queues.get(reviewId) === tail) this.queues.delete(reviewId); }
+  private serialise<T>(reviewId: string, work: () => Promise<T>): Promise<T> {
+    return this.queues.run(reviewId, work);
   }
 
   /** #65: pending link-resolution items list person candidates as they stand after merges (read-time only; files unchanged). */
@@ -100,7 +96,7 @@ export class ReviewModule {
     const now = new Date().toISOString();
     const owner = await ctx.ensureSelfPerson(now);
     const requestedOperationId = typeof review.frontmatter.operation_id === "string" ? review.frontmatter.operation_id : uuidV7();
-    const operation = await ctx.objects.prepareOperation?.("accept-review", { reviewId, objectId: uuidV7() }, requestedOperationId);
+    const operation = await ctx.objects.prepareOperation?.(operationKinds.acceptReview, { reviewId, objectId: uuidV7() }, requestedOperationId);
     const objectId = typeof operation?.payload.objectId === "string" ? operation.payload.objectId : uuidV7();
     // #65: people merged since the proposal was written are replaced by the person they were merged into.
     const proposed = followMergesInProposal(ctx.index, review.frontmatter.proposed_fields as Record<string, unknown>);
@@ -329,8 +325,8 @@ export class ReviewModule {
     const operationId = review.frontmatter.operation_id;
     if (typeof operationId !== "string") return;
     const operation = (await this.ctx.objects.incompleteOperations?.())?.find((candidate) => candidate.id === operationId);
-    if (operation?.kind === personMergeOperation) await this.merges.abandon(review, operation);
-    else if (operation?.kind === "accept-review") await this.abandonCreate(review, operation);
+    if (operation?.kind === operationKinds.mergePerson) await this.merges.abandon(review, operation);
+    else if (operation?.kind === operationKinds.acceptReview) await this.abandonCreate(review, operation);
   }
 
   /**
@@ -350,8 +346,6 @@ export class ReviewModule {
     await ctx.rebuildIndex();
   }
 }
-
-type Operation = { id: string; kind: string; payload: Record<string, unknown> };
 
 /** Fields the user may change on a pending proposal; `null` clears one. */
 export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" | "due_at" | "due_timezone" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id", string | null>>;

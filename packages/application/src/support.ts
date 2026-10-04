@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { sensitivityOf, type LifeOSObject } from "@lifeos/domain";
 
 /** Small helpers shared by the application modules (#53). One home, so the rules cannot drift apart. */
@@ -58,3 +59,91 @@ export const isStringList = (value: unknown): value is string[] => Array.isArray
 
 /** The text items of `value` when it is a list (others dropped); `[]` when it is not a list. */
 export const stringsIn = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+/**
+ * ADR 0013: runs work one call at a time per key. Each call starts once every earlier call with the same key has
+ * settled; an earlier failure does not stop later calls. Use one key (e.g. "all") for a module-wide queue.
+ */
+export class OneAtATime {
+  private readonly tails = new Map<string, Promise<unknown>>();
+
+  run<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const current = (this.tails.get(key) ?? Promise.resolve()).then(work);
+    const tail = current.catch(() => undefined);
+    this.tails.set(key, tail);
+    void tail.then(() => { if (this.tails.get(key) === tail) this.tails.delete(key); });
+    return current;
+  }
+}
+
+/** A role key for a replayable ID (#59). Build one only with `replayRoles`, so the text never drifts. */
+export type ReplayRole = string & { readonly replayRole: unique symbol };
+const role = (text: string) => text as ReplayRole;
+
+/**
+ * ADR 0013: the role keys of replayable IDs. A role names what an ID is for, never what an attempt found already
+ * written. The text is part of stored data (each ID is derived from it), so an existing role's text never changes.
+ * Grammar: `kind` or `kind:key:key`; `parent/child` nests a role raised inside another; `role:operation` is the
+ * operation ID of the Review Item with that role.
+ */
+export const replayRoles = {
+  /** The draft's main object. */
+  main: role("main"),
+  /** The meeting a meeting-material draft creates. */
+  meeting: role("meeting"),
+  /** The summary Review Item of meeting material. */
+  summary: role("summary"),
+  /** The update Review Item a patch raises. */
+  review: role("review"),
+  /** A Source found by provider and external ID (meeting material). */
+  source: (provider: string, externalId: string) => role(`source:${provider}:${externalId}`),
+  /** A web-link Source for a cited URL. */
+  urlSource: (url: string) => role(`source:url:${url}`),
+  /** The Source made from a draft's own body text. */
+  bodySource: role("source:body"),
+  /** A proposal Review Item, by its key in the draft. */
+  proposal: (key: string) => role(`proposal:${key}`),
+  /** A link-resolution Review Item for one unresolved reference. */
+  link: (field: string, reference: string) => role(`link:${field}:${reference}`),
+  /** A person-merge Review Item, by its (order-free) pair key. */
+  merge: (pair: string) => role(`merge:${pair}`),
+  /** `child` raised inside `parent`'s handler, e.g. a merge suggestion raised for the main object. */
+  within: (parent: ReplayRole, child: ReplayRole) => role(`${parent}/${child}`),
+  /** The operation ID of the Review Item with role `of`. */
+  operation: (of: ReplayRole) => role(`${of}:operation`)
+} as const;
+
+/** Bytes 0–9 of every replayable ID of one operation: the 48-bit timestamp of `now`, then the version and 26 bits of the operation's tag. */
+function operationBytes(seed: string, now: string) {
+  const bytes = Buffer.alloc(16);
+  let timestamp = BigInt(Date.parse(now));
+  for (let position = 5; position >= 0; position -= 1) { bytes[position] = Number(timestamp & 0xffn); timestamp >>= 8n; }
+  const tag = createHash("sha256").update(`operation:${seed}`).digest();
+  bytes[6] = 0x70 | (tag[0]! & 0x0f);
+  bytes[7] = tag[1]!;
+  bytes[8] = 0x80 | (tag[2]! & 0x3f);
+  bytes[9] = tag[3]!;
+  return bytes;
+}
+
+/** UUID text of 16 bytes: 8-4-4-4-12 hex digits. */
+function uuidText(bytes: Buffer) {
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * The UUIDv7 for `role` in the journalled operation `seed` (#59): the same inputs always give the same ID.
+ * Layout: the operation's bytes (timestamp and tag, shared by all its IDs), then 48 bits derived from operation + role.
+ */
+export function replayableId(seed: string, role: ReplayRole, now: string) {
+  const bytes = operationBytes(seed, now);
+  createHash("sha256").update(`${seed}\n${role}`).digest().copy(bytes, 10, 0, 6);
+  return uuidText(bytes);
+}
+
+/** Whether `id` is one of the replayable IDs of operation `seed`, whatever its role: the replay window for `ctx.replaying`. */
+export function replayScope(seed: string, now: string) {
+  const shared = uuidText(operationBytes(seed, now)).split("-").slice(0, 4).join("-");
+  return (id: string) => id.startsWith(`${shared}-`);
+}

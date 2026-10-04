@@ -18,10 +18,37 @@ export interface ObjectStore {
    * it copies, without reading it. Lets a start skip unchanged objects cheaply (ADR 0012).
    */
   latestVersionInfo?(id: string): Promise<{ relativePath: string; revision: number; hashPrefix: string } | undefined>;
-  prepareOperation?(kind: string, payload: Record<string, unknown>, operationId: string): Promise<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>;
+  /** Journals an operation before its first write (ADR 0013). Exclusive: if `operationId` exists, its stored record wins. */
+  prepareOperation?(kind: OperationKind, payload: Record<string, unknown>, operationId: string): Promise<StoredOperation>;
   completeOperation?(operationId: string): Promise<void>;
-  incompleteOperations?(): Promise<Array<{ id: string; kind: string; status: string; payload: Record<string, unknown> }>>;
+  incompleteOperations?(): Promise<StoredOperation[]>;
 }
+
+/**
+ * The operations journal (ADR 0013): every kind of multi-write step that is journalled before its first write.
+ * The text values are stored in `.lifeos/operations/*.json`, so they never change.
+ */
+export const operationKinds = {
+  acceptReview: "accept-review",
+  mergePerson: "merge-person",
+  createMeeting: "create-meeting",
+  supersedeDecision: "supersede-decision",
+  resolveOpenPoint: "resolve-open-point",
+  applyPatch: "apply-patch",
+  adoptDraft: "adopt-draft",
+  adoptBatch: "adopt-batch"
+} as const;
+export type OperationKind = typeof operationKinds[keyof typeof operationKinds];
+
+/** One journalled operation: its ID, kind and the payload recovery needs to finish or undo it. */
+export interface Operation {
+  id: string;
+  /** An `OperationKind`; typed as text because the journal on disk may hold a kind this version does not know. */
+  kind: string;
+  payload: Record<string, unknown>;
+}
+/** An operation as the journal stores it; `prepared` means not finished yet. */
+export interface StoredOperation extends Operation { status: string }
 
 export interface IndexStore {
   rebuild(objects: LifeOSObject[], diagnostics?: string[]): void;

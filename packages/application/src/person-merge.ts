@@ -1,7 +1,8 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { internalDomainsOf, personEmails } from "./people.js";
-import { sameValue } from "./support.js";
+import { operationKinds, type Operation } from "./ports.js";
+import { OneAtATime, replayRoles, sameValue, type ReplayRole } from "./support.js";
 
 /**
  * Person merges (#40, PRD "People → Merge"). Likely duplicates become `person-merge` Review Items;
@@ -14,7 +15,6 @@ import { sameValue } from "./support.js";
  */
 
 export const personMergeReviewType = "person-merge";
-export const personMergeOperation = "merge-person";
 export type PersonMergeMatch = "email" | "email-local-part" | "name";
 export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string }
 
@@ -68,8 +68,8 @@ export function followMergesInCandidates(index: { get(id: string): LifeOSObject 
   return [...byId.values()];
 }
 
-/** Serializes suggestion sweeps per application, so two triggers never propose the same pair twice. */
-const sweeps = new WeakMap<AppContext, Promise<unknown>>();
+/** Suggestion sweeps run one at a time per application, so two triggers never propose the same pair twice. */
+const sweeps = new WeakMap<AppContext, OneAtATime>();
 
 export class PersonMergeModule {
   constructor(private readonly ctx: AppContext) {}
@@ -79,21 +79,22 @@ export class PersonMergeModule {
    * unreviewed person (calendar- or agent-created), so deliberate look-alikes the user made are left alone;
    * `personIds` narrows the sweep to those people. A pair already proposed (in any status) is never re-proposed.
    */
-  suggest(options: { now?: string; personIds?: string[]; newId?: (role: string) => string } = {}): Promise<string[]> {
+  suggest(options: { now?: string; personIds?: string[]; newId?: (role: ReplayRole) => string } = {}): Promise<string[]> {
     // `newId` (adoption's `run.newId`) makes the Review Item IDs replayable after a crash, keyed by the pair (#59).
-    const run = (sweeps.get(this.ctx) ?? Promise.resolve()).catch(() => undefined).then(() => this.suggestSerialized(options.now ?? new Date().toISOString(), options.personIds, options.newId ?? (() => uuidV7())));
-    sweeps.set(this.ctx, run);
-    return run;
+    const queue = sweeps.get(this.ctx) ?? new OneAtATime();
+    sweeps.set(this.ctx, queue);
+    return queue.run("sweep", () => this.suggestSerialized(options.now ?? new Date().toISOString(), options.personIds, options.newId ?? (() => uuidV7())));
   }
 
-  private async suggestSerialized(now: string, only: string[] | undefined, newId: (role: string) => string) {
+  private async suggestSerialized(now: string, only: string[] | undefined, newId: (role: ReplayRole) => string) {
     const { ctx } = this;
     await ctx.rebuildIndex();
     const people = ctx.index.all().filter(live);
-    const proposed = new Set(ctx.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.review_type === personMergeReviewType).map((review) => {
+    const suggestions = new Map(ctx.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.review_type === personMergeReviewType).map((review) => {
       const fields = review.frontmatter.proposed_fields as Partial<PersonMergeProposal>;
-      return pairKey(String(fields.keep_person_id), String(fields.merge_person_id));
+      return [pairKey(String(fields.keep_person_id), String(fields.merge_person_id)), review] as const;
     }));
+    const proposed = new Set(suggestions.keys());
     const created: string[] = [];
     for (const [index, left] of people.entries()) {
       for (const right of people.slice(index + 1)) {
@@ -101,6 +102,9 @@ export class PersonMergeModule {
         if (only && !only.includes(left.frontmatter.id) && !only.includes(right.frontmatter.id)) continue;
         if (left.frontmatter.is_self === true && right.frontmatter.is_self === true) continue;
         const key = pairKey(left.frontmatter.id, right.frontmatter.id);
+        // #74: a crash replay finds the suggestion its first attempt wrote (same replayable ID); its audit may be missing.
+        const ours = suggestions.get(key);
+        if (ours && ours.frontmatter.id === newId(replayRoles.merge(key))) await this.auditSuggestion(ours.frontmatter.id, ours.frontmatter.proposed_fields as PersonMergeProposal, now);
         const match = proposed.has(key) ? undefined : this.match(left, right);
         if (!match) continue;
         proposed.add(key);
@@ -132,19 +136,24 @@ export class PersonMergeModule {
     return left.frontmatter.created_at <= right.frontmatter.created_at ? [left, right] : [right, left];
   }
 
-  private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: (role: string) => string) {
-    const role = `merge:${pairKey(keep.frontmatter.id, merge.frontmatter.id)}`;
+  private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: (role: ReplayRole) => string) {
+    const role = replayRoles.merge(pairKey(keep.frontmatter.id, merge.frontmatter.id));
     const id = newId(role);
     const title = `Merge ${merge.frontmatter.title} into ${keep.frontmatter.title}`;
     const reason = match === "email" ? "Both have the same email address." : match === "email-local-part" ? "Their email addresses match on two internal domains." : "Their names match.";
     const proposal: PersonMergeProposal = { keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match, keep_title: keep.frontmatter.title, merge_title: merge.frontmatter.title };
     await this.ctx.objects.write({
       relativePath: `review-items/${markdownFileName(title, id, now)}`,
-      frontmatter: { ...this.ctx.envelope(id, "review-item", title, now), review_type: personMergeReviewType, target_object_type: "person", proposed_fields: { ...proposal }, confidence_label: match === "name" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: newId(`${role}:operation`) },
+      frontmatter: { ...this.ctx.envelope(id, "review-item", title, now), review_type: personMergeReviewType, target_object_type: "person", proposed_fields: { ...proposal }, confidence_label: match === "name" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: newId(replayRoles.operation(role)) },
       body: `# Possible duplicate person\n\n${reason} Accepting moves every reference from ${merge.frontmatter.title} to ${keep.frontmatter.title} and deletes ${merge.frontmatter.title}. Nothing changes until you accept.\n`
     });
-    await this.ctx.writeAudit("review.proposed", id, now, { review_type: personMergeReviewType, keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match }, { type: "system" });
+    await this.auditSuggestion(id, proposal, now);
     return id;
+  }
+
+  /** The suggestion's `review.proposed` audit, written once per Review Item (ADR 0013). */
+  private auditSuggestion(reviewId: string, proposal: PersonMergeProposal, now: string) {
+    return this.ctx.writeAuditOnce("review.proposed", reviewId, now, { review_type: personMergeReviewType, keep_person_id: proposal.keep_person_id, merge_person_id: proposal.merge_person_id, match: proposal.match }, { matchOn: [], actor: { type: "system" } });
   }
 
   /** Accept a `person-merge` Review Item. Safe to call again after a crash: it finishes, or rolls back, the stored plan. */
@@ -162,7 +171,7 @@ export class PersonMergeModule {
     let plan = existing?.payload.plan as PlanEntry[] | undefined;
     if (!plan) {
       plan = this.plan(proposal);
-      plan = (await ctx.objects.prepareOperation?.(personMergeOperation, { reviewId: review.frontmatter.id, keepId: proposal.keep_person_id, mergeId: proposal.merge_person_id, plan }, operationId))?.payload.plan as PlanEntry[] ?? plan;
+      plan = (await ctx.objects.prepareOperation?.(operationKinds.mergePerson, { reviewId: review.frontmatter.id, keepId: proposal.keep_person_id, mergeId: proposal.merge_person_id, plan }, operationId))?.payload.plan as PlanEntry[] ?? plan;
     }
     const now = new Date().toISOString();
     const objects = plan.map((entry) => ctx.index.get(entry.id));
@@ -180,7 +189,7 @@ export class PersonMergeModule {
   }
 
   /** Startup recovery of an interrupted merge: finish it, or roll it back if a file it touches changed meanwhile. */
-  async recover(operation: { id: string; payload: Record<string, unknown> }): Promise<"completed" | "rolled-back"> {
+  async recover(operation: Operation): Promise<"completed" | "rolled-back"> {
     const review = this.ctx.index.get(String(operation.payload.reviewId));
     // The review already moved on (rolled back with a new operation, or deleted): nothing left to do.
     if (!review || review.frontmatter.operation_id !== operation.id) { await this.ctx.objects.completeOperation?.(operation.id); return "rolled-back"; }
@@ -239,7 +248,7 @@ export class PersonMergeModule {
    * #56: rejecting an item whose merge started but did not finish. Every step of a merge can be undone,
    * so the whole plan is rolled back and the operation closed; the caller then marks the item rejected.
    */
-  async abandon(review: LifeOSObject, operation: { id: string; payload: Record<string, unknown> }) {
+  async abandon(review: LifeOSObject, operation: Operation) {
     const { ctx } = this;
     await ctx.rebuildIndex();
     const now = new Date().toISOString();

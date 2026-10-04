@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LifeOSObject } from "@lifeos/domain";
-import { contextLinkFields, dueDate, inheritContextLinks, isLive, isMeetingRestricted, isRestricted, isStringList, objectIdPattern, sameValue, stringsIn, validTimeZone } from "./support.js";
+import { contextLinkFields, dueDate, inheritContextLinks, isLive, isMeetingRestricted, isRestricted, isStringList, objectIdPattern, OneAtATime, replayableId, replayRoles, replayScope, sameValue, stringsIn, validTimeZone } from "./support.js";
 
 const object = (frontmatter: Record<string, unknown>) => ({ frontmatter, body: "" }) as unknown as LifeOSObject;
 
@@ -91,5 +91,51 @@ describe("small value helpers", () => {
     expect(isStringList("a")).toBe(false);
     expect(stringsIn(["a", 1, "b"])).toEqual(["a", "b"]);
     expect(stringsIn("a")).toEqual([]);
+  });
+});
+
+describe("replayable IDs and role keys (#59, #74)", () => {
+  const seed = "01995d3e-912b-7357-8aa6-9816c1ad90a5";
+  const now = "2026-10-04T09:15:00.000Z";
+  it("builds the same role text as before #74, so in-flight operations replay onto the same IDs", () => {
+    const merge = replayRoles.within(replayRoles.main, replayRoles.merge("a|b"));
+    expect(merge).toBe("main/merge:a|b");
+    expect(replayRoles.operation(merge)).toBe("main/merge:a|b:operation");
+    expect(replayRoles.within(replayRoles.main, replayRoles.urlSource("https://example.com/x"))).toBe("main/source:url:https://example.com/x");
+    expect(replayRoles.within(replayRoles.main, replayRoles.bodySource)).toBe("main/source:body");
+    expect(replayRoles.source("gong", "g-1")).toBe("source:gong:g-1");
+    expect(replayRoles.proposal("p1")).toBe("proposal:p1");
+    expect(replayRoles.link("owner", "Kim")).toBe("link:owner:Kim");
+    expect(replayRoles.operation(replayRoles.review)).toBe("review:operation");
+  });
+  it("derives the same IDs as before #74", () => {
+    expect(replayableId(seed, replayRoles.main, now)).toBe("01a10631-f620-7492-a192-48fc12b01ad5");
+    expect(replayableId(seed, replayRoles.within(replayRoles.main, replayRoles.merge("a|b")), now)).toBe("01a10631-f620-7492-a192-947f1f5ebd91");
+    expect(replayableId(seed, replayRoles.operation(replayRoles.within(replayRoles.main, replayRoles.merge("a|b"))), now)).toBe("01a10631-f620-7492-a192-04ecfae6c878");
+  });
+  it("scopes a replay to every ID of its own operation and no other", () => {
+    const scope = replayScope(seed, now);
+    expect(scope(replayableId(seed, replayRoles.summary, now))).toBe(true);
+    expect(scope(replayableId(seed, replayRoles.proposal("x"), now))).toBe(true);
+    expect(scope(replayableId("01995d3e-912b-7357-8aa6-9816c1ad90a6", replayRoles.main, now))).toBe(false);
+    expect(scope("01a10631-f620-7492-a192")).toBe(false);
+  });
+});
+
+describe("OneAtATime (#74)", () => {
+  it("runs calls with one key one after the other, even after a failure, and calls with other keys alongside", async () => {
+    const queue = new OneAtATime();
+    const log: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const first = queue.run("a", async () => { log.push("a1 start"); await gate; log.push("a1 end"); throw new Error("a1 failed"); });
+    const second = queue.run("a", async () => { log.push("a2"); return 2; });
+    const other = queue.run("b", async () => { log.push("b1"); return 1; });
+    await other;
+    expect(log).toEqual(["a1 start", "b1"]);
+    release();
+    await expect(first).rejects.toThrow("a1 failed");
+    expect(await second).toBe(2);
+    expect(log).toEqual(["a1 start", "b1", "a1 end", "a2"]);
   });
 });

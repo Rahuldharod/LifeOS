@@ -1,14 +1,15 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
-import type { CalendarEvent } from "./ports.js";
+import { operationKinds, type CalendarEvent } from "./ports.js";
+import { OneAtATime } from "./support.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
 
 /** Canonical meetings for calendar events: creation, preview, workspace and duplicate reconciliation. */
 export class MeetingsModule {
-  /** In-flight `createMeetingFromEvent` calls, keyed by calendar event id (PB-004). */
-  private readonly meetingCreations = new Map<string, Promise<unknown>>();
+  /** Meeting creation runs one call at a time per calendar event id (PB-004, ADR 0013). */
+  private readonly meetingCreations = new OneAtATime();
 
   private readonly people: PeopleModule;
 
@@ -26,12 +27,7 @@ export class MeetingsModule {
   async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
     // PB-004: two near-simultaneous first edits both saw "no meeting yet" and each created one.
     // Calls for the same event now run one after the other, so the second finds the first's meeting.
-    const previous = this.meetingCreations.get(externalId) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(() => this.createMeetingFromEventSerialized(externalId, from, to, calendarId, initialBody));
-    const settled = run.catch(() => undefined);
-    this.meetingCreations.set(externalId, settled);
-    void settled.then(() => { if (this.meetingCreations.get(externalId) === settled) this.meetingCreations.delete(externalId); });
-    return run;
+    return this.meetingCreations.run(externalId, () => this.createMeetingFromEventSerialized(externalId, from, to, calendarId, initialBody));
   }
 
   /**
@@ -43,8 +39,7 @@ export class MeetingsModule {
    */
   /** `draftKey`: the adopted draft asking for the meeting (#59); its `meeting.created` audit is written once per draft. */
   async ensureMeetingForEvent(externalId: string, options: { from: Date; to: Date; calendarId?: string; meetingId: string; draftKey?: string }) {
-    const previous = this.meetingCreations.get(externalId) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(async () => {
+    return this.meetingCreations.run(externalId, async () => {
       const existing = this.findMeetingForEvent(externalId, options.calendarId);
       if (existing) return { meeting: existing, created: false };
       if (!this.ctx.calendar) throw new Error("Calendar connector is not configured");
@@ -53,21 +48,17 @@ export class MeetingsModule {
       const now = new Date().toISOString();
       const meeting = await this.writeMeeting(event, options.meetingId, await this.ensureEventContext(event, now), now);
       const metadata = { external_id: externalId, reason: "enrichment" };
-      if (options.draftKey) await this.ctx.writeAuditOnce("meeting.created", options.meetingId, now, { ...metadata, draft_key: options.draftKey });
+      if (options.draftKey) await this.ctx.writeAuditOnce("meeting.created", options.meetingId, now, { ...metadata, draft_key: options.draftKey }, { matchOn: ["draft_key"] });
       else await this.ctx.writeAudit("meeting.created", options.meetingId, now, metadata);
       await this.ctx.rebuildIndex();
       return { meeting: this.ctx.index.get(options.meetingId) ?? meeting, created: true };
     });
-    const settled = run.catch(() => undefined);
-    this.meetingCreations.set(externalId, settled);
-    void settled.then(() => { if (this.meetingCreations.get(externalId) === settled) this.meetingCreations.delete(externalId); });
-    return run;
   }
 
   /** The `meeting.created` audit of a meeting an adopted draft created, if a crash stopped it being written (#59). */
   async auditCreatedForDraft(meeting: LifeOSObject, draftKey: string) {
     const ref = (meeting.frontmatter.external_refs as Array<{ external_id?: string }> | undefined)?.[0];
-    await this.ctx.writeAuditOnce("meeting.created", meeting.frontmatter.id, meeting.frontmatter.created_at, { external_id: ref?.external_id, reason: "enrichment", draft_key: draftKey });
+    await this.ctx.writeAuditOnce("meeting.created", meeting.frontmatter.id, meeting.frontmatter.created_at, { external_id: ref?.external_id, reason: "enrichment", draft_key: draftKey }, { matchOn: ["draft_key"] });
   }
 
   private writeMeeting(event: CalendarEvent, meetingId: string, context: EventContext, now: string) {
@@ -96,7 +87,7 @@ export class MeetingsModule {
     const event = await this.findEvent(externalId, from, to, calendarId);
     const now = new Date().toISOString();
     const context = await this.ensureEventContext(event, now);
-    const pendingOperation = (await ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === "create-meeting" && operation.payload.externalId === externalId);
+    const pendingOperation = (await ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.createMeeting && operation.payload.externalId === externalId);
     const existing = this.findMeetingForEvent(event.externalId, event.calendarId);
     if (existing) {
       const existingNote = this.noteFor(existing.frontmatter.id);
@@ -114,7 +105,7 @@ export class MeetingsModule {
     }
 
     const operationId = pendingOperation?.id ?? uuidV7();
-    const operation = pendingOperation ?? await ctx.objects.prepareOperation?.("create-meeting", { externalId, meetingId: uuidV7(), noteId: uuidV7(), body: initialBody ?? DEFAULT_NOTE_BODY }, operationId);
+    const operation = pendingOperation ?? await ctx.objects.prepareOperation?.(operationKinds.createMeeting, { externalId, meetingId: uuidV7(), noteId: uuidV7(), body: initialBody ?? DEFAULT_NOTE_BODY }, operationId);
     const meetingId = typeof operation?.payload.meetingId === "string" ? operation.payload.meetingId : uuidV7();
     const noteId = typeof operation?.payload.noteId === "string" ? operation.payload.noteId : uuidV7();
     const noteBody = initialBody ?? (typeof operation?.payload.body === "string" ? operation.payload.body : DEFAULT_NOTE_BODY);

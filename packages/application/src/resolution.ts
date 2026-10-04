@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { personEmails } from "./people.js";
-import { isLive, isRestricted, objectIdPattern } from "./support.js";
+import { isLive, isRestricted, objectIdPattern, replayRoles, type ReplayRole } from "./support.js";
 
 /**
  * Name resolution (#33, PRD "Object Contract"): turns draft references (a name, alias, email, object ID
@@ -136,12 +136,12 @@ export class ReferenceResolver {
    * `newId` (adoption's `run.newId`) makes the IDs replayable after a crash, keyed by the reference (#59); it
    * defaults to fresh UUIDv7s.
    */
-  async raiseLinkReviews(target: LifeOSObject["frontmatter"], unresolved: UnresolvedReference[], context: { now: string; origin: Origin; agentRunId?: string; sourceIds?: string[]; newId?: (role: string) => string }) {
+  async raiseLinkReviews(target: LifeOSObject["frontmatter"], unresolved: UnresolvedReference[], context: { now: string; origin: Origin; agentRunId?: string; sourceIds?: string[]; newId?: (role: ReplayRole) => string }) {
     const ids: string[] = [];
     const newId = context.newId ?? (() => uuidV7());
     for (const item of unresolved) {
       const spec = referenceFields[item.field];
-      const role = `link:${item.field}:${item.reference}`;
+      const role = replayRoles.link(item.field, item.reference);
       const id = newId(role);
       const title = `Link ${item.field.replace("_", " ")} "${item.reference}" on ${target.title}`;
       const why = item.problem === "ambiguous" ? `matches ${item.candidates.length} ${spec.type}s:\n\n${item.candidates.map((candidate) => `- ${candidate.title} (${candidate.id})`).join("\n")}` : `matches no ${spec.type}.`;
@@ -151,7 +151,7 @@ export class ReferenceResolver {
           ...this.ctx.envelope(id, "review-item", title, context.now, context.origin),
           review_type: "link-resolution", target_object_type: target.type, target_object_id: target.id,
           proposed_fields: { reference_field: item.field, reference: item.reference, link_field: spec.linkField, list: spec.list, candidate_type: spec.type, problem: item.problem, candidates: item.candidates },
-          confidence_label: "Low", field_evidence: {}, status: "pending", operation_id: newId(`${role}:operation`), source_ids: context.sourceIds ?? [],
+          confidence_label: "Low", field_evidence: {}, status: "pending", operation_id: newId(replayRoles.operation(role)), source_ids: context.sourceIds ?? [],
           ...(context.agentRunId ? { agent_run_id: context.agentRunId } : {})
         },
         body: `# ${title}\n\n"${item.reference}" ${why}\n`

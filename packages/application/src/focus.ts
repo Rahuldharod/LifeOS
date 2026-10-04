@@ -3,7 +3,7 @@ import { DraftError, isCalendarDate, text, toUtc, type AdoptionRun, type ParsedD
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { workOrderContractVersion } from "./enrichment.js";
 import type { InboxStore } from "./ports.js";
-import { isLive, isRestricted, objectIdPattern } from "./support.js";
+import { isLive, isRestricted, objectIdPattern, replayRoles } from "./support.js";
 
 /**
  * Daily Focus (ADR 0011, PRD "Daily Focus and Today"). The morning routine writes the brief as a
@@ -183,7 +183,7 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
 
   // Briefs adopted earlier in this batch are not in the index yet; the rebuild below keeps the next one honest.
   // #60: on a crash replay the index may already hold this brief (same replayable ID); it is never one of its own "others".
-  const id = run.newId("main");
+  const id = run.newId(replayRoles.main);
   const sameDate = ctx.index.all().filter((object) => object.frontmatter.type === "daily-focus" && object.frontmatter.id !== id && dateText(object.frontmatter.focus_on) === focusOn);
   const others = sameDate.filter(isLive);
   // Briefs the interrupted first attempt already archived for this one; their audit may still be missing.
@@ -201,10 +201,9 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
   });
   if (!newer) {
     // Each archive and its audit are two writes; the audit is written only if missing, so a replay completes it exactly once.
-    const audited = new Set(ctx.index.all().filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === "daily-focus.superseded" && (object.frontmatter.metadata as Record<string, unknown> | undefined)?.superseded_by === id).map((object) => String(object.frontmatter.object_id)));
     for (const older of [...others, ...archivedByUs]) {
       if (isLive(older)) await ctx.update(older, { archived_at: run.now, superseded_by_id: id }, { expectedHash: older.contentHash, now: run.now });
-      if (!audited.has(older.frontmatter.id)) await ctx.writeAudit("daily-focus.superseded", older.frontmatter.id, run.now, { superseded_by: id, focus_on: focusOn }, { type: "agent", ref: run.id });
+      await ctx.writeAuditOnce("daily-focus.superseded", older.frontmatter.id, run.now, { superseded_by: id, focus_on: focusOn }, { matchOn: ["superseded_by"], actor: { type: "agent", ref: run.id } });
     }
   }
   await ctx.rebuildIndex();

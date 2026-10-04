@@ -1,9 +1,32 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, link, mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { inboxFolders, type AgentIndexFile, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
+import { inboxFolders, type AgentIndexFile, type Operation, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
+
+/** Codes of file systems (some synced or network ones) that refuse hard links. */
+const hardLinkRefused = new Set(["EPERM", "ENOTSUP", "ENOSYS", "EXDEV", "EOPNOTSUPP"]);
+
+/**
+ * ADR 0013: publishes the finished file `temporary` as `target` only if nothing is there yet; false when something is.
+ * A hard link does this atomically and, unlike rename, never replaces a file. Where hard links are refused it checks,
+ * then renames: not atomic, but only this app creates these paths. On true the temporary file is gone; on false it stays.
+ */
+export async function createExclusive(temporary: string, target: string): Promise<boolean> {
+  try {
+    await link(temporary, target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    if (code === "EEXIST") return false;
+    if (!hardLinkRefused.has(code)) throw error;
+    if (await access(target).then(() => true, () => false)) return false;
+    await rename(temporary, target);
+    return true;
+  }
+  await rm(temporary, { force: true });
+  return true;
+}
 
 export class ObjectConflictError extends Error {
   override name = "ObjectConflictError";
@@ -210,20 +233,9 @@ export class MarkdownObjectStore implements ObjectStore {
     return name ? path.relative(this.root, path.join(path.dirname(target), name)).split(path.sep).join("/") : undefined;
   }
 
-  /** Moves a finished temporary file to a path that must not exist yet. A hard link fails atomically if it does. */
+  /** Moves a finished temporary file to a path that must not exist yet (ADR 0013: `createExclusive`). */
   private async publishNew(temporary: string, target: string, relativePath: string) {
-    try {
-      await link(temporary, target);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "EEXIST") throw new ObjectConflictError(`Cannot create ${relativePath}: a file already exists there`);
-      // Some synced or network file systems refuse hard links: check, then rename (only this app writes new paths).
-      if (code !== "EPERM" && code !== "ENOTSUP" && code !== "ENOSYS" && code !== "EXDEV" && code !== "EOPNOTSUPP") throw error;
-      if (await access(target).then(() => true, () => false)) throw new ObjectConflictError(`Cannot create ${relativePath}: a file already exists there`);
-      await rename(temporary, target);
-      return;
-    }
-    await rm(temporary, { force: true });
+    if (!await createExclusive(temporary, target)) throw new ObjectConflictError(`Cannot create ${relativePath}: a file already exists there`);
   }
 
   /**
@@ -393,13 +405,11 @@ export class FilesystemAgentIndexWriter implements AgentIndexWriter {
   }
 }
 
-export interface OperationRecord {
-  id: string;
-  kind: string;
+/** An operations-journal file (ADR 0013): the application's `Operation` plus its status and times. */
+export interface OperationRecord extends Operation {
   status: "prepared" | "completed";
   created_at: string;
   completed_at?: string;
-  payload: Record<string, unknown>;
 }
 
 export class FilesystemOperationStore {
@@ -418,14 +428,10 @@ export class FilesystemOperationStore {
     const target = path.join(this.directory, `${operationId}.json`);
     const temporary = `${target}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-    try {
-      // A hard link publishes the complete file under its name in one step and, unlike rename, never replaces one.
-      await link(temporary, target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      return await this.read(operationId) ?? record;
-    } finally { await rm(temporary, { force: true }); }
-    return record;
+    let created: boolean;
+    try { created = await createExclusive(temporary, target); }
+    finally { await rm(temporary, { force: true }); }
+    return created ? record : await this.read(operationId) ?? record;
   }
 
   async complete(record: OperationRecord) {
