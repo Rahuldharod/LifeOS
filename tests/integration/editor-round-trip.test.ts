@@ -7,7 +7,7 @@ import * as crepePackage from "@milkdown/crepe";
 import { withSummarySection } from "../../packages/application/src/meeting-material.js";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { lostImages, roundTripReport, storedMarkdown, unprovenConstructs, visualEditorFeatures, visualMarkdown } from "../../apps/web/src/editorMarkdown.js";
-import { preserveImages, type ImageAwareEditor } from "../../apps/web/src/visualEditorImages.js";
+import { prepareVisualEditor, type ImageAwareEditor } from "../../apps/web/src/visualEditorImages.js";
 
 // Issue #89 (PB-003): opening a note in the visual editor and saving it must not change Markdown the
 // user did not edit. Every fixture is loaded into the real Milkdown Crepe editor through the app's
@@ -44,6 +44,14 @@ const LOSSLESS = [
   "links.md",
   "lifeos-links.md",
   "summary-section-spaced.md",
+  // #96: the Summary section exactly as withSummarySection writes it (checked against it below).
+  "summary-section-written.md",
+  // #96: an empty line saved by an older version as <br /> is kept as written.
+  "empty-line-br.md",
+  // #96: an empty bullet stays an empty bullet, not `* <br />`.
+  "bullets-empty-item.md",
+  // #96: HTML <img> tags are kept as written (and covered by the image-loss guard).
+  "image-html.md",
   "blockquote.md",
   "footnote.md",
   "html-inline-block.md",
@@ -63,7 +71,7 @@ const KNOWN_FAILURES: Record<string, string> = {
   "bullets-dash.md": "bullets written with - or +",
   "bullets-plus.md": "bullets written with - or +",
   "task-list-dash.md": "bullets written with - or +",
-  "summary-section.md": "blocks not separated by a blank line",
+  "summary-section.md": "blocks not separated by a blank line", // the form written before #96; still read, rewritten on the next summary
   "heading-setext.md": "underlined (setext) headings",
   "heading-then-text.md": "blocks not separated by a blank line",
   "paragraph-then-list.md": "blocks not separated by a blank line",
@@ -119,7 +127,7 @@ async function throughVisualEditor(body: string, edit?: (editor: CrepeEditor) =>
   const root = document.createElement("div");
   document.body.append(root);
   const editor = new Crepe({ root, defaultValue: visualMarkdown(body), features: visualEditorFeatures });
-  preserveImages(editor);
+  prepareVisualEditor(editor);
   try {
     await editor.create();
     edit?.(editor);
@@ -163,6 +171,73 @@ describe("visual editor round trip (#89, PB-003)", () => {
 
     it("an empty note", async () => {
       expect(await throughVisualEditor("")).toBe("");
+    });
+  });
+
+  describe("LifeOS's own Summary section (#96)", () => {
+    it("is written in the form the visual editor keeps byte-for-byte, with no 'Unproven formatting' label", async () => {
+      const user = "# Weekly sync\n\n## Notes\n\nText.\n";
+      for (const body of [
+        withSummarySection(user, "* Agreed the scope\n* Review on Friday"),
+        withSummarySection("", "Only a summary."),
+        // A newer summary replacing one written in the older, unspaced form (summary-section.md).
+        withSummarySection((await loadBody("summary-section.md")).body, "Replaced.")
+      ]) {
+        const saved = await throughVisualEditor(body);
+        expect(saved).toBe(body);
+        expect(roundTripReport(body, saved)).toEqual({ lossless: true, constructs: [] });
+        expect(unprovenConstructs(body)).toEqual([]);
+      }
+    });
+
+    it("the summary-section-written fixture is what withSummarySection writes", async () => {
+      const { body } = await loadBody("summary-section-written.md");
+      const summary = "* Agreed the scope\n* Review on Friday\n\n### Risks\n\nBudget.";
+      // Migrating an unmarked (pre-#66) summary writes exactly the fixture; writing it again changes nothing.
+      expect(withSummarySection("# Weekly sync\n\n## Summary\n\nOld.\n\n## Notes\n\nText.\n", summary)).toBe(body);
+      expect(withSummarySection(body, summary)).toBe(body);
+    });
+  });
+
+  describe("empty lines are never saved as <br /> (#96)", () => {
+    const addEmptyParagraphs = (editor: CrepeEditor) => editor.editor.action((ctx) => {
+      const view = ctx.get("editorView");
+      const paragraph = view.state.schema.nodes["paragraph"]!;
+      view.dispatch(view.state.tr.insert(view.state.doc.content.size, paragraph.create({})));
+      view.dispatch(view.state.tr.insert(0, paragraph.create({})));
+    });
+
+    it("an empty paragraph added in Visual mode saves as nothing", async () => {
+      const saved = await throughVisualEditor("First.\n\nSecond.\n", (editor) => {
+        addEmptyParagraphs(editor);
+        editor.editor.action((ctx) => {
+          const view = ctx.get("editorView");
+          view.dispatch(view.state.tr.insert(9, view.state.schema.nodes["paragraph"]!.create({}))); // between the two paragraphs
+        });
+      });
+      expect(saved).not.toContain("<br");
+      expect(saved).toBe("First.\n\nSecond.\n");
+    });
+
+    it("an empty line added inside a list item or quote saves as nothing", async () => {
+      const insertAt = (...positions: number[]) => (editor: CrepeEditor) => editor.editor.action((ctx) => {
+        const view = ctx.get("editorView");
+        for (const at of positions) view.dispatch(view.state.tr.insert(at, view.state.schema.nodes["paragraph"]!.create({})));
+      });
+      expect(await throughVisualEditor("* a\n* b\n", insertAt(5))).toBe("* a\n* b\n"); // after the text of the first item
+      expect(await throughVisualEditor("* a\n* b\n", insertAt(2, 2))).toBe("* a\n* b\n"); // before it, twice
+      expect(await throughVisualEditor("* [ ] task\n", insertAt(2))).toBe("* [ ] task\n");
+      expect(await throughVisualEditor("> Quote\n", insertAt(1, 9))).toBe("> Quote\n");
+    });
+
+    it("a <br /> an older save left in the note is kept, also when the note is edited elsewhere", async () => {
+      const body = "First.\n\n<br />\n\nSecond.\n";
+      expect(await throughVisualEditor(body)).toBe(body);
+      const edited = await throughVisualEditor(body, (editor) => editor.editor.action((ctx) => {
+        const view = ctx.get("editorView");
+        view.dispatch(view.state.tr.insertText("Edited. ", 1));
+      }));
+      expect(edited).toBe("Edited. First.\n\n<br />\n\nSecond.\n");
     });
   });
 
@@ -232,13 +307,6 @@ describe("visual editor round trip (#89, PB-003)", () => {
       const saved = await throughVisualEditor(body);
       expect(saved).not.toBe(body);
       expect(roundTripReport(body, saved).constructs).toContain(construct);
-    });
-
-    it("the Summary section LifeOS itself writes", async () => {
-      const body = withSummarySection("# Weekly sync\n\n## Notes\n\nText.\n", "* Agreed the scope\n* Review on Friday");
-      const saved = await throughVisualEditor(body);
-      expect(saved).not.toBe(body);
-      expect(roundTripReport(body, saved).constructs).toContain("blocks not separated by a blank line");
     });
   });
 });

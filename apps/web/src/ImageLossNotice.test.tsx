@@ -34,6 +34,13 @@ describe("lostImages (#91)", () => {
     expect(imagesIn("```\n![not](an-image.png)\n```\n\n`![nor](this.png)` and \\![nor](that.png)\n")).toEqual([]);
   });
 
+  it("covers HTML <img> tags, in any attribute order and quoting (#96)", () => {
+    expect(imagesIn('<img src="../assets/a.png" alt="Board">\n\nText <img alt=\'Logo\' src=https://example.com/l.png /> here.\n')).toEqual(["Board → ../assets/a.png", "Logo → https://example.com/l.png"]);
+    expect(lostImages('A\n\n<img src="../assets/board.png" alt="Whiteboard">\n\nB\n', "A\n\nB\n")).toEqual(["Whiteboard → ../assets/board.png"]);
+    expect(lostImages('<IMG SRC="x.png">\n', "Nothing.\n")).toEqual([" → x.png"]);
+    expect(imagesIn("```\n<img src=\"code.png\">\n```\n\n`<img src=\"inline.png\">`\n")).toEqual([]);
+  });
+
   it("a note without images has nothing to lose", () => {
     expect(lostImages("# Title\n", "# Title\n")).toEqual([]);
   });
