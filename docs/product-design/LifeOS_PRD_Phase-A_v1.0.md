@@ -401,7 +401,7 @@ Status of the user stories on branch `feature/phase-a-21` (head `897c0e1`). **Bu
 | 1–16 | Capture and agent writes | **Built** (app side) | Adoption, auto-adopt, name resolution, routing by origin, Knowledge Note and Source drafts (#31–#35). Phone dictation and the language rule depend on the skills pack (not built). |
 | 17–22 | Patch drafts | **Built** | Auto-apply, review routing, conflict rule, undo (#36, #37, #61, #71, #81). See *Known gaps* for undo limits. |
 | 23–27 | Agent Index | **Built** | `_agent/` files, freshness stamp, pending drafts, restricted counted only (#43, #63). |
-| 28–41 | Post-meeting enrichment | **Built** (app side) | Work Order, enrichment state (shown on the meeting page with missing and unavailable material), Give up, stale Work Orders, meeting-material adoption, summary between markers (#44, #45, #66, #87). The enrichment skill is not built. |
+| 28–41 | Post-meeting enrichment | **Built** (app side) | Work Order, enrichment state (shown on the meeting page with missing and unavailable material), Give up, stale Work Orders, meeting-material adoption, summary between markers (#44, #45, #66, #87). The enrichment skill is built (`skills/lifeos-enrichment`, #50); client meetings stay blocked until IT/legal sign-off, and the dry-run (`skills/INSTALL.md`) is not yet run. |
 | 42–44 | Review | **Built** | Editable proposals; `update`, `link-resolution` (with candidate picker), `person-merge` and `summary` types; atomic, double-click-safe accept (#57, #62). |
 | 45–57 | Today and the Daily Focus brief | **Built** (app side) | Brief with live overlay, Refresh writes a `replan` Work Order, Focus Overrides, live panels, settings (#46–#48, #64). |
 | 58–59 | Slack DM | **Not built** | Part of the morning routine (agent side). |
