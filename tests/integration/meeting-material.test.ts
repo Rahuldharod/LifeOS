@@ -205,6 +205,40 @@ describe("meeting-material adoption", () => {
     expect(meeting!.body).not.toContain("owes the deck");
   });
 
+  it("a summary with its own headings is written once on retry, fully replaced by a newer one, and never touches the note (#66)", async () => {
+    const { root, application } = await vault();
+    const { meeting, note } = await application.createMeetingFromEvent("evt-1", range.from, range.to, "work", "# Notes\n\nMy own notes.\n");
+    const headed = "Vendor B chosen.\n\n## Risks\n\n- Budget slips\n\n# Appendix\n\nOld timeline.\n";
+    await dropDraft(root, "one.md", material({ key: "one", meeting: meeting.frontmatter.id, summary: headed }));
+    await application.adoptDrafts();
+    const first = application.reviews().find((review) => review.frontmatter.review_type === "summary")!;
+    await application.acceptReviewItem(first.frontmatter.id);
+    const accepted = await application.object(meeting.frontmatter.id);
+    expect(accepted.body.match(/## Risks/g)).toHaveLength(1);
+
+    // Crash after the meeting write, before the Review Item was marked accepted: the retry finds the section in place.
+    const reviewFile = path.join(root, "review-items", (await readdir(path.join(root, "review-items"))).find((name) => name.includes(first.frontmatter.id))!);
+    await writeFile(reviewFile, (await readFile(reviewFile, "utf8")).replace(/^status: accepted$/m, "status: pending"));
+    await application.rebuildIndex();
+    expect(application.reviews().find((review) => review.frontmatter.id === first.frontmatter.id)!.frontmatter.status).toBe("pending");
+    await application.acceptReviewItem(first.frontmatter.id);
+    const retried = await application.object(meeting.frontmatter.id);
+    expect(retried.body).toBe(accepted.body);
+    expect(retried.body.match(/## Summary/g)).toHaveLength(1);
+    expect(retried.body.match(/## Risks/g)).toHaveLength(1);
+
+    // A newer summary replaces every part of the older one; the user's text around it is unchanged.
+    await dropDraft(root, "two.md", material({ key: "two", meeting: meeting.frontmatter.id, summary: "A better summary.\n\n## Next\n\n- Ship\n" }));
+    await application.adoptDrafts();
+    const second = application.reviews().find((review) => review.frontmatter.review_type === "summary" && review.frontmatter.status === "pending")!;
+    await application.acceptReviewItem(second.frontmatter.id);
+    const replaced = await application.object(meeting.frontmatter.id);
+    for (const fragment of ["Vendor B chosen", "## Risks", "Budget slips", "# Appendix", "Old timeline"]) expect(replaced.body).not.toContain(fragment);
+    expect(replaced.body).toContain("## Summary\n\nA better summary.\n\n## Next\n\n- Ship\n");
+    expect(replaced.body.startsWith(meeting.body.trimEnd())).toBe(true);
+    expect((await application.object(note!.frontmatter.id)).body).toBe("# Notes\n\nMy own notes.\n");
+  });
+
   it("re-running on the same meeting never duplicates sources or proposals, and completes the state", async () => {
     const { root, application } = await vault();
     await dropDraft(root, "first.md", material({ key: "enrich-evt-1-a" }));
