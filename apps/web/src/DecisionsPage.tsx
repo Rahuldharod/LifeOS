@@ -7,6 +7,7 @@ import { HistoryLink } from "./HistoryPanel.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
+import { SensitivityToggle } from "./SensitivityToggle.js";
 import { zonedDateTime, zonedInputValue } from "./zonedTime.js";
 
 type LifeObject = { frontmatter: Record<string, unknown> & { id: string; type: string; title: string; revision: number }; body: string; relativePath: string; contentHash: string };
@@ -151,8 +152,9 @@ function DecisionPanel({ detail, projects, clients, products, people, busy, read
       <SearchSelect label="Product" options={options(products)} value={draft.primary_product_id} disabled={locked} onChange={(next) => set("primary_product_id", next)} />
       <SearchSelect multi label="People" options={options(people)} value={draft.people_ids} disabled={locked} onChange={(next) => set("people_ids", next)} />
     </div>
+    <SensitivityToggle object={decision} noun="decision" disabled={locked} run={run} onChanged={() => refresh(value.id)} />
     <div className="crud-actions">
-      <EnvelopeBadges frontmatter={value} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
+      <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
       <button disabled={locked || !draft.title.trim() || !draft.decision_text.trim()} onClick={() => void save()}>Save changes</button>
       <button disabled={locked || !active || Boolean(successor)} title={active ? undefined : "Only active decisions can be superseded"} onClick={() => setSuccessor({ title: "", decision_text: "", rationale: "" })}>Supersede…</button>
     </div>

@@ -84,6 +84,11 @@ server.put<{ Params: { id: string }; Body: { isExternal?: boolean | null; expect
   if (typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
   return application.setPersonExternal(request.params.id, isExternal, expectedHash);
 });
+// #87: the user confirms an automatically created ("unreviewed") person.
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/people/:id/reviewed", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.confirmPersonReviewed(request.params.id, request.body.expectedHash);
+});
 server.post("/api/v1/index/rebuild", async () => application.rebuildIndex());
 server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/events", async (request, reply) => {
   const from = request.query.from ? new Date(request.query.from) : undefined;
@@ -122,6 +127,23 @@ server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/s
   const to = request.query.to ? new Date(request.query.to) : undefined;
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   return application.syncCalendar(from, to);
+});
+// #88 (PB-022b): like /calendar/events and /calendar/sync, but a calendar that cannot be read (network, expired
+// token, denied Keychain) answers 200 with the meetings already in LifeOS and an `offline` state, never an error.
+const calendarRange = (query: { from?: string; to?: string }) => {
+  const from = query.from ? new Date(query.from) : undefined;
+  const to = query.to ? new Date(query.to) : undefined;
+  return (from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to) ? undefined : { from, to };
+};
+server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/day", async (request, reply) => {
+  const range = calendarRange(request.query);
+  if (!range) return reply.status(400).send({ error: "Enter a valid calendar date range" });
+  return application.calendarDay(range.from, range.to);
+});
+server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/day/sync", async (request, reply) => {
+  const range = calendarRange(request.query);
+  if (!range) return reply.status(400).send({ error: "Enter a valid calendar date range" });
+  return application.calendarDay(range.from, range.to, { sync: true });
 });
 server.get("/api/v1/connections/google", async () => googleConnectionStatus(secrets, google, application.calendarSyncStatus()));
 server.get("/api/v1/settings/connections", async () => connectionSettings(secrets, google, application.calendarSyncStatus()));

@@ -36,6 +36,7 @@ export type { AppliedPatch, UpdateChange, UpdateProposal } from "./patches.js";
 export type { DailyFocusView, FocusItem, FocusItemState, FocusOverrideAction, FocusOverrideChange, FocusOverrideState, ReplanRequest } from "./focus.js";
 export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords, defaultMaxMustDos, maxMustDosLimit, focusOverrideActions } from "./focus.js";
 import type { FocusOverrideChange } from "./focus.js";
+export type { CalendarDay, CalendarOffline, CalendarOfflineReason } from "./calendar.js";
 export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySettings, WaitingGroup, Weekday } from "./today.js";
 export { defaultTodaySettings, weekdays } from "./today.js";
 export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
@@ -158,6 +159,7 @@ export class LifeOSApplication {
   // People (#39): display labels (also the Agent Index's source, #43), the External override, internal domains
   personLabels() { return this.people.labels(); }
   setPersonExternal(id: string, isExternal: boolean | null, expectedHash: string) { return this.people.setExternal(id, isExternal, expectedHash); }
+  confirmPersonReviewed(id: string, expectedHash: string) { return this.people.confirmReviewed(id, expectedHash); }
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
   getSelfEmails() { return this.people.getSelfEmails(); }
@@ -179,6 +181,8 @@ export class LifeOSApplication {
   saveCalendarPreferences(input: { disabledCalendarIds: string[]; defaultCalendarId?: string }, expectedHash?: string) { return this.calendarModule.saveCalendarPreferences(input, expectedHash); }
   syncCalendar(from?: Date, to?: Date) { return this.calendarModule.syncCalendar(from, to); }
   calendarSyncStatus() { return this.calendarModule.calendarSyncStatus(); }
+  /** #88: the range from the calendar, or the meetings already in LifeOS, labelled offline, when it cannot be read. */
+  calendarDay(from?: Date, to?: Date, options?: { sync?: boolean }) { return this.calendarModule.calendarDay(from, to, options); }
   recordGoogleConnection() { return this.calendarModule.recordGoogleConnection(); }
 
   // Meetings
