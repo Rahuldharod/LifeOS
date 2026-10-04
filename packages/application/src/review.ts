@@ -78,7 +78,15 @@ export class ReviewModule {
 
   /** `linkTo` is the object chosen for a `link-resolution` item; other review types ignore it. */
   acceptReviewItem(reviewId: string, options: { linkTo?: string } = {}) {
-    return this.serialise(reviewId, () => this.accept(reviewId, options));
+    return this.serialise(reviewId, async () => {
+      // #82: a reject the user started (and a crash interrupted) wins over a later accept: it is finished instead.
+      const rejecting = await this.openReject(reviewId);
+      if (rejecting) {
+        await this.finishReject(rejecting);
+        throw new Error("This review item was rejected; its unfinished accept was undone");
+      }
+      return this.accept(reviewId, options);
+    });
   }
 
   private async accept(reviewId: string, options: { linkTo?: string } = {}) {
@@ -292,26 +300,68 @@ export class ReviewModule {
   }
 
   private async reject(reviewId: string) {
-    const review = this.ctx.required(reviewId, "review-item");
+    const { ctx } = this;
+    const review = ctx.required(reviewId, "review-item");
     if (review.frontmatter.status === "rejected") return review;
     if (review.frontmatter.status !== "pending") throw new Error("Only pending review items can be rejected");
-    // #56: an accept that started but did not finish is undone first, so nothing is left half done.
-    await this.abandonOperation(review);
-    const latest = this.ctx.required(reviewId, "review-item");
+    // #82: an accept that started but did not finish is undone first (#56). The reject is journalled before the first
+    // rollback write, so a crash part-way through is finished as a reject by recovery, never as the accept.
+    const rejecting = await this.openReject(reviewId) ?? (await this.openAccept(review) ? await ctx.objects.prepareOperation?.(operationKinds.rejectReview, { reviewId }, uuidV7()) : undefined);
+    if (rejecting) { await this.finishReject(rejecting); return ctx.required(reviewId, "review-item"); }
     const now = new Date().toISOString();
-    const updated = await this.ctx.update(latest, { status: "rejected", reviewed_at: now }, { expectedHash: latest.contentHash, now });
-    await this.ctx.writeAudit("review.rejected", reviewId, now, {});
-    await this.ctx.rebuildIndex();
+    const updated = await ctx.update(review, { status: "rejected", reviewed_at: now }, { expectedHash: review.contentHash, now });
+    await ctx.writeAudit("review.rejected", reviewId, now, {});
+    await ctx.rebuildIndex();
     return updated;
+  }
+
+  /**
+   * #82: finishes a journalled reject: rolls back the item's unfinished accept, marks it rejected and closes the reject.
+   * Every step is replay-safe, so the user retrying, or startup recovery, runs it again from the start.
+   */
+  private async finishReject(operation: Operation) {
+    const { ctx } = this;
+    await ctx.rebuildIndex();
+    const reviewId = String(operation.payload.reviewId);
+    const review = ctx.index.get(reviewId);
+    if (review?.frontmatter.type !== "review-item") { await ctx.objects.completeOperation?.(operation.id); return; }
+    await this.abandonOperation(review);
+    const latest = ctx.required(reviewId, "review-item");
+    const now = new Date().toISOString();
+    if (latest.frontmatter.status === "pending") await ctx.update(latest, { status: "rejected", reviewed_at: now }, { expectedHash: latest.contentHash, now });
+    await ctx.writeAuditOnce("review.rejected", reviewId, now, { operation_id: operation.id }, { matchOn: ["operation_id"] });
+    await ctx.objects.completeOperation?.(operation.id);
+    await ctx.rebuildIndex();
+  }
+
+  /** The open (journalled, not finished) reject of a Review Item, if any (#82). */
+  private async openReject(reviewId: string) {
+    return (await this.ctx.objects.incompleteOperations?.())?.find((operation) => operation.kind === operationKinds.rejectReview && operation.payload.reviewId === reviewId);
+  }
+
+  /** The Review Item's unfinished accept operation, if any. */
+  private async openAccept(review: LifeOSObject) {
+    const operationId = review.frontmatter.operation_id;
+    if (typeof operationId !== "string") return undefined;
+    return (await this.ctx.objects.incompleteOperations?.())?.find((candidate) => candidate.id === operationId);
+  }
+
+  /** Startup recovery of a `reject-review` operation (#82): the reject is finished. */
+  recoverReject(operation: Operation) {
+    const reviewId = String(operation.payload.reviewId);
+    return this.serialise(reviewId, () => this.finishReject(operation));
   }
 
   /**
    * Startup recovery of an `accept-review` operation (#56): finishes it while the item is pending or accepted,
    * and undoes it when the user rejected the item meanwhile (or the item is gone), so recovery never fails on it.
+   * #82: a recorded reject intent wins, so the accept is never finished for an item the user chose to reject.
    */
   recoverAccept(operation: Operation) {
     const reviewId = String(operation.payload.reviewId);
     return this.serialise(reviewId, async () => {
+      const rejecting = await this.openReject(reviewId);
+      if (rejecting) { await this.finishReject(rejecting); return; }
       const review = this.ctx.index.get(reviewId);
       if (review?.frontmatter.type === "review-item" && (review.frontmatter.status === "pending" || review.frontmatter.status === "accepted")) {
         await this.accept(review.frontmatter.id);
@@ -320,11 +370,19 @@ export class ReviewModule {
     });
   }
 
+  /** Startup recovery of a `merge-person` operation: as `recoverAccept`, a recorded reject intent wins (#82). */
+  recoverMerge(operation: Operation) {
+    const reviewId = String(operation.payload.reviewId);
+    return this.serialise(reviewId, async () => {
+      const rejecting = await this.openReject(reviewId);
+      if (rejecting) await this.finishReject(rejecting);
+      else await this.merges.recover(operation);
+    });
+  }
+
   /** Undoes and closes the unfinished operation of a Review Item, if it has one. */
   private async abandonOperation(review: LifeOSObject) {
-    const operationId = review.frontmatter.operation_id;
-    if (typeof operationId !== "string") return;
-    const operation = (await this.ctx.objects.incompleteOperations?.())?.find((candidate) => candidate.id === operationId);
+    const operation = await this.openAccept(review);
     if (operation?.kind === operationKinds.mergePerson) await this.merges.abandon(review, operation);
     else if (operation?.kind === operationKinds.acceptReview) await this.abandonCreate(review, operation);
   }

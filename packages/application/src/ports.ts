@@ -37,6 +37,7 @@ export interface ObjectStore {
 export const operationKinds = {
   acceptReview: "accept-review",
   mergePerson: "merge-person",
+  rejectReview: "reject-review",
   createMeeting: "create-meeting",
   supersedeDecision: "supersede-decision",
   resolveOpenPoint: "resolve-open-point",
