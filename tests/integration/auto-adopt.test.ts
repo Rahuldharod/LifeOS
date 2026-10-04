@@ -73,9 +73,10 @@ describe("automatic adoption trigger", () => {
 
     await dropDraft(root, "a.md", dictatedTask("a", "First"));
     await dropDraft(root, "b.md", dictatedTask("b", "Second"));
-    for (let event = 0; event < 5; event += 1) { trigger.notify(); await pause(10); }
-    await until(async () => (await ofType(application, "task")).length === 2);
-    await pause(150);
+    // #55: one synchronous burst; pauses between events let a slow machine outrun the debounce and split the batch.
+    for (let event = 0; event < 5; event += 1) trigger.notify();
+    await until(async () => batches.length > 0);
+    expect(await ofType(application, "task")).toHaveLength(2);
     expect(batches).toHaveLength(1);
     expect(batches[0]!.drafts.map((draft) => draft.outcome)).toEqual(["adopted", "adopted"]);
   });
