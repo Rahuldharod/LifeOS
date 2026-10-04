@@ -35,6 +35,39 @@ const localPart = (email: string) => email.split("@")[0]!.replace(/\+.*$/, "");
 
 export class PersonMergeConflictError extends Error { override name = "PersonMergeConflictError"; }
 
+/**
+ * #65: merges leave pending Review Items naming the merged person (they are history, so never rewritten).
+ * Accepting one follows `merged_into_person_id`, through chains of merges, to the person who survives.
+ * Any other ID (not a person, unknown, or a person deleted without a merge) comes back unchanged.
+ */
+export function survivingPersonId(index: { get(id: string): LifeOSObject | undefined }, id: string) {
+  const seen = new Set<string>();
+  let current = id;
+  for (let person = index.get(current); person?.frontmatter.type === "person" && typeof person.frontmatter.merged_into_person_id === "string" && !seen.has(current); person = index.get(current)) {
+    seen.add(current);
+    current = person.frontmatter.merged_into_person_id;
+  }
+  return current;
+}
+
+/** Person references in a create proposal, each moved to its surviving person; lists lose the repeats this makes. */
+export function followMergesInProposal(index: { get(id: string): LifeOSObject | undefined }, proposed: Record<string, unknown>) {
+  const result = { ...proposed };
+  for (const key of ["owner_person_id", "waiting_for_person_id"]) if (typeof result[key] === "string") result[key] = survivingPersonId(index, result[key]);
+  if (Array.isArray(result.people_ids)) result.people_ids = [...new Set(result.people_ids.map((id) => typeof id === "string" ? survivingPersonId(index, id) : id))];
+  return result;
+}
+
+/** Link-resolution person candidates moved to their surviving person (current title), each listed once. */
+export function followMergesInCandidates(index: { get(id: string): LifeOSObject | undefined }, candidates: Array<{ id: string; title: string }>) {
+  const byId = new Map<string, { id: string; title: string }>();
+  for (const candidate of candidates) {
+    const id = survivingPersonId(index, candidate.id);
+    if (!byId.has(id)) byId.set(id, id === candidate.id ? candidate : { id, title: index.get(id)?.frontmatter.title ?? candidate.title });
+  }
+  return [...byId.values()];
+}
+
 /** Serializes suggestion sweeps per application, so two triggers never propose the same pair twice. */
 const sweeps = new WeakMap<AppContext, Promise<unknown>>();
 

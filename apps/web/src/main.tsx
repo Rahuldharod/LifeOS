@@ -21,14 +21,17 @@ import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
 import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
-import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, parseEmails, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
+import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
-import { awaitingAdoptionLabel, daysBetween } from "./todayPanels.js";
-import { CappedRows, GiveUpRow, LivePanel, WaitingGroupRow, type WaitingGroup } from "./TodayLists.js";
+import { awaitingAdoptionLabel } from "./todayPanels.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
 import { reviewInFlight } from "./reviewInFlight.js";
+import { formatDate, formatTime } from "./dateFormat.js";
+import { PageHeader, Summary, objectRow } from "./pageParts.js";
+import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, type Today, type TodayPanels } from "./TodayPage.js";
+import { SettingsPage } from "./SettingsPage.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -59,28 +62,11 @@ type Workspace = {
   tasks: LifeObject[];
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
-type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
-type FocusChange = { action: "pin" | "unpin" | "replace" | "dismiss" | "restore" | "reset"; taskId?: string; replacementId?: string };
-type DailyFocus = { date: string; brief?: { id: string; title: string; path: string; generatedAt: string; body: string; lengthWarning?: string }; iOwe: FocusItem[]; top3: FocusItem[]; top3Source: "brief" | "rule"; maxMustDos: number; override?: { contentHash: string }; dismissedTop3: FocusItem[]; waitingAndDecisions: FocusItem[]; meetingPrep: FocusItem[]; dayShape?: { meetingHours: number; freeHours: number }; deferCandidates: FocusItem[]; restrictedHidden: number };
-type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[]; upcoming: LifeObject[]; waiting: LifeObject[]; topThree: Array<{ task: LifeObject; reason: string }>; reviewCount: number; focus?: DailyFocus };
 type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
 type InboxDrafts = { awaiting: number; drafts?: number; patches?: number; failed: Array<{ path: string; reason: string }> };
-type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
-type TodaySettings = { meetingHoursThreshold: number; briefTime: string; briefTimeZone: string; briefDays: Weekday[]; contentHash?: string };
-/** #48: Today's live panels, computed by the server on each load (never from the brief). */
-type TodayPanels = {
-  date: string; overdue: LifeObject[]; dueToday: LifeObject[]; upcomingHighPriority: LifeObject[];
-  waitingByPerson: Array<WaitingGroup & { tasks: LifeObject[] }>;
-  nextMeetings: Array<{ title: string; startsAt: string; endsAt: string; inProgress: boolean; meetingId?: string; noteId?: string; calendarEventId?: string; calendarName?: string; restricted: boolean }>;
-  meetingHours: number; meetingHeavy: boolean; calendarError?: string;
-  openPointsForMeetings: Array<{ openPoint: LifeObject; meetingId: string; meetingTitle: string; link: "raised-in" | "project" | "client" | "people" }>;
-  reviewCount: number; inbox: { awaiting: number; drafts: number; patches: number }; failedDrafts: Array<{ path: string; reason: string }>;
-  staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }>; settings: TodaySettings;
-};
 type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "review" | "duplicate" | "failed" | "skipped" }> };
-type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
 type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
 type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus };
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
@@ -93,21 +79,6 @@ type StoredAsset = { relativePath: string; markdownPath: string; sha256: string;
 type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Open Points" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
 
 const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
-
-function formatDate(value: unknown) {
-  if (typeof value !== "string") return "—";
-  const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  try { return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone }); }
-  catch { return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); }
-}
-
-/** Time only, for list items whose day is already shown in a group header (PB-023). */
-function formatTime(value: unknown) {
-  if (typeof value !== "string") return "—";
-  const timeZone = localStorage.getItem("lifeos.displayTimeZone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  try { return new Date(value).toLocaleTimeString([], { timeStyle: "short", timeZone }); }
-  catch { return new Date(value).toLocaleTimeString([], { timeStyle: "short" }); }
-}
 
 function formatEventDate(event: Event) {
   if (!event.isAllDay) return formatDate(event.startsAt);
@@ -136,11 +107,6 @@ function formatGap(milliseconds: number) {
   const remainder = minutes % 60;
   return hours ? `${hours}h${remainder ? ` ${remainder}m` : ""} free` : `${minutes}m free`;
 }
-
-const availableTimeZones = (() => {
-  const supportedValuesOf = (Intl as unknown as { supportedValuesOf?: (key: "timeZone") => string[] }).supportedValuesOf;
-  return supportedValuesOf ? supportedValuesOf("timeZone") : ["Europe/Paris", "UTC", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
-})();
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -352,7 +318,6 @@ function App() {
   const [workspace, setWorkspace] = useState<Workspace>();
   const [today, setToday] = useState<Today>({ tasks: [], overdue: [], dueToday: [], upcoming: [], waiting: [], topThree: [], reviewCount: 0 });
   const [todayPanels, setTodayPanels] = useState<TodayPanels>();
-  const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [tasks, setTasks] = useState<LifeObject[]>([]);
   const [projects, setProjects] = useState<ProjectRollup[]>([]);
   const [clients, setClients] = useState<EntityRollup[]>([]);
@@ -360,9 +325,6 @@ function App() {
   const [people, setPeople] = useState<EntityRollup[]>([]);
   // #39: short, unambiguous names; recomputed by the server on every load.
   const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
-  const [internalDomains, setInternalDomains] = useState<{ domains: string[]; contentHash?: string }>();
-  const [selfEmails, setSelfEmails] = useState<{ emails: string[]; contentHash?: string }>();
-  const [focusSettings, setFocusSettings] = useState<{ maxMustDos: number; contentHash?: string }>();
   const [reviews, setReviews] = useState<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>([]);
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
   const [notes, setNotes] = useState<LifeObject[]>([]);
@@ -532,46 +494,6 @@ function App() {
     setCalendarCatalog(catalog);
     if (prefs) setCalendarPrefs(prefs);
     setCalendarCatalogLoaded(true);
-  };
-
-  const loadInternalDomains = async () => setInternalDomains(await api<{ domains: string[]; contentHash?: string }>("/api/v1/settings/internal-domains").catch(() => undefined));
-
-  /** #39: saves the synced internal-domains setting; resolves to an error message, or undefined on success. */
-  const saveInternalDomains = async (domains: string[]): Promise<string | undefined> => {
-    try {
-      setInternalDomains(await api<{ domains: string[]; contentHash?: string }>("/api/v1/settings/internal-domains", { method: "PUT", body: JSON.stringify({ domains, expectedHash: internalDomains?.contentHash }) }));
-      await loadCollections();
-      return undefined;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadInternalDomains(); return "The internal domains were changed on another device. The latest version is loaded; make your change again."; }
-      return error instanceof Error ? error.message : "Could not save internal domains";
-    }
-  };
-
-  const loadSelfEmails = async () => setSelfEmails(await api<{ emails: string[]; contentHash?: string }>("/api/v1/settings/self-emails").catch(() => undefined));
-
-  /** #54: saves the synced self-email setting; resolves to an error message, or undefined on success. */
-  const saveSelfEmails = async (emails: string[]): Promise<string | undefined> => {
-    try {
-      setSelfEmails(await api<{ emails: string[]; contentHash?: string }>("/api/v1/settings/self-emails", { method: "PUT", body: JSON.stringify({ emails, expectedHash: selfEmails?.contentHash }) }));
-      return undefined;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadSelfEmails(); return "Your email addresses were changed on another device. The latest version is loaded; make your change again."; }
-      return error instanceof Error ? error.message : "Could not save your email addresses";
-    }
-  };
-
-  const loadTodaySettings = async () => setTodaySettings(await api<TodaySettings>("/api/v1/settings/today").catch(() => undefined));
-  /** #48: saves the synced Today settings; resolves to an error message, or undefined on success. */
-  const saveTodaySettings = async (changes: Omit<TodaySettings, "contentHash">): Promise<string | undefined> => {
-    try {
-      setTodaySettings(await api<TodaySettings>("/api/v1/settings/today", { method: "PUT", body: JSON.stringify({ ...changes, expectedHash: todaySettings?.contentHash }) }));
-      await loadCollections();
-      return undefined;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadTodaySettings(); return "The Today settings were changed on another device. The latest version is loaded; make your change again."; }
-      return error instanceof Error ? error.message : "Could not save the Today settings";
-    }
   };
 
   /** Saves to the synced settings file; resolves to an error message, or undefined on success. */
@@ -843,19 +765,6 @@ function App() {
       if (error instanceof ApiError && error.status === 409) { await loadCollections(); setMessage("Today's Top 3 was changed on another device. The latest is loaded; make your change again."); }
       else setMessage(error instanceof Error ? error.message : "Could not change the Top 3");
     } finally { setBusy(false); }
-  };
-
-  const loadFocusSettings = async () => setFocusSettings(await api<{ maxMustDos: number; contentHash?: string }>("/api/v1/settings/daily-focus").catch(() => undefined));
-  /** #47: saves the synced max must-dos setting; resolves to an error message, or undefined on success. */
-  const saveFocusSettings = async (maxMustDos: number): Promise<string | undefined> => {
-    try {
-      setFocusSettings(await api<{ maxMustDos: number; contentHash?: string }>("/api/v1/settings/daily-focus", { method: "PUT", body: JSON.stringify({ maxMustDos, expectedHash: focusSettings?.contentHash }) }));
-      await loadCollections();
-      return undefined;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadFocusSettings(); return "The setting was changed on another device. The latest version is loaded; make your change again."; }
-      return error instanceof Error ? error.message : "Could not save the setting";
-    }
   };
 
   const giveUpEnrichment = (meetingId: string) => run(async () => {
@@ -1244,7 +1153,6 @@ function App() {
       setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
     } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
   }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
-  useEffect(() => { if (view === "Settings") { void loadCalendarCatalog(); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); } }, [view]);
 
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
@@ -1274,26 +1182,7 @@ function App() {
 
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
-      {view === "Today" && <>
-        <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="A calm view of active work and pending decisions." />
-        <div className="summary">
-          <Summary label="Active tasks" value={today.tasks.length} detail="across all contexts" />
-          <Summary label="Review inbox" value={today.reviewCount} detail="awaiting confirmation" />
-          <Summary label="Today's events" value={events.length} detail="across connected calendars" />
-        </div>
-        <article className="quick-capture"><span>QUICK CAPTURE</span><div className="capture-row"><input value={capture} onChange={(event) => setCapture(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) submitCapture(); }} placeholder="Capture a task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={submitCapture}>Capture</button></div></article>
-        {/* #64: /today always returns `focus`, so the old "Suggested Top 3" fallback could never show. */}
-        {today.focus && <DailyFocusPanel focus={today.focus} tasks={today.tasks} disabled={busy || readOnly} onRefresh={() => void requestReplan()} onChange={(change) => void changeFocus(change)} />}
-        <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void requestEnrichment()}>Enrich last 48h</button></div>
-          {/* #48: stale Work Orders moved to the "Inbox and agents" live panel. */}
-          <CappedRows items={enrichment.proposedGaveUp} row={(meeting) => <GiveUpRow key={meeting.meetingId} meeting={meeting} disabled={busy || readOnly} onGiveUp={(meetingId) => void giveUpEnrichment(meetingId)} />} /></article>
-        {todayPanels ? <TodayLivePanels panels={todayPanels} onOpenInbox={() => setView("Inbox")} /> : <>
-          {/* Until the live panels load (or if they fail), the basic lists from /today stand in. */}
-          <LivePanel title="Overdue" items={today.overdue} empty="Nothing overdue." row={objectRow} />
-          <LivePanel title="Due today" items={today.dueToday} empty="Nothing due today." row={objectRow} />
-          <LivePanel title="Waiting" items={today.waiting} empty="Nothing waiting on someone else." row={objectRow} />
-        </>}
-      </>}
+      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} />}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
@@ -1484,101 +1373,11 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => { localStorage.setItem("lifeos.displayTimeZone", event.target.value); setDisplayTimeZone(event.target.value); }}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={saveCalendarPrefs} /><SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connectionSettings?.calendar} busy={busy || readOnly} onSave={saveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connectionSettings?.drive} busy={busy || readOnly} onSave={saveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>}
+      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendarCatalog} calendarCatalogLoaded={calendarCatalogLoaded} calendarPrefs={calendarPrefs} onLoadCalendars={loadCalendarCatalog} onSaveCalendarPrefs={saveCalendarPrefs} connectionSettings={connectionSettings} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={loadCollections} />}
     </section>
   </main>;
 }
 
-function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <header><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p className="lede">{description}</p></header>;
-}
-function Summary({ label, value, detail }: { label: string; value: string | number; detail: string }) {
-  return <article><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
-}
-/**
- * #46: the morning brief with live status, in the agreed order: I owe → Top 3 → waiting/decisions →
- * meeting prep → day shape. Finished items are struck through (the server already sank them), past
- * meetings are marked, and deleted references show as missing. Without a brief, the rule's Top 3 shows.
- */
-function DailyFocusPanel({ focus, tasks, disabled, onRefresh, onChange }: { focus: DailyFocus; tasks: LifeObject[]; disabled: boolean; onRefresh: () => void; onChange: (change: FocusChange) => void }) {
-  const stateLabel = { open: "", done: "Done", cancelled: "Cancelled", past: "Past", missing: "Missing: deleted or not found" } as const;
-  const row = (item: FocusItem, details: Array<string | undefined>) => <div className={`object-row focus-item ${item.state}`} key={item.id}><i /><div><b>{item.object?.frontmatter.title ?? "Missing item"}{item.object && <LockBadge frontmatter={item.object.frontmatter} />}</b><small>{[stateLabel[item.state], ...details].filter(Boolean).join(" · ")}</small></div></div>;
-  const section = (title: string, items: FocusItem[], details: (item: FocusItem) => Array<string | undefined>, empty: string) => <div className="focus-section"><h4>{title}</h4>{items.length ? <CappedRows items={items} row={(item) => row(item, details(item))} /> : <p className="muted">{empty}</p>}</div>;
-  const { brief } = focus;
-  return <article className="daily-focus">
-    <span>DAILY FOCUS</span>
-    <div className="capture-row"><p className="muted">{brief ? `Generated at ${formatTime(brief.generatedAt)}` : "No brief for today yet. Top 3 suggested by priority, then due date."}</p><button disabled={disabled} onClick={onRefresh} title="Ask Claude to re-plan today">Refresh</button></div>
-    {brief?.lengthWarning && <p className="muted" role="note">Note: {brief.lengthWarning}.</p>}
-    {brief && section("I owe", focus.iOwe, (item) => [item.overdue && item.state === "open" ? "Overdue" : undefined], "Nothing owed today.")}
-    <TopThreeSection focus={focus} tasks={tasks} disabled={disabled} onChange={onChange} stateLabel={stateLabel} />
-    {brief && <>
-      {section("Waiting and decisions", focus.waitingAndDecisions, (item) => [item.ageDays !== undefined ? `${item.ageDays} days` : undefined], "Nothing to chase.")}
-      {section("Meeting prep", focus.meetingPrep, (item) => [item.object?.frontmatter.starts_at ? formatTime(item.object.frontmatter.starts_at) : undefined, item.context, item.ask ? `Your ask: ${item.ask}` : undefined], "No meetings to prepare.")}
-      {focus.dayShape && <div className="focus-section"><h4>Day shape</h4><p>{focus.dayShape.meetingHours} h in meetings · {focus.dayShape.freeHours} h free</p></div>}
-      {focus.deferCandidates.length > 0 && section("Consider deferring", focus.deferCandidates, (item) => [item.reason], "")}
-      {brief.body.trim() && <p className="focus-narrative">{brief.body.trim()}</p>}
-    </>}
-    {focus.restrictedHidden > 0 && <p className="muted">{focus.restrictedHidden} restricted {focus.restrictedHidden === 1 ? "item" : "items"} not shown.</p>}
-  </article>;
-}
-/**
- * #47: the effective Top 3 with the user's controls. Every control is a real button or select (keyboard
- * operable, Escape cancels a replace), and "Pinned" / "Replaces …" are written out, never shown by colour alone.
- */
-function TopThreeSection({ focus, tasks, disabled, onChange, stateLabel }: { focus: DailyFocus; tasks: LifeObject[]; disabled: boolean; onChange: (change: FocusChange) => void; stateLabel: Record<FocusItem["state"], string> }) {
-  const [replacing, setReplacing] = useState<string>();
-  const [choice, setChoice] = useState("");
-  const [toPin, setToPin] = useState("");
-  // Open, non-restricted tasks not already shown: the candidates for Replace and Pin (the server checks again).
-  const candidates = tasks.filter((task) => task.frontmatter.sensitivity !== "restricted" && !focus.top3.some((item) => item.id === task.frontmatter.id));
-  const title = (item: FocusItem) => item.object?.frontmatter.title ?? "Missing item";
-  const cancelReplace = () => { setReplacing(undefined); setChoice(""); };
-  const options = <>{candidates.map((task) => <option key={task.frontmatter.id} value={task.frontmatter.id}>{task.frontmatter.title}</option>)}</>;
-  return <div className="focus-section top-three">
-    <h4>Top 3</h4>
-    {!focus.top3.length && <p className="muted">No active commitments to rank.</p>}
-    {focus.top3.map((item) => <div key={item.id}>
-      <div className={`object-row focus-item ${item.state}`}><i /><div><b>{title(item)}{item.object && <LockBadge frontmatter={item.object.frontmatter} />}</b><small>{[item.pinned ? "Pinned" : undefined, stateLabel[item.state], item.whyToday, item.replaces ? `Replaces "${item.replaces.title}"` : undefined, item.ifThen].filter(Boolean).join(" · ")}</small></div>
-        <div className="focus-controls">
-          {item.object && <button type="button" aria-pressed={Boolean(item.pinned)} aria-label={`${item.pinned ? "Unpin" : "Pin"} ${title(item)}`} disabled={disabled} onClick={() => onChange({ action: item.pinned ? "unpin" : "pin", taskId: item.id })}>{item.pinned ? "Unpin" : "Pin"}</button>}
-          <button type="button" aria-expanded={replacing === item.id} aria-label={`Replace ${title(item)}`} disabled={disabled || !candidates.length} onClick={() => replacing === item.id ? cancelReplace() : (setReplacing(item.id), setChoice(""))}>Replace</button>
-          <button type="button" aria-label={`Dismiss ${title(item)} for today`} disabled={disabled} onClick={() => onChange({ action: "dismiss", taskId: item.id })}>Dismiss</button>
-        </div>
-      </div>
-      {replacing === item.id && <div className="capture-row focus-replace" onKeyDown={(event) => { if (event.key === "Escape") cancelReplace(); }}>
-        <select autoFocus aria-label={`Task to put in place of ${title(item)}`} value={choice} onChange={(event) => setChoice(event.target.value)}><option value="">Choose a task…</option>{options}</select>
-        <button type="button" className="primary" disabled={disabled || !choice} onClick={() => { onChange({ action: "replace", taskId: item.id, replacementId: choice }); cancelReplace(); }}>Replace</button>
-        <button type="button" onClick={cancelReplace}>Cancel</button>
-      </div>}
-    </div>)}
-    {focus.top3.length < focus.maxMustDos && candidates.length > 0 && <div className="capture-row focus-pin">
-      <select aria-label="Task to pin to today's Top 3" value={toPin} disabled={disabled} onChange={(event) => setToPin(event.target.value)}><option value="">Add a task to today's Top 3…</option>{options}</select>
-      <button type="button" disabled={disabled || !toPin} onClick={() => { onChange({ action: "pin", taskId: toPin }); setToPin(""); }}>Pin</button>
-    </div>}
-    {focus.dismissedTop3.length > 0 && <div className="focus-dismissed"><small>Dismissed for today</small>
-      <CappedRows items={focus.dismissedTop3} row={(item) => <div className="object-row" key={item.id}><div><b>{title(item)}</b></div><button type="button" aria-label={`Restore ${title(item)} to today's Top 3`} disabled={disabled} onClick={() => onChange({ action: "restore", taskId: item.id })}>Restore</button></div>} />
-    </div>}
-    {focus.override && <button type="button" className="link-button" disabled={disabled} onClick={() => onChange({ action: "reset" })}>Clear my Top 3 changes for today</button>}
-  </div>;
-}
-/** #47: the synced max must-dos setting: how many items Today's Top 3 shows. */
-function MaxMustDosCard({ setting, disabled, onSave }: { setting?: { maxMustDos: number; contentHash?: string }; disabled: boolean; onSave: (maxMustDos: number) => Promise<string | undefined> }) {
-  const [value, setValue] = useState(setting?.maxMustDos ?? 3);
-  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { if (setting) setValue(setting.maxMustDos); }, [setting?.maxMustDos]);
-  const save = async () => {
-    setSaving(true);
-    const error = await onSave(value);
-    setSaving(false);
-    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Today's Top 3 now shows at most this many must-dos." });
-  };
-  return <article className="internal-domains-setting"><span>TODAY</span><h3>Max must-dos</h3>
-    <p className="muted">How many items Today's Top 3 shows, whether from the morning brief or the priority rule. Pinned tasks count towards it.</p>
-    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><select aria-label="Max must-dos" value={value} disabled={disabled} onChange={(event) => { setValue(Number(event.target.value)); setStatus(undefined); }}>{[1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select><button type="button" disabled={disabled || saving || value === setting.maxMustDos} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
-    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
-  </article>;
-}
 function Meta({ label, value }: { label: string; value: string }) {
   return <div className="meta"><small>{label}</small><b title={value}>{value}</b></div>;
 }
@@ -1590,36 +1389,6 @@ function PeopleMeta({ label, people, labels, empty }: { label: string; people: L
   const text = people.map((person) => personLabel(labels, person).label).join(", ") || empty;
   return <div className="meta"><small>{label}</small><b title={text}>{people.length ? <PeopleList people={people} labels={labels} /> : empty}</b></div>;
 }
-const dueText = (task: LifeObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
-const openPointLinkText = { "raised-in": "Raised in", project: "Same project as", client: "Same client as", people: "Same people as" } as const;
-
-/** #48: Today's live panels, in the PRD's order. Status is always said in words, never by colour alone. */
-function TodayLivePanels({ panels, onOpenInbox }: { panels: TodayPanels; onOpenInbox: () => void }) {
-  const taskRow = (detail: (task: LifeObject) => string) => (task: LifeObject) => <div className="object-row" key={task.frontmatter.id}><i /><div><b>{task.frontmatter.title}<LockBadge frontmatter={task.frontmatter} /></b><small>{detail(task)}</small></div></div>;
-  const overdueBy = (task: LifeObject) => { const due = dueText(task); const days = due ? daysBetween(due, panels.date) : 0; return `Overdue by ${days} ${days === 1 ? "day" : "days"} · due ${due}`; };
-  const meetingTime = (meeting: TodayPanels["nextMeetings"][number]) => `${formatTime(meeting.startsAt)}–${formatTime(meeting.endsAt)}`;
-  const inboxRows = [
-    { key: "reviews", text: `${panels.reviewCount} review ${panels.reviewCount === 1 ? "item" : "items"} awaiting confirmation` },
-    { key: "awaiting", text: awaitingAdoptionLabel(panels.inbox) },
-    ...panels.failedDrafts.map((entry) => ({ key: `failed:${entry.path}`, text: `Failed draft: ${entry.reason}`, path: entry.path })),
-    ...panels.staleWorkOrders.map((order) => ({ key: `stale:${order.path}`, text: `Stale Work Order: not processed for ${order.ageDays} days`, path: order.path }))
-  ];
-  return <>
-    <LivePanel title="Overdue" items={panels.overdue} empty="Nothing overdue." row={taskRow(overdueBy)} />
-    <LivePanel title="Due today" items={panels.dueToday} empty="Nothing due today." row={taskRow((task) => `Due today${task.frontmatter.priority ? ` · ${String(task.frontmatter.priority)} priority` : ""}`)} />
-    <LivePanel title="Upcoming high priority" items={panels.upcomingHighPriority} empty="No upcoming high-priority work." row={taskRow((task) => `High priority · ${dueText(task) ? `due ${dueText(task)}` : "no due date"}`)} />
-    <LivePanel title="Waiting by person" items={panels.waitingByPerson} empty="Nothing waiting on someone else." row={(group) => <WaitingGroupRow key={group.personId ?? "unknown"} group={group} />} />
-    <LivePanel title="Next meetings" items={panels.nextMeetings} empty={panels.calendarError ? "No meetings found in LifeOS for the rest of today." : "No more meetings today."}
-      note={<>{panels.calendarError && <p className="muted" role="status">Calendar could not be read ({panels.calendarError}); showing meetings already in LifeOS.</p>}<p className="muted">{panels.meetingHours} h of meetings today{panels.meetingHeavy ? ` · Meeting-heavy day (${panels.settings.meetingHoursThreshold} h or more)` : ""}</p></>}
-      row={(meeting) => <div className="object-row" key={meeting.meetingId ?? meeting.calendarEventId}><i /><div><b>{meeting.title}{meeting.restricted && <LockBadge frontmatter={{ sensitivity: "restricted" }} />}</b><small>{[meeting.inProgress ? "Now" : undefined, meetingTime(meeting), meeting.calendarName, meeting.noteId ? "Has notes" : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
-    <LivePanel title="Open points for today's meetings" items={panels.openPointsForMeetings} empty="No open points linked to today's meetings."
-      row={(entry) => <div className="object-row" key={entry.openPoint.frontmatter.id}><i /><div><b>{entry.openPoint.frontmatter.title}<LockBadge frontmatter={entry.openPoint.frontmatter} /></b><small>{[`${openPointLinkText[entry.link]} ${entry.meetingTitle}`, entry.openPoint.frontmatter.importance ? `${String(entry.openPoint.frontmatter.importance)} importance` : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
-    <LivePanel title="Inbox and agents" items={inboxRows} empty="" note={<button type="button" onClick={onOpenInbox}>Open Inbox</button>}
-      row={(entry) => <div className="object-row" key={entry.key}><i /><div><b>{entry.text}</b>{"path" in entry && entry.path && <small><code>{entry.path}</code></small>}</div></div>} />
-  </>;
-}
-
-const objectRow = (object: LifeObject) => <div className="object-row" key={object.frontmatter.id}><i /><div><b>{object.frontmatter.title}<LockBadge frontmatter={object.frontmatter} /></b><small>{object.frontmatter.status ?? object.frontmatter.type} · Updated {formatDate(object.frontmatter.updated_at)}</small></div></div>;
 function ObjectList({ title, objects, empty }: { title: string; objects: LifeObject[]; empty: string }) {
   return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map(objectRow)}</article>;
 }
@@ -1653,149 +1422,6 @@ function PersonExternalControl({ person, labels, disabled, onChange }: { person:
   return <span className="person-external"><small>Shown as</small><b><PersonName {...label} /></b>{!isSelf && onChange && <label><small>External</small><select value={externalChoiceOf(person.frontmatter)} disabled={disabled} onChange={(event) => onChange(person, event.target.value as ExternalChoice)}>
     <option value="auto">Auto (by email domain{externalChoiceOf(person.frontmatter) === "auto" ? `: ${derived}` : ""})</option><option value="external">External</option><option value="internal">Internal</option>
   </select></label>}</span>;
-}
-
-const weekdayNames: Array<[Weekday, string]> = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
-/** #48: the synced Today settings: when a day counts as meeting-heavy, and when the morning routine writes the brief. */
-function TodaySettingsCard({ setting, disabled, timeZones, onSave }: { setting?: TodaySettings; disabled: boolean; timeZones: string[]; onSave: (changes: Omit<TodaySettings, "contentHash">) => Promise<string | undefined> }) {
-  const [threshold, setThreshold] = useState("");
-  const [time, setTime] = useState("");
-  const [zone, setZone] = useState("");
-  const [days, setDays] = useState<Weekday[]>([]);
-  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { if (setting) { setThreshold(String(setting.meetingHoursThreshold)); setTime(setting.briefTime); setZone(setting.briefTimeZone); setDays(setting.briefDays); } }, [setting]);
-  const save = async () => {
-    setSaving(true);
-    const error = await onSave({ meetingHoursThreshold: Number(threshold), briefTime: time, briefTimeZone: zone, briefDays: days });
-    setSaving(false);
-    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved." });
-  };
-  const edit = <T,>(set: (value: T) => void) => (value: T) => { set(value); setStatus(undefined); };
-  return <article className="today-setting"><span>TODAY</span><h3>Meetings and morning brief</h3>
-    {!setting ? <p className="muted">Loading…</p> : <>
-      <label>Meeting-heavy day from (hours) <input type="number" min={0} max={24} step={0.5} value={threshold} disabled={disabled} onChange={(event) => edit(setThreshold)(event.target.value)} /></label>
-      <p className="muted">Information only: Today notes a meeting-heavy day; nothing is blocked.</p>
-      <label>Brief time <input type="time" value={time} disabled={disabled} onChange={(event) => edit(setTime)(event.target.value)} /></label>
-      <label>Brief time zone <select value={zone} disabled={disabled} onChange={(event) => edit(setZone)(event.target.value)}>{[...new Set([zone, ...timeZones])].map((option) => <option key={option}>{option}</option>)}</select></label>
-      <fieldset disabled={disabled}><legend>Brief days</legend>{weekdayNames.map(([day, name]) => <label key={day}><input type="checkbox" checked={days.includes(day)} onChange={(event) => edit(setDays)(event.target.checked ? [...days, day] : days.filter((value) => value !== day))} /> {name}</label>)}</fieldset>
-      <button type="button" disabled={disabled || saving || !days.length || !threshold.trim() || !time} onClick={save}>{saving ? "Saving…" : "Save"}</button>
-      {!days.length && <p className="calendar-error" role="alert">Choose at least one day.</p>}
-    </>}
-    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
-  </article>;
-}
-
-/** #39: the synced internal-domains setting. People with addresses only on other domains are shown as External. */
-function InternalDomainsCard({ setting, disabled, onSave }: { setting?: { domains: string[]; contentHash?: string }; disabled: boolean; onSave: (domains: string[]) => Promise<string | undefined> }) {
-  const saved = setting?.domains.join(", ") ?? "";
-  const [text, setText] = useState(saved);
-  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
-  const [saving, setSaving] = useState(false);
-  useEffect(() => setText(saved), [saved]);
-  const domains = parseDomains(text);
-  const dirty = domains.join("|") !== (setting?.domains ?? []).join("|");
-  const save = async () => {
-    setSaving(true);
-    const error = await onSave(domains);
-    setSaving(false);
-    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. People labels now use these domains." });
-  };
-  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>Internal domains</h3>
-    <p className="muted">Email domains of your own organisations, separated by commas. Anyone with addresses only on other domains is shown as "Name<span className="ext-suffix"> - ext</span>". You can override this on each person.</p>
-    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Internal domains" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="example.com, example.org" /><button type="button" disabled={disabled || saving || !dirty || !domains.length} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
-    {setting && !setting.domains.length && !text.trim() && <p className="muted" role="status">Not set yet: nobody is marked External automatically.</p>}
-    {setting && setting.domains.length > 0 && !domains.length && <p className="calendar-error" role="alert">Enter at least one domain.</p>}
-    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
-  </article>;
-}
-
-/** #54: the user's own addresses, a synced setting. Attendees with one of them are you; unset means nobody is matched as you by email. */
-function SelfEmailsCard({ setting, disabled, onSave }: { setting?: { emails: string[]; contentHash?: string }; disabled: boolean; onSave: (emails: string[]) => Promise<string | undefined> }) {
-  const saved = setting?.emails.join(", ") ?? "";
-  const [text, setText] = useState(saved);
-  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
-  const [saving, setSaving] = useState(false);
-  useEffect(() => setText(saved), [saved]);
-  const emails = parseEmails(text);
-  const dirty = emails.map((email) => email.toLowerCase()).join("|") !== (setting?.emails ?? []).join("|");
-  const save = async () => {
-    setSaving(true);
-    const error = await onSave(emails);
-    setSaving(false);
-    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: emails.length ? "Saved. Attendees with these addresses are now you." : "Saved. No address is matched to you." });
-  };
-  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>My email addresses</h3>
-    <p className="muted">Every address you use, separated by commas. Calendar attendees with one of these addresses are linked to you instead of creating a new person.</p>
-    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
-    {setting && !setting.emails.length && !status && <p className="muted" role="status">Not set yet: no attendee is recognised as you by email.</p>}
-    {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
-  </article>;
-}
-
-function CalendarListCard({ catalog, loaded, prefs, onSave }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; onSave: (prefs: CalendarPrefs) => Promise<string | undefined> }) {
-  // Edits stay in this draft until Save, so a half-finished change (for example, nothing ticked) is never stored.
-  const [disabled, setDisabled] = useState(prefs.disabledCalendarIds);
-  const [defaultId, setDefaultId] = useState(prefs.defaultCalendarId);
-  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string }>();
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { setDisabled(prefs.disabledCalendarIds); setDefaultId(prefs.defaultCalendarId); }, [prefs]);
-
-  const selectedCount = catalog.filter((calendar) => !disabled.includes(calendar.id)).length;
-  const allSelected = catalog.length > 0 && selectedCount === catalog.length;
-  const noneSelected = catalog.length > 0 && selectedCount === 0;
-  const dirty = defaultId !== prefs.defaultCalendarId || [...disabled].sort().join("|") !== [...prefs.disabledCalendarIds].sort().join("|");
-  const defaultOff = Boolean(defaultId) && disabled.includes(defaultId!);
-  const edit = <T,>(setter: (value: T) => void, value: T) => { setter(value); setStatus(undefined); };
-
-  const save = async () => {
-    setSaving(true);
-    const error = await onSave({ ...prefs, disabledCalendarIds: disabled, defaultCalendarId: defaultId });
-    setSaving(false);
-    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Your other devices will pick this up when the data folder syncs." });
-  };
-
-  return <article className="calendar-list-setting"><span>CALENDARS</span><h3>Calendars in the Calendar view</h3>
-    <p className="muted">Tick the calendars to include. Hover a calendar to make it the default; the Calendar view opens on it.</p>
-    {!loaded && <p className="muted">Loading calendars…</p>}
-    {loaded && !catalog.length && <p className="muted">No calendars available. Connect Google Calendar to choose from your calendars.</p>}
-    {catalog.length > 0 && <div className="calendar-toolbar">
-      <button type="button" onClick={() => edit(setDisabled, allSelected ? catalog.map((calendar) => calendar.id) : [])}>{allSelected ? "Unselect all" : "Select all"}</button>
-      <small className="muted">{selectedCount} of {catalog.length} selected</small>
-    </div>}
-    {catalog.map((calendar) => {
-      const enabled = !disabled.includes(calendar.id);
-      const isDefault = defaultId === calendar.id;
-      return <div className="calendar-row" key={calendar.id}>
-        <label><input type="checkbox" checked={enabled} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
-        {enabled && <span className="calendar-row-actions">
-          {isDefault
-            ? <button type="button" onClick={() => edit(setDefaultId, undefined)}>Remove default</button>
-            : <button type="button" onClick={() => edit(setDefaultId, calendar.id)}>Set as default</button>}
-        </span>}
-      </div>;
-    })}
-    {noneSelected && <p className="calendar-error" role="alert">Select at least one calendar. You can't save with none selected.</p>}
-    {defaultOff && !noneSelected && <p className="muted" role="status">The default calendar is unticked, so the Calendar view will open on All calendars.</p>}
-    {catalog.length > 0 && <div className="calendar-save">
-      <button type="button" disabled={!dirty || noneSelected || saving} onClick={save}>{saving ? "Saving…" : "Save"}</button>
-      {dirty && !status && !noneSelected && <small className="muted">Unsaved changes</small>}
-      {status && <small className={status.kind === "error" ? "calendar-error" : "calendar-saved"} role={status.kind === "error" ? "alert" : "status"}>{status.text}</small>}
-    </div>}
-  </article>;
-}
-
-function GoogleSecretCard({ provider, title, status, busy, onSave }: { provider: "calendar" | "drive"; title: string; status?: { configured: boolean; connected: boolean }; busy: boolean; onSave: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean> }) {
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [saved, setSaved] = useState(false);
-  const save = async () => {
-    setSaved(false);
-    if (await onSave(provider, clientId, clientSecret)) {
-      setClientId(""); setClientSecret(""); setSaved(true);
-    }
-  };
-  return <article className="secret-card"><span>{title.toUpperCase()}</span><h3>{status?.configured ? "Credentials configured" : "Credentials required"}</h3><p className="muted">{status?.connected ? "Connected" : provider === "calendar" ? "Configure here, then authorize from Calendar." : "Stored for the upcoming Drive source connector."}</p>{saved && <div className="inline-success">Saved securely in macOS Keychain.</div>}<div className="knowledge-form"><input value={clientId} onChange={(event) => { setSaved(false); setClientId(event.target.value); }} placeholder="OAuth client ID" autoComplete="off" /><input type="password" value={clientSecret} onChange={(event) => { setSaved(false); setClientSecret(event.target.value); }} placeholder={status?.configured ? "Enter a new secret to replace it" : "OAuth client secret"} autoComplete="new-password" /><button className="primary" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={save}>{busy ? "Saving…" : status?.configured ? "Replace credentials" : "Save to Keychain"}</button></div></article>;
 }
 
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);

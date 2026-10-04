@@ -145,7 +145,8 @@ export function envelopeWriteProblem(next: { origin?: unknown; sensitivity?: unk
 /**
  * Lifecycle rules for an app write, given the previous front matter (`undefined` when new), which a
  * single-file schema cannot check. Decisions start `active`; only `active` may move, to `superseded`
- * or `reversed`; the supersede links, once written, never change. Open points start `open`; only `open`
+ * or `reversed`; the supersede links, once written, never change. An existing active decision may gain
+ * `supersedes_decision_id` once, when it is chosen to replace another (#67). Open points start `open`; only `open`
  * may move, to `resolved` or `closed`; the stamps and the decision link, once written, never change.
  */
 export function lifecycleWriteProblem(next: Record<string, unknown>, previous?: Record<string, unknown>): string | undefined {
@@ -154,7 +155,7 @@ export function lifecycleWriteProblem(next: Record<string, unknown>, previous?: 
   if (!previous) return next.status === "active" ? undefined : `A new decision must be active, got "${String(next.status)}"`;
   if (next.status !== previous.status && previous.status !== "active") return `A ${String(previous.status)} decision is final and cannot become ${String(next.status)}`;
   if (previous.supersedes_decision_id !== undefined && next.supersedes_decision_id !== previous.supersedes_decision_id) return "supersedes_decision_id cannot change once set";
-  if (previous.supersedes_decision_id === undefined && next.supersedes_decision_id !== undefined) return "supersedes_decision_id can only be set when the decision is created";
+  if (previous.supersedes_decision_id === undefined && next.supersedes_decision_id !== undefined && (previous.status !== "active" || next.status !== "active")) return "supersedes_decision_id can only be set on an active decision";
   if (previous.superseded_by_decision_id !== undefined && next.superseded_by_decision_id !== previous.superseded_by_decision_id) return "superseded_by_decision_id cannot change once set";
   return undefined;
 }

@@ -2,9 +2,10 @@ import { originOf, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeo
 import { isCalendarDate, proposalBody, toUtc } from "./adoption.js";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { acceptSummary, summaryReviewType } from "./meeting-material.js";
+import { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
-import { PersonMergeModule, personMergeOperation, personMergeReviewType } from "./person-merge.js";
+import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeOperation, personMergeReviewType, survivingPersonId } from "./person-merge.js";
 import { contextLinkFields, inheritContextLinks, sameValue, validTimeZone } from "./support.js";
 
 
@@ -14,7 +15,7 @@ export class ReviewModule {
   readonly merges: PersonMergeModule;
   /** #62: the tail of the queue of accept/reject/recover calls per Review Item, so they run one at a time. */
   private readonly queues = new Map<string, Promise<unknown>>();
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule) { this.merges = new PersonMergeModule(ctx); }
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly decisions = new DecisionsModule(ctx)) { this.merges = new PersonMergeModule(ctx); }
 
   /**
    * #62: runs `work` after every earlier accept, reject or recovery of the same Review Item has settled, so a
@@ -29,8 +30,13 @@ export class ReviewModule {
     finally { if (this.queues.get(reviewId) === tail) this.queues.delete(reviewId); }
   }
 
+  /** #65: pending link-resolution items list person candidates as they stand after merges (read-time only; files unchanged). */
   reviews() {
-    return this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item");
+    return this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item").map((review) => {
+      const proposed = review.frontmatter.proposed_fields as { candidate_type?: unknown; candidates?: unknown } | undefined;
+      if (review.frontmatter.review_type !== "link-resolution" || review.frontmatter.status !== "pending" || proposed?.candidate_type !== "person" || !Array.isArray(proposed.candidates)) return review;
+      return { ...review, frontmatter: { ...review.frontmatter, proposed_fields: { ...proposed, candidates: followMergesInCandidates(this.ctx.index, proposed.candidates as Array<{ id: string; title: string }>) } } };
+    });
   }
 
   async processMeeting(meetingId: string) {
@@ -96,7 +102,8 @@ export class ReviewModule {
     const requestedOperationId = typeof review.frontmatter.operation_id === "string" ? review.frontmatter.operation_id : uuidV7();
     const operation = await ctx.objects.prepareOperation?.("accept-review", { reviewId, objectId: uuidV7() }, requestedOperationId);
     const objectId = typeof operation?.payload.objectId === "string" ? operation.payload.objectId : uuidV7();
-    const proposed = review.frontmatter.proposed_fields as Record<string, unknown>;
+    // #65: people merged since the proposal was written are replaced by the person they were merged into.
+    const proposed = followMergesInProposal(ctx.index, review.frontmatter.proposed_fields as Record<string, unknown>);
     const title = typeof proposed.title === "string" ? proposed.title : review.frontmatter.title;
     const targetType = String(review.frontmatter.target_object_type);
     const folder = targetType === "task" ? "tasks" : targetType === "decision" ? "decisions" : targetType === "open-point" ? "open-points" : targetType === "knowledge-note" ? "knowledge" : undefined;
@@ -135,8 +142,10 @@ export class ReviewModule {
     if (review.frontmatter.status === "accepted") return ctx.required(targetId);
     if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
     const proposed = review.frontmatter.proposed_fields as { link_field: string; list?: boolean; candidate_type: ObjectEnvelope["type"]; candidates?: Array<{ id: string }> };
-    const candidates = proposed.candidates ?? [];
-    const chosenId = linkTo ?? (candidates.length === 1 ? candidates[0]!.id : undefined);
+    // #65: merged people stand for the person they were merged into, so a merged pair is one candidate.
+    const candidates = proposed.candidate_type === "person" ? followMergesInCandidates(ctx.index, (proposed.candidates ?? []) as Array<{ id: string; title: string }>) : proposed.candidates ?? [];
+    const picked = linkTo ?? (candidates.length === 1 ? candidates[0]!.id : undefined);
+    const chosenId = picked && proposed.candidate_type === "person" ? survivingPersonId(ctx.index, picked) : picked;
     if (!chosenId) throw new Error(`Choose the ${proposed.candidate_type} to link`);
     const chosen = ctx.index.get(chosenId);
     if (!chosen || chosen.frontmatter.type !== proposed.candidate_type || chosen.frontmatter.deleted_at) throw new Error(`Choose an existing ${proposed.candidate_type} to link`);
@@ -168,6 +177,9 @@ export class ReviewModule {
     const target = ctx.required(targetId);
     if (target.frontmatter.deleted_at) throw new Error("The object to change was deleted");
     const note = proposal.append_note;
+    // #67: superseding goes through the Decisions workspace path, which sets both links.
+    const successor = target.frontmatter.type === "decision" ? proposal.changes.find((change) => change.field === "superseded_by_decision_id")?.proposed : undefined;
+    const successorId = typeof successor === "string" ? successor : undefined;
     const landed = target.frontmatter.revision === proposal.base_revision + 1 && proposal.changes.every((change) => sameValue(target.frontmatter[change.field], change.proposed)) && (!note || target.body.endsWith(`\n${note}\n`));
     const now = new Date().toISOString();
     let updated = target;
@@ -176,7 +188,13 @@ export class ReviewModule {
         throw new ObjectConflictError(`${target.frontmatter.title} changed since this review item was raised (revision ${proposal.base_revision}, now ${target.frontmatter.revision}); reject it and send the change again`);
       }
       const changes = Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed ?? undefined]));
-      updated = await ctx.update(target, changes, { expectedHash: proposal.base_hash, now, ...(note ? { body: target.body + appendedText(target.body, note) } : {}) });
+      const body = note ? target.body + appendedText(target.body, note) : undefined;
+      updated = successorId
+        ? (await this.decisions.supersedeWith(targetId, successorId, proposal.base_hash, { changes, ...(body !== undefined ? { body } : {}) })).superseded
+        : await ctx.update(target, changes, { expectedHash: proposal.base_hash, now, ...(body !== undefined ? { body } : {}) });
+    } else if (successorId) {
+      // #67: a crash may have left the successor's back link unwritten; finish it (a no-op once both links are set).
+      updated = (await this.decisions.supersedeWith(targetId, successorId, target.contentHash)).superseded;
     }
     await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId }, { expectedHash: review.contentHash, now });
     await ctx.writeAudit("review.accepted", targetId, now, {

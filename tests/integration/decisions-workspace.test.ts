@@ -195,6 +195,9 @@ describe("decisions workspace", () => {
     expect(lifecycleWriteProblem({ ...base, status: "active" })).toBeUndefined();
     expect(lifecycleWriteProblem({ ...base, status: "superseded" }, { ...base, status: "active" })).toBeUndefined();
     expect(lifecycleWriteProblem({ ...base, status: "active" }, { ...base, status: "superseded" })).toMatch(/superseded/);
-    expect(lifecycleWriteProblem({ ...base, status: "active", supersedes_decision_id: ids.review }, { ...base, status: "active" })).toMatch(/supersedes_decision_id/);
+    // #67: an existing active decision may gain the link once, when it is chosen as a successor; never on a final one.
+    expect(lifecycleWriteProblem({ ...base, status: "active", supersedes_decision_id: ids.review }, { ...base, status: "active" })).toBeUndefined();
+    expect(lifecycleWriteProblem({ ...base, status: "reversed", supersedes_decision_id: ids.review }, { ...base, status: "reversed" })).toMatch(/supersedes_decision_id/);
+    expect(lifecycleWriteProblem({ ...base, status: "active", supersedes_decision_id: ids.source }, { ...base, status: "active", supersedes_decision_id: ids.review })).toMatch(/cannot change/);
   });
 });
