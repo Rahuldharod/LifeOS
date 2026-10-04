@@ -6,7 +6,7 @@ import type { EnrichmentModule, EnrichmentStatus } from "./enrichment.js";
 import type { EntitiesModule } from "./entities.js";
 import type { MeetingsModule } from "./meetings.js";
 import { openPointPeopleIds } from "./open-points.js";
-import type { PeopleModule } from "./people.js";
+import type { PeopleModule, PeopleSetupWarning } from "./people.js";
 import { dueDate, isLive, isRestricted } from "./support.js";
 
 /**
@@ -65,6 +65,8 @@ export interface TodayPanels {
   failedDrafts: InboxStatus["failed"];
   staleWorkOrders: EnrichmentStatus["staleWorkOrders"];
   settings: TodaySettings;
+  /** #76: present while the user's own email addresses or the internal domains are unset. */
+  setupWarning?: PeopleSetupWarning;
 }
 
 const todaySettingsPath = "settings/today.md";
@@ -150,6 +152,7 @@ export class TodayModule {
     const nextMeetings = meetings.filter((meeting) => Date.parse(meeting.endsAt) > now.getTime()).map((meeting) => ({ ...meeting, inProgress: Date.parse(meeting.startsAt) <= now.getTime() }));
 
     const [inbox, enrichment] = await Promise.all([this.adoption.inboxStatus(), this.enrichment.status({ now })]);
+    const setupWarning = this.people.setupWarning();
     return {
       date, timeZone,
       overdue: tasks.overdue, dueToday: tasks.dueToday, upcomingHighPriority, waitingByPerson,
@@ -159,7 +162,8 @@ export class TodayModule {
       inbox: { awaiting: inbox.awaiting, drafts: inbox.drafts, patches: inbox.patches },
       failedDrafts: inbox.failed,
       staleWorkOrders: enrichment.staleWorkOrders,
-      settings
+      settings,
+      ...(setupWarning ? { setupWarning } : {})
     };
   }
 

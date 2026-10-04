@@ -125,6 +125,16 @@ export function selfEmailsOf(index: Pick<AppContext["index"], "all">) {
   return selfEmailsFrom(settingIn(index, selfEmailsPath)?.frontmatter);
 }
 
+/** #76: set while the user's own addresses or the internal domains are unset, so Today and System Health can point to Settings. */
+export interface PeopleSetupWarning { selfEmailsMissing: boolean; internalDomainsMissing: boolean }
+
+/** Undefined once both settings are saved. */
+export function peopleSetupWarning(index: Pick<AppContext["index"], "all">): PeopleSetupWarning | undefined {
+  const selfEmailsMissing = selfEmailsOf(index).length === 0;
+  const internalDomainsMissing = internalDomainsOf(index).length === 0;
+  return selfEmailsMissing || internalDomainsMissing ? { selfEmailsMissing, internalDomainsMissing } : undefined;
+}
+
 export function personDisplayLabels(objects: ReadonlyArray<Pick<LifeOSObject, "frontmatter">>, internalDomains: readonly string[]): PersonLabel[] {
   const people = objects.filter((object) => object.frontmatter.type === "person");
   const firstName = (person: Pick<LifeOSObject, "frontmatter">) => cleanText(person.frontmatter.given_name) || cleanText(person.frontmatter.title).split(" ")[0] || "Unnamed";
@@ -160,6 +170,11 @@ export class PeopleModule {
   /** Internal domains from the indexed setting file (empty when unset). Synchronous so labels stay a cheap read. */
   internalDomains() {
     return internalDomainsOf(this.ctx.index);
+  }
+
+  /** #76: present while the user's own addresses or the internal domains are unset. */
+  setupWarning() {
+    return peopleSetupWarning(this.ctx.index);
   }
 
   /** Display labels for all people, deleted ones included so old references still read well. */
