@@ -98,7 +98,7 @@ describe("resolving draft references by name", () => {
 
   it("matches people by email first, then by name; owner, waiting_for and people all resolve", async () => {
     const { root, store, application } = await vault();
-    const joel = await seed(store, "person", "Joel Martin", { identifiers: [{ type: "email", value: "Joel.Martin@EagleEye.com" }] });
+    const joel = await seed(store, "person", "Joel Martin", { identifiers: [{ kind: "email", value: "Joel.Martin@EagleEye.com" }] });
     // Another person titled with the email text would win a name match, but email matching comes first.
     await seed(store, "person", "joel.martin@eagleeye.com");
     const anna = await seed(store, "person", "Anna Kowalska", { aliases: ["Ania"] });

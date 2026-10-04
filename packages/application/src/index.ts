@@ -12,11 +12,11 @@ import { ReviewModule } from "./review.js";
 import { SystemModule } from "./system.js";
 
 export type { ExternalChange } from "./history.js";
-export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS } from "./people.js";
+export { derivePersonName, DEFAULT_INTERNAL_DOMAINS, DEFAULT_SELF_EMAILS, personEmails } from "./people.js";
 export type { AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, SecretStore } from "./ports.js";
 export { inboxFolders } from "./ports.js";
 export type { AdoptionBatch, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
-export { ReferenceResolver, referenceFields, foldName, foldSubject, personEmails } from "./resolution.js";
+export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./resolution.js";
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
 
 /**

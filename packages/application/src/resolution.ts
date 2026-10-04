@@ -1,5 +1,6 @@
 import { sensitivityOf, uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
+import { personEmails } from "./people.js";
 
 /**
  * Name resolution (#33, PRD "Object Contract"): turns draft references (a name, alias, email, object ID
@@ -33,24 +34,6 @@ export const foldName = (value: string) => foldForSearch(value).trim().replace(/
 /** Subjects also ignore separators, so "retail-media", "retail_media" and "Retail Media" are one subject. */
 export const foldSubject = (value: string) => foldForSearch(value).replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : typeof value === "string" ? [value] : [];
-
-/**
- * A person's email addresses. Assumed shape (to be written by attendee matching, #38): `identifiers` is a
- * list of `{ type: "email", value }` entries; plain strings, `{ email }` entries and top-level `email` /
- * `emails` are read too so either shape works.
- */
-export function personEmails(person: LifeOSObject) {
-  const { identifiers, email: single, emails } = person.frontmatter as Record<string, unknown>;
-  const fromIdentifiers = (Array.isArray(identifiers) ? identifiers : []).flatMap((entry: unknown) => {
-    if (typeof entry === "string") return email.test(entry.trim()) ? [entry] : [];
-    if (!entry || typeof entry !== "object") return [];
-    const { type, kind, value, email: address } = entry as Record<string, unknown>;
-    const label = type ?? kind;
-    if (typeof address === "string") return [address];
-    return typeof value === "string" && (label === undefined || label === "email") ? [value] : [];
-  });
-  return [...fromIdentifiers, ...strings(single), ...strings(emails)].map((address) => address.trim().toLowerCase()).filter(Boolean);
-}
 
 export class ReferenceResolver {
   constructor(private readonly ctx: AppContext) {}
