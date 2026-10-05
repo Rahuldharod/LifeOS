@@ -109,11 +109,13 @@ async function seededVault(kind?: Expectation["vault"]) {
   return { root, application };
 }
 
-async function drop(root: string, folder: string, name: string, content: string) {
+// `now` is the adoption clock: a fixture adopted at a fixed time gets a file a minute older than that time,
+// so the 2-second grace never depends on the real date the suite runs on.
+async function drop(root: string, folder: string, name: string, content: string, now = new Date()) {
   const target = path.join(root, "_inbox", folder, name);
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, content);
-  const past = new Date(Date.now() - 60_000);
+  const past = new Date(now.getTime() - 60_000);
   await utimes(target, past, past);
 }
 
@@ -374,7 +376,7 @@ describe("morning routine skill (#51)", () => {
     if ((want.selfCheck ?? "pass") === "pass") expect(problems).toEqual([]);
     else expect(problems.join("; ")).toContain(`${morningIds.privateTask} is not listed in _agent/`);
 
-    await drop(root, "drafts", `${want.name}.md`, fixture.content);
+    await drop(root, "drafts", `${want.name}.md`, fixture.content, now);
     const batch = await application.adoptDrafts({ now });
     expect(batch.drafts[0], batch.drafts[0]?.reason).toMatchObject({ outcome: "adopted" });
     // Adoption accepts a restricted reference (Today hides and counts it), which is why the self-check exists.
