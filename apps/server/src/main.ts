@@ -5,7 +5,6 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
-import { MockAiProvider } from "@lifeos/ai";
 import { LifeOSApplication, type AutoBackups, type ReviewEdits, type Weekday } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
@@ -42,8 +41,9 @@ const calendars = calendarSource({ secrets, mockOnly: process.env.LIFEOS_CALENDA
 /** Startup and Retry: the only reads made just to know what is configured. A denied prompt leaves the card showing Retry. */
 await calendars.probe().catch((error) => console.error("Could not read Google connection secrets", error));
 const calendar = calendars.calendar;
+// #98: no AI provider; Claude does the AI work through the skills (ADR 0008). The mock AI is for tests only.
 // The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild; the watcher ignores `_agent/`.
-const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot));
+const application = new LifeOSApplication(store, index, calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot));
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 // #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
 let autoBackups: AutoBackups | undefined;
@@ -242,7 +242,6 @@ server.post<{ Params: { id: string }; Body: { sensitivity?: "normal" | "restrict
   if (typeof request.body?.expectedHash !== "string" || typeof request.body.sensitivity !== "string") return reply.status(400).send({ error: "sensitivity and expectedHash are required" });
   return application.setSensitivity(request.params.id, request.body.sensitivity, request.body.expectedHash);
 });
-server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (request) => application.processMeeting(request.params.id));
 server.post<{ Params: { id: string }; Body: { linkTo?: string } | undefined }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
 // Edits a pending proposal: title, owner, due, priority and context links (#34); `null` clears a field.
 server.patch<{ Params: { id: string }; Body: ReviewEdits }>("/api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));

@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LifeOSApplication } from "@lifeos/application";
+import { LifeOSApplication, type AiProvider } from "@lifeos/application";
 import { MockCalendarConnector } from "@lifeos/connectors";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
@@ -12,12 +12,20 @@ import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
+// #98: the app proposes Knowledge Notes only with an AI provider; this one keeps the source title.
+const titles = new Map<string, string>();
+const titled: AiProvider = {
+  proposeMeetingOutputs: async () => [],
+  proposeKnowledgeNote: async (text) => ({ title: titles.get(text)!, body: `# ${titles.get(text)}\n\n${text.trim()}\n`, confidence: "Medium" })
+};
+
 async function setup() {
   const root = await mkdtemp(path.join(tmpdir(), "lifeos-notes-search-"));
   roots.push(root);
-  const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), new MockCalendarConnector(), undefined, "integration-test");
+  const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), new MockCalendarConnector(), titled, "integration-test");
   await application.rebuildIndex();
   const knowledgeNote = async (title: string, text: string) => {
+    titles.set(text, title);
     await application.ingestTextSource(title, text);
     const review = application.reviews().find((item) => item.frontmatter.status === "pending" && item.frontmatter.title === title)!;
     return application.acceptReviewItem(review.frontmatter.id);

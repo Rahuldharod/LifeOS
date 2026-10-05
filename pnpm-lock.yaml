@@ -220,9 +220,6 @@ importers:
       '@fastify/cors':
         specifier: ^11.0.0
         version: 11.3.0
-      '@lifeos/ai':
-        specifier: workspace:*
-        version: link:../../packages/ai
       '@lifeos/application':
         specifier: workspace:*
         version: link:../../packages/application

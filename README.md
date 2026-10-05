@@ -11,7 +11,7 @@ Local-first personal knowledge and work management, backed by typed Markdown fil
 - `packages/object-store-markdown`: Markdown persistence adapter.
 - `packages/index-memory`: rebuildable in-memory index.
 - `packages/connectors`: Google Calendar and mock integration adapters.
-- `packages/ai`: deterministic mock AI adapter behind an application port.
+- `packages/ai`: deterministic mock AI adapter behind an application port, for tests only (the live server has no AI provider).
 - `packages/assets-filesystem`, `packages/backup-filesystem`, `packages/secrets`: managed images, checksummed backups and the macOS Keychain store.
 - `packages/contracts`, `packages/shared`: API types and rules shared by the server and the browser.
 - `schemas`: versioned object contracts and synthetic fixtures.

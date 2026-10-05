@@ -2,14 +2,14 @@
 
 LifeOS is a modular monolith. The browser calls application use cases through the localhost API. Application code owns orchestration; domain code owns invariants; adapters own Markdown, filesystem, connector, AI and secret-store details.
 
-The stable app is a single localhost process on port 4310 that serves the API and the production web build; development runs separately on 5174/4311 against synthetic `.dev-data/` (ADR 0006). The Markdown data root is authoritative and lives at `../data` by default. The in-memory index is rebuilt at process start and may always be discarded. Google Calendar and mock AI adapters implement application-owned ports, keeping external services out of the domain and persistence layers.
+The stable app is a single localhost process on port 4310 that serves the API and the production web build; development runs separately on 5174/4311 against synthetic `.dev-data/` (ADR 0006). The Markdown data root is authoritative and lives at `../data` by default. The in-memory index is rebuilt at process start and may always be discarded. Google Calendar and (in tests only) mock AI adapters implement application-owned ports, keeping external services out of the domain and persistence layers.
 
 The first complete flow now works without bypassing these boundaries:
 
 1. Select a Google or mock calendar event from the timezone-aware day timeline.
 2. Create its canonical meeting and meeting-note objects.
 3. Capture Markdown.
-4. Produce a durable review-item using the mock AI adapter.
+4. Produce a durable review-item from a Claude-written Inbox Draft (ADR 0008). The live server has no AI provider; the mock AI adapter is for tests only (#98).
 5. Accept it idempotently into an authoritative task.
 6. Surface that task on Today and Project views.
 

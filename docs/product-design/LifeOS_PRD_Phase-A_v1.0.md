@@ -464,6 +464,7 @@ Product decisions taken while building, not in the original spec. Each is now ho
 | Work Order filing rule | Agents never write into `_inbox/processed/`, with one exception: when an agent finishes a Work Order, it moves that file from `_inbox/requests/` to `_inbox/processed/`. A Work Order still in `requests/` counts as not done. | #93 |
 | Off-Drive folder per Mac | Each Mac sets its own off-Drive backup folder. It is stored in the synced backup setting, keyed by device ID; the card says it applies to this Mac only. The folder must exist and must not be inside Google Drive, the data folder or the backup folder (checked after resolving links). | #95, ADR 0005 |
 | Stop sequence | `pnpm stop` (1) refuses new writes with "LifeOS is stopping", (2) closes HTTP and waits for adoption to finish, (3) takes the stop backup (gives up after 35 s), (4) releases the device lease. Every wait is bounded below the stop script's 60 s force-stop. Backups and adoption share one queue, so a backup never catches half an adoption. | #95, ADR 0004 |
+| No mock AI in the live app | The server is built with **no AI provider**. A meeting's **Save** and Knowledge's **Preserve** only save; neither raises Review Items. The `/meetings/:id/process` route is gone. The mock AI stays for tests only. Help text points to the skills ("run LifeOS enrichment", LifeOS capture). Decision by Rahul, 5 October 2026 (option A). | ADR 0008, #98 |
 | Phase B scope | Moved out of Phase A on 4 October 2026 so Phase A can close on the core: the macOS launcher and start at login (story 85), the dyslexia-friendly font and dark theme (88–91), Playwright tests and the 10,000-object performance fixture. Each needs its own ticket. | #90 |
 
 ## Known gaps
@@ -482,6 +483,7 @@ Known limits of the current build. Each needs a decision or a ticket.
 | Off-Drive folder paths are visible in the synced file | Each Mac's folder path sits in `settings/backups.md`. Saving it on one Mac can give "changed on another device" on the other until it reloads. | ADR 0005, #95 |
 | Writes during a stop are refused | While LifeOS stops (up to 60 s), a save answers "LifeOS is stopping; your change was not saved". Make the change again once LifeOS is back. | #95 |
 | Two-device limits | If another device's version copy never arrives over Drive, edits made on top of it are not flagged as external. A version copy pruned after 10 saves can no longer be restored (the History panel says so) or used by the patch conflict rule (then only audit events decide). | ADR 0012, #80, #81 |
+| No in-app proposals from pasted text | **Preserve** on Knowledge saves the Source only. A Knowledge Note proposal appears only after the user asks Claude (LifeOS capture) to read it. Review Items the old mock raised before #98 stay pending until rejected. | ADR 0008, #98 |
 | Code duplication | Five copies of the settings save helper, two calendar mappings and several banner components. No behaviour effect. | #97 |
 
 ## Further Notes

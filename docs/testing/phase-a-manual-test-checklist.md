@@ -412,7 +412,7 @@ Only if macOS shows a Keychain prompt when LifeOS starts (it won't after **Alway
 
 ## 15. Meetings & enrichment — P3
 
-Progress: 0 / 19 done
+Progress: 0 / 21 done
 
 - [ ] **15.1** In the test copy, click **Enrich last 48h** on Today. → Expect: "No ended meetings from the last 48 hours need enrichment; no Work Order was written". _(#44)_
 - [ ] **15.2** In the **daily app**, after a day with meetings, click **Enrich last 48h**. → Expect: "Work Order written for N meetings: ask Claude to "run LifeOS enrichment"". _(#44)_
@@ -433,6 +433,8 @@ Progress: 0 / 19 done
 - [ ] **15.17** Drop **K** with a different summary and a new key, then accept it. → Expect: the AI SUMMARY card shows only the new summary. _(#66)_
 - [ ] **15.18** Mark the meeting's note restricted, then accept a pending summary for it. → Expect: refused with a clear message. _(#63)_
 - [ ] **15.19** (Daily app, 48 h after a request with no material) Look at Today's **AFTER MEETINGS** card. → Expect: each meeting has its own **Give up**; clicking says "Stopped waiting for material for this meeting". _(#44, #64)_
+- [ ] **15.20** In the test copy, open the mock meeting, type a line in the note and click **Save**. → Expect: status line "Note saved to Markdown"; no **Save & process** button; no new card in Inbox. _(#98)_
+- [ ] **15.21** Hover **Save**. → Expect: a tooltip says to ask Claude to run LifeOS enrichment on this meeting. _(#98)_
 
 ---
 
@@ -489,12 +491,14 @@ Progress: 0 / 18 done
 
 ## 18. Knowledge drafts — P3
 
-Progress: 0 / 4 done
+Progress: 0 / 6 done
 
 - [ ] **18.1** Drop draft **I1** (source with a URL). → Expect: a Source is created. _(#35)_
 - [ ] **18.2** Drop **I2** (same URL, different case). → Expect: the existing Source is reused; no duplicate. _(#35)_
 - [ ] **18.3** Drop **I3** (dictated knowledge note). → Expect: it shows under **Knowledge → Published Knowledge Notes**. _(#35)_
 - [ ] **18.4** Drop **I4** (agent-extracted knowledge note). → Expect: it becomes a Review card in Inbox instead. _(#35)_
+- [ ] **18.5** In **Knowledge**, type a source title, paste some text and click **Preserve**. → Expect: status line "Source preserved. Ask Claude to run LifeOS capture to propose Knowledge Notes."; you stay on Knowledge; no new card in Inbox; a new file in `.dev-data/sources/`. _(#98)_
+- [ ] **18.6** Read the Knowledge form. → Expect: the button says **Preserve** (no "process"), and the line under it says to ask Claude to run LifeOS capture. _(#98)_
 
 ---
 
@@ -621,6 +625,7 @@ Known and expected in Phase A as built.
 | **Skills on the phone** unconfirmed | Whether skills sync to Android, and whether the Drive connector can write drafts, are still `[TBD]` | #49 |
 | **Hard to test by hand** | The 26-hour "No backup in the last 26 hours" banner, the daily backup, keeping 4 off-Drive copies, and stale Work Orders (7 days). Automated tests cover them | #84, #95, #44 |
 | **Phase B, not built** | No dyslexia-friendly font, no dark theme, no macOS launcher or start at login, no browser (Playwright) tests, no 10,000-object performance test | #90 |
+| **Old mock proposals** stay in Inbox | Cards such as "Review the captured meeting note" raised before #98 are not removed. Reject them by hand | #98 |
 | **Code cleanup** | Shared helpers and banner components are being tidied. No visible change, so nothing to test | #97 |
 
 ---
