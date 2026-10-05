@@ -2,7 +2,7 @@
 
 > **Date:** 4 October 2026 · **Branch:** `feature/phase-a-close-21` · **For:** Rahul
 >
-> Checked against the code in `apps/web/src`, the skills in `skills/`, ADRs 0001–0013 and tickets #23–#96. Button and page names are copied from the app. All examples are made up.
+> Checked against the code in `apps/web/src`, the skills in `skills/`, ADRs 0001–0013 and tickets #23–#98. Button and page names are copied from the app. All examples are made up.
 
 ## Bottom line
 
@@ -93,7 +93,8 @@ flowchart LR
 
 **Limits**
 - You cannot edit the people links on a proposal before accepting. Fix them after.
-- **Built-vs-documented gap:** the **Save & process** button on a meeting and **Preserve & process** on Knowledge still use the built-in mock. It always proposes the same three generic items. Real proposals only come from Claude (enrichment and capture skills).
+- The app makes no proposals itself. A meeting's **Save** and Knowledge's **Preserve** only save. Proposals come from Claude: "run LifeOS enrichment" for meetings, LifeOS capture for pasted sources. _(#98)_
+- Cards the old built-in mock raised before #98 ("Review the captured meeting note" and similar) stay in Inbox. Reject them by hand.
 
 ## 3. Today and Daily Focus
 
@@ -176,6 +177,8 @@ flowchart LR
 **Where to find it**
 - **Today** → **AFTER MEETINGS** → **Enrich last 48h**; **Give up** on meetings with no material after 48 hours.
 - **Calendar** page → meeting: **Enrichment** state, **Give up**, **AI SUMMARY**, **Meeting proposals**, **History**, **Mark restricted**.
+- **Save** on the meeting note only saves it. Hover it for a reminder to ask Claude to run enrichment. _(#98)_
+- **Knowledge** page → **Preserve** saves pasted text as a Source. Ask Claude (LifeOS capture) to propose Knowledge Notes from it. _(#98)_
 - **Inbox and agents** panel: "Stale Work Order" after 7 days unprocessed.
 
 **Limits**

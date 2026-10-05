@@ -187,7 +187,7 @@ sources:
     expect(note.frontmatter.source_ids).toEqual([pasted.frontmatter.id, linkSource!.frontmatter.id, created.frontmatter.id]);
     expect(await bodyOf(root, note.relativePath)).toBe("# Rewards must feel reachable\n\nMembers disengage when the next reward is too far away.\n");
     expect(batch.drafts[0]!.objectIds).toEqual([note.frontmatter.id, created.frontmatter.id]);
-    expect(application.reviews()).toHaveLength(1); // only the one ingestTextSource proposed
+    expect(application.reviews()).toHaveLength(0); // #98: with no AI provider, ingestTextSource proposes nothing
   });
 
   it("an idea with no named source keeps the dictated text as its Source, inheriting sensitivity", async () => {

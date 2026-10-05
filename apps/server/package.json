@@ -10,7 +10,6 @@
     "@fastify/cors": "^11.0.0",
     "@lifeos/application": "workspace:*",
     "@lifeos/assets-filesystem": "workspace:*",
-    "@lifeos/ai": "workspace:*",
     "@lifeos/backup-filesystem": "workspace:*",
     "@lifeos/connectors": "workspace:*",
     "@lifeos/index-memory": "workspace:*",

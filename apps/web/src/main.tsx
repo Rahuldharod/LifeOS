@@ -38,6 +38,8 @@ import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, ty
 import { SettingsPage } from "./SettingsPage.js";
 import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
 import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
+import { MeetingNoteActions } from "./MeetingNoteActions.js";
+import { KnowledgeSourceForm, sourcePreservedToast } from "./KnowledgeSourceForm.js";
 import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
 import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
@@ -684,23 +686,6 @@ function App() {
     } finally { setBusy(false); }
   };
 
-  const processMeeting = async () => {
-    if (!workspace) return false;
-    setBusy(true);
-    try {
-      if (meetingController.dirty && !(await meetingController.saveNow())) return false;
-      const meetingId = meetingController.pending || !workspace.note ? createdWorkspace.current?.meeting.frontmatter.id : workspace.meeting.frontmatter.id;
-      if (!meetingId) return false;
-      await api(`/api/v1/meetings/${meetingId}/process`, { method: "POST" });
-      await refreshWorkspace(meetingId); await loadCollections();
-      setMessage("Mock AI proposal created");
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Something went wrong");
-      return false;
-    } finally { setBusy(false); }
-  };
-
   // #62: one accept or reject per Review Item at a time, even for clicks faster than a re-render.
   const reviewRequests = useRef(reviewInFlight()).current;
   const accept = (review: LifeObject) => reviewRequests.run(review.frontmatter.id, () => run(async () => {
@@ -825,8 +810,8 @@ function App() {
 
   const ingestSource = () => run(async () => {
     await api("/api/v1/sources/text", { method: "POST", body: JSON.stringify({ title: sourceTitle, text: sourceText }) });
-    setSourceTitle(""); setSourceText(""); await loadCollections(); setView("Inbox");
-  }, "Source preserved; Knowledge Note proposal added to Inbox");
+    setSourceTitle(""); setSourceText(""); await loadCollections();
+  }, sourcePreservedToast);
 
   const connectGoogle = () => run(async () => {
     const response = await api<{ authorizationUrl: string }>("/api/v1/connections/google/start");
@@ -1349,7 +1334,7 @@ function App() {
                 </> : editorMode === "visual" && editorReady ? <VisualMarkdownEditor editorKey={`meeting:${editorSession}`} owner={meetingOwner} ensureOwner={ensureMeetingNote} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
                 <div className="editor-footer">
                   <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.pending && !meetingController.dirty ? "Not saved yet · nothing is written until you edit" : meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>
-                  <div className="actions">{workspace.note && <button className="danger" disabled={busy || readOnly || meetingController.autoSaving} onClick={deleteMeetingNote}>Delete note</button>}<button disabled={!editorReady || busy || !meetingController.dirty || readOnly} onClick={saveNote}>Save Markdown</button><button className="primary" disabled={!editorReady || busy || !meetingController.draft.trim() || readOnly} onClick={processMeeting}>Save & process</button></div>
+                  <MeetingNoteActions canDelete={Boolean(workspace.note)} deleteDisabled={busy || readOnly || meetingController.autoSaving} saveDisabled={!editorReady || busy || !meetingController.dirty || readOnly} onDelete={deleteMeetingNote} onSave={saveNote} />
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </article>}
@@ -1433,7 +1418,7 @@ function App() {
         {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
       </>}
 
-      {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text, then review a linked Knowledge Note before publishing it." /><article><span>ADD RAW TEXT SOURCE</span><div className="knowledge-form"><input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} placeholder="Source title" /><textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} placeholder="Paste source text or Markdown…" /><button className="primary" disabled={busy || readOnly || !sourceTitle.trim() || !sourceText.trim()} onClick={ingestSource}>Preserve & process</button></div></article><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
+      {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text. Claude proposes Knowledge Notes from it through the LifeOS skills; you review them in Inbox." /><KnowledgeSourceForm title={sourceTitle} text={sourceText} disabled={busy || readOnly} onTitleChange={setSourceTitle} onTextChange={setSourceText} onPreserve={ingestSource} /><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
 
       {view === "System" && <><PageHeader eyebrow="SYSTEM" title="Health and device handoff" description="Integrity checks and an advisory lease protect the Markdown root during sequential two-device use." />
         <div className="summary">

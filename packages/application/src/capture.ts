@@ -31,7 +31,12 @@ export class CaptureModule {
     const sourceId = uuidV7();
     const fragmentId = "fragment-1";
     const source = await ctx.objects.write({ relativePath: `sources/${markdownFileName(title, sourceId, now)}`, frontmatter: { ...ctx.envelope(sourceId, "source", title.trim(), now), source_type: "pasted-text", captured_at: now, ingestion_status: "captured", fragments: [{ id: fragmentId, text: text.trim(), locator: { kind: "full-text" } }] }, body: `# ${title.trim()}\n\n${text.trim()}\n` });
-    const proposal = ctx.ai?.proposeKnowledgeNote ? await ctx.ai.proposeKnowledgeNote(text) : { title: title.trim(), body: `# ${title.trim()}\n\n${text.trim()}\n`, confidence: "Medium" as const };
+    // #98: without an AI provider (the live app) this only saves; Claude proposes Knowledge Notes through the skills (ADR 0008).
+    if (!ctx.ai?.proposeKnowledgeNote) {
+      await ctx.rebuildIndex();
+      return source;
+    }
+    const proposal = await ctx.ai.proposeKnowledgeNote(text);
     const reviewId = uuidV7();
     await ctx.objects.write({ relativePath: `review-items/${markdownFileName(proposal.title, reviewId, now)}`, frontmatter: { ...ctx.envelope(reviewId, "review-item", proposal.title, now), review_type: "create", target_object_type: "knowledge-note", proposed_fields: { title: proposal.title, body: proposal.body }, field_evidence: { title: [{ source_id: sourceId, fragment_id: fragmentId }], body: [{ source_id: sourceId, fragment_id: fragmentId }] }, confidence_label: proposal.confidence, status: "pending", source_ids: [sourceId], operation_id: uuidV7() }, body: `# Knowledge proposal\n\n${proposal.body}` });
     await ctx.rebuildIndex();
