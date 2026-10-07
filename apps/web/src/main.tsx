@@ -43,6 +43,8 @@ import { KnowledgeSourceForm, sourcePreservedToast } from "./KnowledgeSourceForm
 import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
 import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
+import { LeaseBanner, takeoverCaution } from "./LeaseBanner.js";
+import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
@@ -79,11 +81,11 @@ type Workspace = {
 };
 type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 type EntityRollup = { entity: LifeObject; related: LifeObject[] };
-type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
+type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string; releasedAfterIdle?: boolean };
 type InboxDrafts = { awaiting: number; drafts?: number; patches?: number; failed: Array<{ path: string; reason: string }> };
 type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "review" | "duplicate" | "failed" | "skipped" }> };
 type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
-type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; setupWarning?: SetupWarning; backupWarning?: BackupWarningState };
+type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; idleReleaseMinutes?: number; setupWarning?: SetupWarning; backupWarning?: BackupWarningState };
 type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
 type GoogleConnection = { configured: boolean; connected: boolean; provider: string; missing?: string[]; reason?: "expired"; lastSuccessfulSyncAt?: string; lastError?: string };
@@ -398,6 +400,12 @@ function App() {
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
   const conflictedNoteIds = new Set(notes.filter((note) => isConflictedDraft(readCachedDraft(note), note)).map((note) => note.frontmatter.id));
   const readOnly = health?.session.writeAllowed === false;
+  const releasedAfterIdle = readOnly && health?.session.releasedAfterIdle === true;
+  // ADR 0015: real input in this tab keeps (or, when free, claims) the write lease; the answer refreshes read-only state.
+  useActivityHeartbeat(async () => {
+    const session = await api<SessionStatus>("/api/v1/session/activity", { method: "POST" });
+    setHealth((current) => current ? { ...current, session } : current);
+  });
 
   // Shared by notesController's `fetchLatest` option and the tab-refocus listener below: a "soft"
   // refetch that only updates the notes list state, letting useNoteDraftController's own reconcile
@@ -1240,12 +1248,13 @@ function App() {
         <div className="nav-actions">
           <button className={`settings-link ${view === "Settings" ? "active" : ""}`} onClick={() => setView("Settings")}>Settings</button>
         </div>
-        <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? "Read-only · another device active" : message}</p>
+        <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}</p>
       </div>
     </aside>
 
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
+      <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
       {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} onOpenSettingsCard={openSettingsCard} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
 
       {view === "Calendar" && <>
@@ -1423,12 +1432,12 @@ function App() {
       {view === "System" && <><PageHeader eyebrow="SYSTEM" title="Health and device handoff" description="Integrity checks and an advisory lease protect the Markdown root during sequential two-device use." />
         <div className="summary">
           <Summary label="Object graph" value={health?.diagnostics.length ? "Attention" : "Healthy"} detail={`${health?.objectCount ?? 0} indexed objects`} />
-          <Summary label="Write access" value={readOnly ? "Read-only" : "Enabled"} detail={readOnly ? "another device lease is active" : "revision checks remain active"} />
+          <Summary label="Write access" value={readOnly ? "Read-only" : "Enabled"} detail={readOnly ? (releasedAfterIdle ? "released after inactivity" : "another device lease is active") : "revision checks remain active"} />
           <Summary label="Device" value={health?.session.currentDeviceId ?? "—"} detail="this installation" />
         </div>
         <SelfEmailWarning warning={health?.setupWarning} onOpenSettings={openSettingsCard} />
         <BackupWarning warning={health?.backupWarning} disabled={busy || readOnly} onBackUpNow={createBackup} />
-        {readOnly && <article className="lease-warning"><span>DEVICE HANDOFF REQUIRED</span><h3>{health?.session.activeDeviceId} is still active</h3><p>{health?.session.warning}</p><p>Only take over after LifeOS is closed and Google Drive has finished synchronizing on the other computer.</p><button className="takeover" disabled={busy} onClick={takeOverSession}>Take over write access</button></article>}
+        {readOnly && !releasedAfterIdle && <article className="lease-warning"><span>DEVICE HANDOFF REQUIRED</span><h3>{health?.session.activeDeviceId} is still active</h3><p>{health?.session.warning}</p><p>{takeoverCaution}</p><button className="takeover" disabled={busy} onClick={takeOverSession}>Take over write access</button></article>}
         <div className="system-grid">
           <article><span>SESSION LEASE</span><div className="system-details"><Meta label="Active device" value={health?.session.activeDeviceId ?? "—"} /><Meta label="Started" value={formatDate(health?.session.startedAt)} /><Meta label="Last activity" value={formatDate(health?.session.lastActivityAt)} /><Meta label="Lease expires" value={formatDate(health?.session.leaseExpiresAt)} /></div></article>
           <article><span>INTEGRITY DIAGNOSTICS</span>{!health?.diagnostics.length ? <div className="health-ok"><i />No duplicate IDs, broken links, type mismatches, or duplicate canonical notes.</div> : <ul className="diagnostics">{health.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul>}</article>

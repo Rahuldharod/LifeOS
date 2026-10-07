@@ -16,6 +16,7 @@ import { connectionSettings, googleConnectionStatus, secretRefs } from "./connec
 import { calendarSource } from "./calendar-source.js";
 import { httpError } from "./http-errors.js";
 import { shutDown } from "./shutdown.js";
+import { IdleRelease, idleReleaseMs, registerLease } from "./lease.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
@@ -57,21 +58,11 @@ const backupWarning = async () => {
 // The stable app serves the UI itself (same origin); only the Vite dev UI needs CORS.
 await server.register(cors, { origin: ["http://127.0.0.1:5174", "http://localhost:5174"] });
 
-server.addHook("preHandler", async (request, reply) => {
-  const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
-  if (mutating && stopping) return reply.status(503).send({ error: "LifeOS is stopping; your change was not saved" });
-  const allowedWithoutLease = request.url === "/api/v1/session/take-over" || request.url === "/api/v1/index/rebuild" || request.url === "/api/v1/settings/connections/retry";
-  if (mutating && !allowedWithoutLease && !(await session.refresh()).writeAllowed) {
-    return reply.status(423).send({ error: session.status().warning ?? "LifeOS is read-only because another device lease is active" });
-  }
-});
+// ADR 0003 and 0015: read-only enforcement, takeover, and the idle auto-handover of the device lease.
+const idle = new IdleRelease(session, idleReleaseMs());
+registerLease(server, { session, idle, stopping: () => stopping });
 
-server.addHook("onResponse", async (request, reply) => {
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && reply.statusCode < 400 && session.status().writeAllowed) await session.touch();
-});
-
-server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), ...await backupWarning() }));
-server.post("/api/v1/session/take-over", async () => session.takeOver());
+server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
 server.get("/api/v1/objects", async () => application.listObjects());
 server.get<{ Querystring: { q?: string; state?: string } }>("/api/v1/notes", async (request, reply) => {
   const state = request.query.state ?? "open";
@@ -367,18 +358,20 @@ try {
   await session.start();
   await application.rebuildIndex();
   // #69: record edits made while the app was closed before this start writes anything.
-  if (session.status().writeAllowed) await application.recordExternalChanges().catch((error) => server.log.error(error));
+  if (session.holdsLease()) await application.recordExternalChanges().catch((error) => server.log.error(error));
   // #56: an operation that cannot be recovered is logged and shown in System Health; the server still starts.
   await application.recoverOperations({ onError: (error, operation) => server.log.error({ err: error, operation: operation.id, kind: operation.kind }, "Operation recovery failed") });
   await application.rebuildIndex();
-  if (session.status().writeAllowed) await application.suggestPersonMerges().catch((error) => server.log.error(error));
+  if (session.holdsLease()) await application.suggestPersonMerges().catch((error) => server.log.error(error));
   // Inbox Drafts and Patch Drafts (ADR 0007, #32) are adopted at startup (which also finishes a batch a crash interrupted), shortly after
-  // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease.
-  const autoAdoption = application.startAutoAdoption({ canWrite: () => session.status().writeAllowed, onError: (error) => server.log.error(error) });
+  // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease
+  // (not after an idle release, ADR 0015).
+  const autoAdoption = application.startAutoAdoption({ canWrite: () => session.holdsLease(), onError: (error) => server.log.error(error) });
   await autoAdoption.runNow();
   await server.listen({ host, port });
-  // Backups (#84): at start, daily while running and at a clean stop; only while this device holds the lease (ADR 0003).
-  autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
+  // Backups (#84): at start, daily while running and at a clean stop; only while this device may write (ADR 0003). Backups only
+  // read the data folder into this Mac's own backup folder, so they keep running after an idle release (ADR 0015).
+  autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed || session.status().releasedAfterIdle, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
   let reconcileTimer: NodeJS.Timeout | undefined;
   let reconciling: Promise<unknown> = Promise.resolve();
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
@@ -386,10 +379,11 @@ try {
     if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/") || filename.startsWith("_inbox/patches/")) autoAdoption.notify(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
-    const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();
+    const reconcile = () => session.holdsLease() ? application.recordExternalChanges() : application.rebuildIndex();
     reconcileTimer = setTimeout(() => { reconciling = reconcile().catch((error) => server.log.error(error)); }, 250);
   });
-  const heartbeat = setInterval(() => void session.touch(), 60_000);
+  // Every minute: extend the lease, or release it after LIFEOS_IDLE_RELEASE_MINUTES without user activity (ADR 0015).
+  const heartbeat = setInterval(() => void idle.tick().catch((error) => server.log.error(error)), 60_000);
   heartbeat.unref();
   // #95: writes stop, HTTP and adoption go idle, then the clean-stop backup, then the lease is released.
   const shutdown = async () => {
