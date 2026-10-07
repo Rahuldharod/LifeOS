@@ -5,6 +5,8 @@ import { inboxFolders, type AgentIndexFile, type Operation, type AgentIndexWrite
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
 
+export { dataRootMarker, dataRootProblem, exitUnlessDataRoot, resolveBackupRoot, resolveDataRoot } from "./data-root.js";
+
 /** Codes of file systems (some synced or network ones) that refuse hard links. */
 const hardLinkRefused = new Set(["EPERM", "ENOTSUP", "ENOSYS", "EXDEV", "EOPNOTSUPP"]);
 

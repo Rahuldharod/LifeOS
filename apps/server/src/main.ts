@@ -10,7 +10,7 @@ import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
 import { MemoryIndex } from "@lifeos/index-memory";
-import { FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import { exitUnlessDataRoot, FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore, resolveBackupRoot, resolveDataRoot } from "@lifeos/object-store-markdown";
 import { KnownSecrets, MacOSKeychainSecretStore } from "@lifeos/secrets";
 import { connectionSettings, googleConnectionStatus, secretRefs } from "./connections.js";
 import { calendarSource } from "./calendar-source.js";
@@ -20,10 +20,10 @@ import { shutDown } from "./shutdown.js";
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
 const deviceId = process.env.LIFEOS_DEVICE_ID ?? os.hostname();
-const defaultDataRoot = fileURLToPath(new URL("../../../../data/", import.meta.url));
-const defaultBackupRoot = fileURLToPath(new URL("../../../../backups/", import.meta.url));
-const dataRoot = process.env.LIFEOS_DATA_ROOT ? path.resolve(process.cwd(), process.env.LIFEOS_DATA_ROOT) : defaultDataRoot;
-const backupRoot = process.env.LIFEOS_BACKUP_ROOT ? path.resolve(process.cwd(), process.env.LIFEOS_BACKUP_ROOT) : defaultBackupRoot;
+// ADR 0014: the data lives in Google Drive and is found only through LIFEOS_DATA_ROOT. Before anything else runs
+// (Keychain, lease, index), refuse to start unless that folder holds `.lifeos/schema.md`.
+const dataRoot = await exitUnlessDataRoot(resolveDataRoot());
+const backupRoot = resolveBackupRoot();
 const googleRedirectUri = process.env.GOOGLE_REDIRECT_URI ?? `http://${host}:${port}/api/v1/connections/google/callback`;
 
 const store = new MarkdownObjectStore(dataRoot);

@@ -3,16 +3,15 @@
 //   corepack pnpm reconcile-meetings --apply   archives the extra copies (stop LifeOS first)
 // Apply takes a checksummed backup first and archives (archived_at, file kept); it never deletes.
 import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { LifeOSApplication } from "@lifeos/application";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { MemoryIndex } from "@lifeos/index-memory";
-import { FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import { exitUnlessDataRoot, FilesystemSessionStore, MarkdownObjectStore, resolveBackupRoot, resolveDataRoot } from "@lifeos/object-store-markdown";
 
 const apply = process.argv.includes("--apply");
-const dataRoot = process.env.LIFEOS_DATA_ROOT ? path.resolve(process.env.LIFEOS_DATA_ROOT) : fileURLToPath(new URL("../../data/", import.meta.url));
-const backupRoot = process.env.LIFEOS_BACKUP_ROOT ? path.resolve(process.env.LIFEOS_BACKUP_ROOT) : fileURLToPath(new URL("../../backups/", import.meta.url));
+// ADR 0014: refuse to run unless LIFEOS_DATA_ROOT holds `.lifeos/schema.md`.
+const dataRoot = await exitUnlessDataRoot(resolveDataRoot());
+const backupRoot = resolveBackupRoot();
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
 const deviceId = process.env.LIFEOS_DEVICE_ID ?? os.hostname();
 
