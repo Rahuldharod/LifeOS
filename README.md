@@ -61,7 +61,25 @@ Do this once on each Mac.
    ```
 
    **If it is empty or says "No such file", stop.** Do not start LifeOS until the path is right.
-5. Start LifeOS with `corepack pnpm start`.
+5. Protect the data from Claude. Add this hook to `~/.claude/settings.json` (merge it into any `hooks` you already have):
+
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [
+         {
+           "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+           "hooks": [
+             { "type": "command", "command": "node \"$HOME/Developer/LifeOS/scripts/hooks/data-guard.mjs\"" }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+   It stops Claude from changing files in the data folder directly. Claude can still read everything, and can write drafts in `_inbox/drafts/` and `_inbox/patches/`. LifeOS then adopts them (ADR 0007).
+6. Start LifeOS with `corepack pnpm start`.
 
 **Before you switch Macs:** commit and push any code changes (`git push`). On the other Mac, run `git pull`, then `corepack pnpm update-app`.
 
