@@ -30,7 +30,7 @@ async function dropDraft(root: string, name: string, fields: Record<string, unkn
   const target = path.join(root, "_inbox", "drafts", name);
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, `---\n${stringify(fields)}---\n${body}`);
-  const past = new Date(Date.now() - 60_000);
+  const past = new Date(now.getTime() - 60_000); // relative to the test clock, so the draft is never "still being written" whatever the real date
   await utimes(target, past, past);
 }
 
