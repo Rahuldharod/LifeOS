@@ -19,3 +19,8 @@ local-index/
 # Synthetic data used by `pnpm dev` (PB-001).
 .dev-data/
 .dev-backups/
+
+# Claude Code: only the shared project settings are tracked. Agent worktrees and
+# personal settings stay local (ADR 0014).
+.claude/*
+!.claude/settings.json

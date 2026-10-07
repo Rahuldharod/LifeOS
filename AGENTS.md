@@ -83,6 +83,14 @@ One-off maintenance: `pnpm reconcile-meetings` reports duplicate meetings; `--ap
    - ideas and prioritization: `docs/product-design/Product Backlog.md`;
    - the draft, patch or Work Order contract: the matching `skills/*/SKILL.md` (its examples are tests).
 
+## Worktree lifecycle
+
+Agent worktrees live under `.claude/worktrees/` (ignored by Git) and are temporary (ADR 0014).
+
+- An agent working in a worktree must **commit and push its branch before reporting back**. Nothing may exist only inside a worktree.
+- Cleanup is automatic: the project hook in `.claude/settings.json` runs `node scripts/prune-worktrees.mjs --apply --quiet` at session end. It removes a worktree only when it has no uncommitted or untracked files, its commit is on GitHub, and nothing in it changed for 2 hours. It never uses `--force` and never deletes branches.
+- `corepack pnpm worktrees:prune` shows what would be removed (dry run); add `--apply` to remove. At session start the hook warns when there are more than 10.
+
 Do not create feature-by-feature documentation pages or duplicate implementation details that are already clear from tests and code.
 
 ## Definition of done
