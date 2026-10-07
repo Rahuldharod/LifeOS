@@ -34,12 +34,13 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - `skills`: the Claude skills pack (`lifeos-object-contract`, `lifeos-capture`, `lifeos-ask`, `lifeos-enrichment`, `lifeos-morning`) and `INSTALL.md` (install and dry-run steps for the user). Every example draft, patch, brief and gate case in it is a CI fixture (`tests/integration/skill-fixtures.test.ts`, run by plain `pnpm test`); change skill text and adoption code together. Never open the enrichment skill's client-content gate: only the user does that, with the IT/legal sign-off record.
 - `tests/integration`: cross-package acceptance tests.
 - `docs/product-design`: versioned solution baseline and product backlog.
-- `../data`: real user Markdown and assets; outside Git and authoritative.
-- `../backups`: generated data snapshots; outside Git.
+- `scripts/hooks/data-guard.mjs`: Claude Code hook that blocks agent writes to the data root outside `_inbox/` (registered per user, see README).
+- Data root (`LIFEOS_DATA_ROOT`): real user Markdown and assets in Google Drive; outside Git and authoritative. Code lives in `~/Developer/LifeOS`, never in Drive (ADR 0014).
+- Backup root (`LIFEOS_BACKUP_ROOT`, default `~/LifeOS-backups`): generated data snapshots, local to each Mac; outside Git.
 
 ## Non-negotiable rules
 
-- Markdown files under `../data` are the source of truth. Browser caches and the in-memory index are derived and disposable.
+- Markdown files under the data root (`LIFEOS_DATA_ROOT`) are the source of truth. Browser caches and the in-memory index are derived and disposable.
 - Keep code, real user data, secrets, logs, and backups out of the same Git history.
 - Never place OAuth credentials or tokens in Markdown, source files, fixtures, logs, or commits. Use the `SecretStore` boundary. Status endpoints must not read secret values (each read can show a Keychain prompt).
 - Never put real email addresses or company domains in code, tests or docs. Use `example.com` style data; the user's own values live in the Settings cards.
@@ -48,8 +49,9 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - External workflows must be idempotent. Meeting creation, review acceptance, and recovery must tolerate retries. Any step that writes more than one file follows the crash-recovery pattern in ADR 0013 and its helpers; do not hand-write another.
 - Store instants as ISO 8601 UTC. Preserve source timezone metadata and apply the user-selected timezone only when querying day boundaries or displaying values.
 - Managed image links must remain relative in persisted Markdown so the repository works on both devices.
-- Do not edit real files in `../data` merely to make a test pass. Tests must use temporary roots and synthetic records.
-- Treat the advisory device lease as a guardrail, not the sole concurrency control.
+- While developing, do not read or write the real data root, and never edit its files to make a test pass. Tests use temporary roots and synthetic records; manual checks use `.dev-data/`.
+- Treat the advisory device lease as a guardrail, not the sole concurrency control. Background work that writes objects runs only while this device holds the lease (`holdsLease()`); after an idle release nothing reclaims it except the user's Take back (ADR 0015).
+- The server and maintenance scripts refuse to start unless the data root holds `.lifeos/schema.md` (ADR 0014). Do not add a default data path.
 
 ## Commands
 
@@ -66,7 +68,7 @@ corepack pnpm build
 Two separate runtimes (ADR 0006):
 
 - **Development** (`pnpm dev`): UI `http://127.0.0.1:5174`, API `http://127.0.0.1:4311`, synthetic data in `.dev-data/`, mock calendar. Use this for all coding and manual testing.
-- **Stable app** (the user's daily LifeOS): `http://127.0.0.1:4310`, real `../data`, managed with `pnpm start | stop | status | update-app` (see README). Never stop, restart or update it without asking the user; they may be mid-note. Never kill processes by name pattern: the stable server's command line looks like dev's.
+- **Stable app** (the user's daily LifeOS): `http://127.0.0.1:4310`, real data from `LIFEOS_DATA_ROOT`, managed with `pnpm start | stop | status | update-app` (see README). Never stop, restart or update it without asking the user; they may be mid-note. Never kill processes by name pattern: the stable server's command line looks like dev's.
 
 One-off maintenance: `pnpm reconcile-meetings` reports duplicate meetings; `--apply` (only with the user's OK, and with the stable app stopped) backs up, then archives extras.
 

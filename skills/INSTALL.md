@@ -14,7 +14,7 @@ Five Claude skills: Object Contract, Capture, Ask, Morning and Enrichment. Insta
 
 ## Part 1: Make the zip files (Mac, 2 minutes)
 
-1. Open Terminal in the `code` folder.
+1. Open Terminal in the code folder (`cd ~/Developer/LifeOS`).
 2. Run:
 
    ```bash
@@ -36,14 +36,14 @@ Menu names may differ slightly between Claude versions.
 
 ## Part 3: Give Claude access to the fake data root
 
-The fake data root is `.dev-data/` inside the `code` folder. `pnpm dev` creates it.
+The fake data root is `.dev-data/` inside the code folder (`~/Developer/LifeOS/.dev-data`). `pnpm dev` creates it.
 
-1. In Terminal, in the `code` folder, run `corepack pnpm dev`.
+1. In Terminal, in the code folder (`~/Developer/LifeOS`), run `corepack pnpm dev`.
 2. Open `http://127.0.0.1:5174`. This is the development app, not your real LifeOS.
 3. Check `.dev-data/` now has `_inbox/` and `_agent/` folders.
 4. In the dev app, create: person **Joel Martin**, client **Example Grocer**, project **Spring Promo**.
 5. **Desktop:** in Claude desktop, open **Settings → Extensions**, turn on **Filesystem**, and allow only the `.dev-data/` folder.
-6. **Phone:** in the Claude app, connect **Google Drive**. The `code` folder is in Drive, so `.dev-data/` should sync there. `[TBD — check Drive shows the hidden .dev-data folder]`
+6. **Phone:** in the Claude app, connect **Google Drive**. The code folder is no longer in Drive (ADR 0014), so the phone cannot see `.dev-data/`. Copy it to a test folder in Drive first, outside the real `data` folder. `[TBD — needs a decision: where a Drive-visible test data root lives]`
 7. Start each test chat with: "My LifeOS data root for this test is the `.dev-data` folder."
 
 ## Part 4: Dry-run checklist (desktop)
@@ -95,7 +95,7 @@ The morning routine writes your Daily Focus brief each workday and sends you a 5
 
 ### 7a. Install the skill
 
-1. In Terminal, in the `code` folder, run:
+1. In Terminal, in the code folder (`~/Developer/LifeOS`), run:
 
    ```bash
    cd skills && zip -r ~/Desktop/lifeos-morning.zip lifeos-morning
@@ -118,7 +118,7 @@ The morning routine writes your Daily Focus brief each workday and sends you a 5
 **Preferred: cloud routine** (runs while the Mac is off).
 
 1. In Claude Code, run `/schedule` and create a routine for **06:00 Europe/Paris, Monday to Friday**. If it asks for UTC: 04:00 UTC in summer, 05:00 UTC in winter.
-2. Prompt: "Run LifeOS morning. My LifeOS data root is the `.dev-data` folder in Google Drive."
+2. Prompt: "Run LifeOS morning. My LifeOS data root is the `.dev-data` test folder in Google Drive." (the Drive copy from Part 3, step 6)
 3. Give it the Google Drive, Google Calendar and Slack connectors. `[TBD — verify a cloud routine can write files into Drive]`
 
 **Fallback: desktop scheduled task** (runs only when the Mac is awake and Claude desktop is open).
@@ -160,7 +160,7 @@ The brief examples in `lifeos-morning/SKILL.md` are CI fixtures: each is adopted
 
 ### E1: Install
 
-1. In Terminal, in the `code` folder, run:
+1. In Terminal, in the code folder (`~/Developer/LifeOS`), run:
 
    ```bash
    cd skills && zip -r ~/Desktop/lifeos-enrichment.zip lifeos-enrichment
