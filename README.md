@@ -16,17 +16,56 @@ Local-first personal knowledge and work management, backed by typed Markdown fil
 - `packages/contracts`, `packages/shared`: API types and rules shared by the server and the browser.
 - `schemas`: versioned object contracts and synthetic fixtures.
 - `skills`: the Claude skills pack (Object Contract, capture, ask, enrichment, morning); its examples are tested against adoption in CI. Install and dry-run: `skills/INSTALL.md`.
-- `../data`: synchronized user Markdown and assets; intentionally outside this Git repository.
-- `../backups`: read-only, checksummed data snapshots; also outside Git.
+- Data root (`LIFEOS_DATA_ROOT`): synchronized user Markdown and assets in Google Drive; intentionally outside this Git repository.
+- Backup root (`LIFEOS_BACKUP_ROOT`): read-only, checksummed data snapshots on each Mac's own disk; also outside Git.
+
+## Where the code and the data live
+
+The code and the data are kept apart on purpose:
+
+| What | Where | How it moves between Macs |
+| --- | --- | --- |
+| **Code** (this repository) | `~/Developer/LifeOS` on each Mac, **never inside Google Drive or iCloud** | GitHub: `git push` on one Mac, `git pull` on the other |
+| **Data** | `~/Library/CloudStorage/GoogleDrive-<your-email>/My Drive/Claude Working Space/Personal/LifeOS App/data` | Google Drive for desktop |
+| **Backups** | `~/LifeOS-backups` on each Mac, outside Google Drive | Not synced. Each Mac keeps its own; Time Machine copies them |
+
+Why: the code folder holds hundreds of thousands of small files (`node_modules`, build output, agent worktrees under `.claude/`). Google Drive cannot ignore subfolders, and marking them "online only" does not stop the upload, so the code must sit outside Drive.
+
+### Set up a Mac
+
+Do this once on each Mac.
+
+1. In Google Drive for desktop, sign in with the account that holds the data. In Finder, right-click the `data` folder and choose **Available offline**, so LifeOS and Claude read local files rather than waiting for downloads.
+2. Clone the code outside Drive:
+
+   ```bash
+   mkdir -p ~/Developer ~/LifeOS-backups
+   git clone git@github.com:Rahuldharod/LifeOS.git ~/Developer/LifeOS
+   cd ~/Developer/LifeOS
+   corepack pnpm install
+   ```
+
+3. Tell LifeOS where the data is. LifeOS reads these from the shell, **not** from a `.env` file, so add them to `~/.zshrc`, replacing `<your-email>`:
+
+   ```bash
+   export LIFEOS_DATA_ROOT="$HOME/Library/CloudStorage/GoogleDrive-<your-email>/My Drive/Claude Working Space/Personal/LifeOS App/data"
+   export LIFEOS_BACKUP_ROOT="$HOME/LifeOS-backups"
+   export LIFEOS_DEVICE_ID="desk-mac"   # a different name on each Mac, e.g. "laptop"
+   ```
+
+   Then open a new Terminal window.
+4. Check the path before the first start. This must list `.lifeos` and folders such as `tasks` and `people`:
+
+   ```bash
+   ls -a "$LIFEOS_DATA_ROOT"
+   ```
+
+   **If it is empty or says "No such file", stop.** Do not start LifeOS until the path is right.
+5. Start LifeOS with `corepack pnpm start`.
+
+**Before you switch Macs:** commit and push any code changes (`git push`). On the other Mac, run `git pull`, then `corepack pnpm update-app`.
 
 ## Run locally
-
-Complete the first-time setup from the `code` directory:
-
-```bash
-corepack pnpm install
-cp .env.example .env
-```
 
 ### Use LifeOS
 
