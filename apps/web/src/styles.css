@@ -413,6 +413,6 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .breadcrumbs { margin-bottom: 14px; font-size: 13px; }
 .breadcrumbs ol { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .breadcrumbs li { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
-.breadcrumbs li + li::before { content: "›"; opacity: 0.6; flex: none; }
+.breadcrumbs li + li::before { content: "›" / ""; opacity: 0.6; flex: none; }
 .breadcrumbs a, .breadcrumbs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
 .breadcrumbs li:last-child span { max-width: 60ch; font-weight: 600; }
