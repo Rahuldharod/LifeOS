@@ -312,7 +312,7 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .visual-markdown-editor .milkdown .ProseMirror { max-width: calc(75ch + 144px); margin-inline: 0; padding-inline: 72px; }
 
 /* PB-007: the object a LifeOS link pointed at, briefly marked after navigating to it. */
-.crud-card.highlighted { outline: 2px solid #c79a3b; outline-offset: 2px; transition: outline-color .6s; }
+.crud-card.highlighted, .review-highlight.highlighted { outline: 2px solid #c79a3b; outline-offset: 2px; transition: outline-color .6s; }
 .markdown-preview a[href^="lifeos:"], .visual-markdown-editor a[data-lifeos-href] { color: #245646; text-decoration-style: dotted; cursor: pointer; }
 .envelope-badges { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .origin-label { color: #6f776f; font-size: 11px; }
