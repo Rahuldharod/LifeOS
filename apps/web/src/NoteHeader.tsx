@@ -3,6 +3,7 @@
 // there is no separate Save step; a failed save puts the previous value back.
 import React, { useEffect, useRef, useState } from "react";
 import { noteDetailsChanges, noteDetailsForm, type NoteDetailsForm } from "./noteDetailsForm.js";
+import { CopyLink } from "./CopyLink.js";
 import { EnvelopeBadges } from "./EnvelopeBadges.js";
 import { isRestricted } from "./envelope.js";
 import { SearchSelect } from "./SearchSelect.js";
@@ -63,6 +64,8 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
             <label className="sensitivity-toggle"><input type="checkbox" checked={restricted} disabled={disabled} onChange={(event) => void toggleRestricted(event.target.checked)} /> Mark restricted</label>
           </div>
         </div>
+        {/* The unsaved "NEW NOTE" header carries the meeting's id, not a note id, so it cannot be linked yet. */}
+        <CopyLink object={note.contentHash === "pending" ? undefined : note} disabled={disabled} />
         {children}
       </div>
       <div className="note-header-links">

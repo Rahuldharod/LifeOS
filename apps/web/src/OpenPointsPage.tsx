@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
 import { HistoryLink } from "./HistoryPanel.js";
+import { CopyLink } from "./CopyLink.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
@@ -139,6 +140,7 @@ function OpenPointPanel({ detail, projects, clients, products, people, busy, rea
 
   return <article className="decision-detail" aria-label={`Open point: ${value.title}`}>
     <span>OPEN POINT · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
+    <CopyLink object={{ frontmatter: { id: value.id, title: value.title } }} />
     <HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />
     {value.status === "resolved" && <p className="decision-chain" role="note">Resolved {formatDate(value.resolved_at)}{detail.resolutionDecision ? <> by decision {link(detail.resolutionDecision)}</> : value.resolution_decision_id ? <span className="muted"> by a decision that is missing</span> : null}</p>}
     {value.status === "closed" && <p className="decision-chain" role="note">Closed {formatDate(value.closed_at)}{value.close_reason ? `: ${String(value.close_reason)}` : " (no reason given)"}</p>}
