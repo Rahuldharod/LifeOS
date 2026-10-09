@@ -33,6 +33,8 @@ Every step that writes more than one file follows one crash-recovery pattern (AD
 
 Each save keeps a version copy in `.lifeos/versions/<id>/`; only the last 10 per object are kept (ADR 0012). The newest copy is the baseline for spotting edits made outside the app, including edits made while it was closed or on the other computer.
 
+The app removes object files in one case only: "Delete permanently" on a note already in Notes › Deleted (ADR 0017). It is a journalled `purge-note` operation that removes the file and its version copies, refused while another object references the note in its front matter.
+
 The user's own email addresses and internal domains are synced settings (`settings/self-emails.md`, `settings/internal-domains.md`), never code. Secrets go through `KnownSecrets` over the Keychain store: connection status is answered from what the app has already seen, so only connect, sync, the start-up probe and an explicit Retry read the Keychain.
 
 The History panel lists an object's version copies and restores one through the guarded write (`packages/application/src/history.ts`). A restore keeps the object's current sensitivity and review state, and is refused if the object changed since the panel was opened (it sends the content hash it was opened with).

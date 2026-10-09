@@ -5,6 +5,13 @@ export interface ObjectStore {
   scan?(): Promise<{ objects: LifeOSObject[]; diagnostics: string[] }>;
   read(relativePath: string): Promise<LifeOSObject>;
   write(input: { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string }): Promise<LifeOSObject>;
+  /**
+   * PB-030: removes the object file at `relativePath` only while its content hash is still `expectedHash`
+   * (`ObjectConflictError` otherwise). A file already gone is not an error, so a replay after a crash can call it again.
+   */
+  remove?(relativePath: string, expectedHash: string): Promise<void>;
+  /** PB-030: removes every kept copy of `id` (`.lifeos/versions/<id>/`). Idempotent. */
+  removeVersions?(id: string): Promise<void>;
   /** Saves a copy of `object` in the versions store and returns its relative path (U4: external changes). */
   keepVersion?(object: LifeOSObject): Promise<string>;
   /**
@@ -45,7 +52,8 @@ export const operationKinds = {
   resolveOpenPoint: "resolve-open-point",
   applyPatch: "apply-patch",
   adoptDraft: "adopt-draft",
-  adoptBatch: "adopt-batch"
+  adoptBatch: "adopt-batch",
+  purgeNote: "purge-note"
 } as const;
 export type OperationKind = typeof operationKinds[keyof typeof operationKinds];
 
