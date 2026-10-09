@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createBrowserRouter, RouterProvider, useLocation } from "react-router";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "@milkdown/crepe/theme/common/style.css";
@@ -48,6 +49,8 @@ import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
+import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
+import { useGuardedNavigation } from "./useGuardedNavigation.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -92,9 +95,8 @@ type GoogleConnection = { configured: boolean; connected: boolean; provider: str
 type EntityType = "task" | "project" | "client" | "product" | "person";
 type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
-type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Open Points" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
-
-const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System", "Settings"];
+/** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
+const lastPathKey = "lifeos.lastPath";
 
 function formatEventDate(event: Event) {
   if (!event.isAllDay) return formatDate(event.startsAt);
@@ -335,10 +337,10 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
 }
 
 function App() {
-  const [view, setView] = useState<View>(() => {
-    const remembered = localStorage.getItem("lifeos.activeView") as View | null;
-    return remembered && views.includes(remembered) ? remembered : "Today";
-  });
+  // PB-027: the URL says which tab and which item are open.
+  const location = useLocation();
+  const route = parseRoute(location.pathname);
+  const view: View = route?.view ?? "Today";
   const [events, setEvents] = useState<Event[]>([]);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [today, setToday] = useState<Today>({ tasks: [], overdue: [], dueToday: [], upcoming: [], waiting: [], topThree: [], reviewCount: 0 });
@@ -356,7 +358,7 @@ function App() {
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   // PB-025: Open/Deleted tabs and keyword search over the notes list.
   const [deletedNotes, setDeletedNotes] = useState<LifeObject[]>([]);
-  const [noteTab, setNoteTab] = useState<"open" | "deleted">("open");
+  const noteTab: "open" | "deleted" = route?.view === "Notes" && route.noteTab === "deleted" ? "deleted" : "open";
   const [noteQuery, setNoteQuery] = useState("");
   const [noteResults, setNoteResults] = useState<LifeObject[]>();
   const [selectedDeletedId, setSelectedDeletedId] = useState<string>();
@@ -379,7 +381,9 @@ function App() {
   const [connections, setConnections] = useState<ConnectionsState>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
-  const [selectedDate, setSelectedDate] = useState(() => dateInTimeZone(new Date(), storedDisplayTimeZone()));
+  const [selectedDate, setSelectedDate] = useState(() => (route?.view === "Calendar" && route.date) || dateInTimeZone(new Date(), storedDisplayTimeZone()));
+  // PB-027: open items in the URL are resolved only once the lists they live in have loaded.
+  const [collectionsLoaded, setCollectionsLoaded] = useState(false);
   const [calendarFilter, setCalendarFilter] = useState("all");
   const [calendarSources, setCalendarSources] = useState<Record<string, { name: string; color?: string }>>({});
   // Every calendar the account can view; empty until loaded, or when the calendar connection is unavailable.
@@ -394,7 +398,6 @@ function App() {
   const imageInput = useRef<HTMLInputElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
   const notesImageInput = useRef<HTMLInputElement>(null);
-  const rememberedNoteId = useRef<string | undefined>(localStorage.getItem("lifeos.activeNoteId") ?? undefined);
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
@@ -482,7 +485,9 @@ function App() {
       }
       setWorkspace((current) => current && !current.note && (current.meeting.frontmatter.id === `preview:${target.externalId}` || current.meeting.frontmatter.id === next.meeting.frontmatter.id) ? next : current);
       if (previewTarget.current === target) previewTarget.current = undefined;
-      localStorage.setItem("lifeos.activeMeetingId", next.meeting.frontmatter.id);
+      // PB-027: the new meeting gets its own URL, replacing the event's, while the user is still on it.
+      const here = parseRoute(locationRef.current.pathname);
+      if (here?.view === "Calendar" && !here.id && !settlingNavigation.current) followRoute({ view: "Calendar", date: target.date, id: next.meeting.frontmatter.id }, { replace: true, shown: true });
       setEvents((current) => current.map((event) => event.externalId === target.externalId && event.calendarId === target.calendarId
         ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
         : event));
@@ -495,6 +500,35 @@ function App() {
   // An editor is shown for an existing note, or for an unsaved draft over a calendar event.
   const editorReady = Boolean(workspace?.note) || meetingController.pending;
   const meetingOwner: EditorOwner | undefined = workspace?.note ? { id: workspace.note.frontmatter.id, relativePath: workspace.note.relativePath } : undefined;
+
+  // PB-027 navigation. Every in-app move goes through `go`: it saves the open notes first, then
+  // changes the URL; effects below open whatever the URL names. Back/Forward is held by the router
+  // until the same save succeeds (useGuardedNavigation).
+  const locationRef = useRef(location);
+  locationRef.current = location;
+  const guarded = useGuardedNavigation({ editors: [notesController, meetingController], readOnly, onLeaveFailed: setMessage });
+  const leaveEditors = guarded.leave;
+  // While a held Back/Forward saves, nothing else may change the URL: a first save over a calendar
+  // event would otherwise replace the URL with the new meeting's and release the held navigation.
+  const settlingNavigation = guarded.settling;
+  // A path whose item the app already put on screen itself (an opened event, a just-created meeting).
+  const routeAlreadyShown = useRef<string | undefined>(undefined);
+  const followRoute = (next: Route, options: { replace?: boolean; shown?: boolean } = {}) => {
+    const path = routePath(next);
+    if (path === locationRef.current.pathname) return;
+    if (options.shown) routeAlreadyShown.current = path;
+    guarded.follow(path, options);
+  };
+  const go = async (next: Route, options: { replace?: boolean } = {}) => {
+    if (!(await leaveEditors())) return false;
+    followRoute(next, options);
+    return true;
+  };
+  /** The tab's own page, keeping the note or meeting it last had open. */
+  const tabRoute = (target: View): Route => target === "Notes" ? { view: "Notes", noteTab: "open", id: selectedNoteId }
+    : target === "Calendar" ? { view: "Calendar", date: selectedDate, id: workspace && workspace.persisted !== false ? workspace.meeting.frontmatter.id : undefined }
+    : { view: target };
+  const calendarRoute = (date: string): Route => ({ view: "Calendar", date, id: route?.view === "Calendar" ? route.id : undefined });
 
   const loadCollections = async () => {
     // Without labels, badges fall back to full titles rather than failing the whole load.
@@ -568,13 +602,12 @@ function App() {
 
   useEffect(() => {
     void loadCalendarCatalog();
+    // PB-027: the URL replaced these; drop what older versions left behind.
+    try { for (const key of ["lifeos.activeView", "lifeos.activeNoteId", "lifeos.activeMeetingId"]) localStorage.removeItem(key); } catch { /* storage unavailable */ }
     Promise.all([api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), loadCollections()])
-      .then(async () => {
-        const meetingId = localStorage.getItem("lifeos.activeMeetingId");
-        if (view === "Calendar" && meetingId) await refreshWorkspace(meetingId).catch(() => localStorage.removeItem("lifeos.activeMeetingId"));
-        setMessage("Local workspace ready");
-      })
-      .catch((error: Error) => setMessage(error.message));
+      .then(() => setMessage("Local workspace ready"))
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setCollectionsLoaded(true));
   }, []);
 
   const calendarFailed = (error: unknown) => {
@@ -591,7 +624,16 @@ function App() {
     loadCalendarDay().catch((error: Error) => setMessage(calendarFailed(error)));
   }, [selectedDate, displayTimeZone]);
 
-  useEffect(() => { localStorage.setItem("lifeos.activeView", view); }, [view]);
+  // PB-027: `/` and unknown paths go to the last page this browser showed (or Today), without a history entry.
+  useEffect(() => {
+    let remembered: string | null = null;
+    try {
+      if (route) { localStorage.setItem(lastPathKey, location.pathname); return; }
+      remembered = localStorage.getItem(lastPathKey);
+    } catch { /* storage unavailable: fall back to Today */ }
+    if (route) return;
+    followRoute(remembered && parseRoute(remembered) ? parseRoute(remembered)! : { view: "Today" }, { replace: true });
+  }, [location.pathname]);
 
   // Re-fetch whichever note/workspace is currently open as soon as the tab regains focus, so an
   // external edit (another device, an agent, Git) is discovered immediately rather than only on
@@ -601,7 +643,7 @@ function App() {
   // open (and its autosave keeps running) even after switching away from its editor.
   //
   // The handler reads these through refs (same pattern as activeDraft in useNoteDraftController.ts
-  // and rememberedNoteId above) rather than depending on them directly: `workspace` gets a new
+  // and locationRef above) rather than depending on them directly: `workspace` gets a new
   // object identity on every autosave, and depending on it here would tear down and re-add the
   // document listener on that same ~1.8s cadence instead of only when a note/workspace opens or
   // closes.
@@ -630,17 +672,55 @@ function App() {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-  // Resume the last-open note on load. Every other path that switches notes (openNote, and the
-  // reconcile/autosave effects inside useNoteDraftController) opens its draft explicitly too, so
-  // this is the only place a note change needs to prime the controller itself.
+  // PB-027: what the URL names is checked against the loaded lists; a gone item shows the list with this.
+  const routeData = { notes, deletedNotes, objects: objectLinks, pendingReviewIds: reviews.filter((review) => review.frontmatter.status === "pending").map((review) => review.frontmatter.id) };
+  const routeProblem = collectionsLoaded && route ? routeTarget(route, routeData) : undefined;
+  const missingItem = routeProblem?.kind === "missing" ? routeProblem.message : undefined;
+
+  // PB-027: the note in the URL is the open note (on load, Back/Forward, and every in-app open).
+  // This is the only place a note change primes the notes controller.
   useEffect(() => {
-    if (selectedNoteId || !rememberedNoteId.current) return;
-    const remembered = notes.find((note) => note.frontmatter.id === rememberedNoteId.current);
-    if (!remembered) return;
-    const opened = notesController.open(remembered, readCachedDraft(remembered));
-    setSelectedNoteId(remembered.frontmatter.id);
+    if (!collectionsLoaded || route?.view !== "Notes") return;
+    const target = routeTarget(route, routeData);
+    if (target.kind === "redirect") { followRoute(target.route, { replace: true }); return; }
+    const id = target.kind === "ok" ? route.id : undefined;
+    if (route.noteTab === "deleted") { setSelectedDeletedId(id); return; }
+    if (id === selectedNoteId) return;
+    const note = notes.find((candidate) => candidate.frontmatter.id === id);
+    if (!note) { notesController.reset(); setSelectedNoteId(undefined); return; }
+    const opened = notesController.open(note, readCachedDraft(note));
+    setSelectedNoteId(note.frontmatter.id); setNotesMode("visual");
     if (opened.conflict) setMessage("Recovered a browser draft, but the Markdown file also changed. Review before saving.");
-  }, [notes, selectedNoteId]);
+  }, [location.pathname, collectionsLoaded, notes, deletedNotes]);
+
+  // PB-027: the meeting in the URL is the open meeting. A path with no meeting closes it, so Back
+  // from a meeting returns to the bare day. Runs on URL changes only, so a list refresh never
+  // reopens or closes anything.
+  useEffect(() => {
+    if (!collectionsLoaded || route?.view !== "Calendar") return;
+    if (route.date && route.date !== selectedDate) setSelectedDate(route.date);
+    if (routeAlreadyShown.current === location.pathname) { routeAlreadyShown.current = undefined; return; }
+    routeAlreadyShown.current = undefined;
+    const current = workspaceRef.current;
+    const close = () => { if (workspaceRef.current) { setWorkspace(undefined); previewTarget.current = undefined; meetingController.reset(); } };
+    if (!route.id) { close(); return; }
+    if (current?.meeting.frontmatter.id === route.id) return;
+    const meetingId = route.id;
+    void (async () => {
+      // A meeting created a moment ago may not be in the object list yet; ask the server once more.
+      let objects = objectLinks;
+      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { objects = await api<ObjectLink[]>("/api/v1/objects").catch(() => objects); setObjectLinks(objects); }
+      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { close(); return; }
+      previewTarget.current = undefined;
+      setEditorMode("visual"); setEditorSession((session) => session + 1);
+      await run(() => refreshWorkspace(meetingId), "Meeting opened");
+    })();
+  }, [location.pathname, collectionsLoaded]);
+
+  // PB-027: a task, project, decision… in the URL is highlighted on its tab, as a PB-007 link does.
+  useEffect(() => {
+    if (collectionsLoaded && route?.id && route.view !== "Notes" && route.view !== "Calendar") setHighlightId(route.id);
+  }, [location.pathname, collectionsLoaded]);
 
   async function run(action: () => Promise<void>, success: string) {
     setBusy(true);
@@ -653,15 +733,21 @@ function App() {
 
   // Opening an event is a read (PB-020): it shows the existing meeting note, or an editable draft
   // over a non-persisted preview. Nothing is written until the user makes a real edit.
-  const openEvent = (selectedEvent: Event) => run(async () => {
+  // PB-027: the open note is saved first, and the opened meeting gets its own URL (an unsaved event
+  // has no id yet, so it stays on the day's URL until its first edit creates the meeting).
+  const openEvent = async (selectedEvent: Event) => {
+    if (!(await leaveEditors())) return false;
     // #88: offline, a stored meeting opens from LifeOS; the preview would need the calendar.
-    if (selectedEvent.stored && selectedEvent.meetingId) { await refreshWorkspace(selectedEvent.meetingId); localStorage.setItem("lifeos.activeMeetingId", selectedEvent.meetingId); return; }
+    if (selectedEvent.stored && selectedEvent.meetingId) { followRoute({ view: "Calendar", date: selectedDate, id: selectedEvent.meetingId }); return true; }
+    return previewEvent(selectedEvent);
+  };
+  const previewEvent = (selectedEvent: Event) => run(async () => {
     const { externalId, calendarId } = selectedEvent;
     const range = dayRange(selectedDate, displayTimeZone);
     const next = await api<Workspace>(`/api/v1/meetings/preview?${new URLSearchParams({ externalId, ...(calendarId ? { calendarId } : {}), ...range })}`);
     setWorkspace(next); setEditorMode("visual"); setEditorSession((current) => current + 1);
+    followRoute({ view: "Calendar", date: selectedDate, id: next.persisted !== false ? next.meeting.frontmatter.id : undefined }, { shown: true });
     if (next.persisted !== false) {
-      localStorage.setItem("lifeos.activeMeetingId", next.meeting.frontmatter.id);
       setEvents((current) => current.map((event) => event.externalId === externalId && event.calendarId === calendarId
         ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
         : event));
@@ -696,8 +782,14 @@ function App() {
 
   // #62: one accept or reject per Review Item at a time, even for clicks faster than a re-render.
   const reviewRequests = useRef(reviewInFlight()).current;
+  /** PB-027: once the item in the URL is accepted, rejected or deleted here, the URL drops it (no "not found" banner). */
+  const leaveFinishedItem = (id: string) => {
+    const here = parseRoute(locationRef.current.pathname);
+    if (here?.id === id && here.view !== "Notes" && here.view !== "Calendar") followRoute({ view: here.view }, { replace: true });
+  };
   const accept = (review: LifeObject) => reviewRequests.run(review.frontmatter.id, () => run(async () => {
     await api(`/api/v1/review-items/${review.frontmatter.id}/accept`, { method: "POST" });
+    leaveFinishedItem(review.frontmatter.id);
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
   }, acceptToast(review.frontmatter)));
@@ -707,6 +799,7 @@ function App() {
     setBusy(true);
     try {
       await action();
+      leaveFinishedItem(reviewId);
       if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
       await loadCollections();
       setMessage(success);
@@ -720,6 +813,7 @@ function App() {
 
   const reject = (reviewId: string) => reviewRequests.run(reviewId, () => run(async () => {
     await api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" });
+    leaveFinishedItem(reviewId);
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
   }, "Proposal rejected"));
@@ -881,6 +975,7 @@ function App() {
 
   const deleteEntity = (object: LifeObject) => run(async () => {
     await api(`/api/v1/entities/by-id/${object.frontmatter.id}`, { method: "DELETE", body: JSON.stringify({ expectedHash: object.contentHash }) });
+    leaveFinishedItem(object.frontmatter.id);
     await loadCollections();
   }, `${object.frontmatter.type} moved to deleted state`);
 
@@ -983,11 +1078,6 @@ function App() {
     } finally { setBusy(false); }
   }
 
-  function openNote(note: LifeObject) {
-    notesController.open(note, readCachedDraft(note));
-    setSelectedNoteId(note.frontmatter.id); setNotesMode("visual");
-    localStorage.setItem("lifeos.activeNoteId", note.frontmatter.id);
-  }
 
   // Debounced server-side search over the active tab. A blank query shows the full tab from state.
   // `ignore` drops a response that arrives after the query or tab already changed.
@@ -1010,8 +1100,9 @@ function App() {
   const restoreNote = (note: LifeObject) => run(async () => {
     const restored = await api<LifeObject>(`/api/v1/notes/${note.frontmatter.id}/restore`, { method: "POST", body: JSON.stringify({ expectedHash: note.contentHash }) });
     await loadCollections();
-    setSelectedDeletedId(undefined); setNoteTab("open"); setNoteQuery("");
-    openNote(restored);
+    setSelectedDeletedId(undefined); setNoteQuery("");
+    // Replaced: Back should not return to the deleted copy that no longer exists.
+    followRoute({ view: "Notes", noteTab: "open", id: restored.frontmatter.id }, { replace: true });
   }, "Note restored");
 
   // PB-021: deleting tombstones the note (the Markdown file stays on disk, marked deleted). Confirms
@@ -1030,14 +1121,13 @@ function App() {
 
   const deleteSelectedNote = () => selectedNote && deleteNote(selectedNote, notesController, () => {
     setSelectedNoteId(undefined);
-    rememberedNoteId.current = undefined;
-    localStorage.removeItem("lifeos.activeNoteId");
+    followRoute({ view: "Notes", noteTab: "open" }, { replace: true });
   });
 
   const deleteMeetingNote = () => workspace?.note && deleteNote(workspace.note, meetingController, () => {
     const noteId = workspace.note?.frontmatter.id;
     setWorkspace(undefined);
-    localStorage.removeItem("lifeos.activeMeetingId");
+    followRoute({ view: "Calendar", date: selectedDate }, { replace: true });
     setEvents((current) => current.map((event) => event.noteId === noteId ? { ...event, hasNote: false, noteId: undefined } : event));
   });
 
@@ -1057,12 +1147,10 @@ function App() {
 
   // PB-007: a `lifeos://object/<id>` link opens the object inside the app. The object list is fetched
   // fresh so a link to something created a moment ago still works, and the note being edited is saved
-  // first so leaving it can never drop text.
+  // first so leaving it can never drop text. PB-027: each link opened is a history entry.
   const openLifeosLink = async (href: string) => {
     try {
-      for (const controller of [notesController, meetingController]) {
-        if (controller.dirty && !(await controller.saveNow())) { setMessage("Save or resolve the note you are editing, then open the link."); return; }
-      }
+      if (!(await leaveEditors())) return;
       const objects = await api<ObjectLink[]>("/api/v1/objects");
       setObjectLinks(objects);
       const target = resolveLifeosLink(href, objects);
@@ -1075,18 +1163,16 @@ function App() {
         const live = open.find((note) => note.frontmatter.id === target.id);
         const gone = deleted.find((note) => note.frontmatter.id === target.id);
         if (!live && !gone) { setMessage("That linked note no longer exists."); return; }
-        setView("Notes");
-        if (live) { setNoteTab("open"); openNote(live); } else { setNoteTab("deleted"); setSelectedDeletedId(target.id); }
+        followRoute({ view: "Notes", noteTab: live ? "open" : "deleted", id: target.id });
       } else if (target.kind === "meeting") {
         const meeting = objects.find((object) => object.frontmatter.id === target.id);
-        setView("Calendar");
-        if (meeting?.frontmatter.starts_at) setSelectedDate(dateInTimeZone(new Date(String(meeting.frontmatter.starts_at)), displayTimeZone));
-        localStorage.setItem("lifeos.activeMeetingId", target.id);
-        await refreshWorkspace(target.id);
+        const date = meeting?.frontmatter.starts_at ? dateInTimeZone(new Date(String(meeting.frontmatter.starts_at)), displayTimeZone) : selectedDate;
+        followRoute({ view: "Calendar", date, id: target.id });
       } else if (target.kind === "inbox") {
-        setView("Inbox");
+        followRoute({ view: "Inbox", id: target.id });
       } else {
-        setView(target.view);
+        followRoute({ view: target.view, id: target.id });
+        // The same card again (no URL change) still flashes.
         setHighlightId(target.id);
       }
     } catch (error) {
@@ -1113,8 +1199,8 @@ function App() {
     return () => document.removeEventListener("click", onClick, true);
   }, []);
   /** #76: opens Settings and moves focus to the given card once it has rendered. */
-  const openSettingsCard = (cardId: string) => {
-    setView("Settings");
+  const openSettingsCard = async (cardId: string) => {
+    if (!(await go({ view: "Settings" }))) return;
     window.setTimeout(() => { const card = document.getElementById(cardId); card?.scrollIntoView({ block: "center", behavior: "smooth" }); card?.focus({ preventScroll: true }); }, 80);
   };
   useEffect(() => {
@@ -1242,11 +1328,11 @@ function App() {
     <aside>
       <h1>LifeOS</h1>
       <nav className="nav-main">
-        {navigation.map((item) => <button className={item === view ? "active" : ""} key={item} onClick={() => setView(item)}>{item}{item === "Inbox" && pendingReviews.length > 0 ? <em>{pendingReviews.length}</em> : null}</button>)}
+        {navigation.map((item) => <button className={item === view ? "active" : ""} key={item} onClick={() => void go(tabRoute(item))}>{item}{item === "Inbox" && pendingReviews.length > 0 ? <em>{pendingReviews.length}</em> : null}</button>)}
       </nav>
       <div className="nav-footer">
         <div className="nav-actions">
-          <button className={`settings-link ${view === "Settings" ? "active" : ""}`} onClick={() => setView("Settings")}>Settings</button>
+          <button className={`settings-link ${view === "Settings" ? "active" : ""}`} onClick={() => void go({ view: "Settings" })}>Settings</button>
         </div>
         <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}</p>
       </div>
@@ -1255,18 +1341,19 @@ function App() {
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
-      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => setView("Inbox")} onOpenSettingsCard={openSettingsCard} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
+      {missingItem && <article className="lease-warning" role="status"><span>NOT FOUND</span><p>{missingItem} Showing the {view === "Calendar" ? "day" : "list"} instead.</p></article>}
+      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => void go({ view: "Inbox" })} onOpenSettingsCard={openSettingsCard} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
         {googleConnection?.reason === "expired" && <article className="lease-warning" role="alert"><span>GOOGLE CALENDAR</span><h3>Reconnect Google Calendar</h3><p>Google no longer accepts the saved access, so events cannot sync. {googleConnection.lastSuccessfulSyncAt ? `Last successful sync: ${new Date(googleConnection.lastSuccessfulSyncAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: displayTimeZone })}.` : "No successful sync recorded yet."}</p><button className="takeover" disabled={busy} onClick={connectGoogle}>Reconnect</button></article>}
-        {googleConnection && !googleConnection.connected && googleConnection.reason !== "expired" && <article className="lease-warning"><span>GOOGLE CALENDAR</span><h3>{googleConnection.configured ? "Ready to connect" : "Configuration required"}</h3><p>{googleConnection.configured ? "Authorize read-only access to replace the mock calendar with your upcoming events." : "Add the Google Calendar OAuth client under Settings, then return here to connect."}</p>{googleConnection.configured ? <button className="takeover" disabled={busy} onClick={connectGoogle}>Connect Google Calendar</button> : <button onClick={() => setView("Settings")}>Open Settings</button>}</article>}
+        {googleConnection && !googleConnection.connected && googleConnection.reason !== "expired" && <article className="lease-warning"><span>GOOGLE CALENDAR</span><h3>{googleConnection.configured ? "Ready to connect" : "Configuration required"}</h3><p>{googleConnection.configured ? "Authorize read-only access to replace the mock calendar with your upcoming events." : "Add the Google Calendar OAuth client under Settings, then return here to connect."}</p>{googleConnection.configured ? <button className="takeover" disabled={busy} onClick={connectGoogle}>Connect Google Calendar</button> : <button onClick={() => void go({ view: "Settings" })}>Open Settings</button>}</article>}
         {googleConnection?.connected && <article className="connection-card"><span>GOOGLE CALENDAR CONNECTED</span><p className="muted">Read-only access is active. Each manual sync records a durable Sync Run.</p><button disabled={busy || readOnly} onClick={syncGoogle}>Sync now</button></article>}
         <div className="meeting-layout split-layout" style={calendarSplit.style}>
           <article className="event-list">
-            <div className="event-list-heading"><span>DAY TIMELINE</span><button onClick={() => setSelectedDate(dateInTimeZone(new Date(), displayTimeZone))}>Today</button></div>
+            <div className="event-list-heading"><span>DAY TIMELINE</span><button onClick={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}>Today</button></div>
             <div className="calendar-controls">
-              <label><small>Date</small><input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} /></label>
+              <label><small>Date</small><input type="date" value={selectedDate} onChange={(event) => { if (event.target.value) void go(calendarRoute(event.target.value)); }} /></label>
               <label><small>Calendar</small><select value={calendarFilter} onChange={(event) => setCalendarFilter(event.target.value)}>
                 <option value="all">All calendars</option>
                 {[...offeredCalendars].sort((left, right) => left.name.localeCompare(right.name)).map((calendar) => <option value={calendar.id} key={calendar.id}>{calendar.name}</option>)}
@@ -1364,12 +1451,12 @@ function App() {
           <article className="notes-list">
             <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteQuery.trim() ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
             <div className="notes-tabs" role="tablist" aria-label="Notes">
-              <button role="tab" aria-selected={noteTab === "open"} className={noteTab === "open" ? "selected" : ""} onClick={() => setNoteTab("open")}>Open <small>{notes.length}</small></button>
-              <button role="tab" aria-selected={noteTab === "deleted"} className={noteTab === "deleted" ? "selected" : ""} onClick={() => setNoteTab("deleted")}>Deleted <small>{deletedNotes.length}</small></button>
+              <button role="tab" aria-selected={noteTab === "open"} className={noteTab === "open" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "open", id: selectedNoteId })}>Open <small>{notes.length}</small></button>
+              <button role="tab" aria-selected={noteTab === "deleted"} className={noteTab === "deleted" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "deleted", id: selectedDeletedId })}>Deleted <small>{deletedNotes.length}</small></button>
             </div>
             <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
             {!visibleNotes.length && <p className="muted">{noteQuery.trim() ? `No ${noteTab} notes match “${noteQuery.trim()}”.` : noteTab === "open" ? "No notes have been created yet." : "No deleted notes."}</p>}
-            {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => noteTab === "open" ? openNote(note) : setSelectedDeletedId(note.frontmatter.id)}>
+            {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => void go({ view: "Notes", noteTab, id: note.frontmatter.id })}>
               <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
             </button>)}</div>)}
           </article>
@@ -1424,7 +1511,7 @@ function App() {
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
         {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
-        {pendingReviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
+        {pendingReviews.map((review) => <div key={review.frontmatter.id} id={`object-${review.frontmatter.id}`} className={review.frontmatter.id === highlightId ? "review-highlight highlighted" : "review-highlight"}><ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} /></div>)}
       </>}
 
       {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text. Claude proposes Knowledge Notes from it through the LifeOS skills; you review them in Inbox." /><KnowledgeSourceForm title={sourceTitle} text={sourceText} disabled={busy || readOnly} onTitleChange={setSourceTitle} onTextChange={setSourceText} onPreserve={ingestSource} /><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
@@ -1501,4 +1588,7 @@ function PersonExternalControl({ person, labels, disabled, onChange }: { person:
   </select></label>}</span>;
 }
 
-createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+// PB-027: one catch-all route; App reads the path itself (routes.ts). A data router is needed for
+// useBlocker, which holds Back/Forward until the open note is saved.
+const router = createBrowserRouter([{ path: "*", element: <App /> }]);
+createRoot(document.getElementById("root")!).render(<React.StrictMode><RouterProvider router={router} /></React.StrictMode>);

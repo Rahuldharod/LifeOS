@@ -1,7 +1,6 @@
 import path from "node:path";
 import os from "node:os";
 import { watch } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
@@ -15,6 +14,7 @@ import { KnownSecrets, MacOSKeychainSecretStore } from "@lifeos/secrets";
 import { connectionSettings, googleConnectionStatus, secretRefs } from "./connections.js";
 import { calendarSource } from "./calendar-source.js";
 import { httpError } from "./http-errors.js";
+import { registerWebApp } from "./web-app.js";
 import { shutDown } from "./shutdown.js";
 import { IdleRelease, idleReleaseMs, registerLease } from "./lease.js";
 
@@ -330,25 +330,9 @@ server.get("/api/v1/settings/backups", async () => application.getBackupSettings
 server.put<{ Body: { offDriveFolder?: unknown; expectedHash?: string } }>("/api/v1/settings/backups", async (request) => application.saveBackupSettings({ offDriveFolder: request.body?.offDriveFolder }, request.body?.expectedHash));
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
 
-// Serves the production web build (PB-001): unknown non-API paths fall back to index.html.
+// Serves the production web build (PB-001), with every app URL falling back to index.html (PB-027).
 // The launcher points LIFEOS_WEB_ROOT at its own snapshot of the build, so a later `pnpm build` cannot change the running app.
-const webRoot = process.env.LIFEOS_WEB_ROOT ? path.join(path.resolve(process.env.LIFEOS_WEB_ROOT), path.sep) : fileURLToPath(new URL("../../web/dist/", import.meta.url));
-const webMimeTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".map": "application/json" };
-server.get("/*", async (request, reply) => {
-  let requested: string;
-  try { requested = decodeURIComponent(request.url.split("?")[0]!.replace(/^\//, "")) || "index.html"; }
-  catch { return reply.status(404).send({ error: "Not found" }); }
-  if (requested.startsWith("api/")) return reply.status(404).send({ error: "Not found" });
-  const target = path.resolve(webRoot, requested);
-  if (!target.startsWith(webRoot)) return reply.status(404).send({ error: "Not found" });
-  let served = target;
-  let content = await readFile(target).catch(() => undefined);
-  if (!content && !path.extname(requested)) { served = path.join(webRoot, "index.html"); content = await readFile(served).catch(() => undefined); }
-  if (!content) return reply.status(404).send({ error: requested === "index.html" ? "Web build not found; run pnpm build" : "Not found" });
-  // Vite fingerprints files under assets/, so they can be cached; index.html must always be fresh.
-  reply.header("cache-control", served.includes(`${path.sep}assets${path.sep}`) ? "public, max-age=31536000, immutable" : "no-cache");
-  return reply.type(webMimeTypes[path.extname(served).toLowerCase()] ?? "application/octet-stream").send(content);
-});
+registerWebApp(server, process.env.LIFEOS_WEB_ROOT ?? fileURLToPath(new URL("../../web/dist/", import.meta.url)));
 
 server.setErrorHandler((error, _request, reply) => {
   const { statusCode, body } = httpError(error);
