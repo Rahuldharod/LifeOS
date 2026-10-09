@@ -1,4 +1,4 @@
-// Bottom-right corner handle that resizes the Notes editor freely (PB-024 follow-up). The default
+// Bottom-right corner handle that resizes a note editor freely (PB-024 follow-up, PB-028). The default
 // size comes from CSS (70% of the column, full height); a dragged size is a per-device preference
 // (ADR 0005), kept in browser storage. Double-click the handle to go back to the default.
 import { useState, type CSSProperties, type PointerEvent } from "react";
@@ -28,8 +28,25 @@ function writeSize(key: string, size: BoxSize | undefined) {
   catch { /* the default size still applies */ }
 }
 
-export function useResizableBox(storageKey: string) {
-  const [size, setSize] = useState(() => readSize(storageKey));
+/**
+ * The remembered size under `key`. When nothing is stored there yet, a size kept under an older key
+ * is moved across (copied to `key`, then removed), so renaming a key never loses the user's size.
+ */
+export function readRememberedSize(key: string, legacyKeys: readonly string[] = []): BoxSize | undefined {
+  const current = readSize(key);
+  if (current) return current;
+  for (const legacyKey of legacyKeys) {
+    const legacy = readSize(legacyKey);
+    if (!legacy) continue;
+    writeSize(key, legacy);
+    try { localStorage.removeItem(legacyKey); } catch { /* the copy under the new key is what counts */ }
+    return legacy;
+  }
+  return undefined;
+}
+
+export function useResizableBox(storageKey: string, legacyKeys: readonly string[] = []) {
+  const [size, setSize] = useState(() => readRememberedSize(storageKey, legacyKeys));
   const update = (next: BoxSize | undefined) => { setSize(next); writeSize(storageKey, next); };
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {

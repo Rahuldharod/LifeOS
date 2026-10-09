@@ -291,14 +291,18 @@ section.fit-view > .split-layout { flex: 1 1 auto; min-height: 0; grid-template-
 section.fit-view .notes-list, section.fit-view .event-list { position: static; height: 100%; }
 section.fit-view .split-divider { position: static; height: 100%; }
 section.fit-view .notes-main, section.fit-view .meeting-main { height: 100%; min-height: 0; overflow: auto; align-content: start; }
-.meeting-main textarea, .meeting-main .markdown-preview { min-height: max(330px, calc(100vh - 420px)); }
-.meeting-main .visual-markdown-editor .milkdown .ProseMirror { min-height: max(300px, calc(100vh - 480px)); }
-
-/* The Notes editor: 70% of its column (at least 640px on small screens) and full height by default; the corner handle resizes it freely. */
-.notes-editor { position: relative; display: flex; flex-direction: column; width: max(70%, min(640px, 100%)); max-width: 100%; height: 100%; min-width: 360px; min-height: 280px; }
-.notes-editor > * { flex: none; }
-.notes-editor > .visual-markdown-editor, .notes-editor > textarea, .notes-editor > .markdown-preview { flex: 1 1 auto; min-height: 0; overflow: auto; resize: none; }
-.notes-editor .visual-markdown-editor .milkdown-top-bar { position: sticky; top: 0; z-index: 2; }
+/* PB-028: one editor frame (EditorFrame.tsx) for Notes and Calendar. 70% of its column (at least 640px
+   on small screens) and as tall as the visible column; the text scrolls inside it, and blocks below it
+   (Calendar meeting proposals) stay in the column's own scroll. The corner handle resizes it freely. */
+.editor-frame { position: relative; display: flex; flex-direction: column; width: max(70%, min(640px, 100%)); max-width: 100%; height: max(420px, calc(100vh - 140px)); min-width: 360px; min-height: 280px; }
+/* Wide screens: the column is a size container, so 100cqh is exactly its visible height, even in Calendar where other blocks share the column. */
+@media (min-width: 981px) {
+  section.fit-view .notes-main, section.fit-view .meeting-main { container-type: size; }
+  section.fit-view .editor-frame { height: 100cqh; }
+}
+.editor-frame > * { flex: none; }
+.editor-frame > .visual-markdown-editor, .editor-frame > textarea, .editor-frame > .markdown-preview { flex: 1 1 auto; min-height: 0; overflow: auto; resize: none; }
+.editor-frame .visual-markdown-editor .milkdown-top-bar { position: sticky; top: 0; z-index: 2; }
 .resize-handle { position: absolute; right: 0; bottom: 0; z-index: 3; width: 22px; height: 22px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 0 50%, #9fb3a8 50% 58%, transparent 58% 68%, #9fb3a8 68% 76%, transparent 76%); border-bottom-right-radius: 14px; }
 .resize-handle:hover { background: linear-gradient(135deg, transparent 0 50%, #31584a 50% 58%, transparent 58% 68%, #31584a 68% 76%, transparent 76%); }
 
