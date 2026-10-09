@@ -1,6 +1,6 @@
 # LifeOS Product Backlog
 
-Last reviewed: 2026-10-04
+Last reviewed: 2026-10-09
 
 This file is the durable product-level backlog for LifeOS. It captures problems and opportunities before they are detailed enough to become implementation work.
 
@@ -23,10 +23,17 @@ Use a lightweight score rather than false precision:
 
 ## Now
 
-Items required to make the current version dependable for regular use. Empty after PB-001 and PB-004; the next work comes from Next by score.
+Items required to make the current version dependable for regular use. Ticketed under Phase B (#90) on 2026-10-09.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
+| PB-027 | URLs and the Back button | Each tab and open item has its own URL so Back/Forward, reload and bookmarks work. Unblocks PB-026 and PB-029. | 4 | High | 3 | agent | #100 |
+| PB-010 | Relationship pickers in the other forms | Searchable pickers on the Tasks, Projects, Clients, Products and People forms; tasks gain project, client and product fields. | 4 | High | 2 | agent | #101 |
+| PB-005 | Note filters | Narrow the notes list by type, last-edited date, project, client, product or person, combined with keyword search. | 4 | High | 2 | agent | #105 |
+| PB-028 | One editor layout everywhere | Every note editor shares the Notes-tab layout: capped line length, fills the height, one remembered size per device. | 3 | High | 2 | agent | #102 |
+| PB-030 | Hard delete from the Deleted tab | Remove a tombstoned note's file and versions; refused while frontmatter references it; audited; needs the lease. | 3 | High | 3 | agent | #103 |
+| PB-026 | Breadcrumbs | Show where the user is; each crumb is a real URL. | 2 | High | 1 | agent | #106 |
+| PB-029 | Copy link to an object | Copy `[Title](lifeos://object/<id>)` from any object; a pasted bare address becomes a titled link. Markdown only. | 3 | High | 2 | agent | #107 |
 
 ## Next
 
@@ -35,10 +42,8 @@ High-value capabilities to address after the current version is stable.
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
 | PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Submitting appends a formatted row to the Inbox of this Product Backlog (Captured date, Idea with Bug/Feature label and next PB ID, Source/context with the current page). Supersedes the 2026-09-21 feedback idea. Needs a decision on writing into the code repo at runtime, see ADR 0001. | 3 | High | 2 | — | — |
-| PB-005 | Note filters | Narrow the notes list by type, date range, project, client, product or person. Keyword search shipped in PB-025; the relationship fields are now set per note (PB-006). Re-scoped 2026-10-03. | 4 | High | 2 | — | — |
 | PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
-| PB-010 | Relationship pickers in the other forms | Use the searchable dropdown from PB-006 for project, client, product and people fields in the Tasks, Projects, Clients, Products and People forms. Notes are done (PB-006). Re-scoped 2026-10-03. | 4 | High | 2 | — | — |
 
 ## Later
 
@@ -64,11 +69,6 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 | 2026-09-21 | Add configurable autosave timing and a visible “browser draft recovered” history. | Note reliability |
 | 2026-10-03 | CI: bump `actions/checkout`, `actions/setup-node` and `pnpm/action-setup` to versions that target Node 24; GitHub is retiring Node 20 for actions. Warning only, CI still passes. | CI run 37099945764 annotation |
 | 2026-10-03 | CI: on or after **19 Oct 2026**, check the first CI run on Ubuntu 26 (`ubuntu-latest` migrates that day); pin `ubuntu-24.04` if anything breaks. | CI run 37099945764 annotation |
-| 2026-10-04 | **PB-026 (Feature) Breadcrumbs.** Show where the user is in the app (for example Notes › Weekly data review notes, or Calendar › 3 Oct › Weekly Product Review) and let them jump back up a level in one click. Pairs with PB-027: each crumb should be a real URL. | Rahul, after PB-007 review |
-| 2026-10-04 | **PB-027 (Feature) URLs and the Back button.** Today the app has a single URL, so the browser Back button leaves LifeOS instead of returning to the previous page. Give each tab and each open item (note, meeting day, task, project…) its own URL so Back/Forward, reload and bookmarks work. PB-007 link navigation should push history entries. | Rahul, after PB-007 review |
-| 2026-10-04 | **PB-028 (Bug/Feature) One editor layout everywhere.** The Calendar note editor runs full width, which is hard to read on a 4K screen. Apply the Notes-tab layout (PB-024/024b) to every page and editor: cap the text width, fill the window height with scrolling inside the editor block while every block stays on the page, and let the user resize the editor block. Must adapt to pages with other blocks below the editor (for example Calendar's meeting proposals). | Rahul, after PB-007 review |
-| 2026-10-04 | **PB-029 (Feature) Copy link to an object.** A copy button on every object (note header, meeting, task, project, client, product, person cards) puts its LifeOS link on the clipboard. Pasting it into any note gives a clickable link showing the object's title, `[Title](lifeos://object/<id>)`: rendered as a link in the Visual editor, as Markdown in Markdown mode. A pasted bare `lifeos://object/<id>` address is also turned into a titled link. Clicking it follows PB-007. To decide: copy plain Markdown only, or also an HTML version for pasting into other apps. | Rahul, end of PB-007 session |
-| 2026-10-09 | **PB-030 (Feature) Hard delete from the Deleted tab.** In Notes › Deleted, a "Delete permanently" action on a deleted note. A confirmation pop-up names the note and says it cannot be undone from the app. On confirm, the app removes the Markdown file itself, so empty or obsolete notes stop piling up in the vault. To decide: what happens to links from other objects (a meeting's note, tasks, review items, decisions) — refuse, unlink, or delete them too — so the integrity check does not report "references missing object" (seen 2026-10-09 after manual file deletes); whether the kept version copies in `.lifeos/versions/` go too; that an audit event records the deletion (ADR 0007, the app is the only writer); and that it needs the device lease. Backups still hold the file. | Rahul, after cleaning up manually deleted files |
 
 ## Completed
 
@@ -114,4 +114,5 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-04 | PB-007: one click on a LifeOS link opens the object in every mode, including the Visual editor. | Tried plain-click-edits / Cmd+click-opens first; it was not discoverable. LifeOS links are for navigation and their wording is rarely edited (arrow keys or Markdown mode still work). |
 | 2026-10-04 | Phase A closes on the core. Launcher and start at login, dyslexia-friendly font, dark theme, Playwright tests and the 10,000-object fixture move to Phase B (#90); each needs its own ticket. PB-003, PB-022b and PB-011 are complete. | Decided by Rahul so Phase A can close on the core (#90). |
 | 2026-10-04 | Phase A build decisions and known gaps are recorded in the PRD (*Decisions made during the build*, *Known gaps*) and Solution Design v0.7 (13.10, 13.11), not duplicated here. | One place per decision; the backlog keeps intent and priority only. |
+| 2026-10-09 | Phase A closed (#99 merged, #21 closed). Grilled the backlog: PB-027, PB-010, PB-005, PB-028, PB-030, PB-026 and PB-029 ticketed under Phase B (#90) as #100–#107; Rahul's manual steps in #104. PB-018 stays in Next. | PB-027 unblocks breadcrumbs and copy link; the I=4/E=2 items reuse PB-006's picker. Decisions are recorded in each issue. |
 | 2026-10-02 | PB-023/024: group by last-edited date (matches the sort); the divider width is a per-device browser preference (ADR 0005); the stable app now serves a snapshot of the build. | Headers must follow the list order; 13-inch and 4K screens need different widths; a plain `pnpm build` was silently changing the running app. |

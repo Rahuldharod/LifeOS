@@ -2,7 +2,7 @@
 
 > **Status:** ready-for-agent · **Date:** 3 October 2026 · **Baseline:** Solution Design v0.5 + GitHub `main` @ `e981138` · **Source:** grilling session of 3 October 2026 (Q1–Q41, C1–C5)
 >
-> **Build status (final Phase A build, 4 October 2026):** built on branch `feature/phase-a-close-21` (tickets #23–#51, fixes #53–#82 and the close-out batch #84–#89, #91–#96; not yet merged to `main`).
+> **Build status (final Phase A build, 4 October 2026):** built on branch `feature/phase-a-close-21` (tickets #23–#51, fixes #53–#82 and the close-out batch #84–#89, #91–#96); merged to `main` in #99 on 9 October 2026, when Phase A (#21) closed. Remaining manual steps are #104; follow-on work is Phase B (#90).
 >
 > - **App side:** built, including automatic backups, the History panel, the calendar offline fallback and the editor round-trip suite.
 > - **Agent side:** the skills pack (`skills/`) is built and its examples are tested in CI. Installing it in Claude and running the dry-runs is still to do (Rahul).
