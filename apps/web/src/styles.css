@@ -423,3 +423,8 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .breadcrumbs li + li::before { content: "›" / ""; opacity: 0.6; flex: none; }
 .breadcrumbs a, .breadcrumbs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
 .breadcrumbs li:last-child span { max-width: 60ch; font-weight: 600; }
+
+/* PB-029: Copy link button and its "Copied" feedback */
+.copy-link { display: inline-flex; align-items: center; gap: 6px; }
+.copy-link small { min-width: 5.5em; }
+.copy-link-failed { color: var(--danger, #b3261e); }
