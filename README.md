@@ -25,8 +25,8 @@ The code and the data are kept apart on purpose:
 
 | What | Where | How it moves between Macs |
 | --- | --- | --- |
-| **Code** (this repository) | `~/Developer/LifeOS` on each Mac, **never inside Google Drive or iCloud** | GitHub: `git push` on one Mac, `git pull` on the other |
-| **Data** | `~/Library/CloudStorage/GoogleDrive-<your-email>/My Drive/Claude Working Space/Personal/LifeOS App/data` | Google Drive for desktop |
+| **Code** (this repository) | `~/Developer/lifeos_app` on each Mac, **never inside Google Drive or iCloud** | GitHub: `git push` on one Mac, `git pull` on the other |
+| **Data** | `~/Library/CloudStorage/GoogleDrive-<your-email>/My Drive/Claude Working Space/Personal/LifeOS Data/data` | Google Drive for desktop |
 | **Backups** | `~/LifeOS-backups` on each Mac, outside Google Drive | Not synced. Each Mac keeps its own; Time Machine copies them |
 
 Why: the code folder holds hundreds of thousands of small files (`node_modules`, build output, agent worktrees under `.claude/`). Google Drive cannot ignore subfolders, and marking them "online only" does not stop the upload, so the code must sit outside Drive.
@@ -40,15 +40,15 @@ Do this once on each Mac.
 
    ```bash
    mkdir -p ~/Developer ~/LifeOS-backups
-   git clone git@github.com:Rahuldharod/LifeOS.git ~/Developer/LifeOS
-   cd ~/Developer/LifeOS
+   git clone git@github.com:Rahuldharod/LifeOS.git ~/Developer/lifeos_app
+   cd ~/Developer/lifeos_app
    corepack pnpm install
    ```
 
 3. Tell LifeOS where the data is. LifeOS reads these from the shell, **not** from a `.env` file, so add them to `~/.zshrc`, replacing `<your-email>`:
 
    ```bash
-   export LIFEOS_DATA_ROOT="$HOME/Library/CloudStorage/GoogleDrive-<your-email>/My Drive/Claude Working Space/Personal/LifeOS App/data"
+   export LIFEOS_DATA_ROOT="$HOME/Library/CloudStorage/GoogleDrive-<your-email>/My Drive/Claude Working Space/Personal/LifeOS Data/data"
    export LIFEOS_BACKUP_ROOT="$HOME/LifeOS-backups"
    export LIFEOS_DEVICE_ID="desk-mac"   # a different name on each Mac, e.g. "laptop"
    ```
@@ -77,7 +77,7 @@ Do this once on each Mac.
          {
            "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
            "hooks": [
-             { "type": "command", "command": "node \"$HOME/Developer/LifeOS/scripts/hooks/data-guard.mjs\"" }
+             { "type": "command", "command": "node \"$HOME/Developer/lifeos_app/scripts/hooks/data-guard.mjs\"" }
            ]
          }
        ]

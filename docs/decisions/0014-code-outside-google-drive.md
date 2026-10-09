@@ -1,6 +1,6 @@
 # ADR 0014: Code outside Google Drive; data located by LIFEOS_DATA_ROOT
 
-- Status: Accepted
+- Status: Accepted; folders renamed 2026-10-09: the code is now `~/Developer/lifeos_app` and the data `…/Personal/LifeOS Data/data` (the paths below are as decided on 2026-10-07)
 - Date: 2026-10-07
 - Supersedes: ADR 0001 (code and data as sibling folders inside `LifeOS App/`)
 

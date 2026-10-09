@@ -15,7 +15,7 @@ import { pathToFileURL } from "node:url";
 
 const fileTools = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 /** The data folder is found by this path fragment (case-insensitive: macOS paths are) or by LIFEOS_DATA_ROOT. */
-const dataFragment = "/lifeos app/data";
+const dataFragment = "/lifeos data/data";
 /** Stand-in for $LIFEOS_DATA_ROOT when the variable is not set in the hook's environment. */
 const unsetRoot = "/__lifeos_data_root__";
 
@@ -156,7 +156,7 @@ const writeHints = /open\([^)]*['"][wax+]|write_text|write_bytes|writeFile|appen
  * `cwd` is the session's working directory from the hook input.
  */
 export function checkBash(command, cwd, env = process.env, depth = 0) {
-  const mentionsData = /lifeos\\? app\/data/i.test(command) || /\$\{?LIFEOS_DATA_ROOT\b/.test(command)
+  const mentionsData = /lifeos\\? data\/data/i.test(command) || /\$\{?LIFEOS_DATA_ROOT\b/.test(command)
     || Boolean(env.LIFEOS_DATA_ROOT?.trim() && command.toLowerCase().includes(env.LIFEOS_DATA_ROOT.trim().toLowerCase()));
   let directory = cwd ? path.resolve(cwd) : undefined;
   const touchesData = () => mentionsData || (directory !== undefined && classifyPath(directory, env) !== "outside");

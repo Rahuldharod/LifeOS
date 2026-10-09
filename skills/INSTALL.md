@@ -14,7 +14,7 @@ Five Claude skills: Object Contract, Capture, Ask, Morning and Enrichment. Insta
 
 ## Part 1: Make the zip files (Mac, 2 minutes)
 
-1. Open Terminal in the code folder (`cd ~/Developer/LifeOS`).
+1. Open Terminal in the code folder (`cd ~/Developer/lifeos_app`).
 2. Run:
 
    ```bash
@@ -36,9 +36,9 @@ Menu names may differ slightly between Claude versions.
 
 ## Part 3: Give Claude access to the fake data root
 
-The fake data root is `.dev-data/` inside the code folder (`~/Developer/LifeOS/.dev-data`). `pnpm dev` creates it.
+The fake data root is `.dev-data/` inside the code folder (`~/Developer/lifeos_app/.dev-data`). `pnpm dev` creates it.
 
-1. In Terminal, in the code folder (`~/Developer/LifeOS`), run `corepack pnpm dev`.
+1. In Terminal, in the code folder (`~/Developer/lifeos_app`), run `corepack pnpm dev`.
 2. Open `http://127.0.0.1:5174`. This is the development app, not your real LifeOS.
 3. Check `.dev-data/` now has `_inbox/` and `_agent/` folders.
 4. In the dev app, create: person **Joel Martin**, client **Example Grocer**, project **Spring Promo**.
@@ -95,7 +95,7 @@ The morning routine writes your Daily Focus brief each workday and sends you a 5
 
 ### 7a. Install the skill
 
-1. In Terminal, in the code folder (`~/Developer/LifeOS`), run:
+1. In Terminal, in the code folder (`~/Developer/lifeos_app`), run:
 
    ```bash
    cd skills && zip -r ~/Desktop/lifeos-morning.zip lifeos-morning
@@ -160,7 +160,7 @@ The brief examples in `lifeos-morning/SKILL.md` are CI fixtures: each is adopted
 
 ### E1: Install
 
-1. In Terminal, in the code folder (`~/Developer/LifeOS`), run:
+1. In Terminal, in the code folder (`~/Developer/lifeos_app`), run:
 
    ```bash
    cd skills && zip -r ~/Desktop/lifeos-enrichment.zip lifeos-enrichment

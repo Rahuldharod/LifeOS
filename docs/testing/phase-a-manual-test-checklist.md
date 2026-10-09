@@ -31,7 +31,7 @@ Progress: 0 / 8 done
 | Copy | Address | Data | Use it for |
 |---|---|---|---|
 | **Test copy** (dev) | `http://127.0.0.1:5174` | `code/.dev-data/` (fake) | Everything not marked "daily app" |
-| **Daily app** (stable) | `http://127.0.0.1:4310` | `LifeOS App/data/` (real) | Section 14, section 21 and rows marked "daily app" |
+| **Daily app** (stable) | `http://127.0.0.1:4310` | `LifeOS Data/data/` (real) | Section 14, section 21 and rows marked "daily app" |
 
 - Tests create fake tasks and people. Keep them out of your real vault.
 - In the daily app, only **look**. Don't create test objects there.

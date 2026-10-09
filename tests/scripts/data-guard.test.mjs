@@ -4,8 +4,8 @@ import { classifyPath, evaluate, parseShell } from "../../scripts/hooks/data-gua
 
 // ADR 0007 / 0014: the PreToolUse hook blocks direct writes to the data folder outside _inbox/.
 
-const data = "/Users/me/Library/CloudStorage/GoogleDrive-me@example.com/My Drive/Claude Working Space/Personal/LifeOS App/data";
-const code = "/Users/me/Developer/LifeOS";
+const data = "/Users/me/Library/CloudStorage/GoogleDrive-me@example.com/My Drive/Claude Working Space/Personal/LifeOS Data/data";
+const code = "/Users/me/Developer/lifeos_app";
 const env = { HOME: "/Users/me", LIFEOS_DATA_ROOT: data };
 const noRootEnv = { HOME: "/Users/me" };
 const file = (tool_name, target, extra = {}) => evaluate({ tool_name, tool_input: { [tool_name === "NotebookEdit" ? "notebook_path" : "file_path"]: target }, cwd: code, ...extra }, env);
@@ -19,11 +19,11 @@ describe("classifyPath", () => {
     expect(classifyPath(`${data}/_inbox/../tasks/a.md`, env)).toBe("data");
     expect(classifyPath(`${data.toLowerCase()}/tasks/a.md`, noRootEnv)).toBe("data");
     expect(classifyPath(data, env)).toBe("data");
-    expect(classifyPath("/Users/me/LifeOS App/database/x", noRootEnv)).toBe("outside");
+    expect(classifyPath("/Users/me/LifeOS Data/database/x", noRootEnv)).toBe("outside");
     expect(classifyPath(`${code}/README.md`, env)).toBe("outside");
   });
 
-  it("uses LIFEOS_DATA_ROOT even when it does not contain 'LifeOS App/data'", () => {
+  it("uses LIFEOS_DATA_ROOT even when it does not contain 'LifeOS Data/data'", () => {
     expect(classifyPath("/Volumes/Vault/lifeos/tasks/a.md", { LIFEOS_DATA_ROOT: "/Volumes/Vault/lifeos" })).toBe("data");
   });
 });

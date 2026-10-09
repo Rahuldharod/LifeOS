@@ -35,7 +35,7 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - `tests/integration`: cross-package acceptance tests.
 - `docs/product-design`: versioned solution baseline and product backlog.
 - `scripts/hooks/data-guard.mjs`: Claude Code hook that blocks agent writes to the data root outside `_inbox/` (registered per user, see README).
-- Data root (`LIFEOS_DATA_ROOT`): real user Markdown and assets in Google Drive; outside Git and authoritative. Code lives in `~/Developer/LifeOS`, never in Drive (ADR 0014).
+- Data root (`LIFEOS_DATA_ROOT`): real user Markdown and assets in Google Drive; outside Git and authoritative. Code lives in `~/Developer/lifeos_app`, never in Drive (ADR 0014).
 - Backup root (`LIFEOS_BACKUP_ROOT`, default `~/LifeOS-backups`): generated data snapshots, local to each Mac; outside Git.
 
 ## Non-negotiable rules
