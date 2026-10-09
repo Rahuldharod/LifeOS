@@ -9,6 +9,10 @@ import { isRestricted } from "./envelope.js";
 import { SearchSelect } from "./SearchSelect.js";
 import type { SearchOption } from "./searchOptions.js";
 
+/** The header of a note that does not exist yet (main.tsx `pendingHeaderNote`) carries this hash and the meeting's id. */
+export const PENDING_NOTE_HASH = "pending";
+export const isUnsavedNote = (note: { contentHash: string }) => note.contentHash === PENDING_NOTE_HASH;
+
 type HeaderNote = { frontmatter: Record<string, unknown> & { id: string; title: string; type: string }; contentHash: string };
 
 export function NoteHeader({ note, kind, projects, clients, products, people, disabled, onSave, children }: {
@@ -65,7 +69,7 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
           </div>
         </div>
         {/* The unsaved "NEW NOTE" header carries the meeting's id, not a note id, so it cannot be linked yet. */}
-        <CopyLink object={note.contentHash === "pending" ? undefined : note} disabled={disabled} />
+        <CopyLink object={isUnsavedNote(note) ? undefined : note} />
         {children}
       </div>
       <div className="note-header-links">

@@ -1,7 +1,6 @@
 // Pasting a bare `lifeos://object/<id>` into the visual editor writes a titled link (PB-029).
 // The decision is `pastedLinkMarkdown`; this only puts the result into the Milkdown document.
-import { lifeosLinkId } from "./lifeosLinks.js";
-import { pastedLinkMarkdown } from "./objectLinkMarkdown.js";
+import { pastedLinkTarget, type TitledObject } from "./objectLinkMarkdown.js";
 
 type Mark = { create(attrs: Record<string, unknown>): unknown };
 type EditorView = {
@@ -23,13 +22,10 @@ export function insertLink(editor: PasteEditor, title: string, href: string): bo
 }
 
 /** Handles a paste event; returns true when it was a bare known address and a titled link went in instead. */
-export function pasteLifeosLink(event: PasteEvent, editor: PasteEditor | undefined, objects: Array<{ frontmatter: { id: string; title: string } }>): boolean {
-  const text = event.clipboardData?.getData("text/plain") ?? "";
-  if (!editor || !pastedLinkMarkdown(text, objects)) return false; // the same rule as Markdown mode
-  const id = lifeosLinkId(text);
-  const object = objects.find((candidate) => candidate.frontmatter.id.toLowerCase() === id);
+export function pasteLifeosLink(event: PasteEvent, editor: PasteEditor | undefined, objects: TitledObject[]): boolean {
+  const object = pastedLinkTarget(event.clipboardData?.getData("text/plain") ?? "", objects); // the same rule as Markdown mode
   // Only swallow the paste once the link is in, so a failure still pastes the text.
-  if (!object || !insertLink(editor, object.frontmatter.title, `lifeos://object/${object.frontmatter.id}`)) return false;
+  if (!editor || !object || !insertLink(editor, object.frontmatter.title, `lifeos://object/${object.frontmatter.id}`)) return false;
   event.preventDefault();
   event.stopPropagation();
   return true;

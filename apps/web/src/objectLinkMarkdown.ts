@@ -2,7 +2,7 @@
 // and the paste rule all build them here, so a title with `\`, `[`, `]` or `|` stays a valid link.
 import { lifeosLinkId } from "./lifeosLinks.js";
 
-type TitledObject = { frontmatter: { id: string; title: string } };
+export type TitledObject = { frontmatter: { id: string; title: string } };
 
 /** Backslash-escapes the characters that would end or break a Markdown link label. */
 export function escapeLinkTitle(title: string): string {
@@ -18,14 +18,19 @@ export function objectLinkMarkdown(object: TitledObject): string {
 const BARE = /^lifeos:\/\/object\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * The titled link to paste instead of clipboard text, or undefined to paste the text untouched.
+ * The object a paste should become a link to, or undefined to paste the text untouched.
  * Only a clipboard that is exactly one address (whitespace around it ignored) for a loaded object
  * converts; deleted and archived objects count as known.
  */
-export function pastedLinkMarkdown(clipboardText: string, objects: TitledObject[]): string | undefined {
+export function pastedLinkTarget<T extends TitledObject>(clipboardText: string, objects: T[]): T | undefined {
   const text = clipboardText.trim();
   if (!BARE.test(text)) return undefined;
   const id = lifeosLinkId(text);
-  const object = id ? objects.find((candidate) => candidate.frontmatter.id.toLowerCase() === id) : undefined;
+  return id ? objects.find((candidate) => candidate.frontmatter.id.toLowerCase() === id) : undefined;
+}
+
+/** The titled link Markdown to paste instead of the clipboard text, or undefined to paste the text untouched. */
+export function pastedLinkMarkdown(clipboardText: string, objects: TitledObject[]): string | undefined {
+  const object = pastedLinkTarget(clipboardText, objects);
   return object ? objectLinkMarkdown(object) : undefined;
 }
