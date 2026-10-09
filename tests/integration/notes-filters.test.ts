@@ -130,6 +130,19 @@ describe("notes list filters (#105)", () => {
     expect(ids(application.searchNotes("", "deleted", { from: deleted, to: deleted }))).toEqual(ids([gone]));
   });
 
+  it("matches a person on the note's own people_ids, not on the meeting's attendees (unlike Decisions #41)", async () => {
+    const { application, meeting, ada, id } = await setup();
+    // A new meeting note starts with the attendees in people_ids; the user then sets the note's people to Ada only.
+    const note = await meeting(0, "# Notes\n\nx\n", { people_ids: [id(ada)] });
+    const attendeeIds = application.object(String(note.frontmatter.meeting_id))?.frontmatter.attendee_ids;
+    expect(Array.isArray(attendeeIds) && attendeeIds.length).toBeTruthy();
+    const attendee = String((attendeeIds as unknown[])[0]);
+    expect(note.frontmatter.people_ids).toEqual([id(ada)]);
+
+    expect(application.searchNotes("", "open", { personId: attendee })).toEqual([]);
+    expect(ids(application.searchNotes("", "open", { personId: id(ada) }))).toEqual([note.frontmatter.id]);
+  });
+
   it("filters the deleted tab by context too", async () => {
     const { application, meeting, project, id } = await setup();
     const note = await meeting(0, "# Notes\n\nx\n", { primary_project_id: id(project) });
