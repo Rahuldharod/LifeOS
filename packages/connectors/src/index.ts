@@ -105,6 +105,7 @@ export class GoogleCalendarConnector implements CalendarConnector {
     const accessToken = await this.accessToken();
     const headers = { authorization: `Bearer ${accessToken}` };
     const calendarsResponse = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250&showHidden=false", { headers });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw Google Calendar JSON, mapped field by field below
     const calendarsPayload = await calendarsResponse.json() as { items?: Array<Record<string, any>>; error?: { message?: string } };
     if (calendarsResponse.status === 401) throw this.failAuth(`Google rejected the Calendar access token: ${calendarsPayload.error?.message ?? 401}`);
     if (!calendarsResponse.ok) throw new Error(`Google Calendar list request failed: ${calendarsPayload.error?.message ?? calendarsResponse.status}`);
@@ -117,6 +118,7 @@ export class GoogleCalendarConnector implements CalendarConnector {
     const eventGroups = await Promise.all(calendars.map(async (calendar) => {
       const query = new URLSearchParams({ timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: "true", orderBy: "startTime", maxResults: "250" });
       const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(String(calendar.id))}/events?${query}`, { headers });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw Google Calendar JSON, mapped field by field below
       const payload = await response.json() as { items?: Array<Record<string, any>>; error?: { message?: string } };
       if (!response.ok) throw new Error(`Google Calendar request failed for ${String(calendar.summary ?? calendar.id)}: ${payload.error?.message ?? response.status}`);
       return (payload.items ?? []).filter((event) => event.status !== "cancelled" && event.id && event.start && event.end).map((event) => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { envelopeWriteProblem, lifecycleWriteProblem, objectTypes, uuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { envelopeWriteProblem, lifecycleWriteProblem, objectTypes, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DraftError, draftOrigins, isCalendarDate, text, toUtc, validationIssues, type AdoptionRun, type DraftOrigin, type DraftResult, type FileDocument } from "./adoption.js";
 import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { decisionFields } from "./decisions.js";

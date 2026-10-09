@@ -17,6 +17,7 @@
     "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@lifeos/ai": "workspace:*",
     "@lifeos/application": "workspace:*",
     "@lifeos/assets-filesystem": "workspace:*",
@@ -29,8 +30,12 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.5.0",
     "happy-dom": "^20.14.5",
     "typescript": "^5.9.0",
+    "typescript-eslint": "^8.71.1",
     "vite": "^7.0.0",
     "vitest": "^3.2.0"
   }
