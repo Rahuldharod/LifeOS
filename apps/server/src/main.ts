@@ -18,6 +18,7 @@ import { registerWebApp } from "./web-app.js";
 import { shutDown } from "./shutdown.js";
 import { IdleRelease, idleReleaseMs, registerLease } from "./lease.js";
 import { registerNotePurge } from "./note-purge-routes.js";
+import { registerNotesList } from "./notes-list-route.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
@@ -66,11 +67,7 @@ registerLease(server, { session, idle, stopping: () => stopping });
 
 server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
 server.get("/api/v1/objects", async () => application.listObjects());
-server.get<{ Querystring: { q?: string; state?: string } }>("/api/v1/notes", async (request, reply) => {
-  const state = request.query.state ?? "open";
-  if (state !== "open" && state !== "deleted") return reply.status(400).send({ error: "state must be open or deleted" });
-  return application.searchNotes(request.query.q ?? "", state);
-});
+registerNotesList(server, application);
 server.get<{ Params: { type: "task" | "project" | "client" | "product" | "person" } }>("/api/v1/entities/:type", async (request) => application.entities(request.params.type));
 server.post<{ Params: { type: "task" | "project" | "client" | "product" | "person" }; Body: { fields: Record<string, unknown> } }>("/api/v1/entities/:type", async (request) => application.createEntity(request.params.type, request.body.fields));
 server.patch<{ Params: { id: string }; Body: { fields: Record<string, unknown>; expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.updateEntity(request.params.id, request.body.fields, request.body.expectedHash));

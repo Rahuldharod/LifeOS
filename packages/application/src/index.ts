@@ -10,7 +10,7 @@ import { EntitiesModule, type EntityType } from "./entities.js";
 import { DailyFocusModule } from "./focus.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
-import { NotesModule } from "./notes.js";
+import { NotesModule, type NoteFilters } from "./notes.js";
 import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
 import { PeopleModule } from "./people.js";
@@ -23,7 +23,7 @@ import { TodayModule, type TodaySettings } from "./today.js";
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
 export { NoteReferencedError } from "./notes.js";
-export type { ObjectReference, PurgeCheck } from "./notes.js";
+export type { NoteFilters, ObjectReference, PurgeCheck } from "./notes.js";
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
@@ -124,7 +124,7 @@ export class LifeOSApplication {
   // Notes
   notes() { return this.notesModule.notes(); }
   deletedNotes() { return this.notesModule.deletedNotes(); }
-  searchNotes(query: string, state: "open" | "deleted" = "open") { return this.notesModule.searchNotes(query, state); }
+  searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) { return this.notesModule.searchNotes(query, state, filters); }
   updateBody(id: string, body: string, expectedHash: string) { return this.notesModule.updateBody(id, body, expectedHash); }
   updateNoteMetadata(id: string, changes: Record<string, unknown>, expectedHash: string) { return this.notesModule.updateNoteMetadata(id, changes, expectedHash); }
   deleteNote(id: string, expectedHash: string) { return this.notesModule.deleteNote(id, expectedHash); }

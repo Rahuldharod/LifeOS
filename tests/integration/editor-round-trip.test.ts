@@ -7,6 +7,8 @@ import * as crepePackage from "@milkdown/crepe";
 import { withSummarySection } from "../../packages/application/src/meeting-material.js";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { lostImages, roundTripReport, storedMarkdown, unprovenConstructs, visualEditorFeatures, visualMarkdown } from "../../apps/web/src/editorMarkdown.js";
+import { escapeLinkTitle } from "../../apps/web/src/objectLinkMarkdown.js";
+import { insertLink } from "../../apps/web/src/visualLinkPaste.js";
 import { prepareVisualEditor, type ImageAwareEditor } from "../../apps/web/src/visualEditorImages.js";
 
 // Issue #89 (PB-003): opening a note in the visual editor and saving it must not change Markdown the
@@ -83,6 +85,8 @@ const KNOWN_FAILURES: Record<string, string> = {
   "hard-break-spaces.md": "trailing spaces (including two-space line breaks)",
   "html-entities.md": "HTML entities such as &amp;amp;",
   "backslash-escapes.md": "backslash escapes",
+  // PB-029: a link whose title needed escaping (as the copy button and pickers write it).
+  "lifeos-link-escaped-title.md": "backslash escapes",
   "literal-asterisk.md": "a literal * or _ on its own",
   "table-unpadded.md": "tables not padded the way the editor writes them",
   "table-aligned.md": "tables not padded the way the editor writes them",
@@ -290,6 +294,29 @@ describe("visual editor round trip (#89, PB-003)", () => {
     it("an asset name that is not valid percent-encoding still loads and survives", async () => {
       const body = "![Odd](../assets/100%.png)\n";
       expect(await throughVisualEditor(body)).toBe(body);
+    });
+  });
+
+  describe("a pasted LifeOS link (PB-029)", () => {
+    const id = "0190a1b2-0000-7000-8000-000000000001";
+    const pasteLink = (title: string) => (editor: CrepeEditor) => insertLink(editor as never, title, `lifeos://object/${id}`);
+
+    it("a plain title is saved as [Title](lifeos://object/<id>)", async () => {
+      const saved = await throughVisualEditor("Start.\n", pasteLink("Pricing ideas"));
+      expect(saved).toContain(`[Pricing ideas](lifeos://object/${id})`);
+      expect(await throughVisualEditor(saved)).toBe(saved);
+    });
+
+    it("a title with \\, [, ] or | is saved escaped, stays one link and survives the next round trip", async () => {
+      const title = "Q3 [draft] a|b \\ c";
+      const saved = await throughVisualEditor("Start.\n", pasteLink(title));
+      const link = saved.match(/\[.*\]\(lifeos:\/\/object\/[^)]+\)/)?.[0];
+      // The editor writes its own escapes (it leaves | and a lone \ bare, which is also valid); what matters is one intact link.
+      expect(link).toBe(`[Q3 \\[draft\\] a|b \\ c](lifeos://object/${id})`);
+      expect(await throughVisualEditor(saved)).toBe(saved);
+      // The helper's fuller escaping is read back as the same single link.
+      const helperForm = `[${escapeLinkTitle(title)}](lifeos://object/${id})`;
+      expect((await throughVisualEditor(`${helperForm}\n`)).match(/\(lifeos:\/\/object\/[^)]+\)/g)).toHaveLength(1);
     });
   });
 

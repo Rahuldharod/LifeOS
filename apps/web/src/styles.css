@@ -408,3 +408,23 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .purge-dialog ul { margin: 6px 0 12px; padding-left: 18px; }
 .purge-dialog .actions { display: flex; gap: 8px; justify-content: flex-end; }
 .purge-blockers { color: #954b38; }
+.note-filters { display: grid; gap: 8px; margin: 10px 0; }
+.note-filters-head { display: flex; justify-content: space-between; align-items: center; }
+.note-filters-head small { color: #66756e; font-weight: 750; }
+.note-filter-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.note-filter-grid label { display: grid; gap: 5px; }
+.note-filter-grid small { color: #66756e; font-weight: 750; }
+.note-filter-grid input[type="date"] { width: 100%; border: 1px solid #c9c8be; border-radius: 8px; padding: .55rem .65rem; background: white; color: #21352e; font: inherit; }
+
+/* PB-026: breadcrumbs */
+.breadcrumbs { margin-bottom: 14px; font-size: 13px; }
+.breadcrumbs ol { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.breadcrumbs li { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+.breadcrumbs li + li::before { content: "›" / ""; opacity: 0.6; flex: none; }
+.breadcrumbs a, .breadcrumbs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
+.breadcrumbs li:last-child span { max-width: 60ch; font-weight: 600; }
+
+/* PB-029: Copy link button and its "Copied" feedback */
+.copy-link { display: inline-flex; align-items: center; gap: 6px; }
+.copy-link small { min-width: 5.5em; }
+.copy-link-failed { color: var(--danger, #b3261e); }

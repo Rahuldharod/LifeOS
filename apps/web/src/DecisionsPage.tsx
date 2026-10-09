@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
 import { HistoryLink } from "./HistoryPanel.js";
+import { CopyLink } from "./CopyLink.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
@@ -135,6 +136,7 @@ function DecisionPanel({ detail, projects, clients, products, people, busy, read
 
   return <article className="decision-detail" aria-label={`Decision: ${value.title}`}>
     <span>DECISION · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
+    <CopyLink object={decision} />
     <HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />
     {detail.supersededBy && <p className="decision-chain" role="note">Superseded by <button className="link-button" onClick={() => onSelect(detail.supersededBy!.frontmatter.id)}>{detail.supersededBy.frontmatter.title}</button></p>}
     {detail.resolvesOpenPoints?.map((point) => <p className="decision-chain" key={point.frontmatter.id}>Resolves open point <button className="link-button" onClick={() => onOpen(point.frontmatter.id)}>{point.frontmatter.title}</button></p>)}

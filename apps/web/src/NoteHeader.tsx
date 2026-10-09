@@ -3,10 +3,15 @@
 // there is no separate Save step; a failed save puts the previous value back.
 import React, { useEffect, useRef, useState } from "react";
 import { noteDetailsChanges, noteDetailsForm, type NoteDetailsForm } from "./noteDetailsForm.js";
+import { CopyLink } from "./CopyLink.js";
 import { EnvelopeBadges } from "./EnvelopeBadges.js";
 import { isRestricted } from "./envelope.js";
 import { SearchSelect } from "./SearchSelect.js";
 import type { SearchOption } from "./searchOptions.js";
+
+/** The header of a note that does not exist yet (main.tsx `pendingHeaderNote`) carries this hash and the meeting's id. */
+export const PENDING_NOTE_HASH = "pending";
+export const isUnsavedNote = (note: { contentHash: string }) => note.contentHash === PENDING_NOTE_HASH;
 
 type HeaderNote = { frontmatter: Record<string, unknown> & { id: string; title: string; type: string }; contentHash: string };
 
@@ -63,6 +68,8 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
             <label className="sensitivity-toggle"><input type="checkbox" checked={restricted} disabled={disabled} onChange={(event) => void toggleRestricted(event.target.checked)} /> Mark restricted</label>
           </div>
         </div>
+        {/* The unsaved "NEW NOTE" header carries the meeting's id, not a note id, so it cannot be linked yet. */}
+        <CopyLink object={isUnsavedNote(note) ? undefined : note} />
         {children}
       </div>
       <div className="note-header-links">

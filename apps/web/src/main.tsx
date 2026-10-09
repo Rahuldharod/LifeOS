@@ -15,19 +15,25 @@ import { useNoteDraftController, type NoteDraftController } from "./useNoteDraft
 import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
 import { EditorFrame } from "./EditorFrame.js";
-import { NoteHeader } from "./NoteHeader.js";
+import { NoteHeader, PENDING_NOTE_HASH } from "./NoteHeader.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions, isRestricted } from "./envelope.js";
 import { foldText } from "./searchOptions.js";
-import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
+import { lifeosLinkId, resolveLifeosLink, type LinkedObject } from "./lifeosLinks.js";
 import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
+import { NoteFiltersPanel, entityOptions } from "./NoteFiltersPanel.js";
+import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
 import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { MeetingEnrichment } from "./MeetingEnrichment.js";
 import { PersonReviewControl } from "./PersonReview.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
 import { HistoryLink } from "./HistoryPanel.js";
+import { CopyLink } from "./CopyLink.js";
+import { objectLinkMarkdown } from "./objectLinkMarkdown.js";
+import { markdownPasteAction } from "./markdownPaste.js";
+import { pasteLifeosLink } from "./visualLinkPaste.js";
 import { awaitingAdoptionLabel } from "./todayPanels.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
@@ -53,6 +59,8 @@ import { PermanentDeleteButton } from "./PermanentDelete.js";
 import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
 import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
+import { Breadcrumbs } from "./Breadcrumbs.js";
+import { buildTrail } from "./trail.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -150,15 +158,15 @@ function fileContentBase64(file: File) {
  * (PB-020), `ensureOwner` creates it on demand — inserting an image is a real edit. */
 type EditorOwner = { id: string; relativePath: string };
 
-function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnly, onChange }: { editorKey: string; owner: EditorOwner | undefined; ensureOwner?: () => Promise<EditorOwner | undefined>; markdown: string; readOnly: boolean; onChange: (markdown: string) => void }) {
+function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnly, onChange, linkObjects }: { linkObjects: LinkedObject[]; editorKey: string; owner: EditorOwner | undefined; ensureOwner?: () => Promise<EditorOwner | undefined>; markdown: string; readOnly: boolean; onChange: (markdown: string) => void }) {
   const root = useRef<HTMLDivElement>(null);
   const crepe = useRef<CrepeInstance | undefined>(undefined);
   // Latest props for callbacks created once per mount. Reading these through refs matters: `readOnly`
   // is true while an event is being opened (busy) and the editor finishes loading asynchronously, so
   // a value captured at mount time would leave the editor — and its ribbon, which Crepe hides when
   // read-only — locked until the next remount (PB-019).
-  const latest = useRef({ owner, ensureOwner, readOnly, onChange });
-  latest.current = { owner, ensureOwner, readOnly, onChange };
+  const latest = useRef({ owner, ensureOwner, readOnly, onChange, linkObjects });
+  latest.current = { owner, ensureOwner, readOnly, onChange, linkObjects };
   // Only changes made after the user has focused the editor count as edits. Crepe can re-emit
   // normalized Markdown on its own after loading; that must never dirty the draft or trigger a save.
   const engaged = useRef(false);
@@ -214,7 +222,7 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
   }, [editorKey]);
 
   useEffect(() => { crepe.current?.setReadonly(readOnly || blocked.current); }, [readOnly]);
-  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
+  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }
 
 type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };
@@ -355,6 +363,10 @@ function App() {
   const [deletedNotes, setDeletedNotes] = useState<LifeObject[]>([]);
   const noteTab: "open" | "deleted" = route?.view === "Notes" && route.noteTab === "deleted" ? "deleted" : "open";
   const [noteQuery, setNoteQuery] = useState("");
+  // #105: filters survive Open/Deleted and Back from a note; they reset only when leaving the Notes view.
+  const [noteFilters, setNoteFilters] = useState(noNoteFilters);
+  const noteFilterCount = activeNoteFilterCount(noteFilters);
+  useEffect(() => { if (route?.view !== "Notes") setNoteFilters(noNoteFilters); }, [route?.view]);
   const [noteResults, setNoteResults] = useState<LifeObject[]>();
   const [selectedDeletedId, setSelectedDeletedId] = useState<string>();
   const [highlightId, setHighlightId] = useState<string>();
@@ -670,6 +682,7 @@ function App() {
   const routeData = { notes, deletedNotes, objects: objectLinks, pendingReviewIds: reviews.filter((review) => review.frontmatter.status === "pending").map((review) => review.frontmatter.id) };
   const routeProblem = collectionsLoaded && route ? routeTarget(route, routeData) : undefined;
   const missingItem = routeProblem?.kind === "missing" ? routeProblem.message : undefined;
+  const trail = collectionsLoaded && route ? buildTrail(route, { ...routeData, reviews }, { today: dateInTimeZone(new Date(), displayTimeZone), unsavedMeeting: workspace?.persisted === false }) : [];
 
   // PB-027: the note in the URL is the open note (on load, Back/Forward, and every in-app open).
   // This is the only place a note change primes the notes controller.
@@ -712,8 +725,10 @@ function App() {
   }, [location.pathname, collectionsLoaded]);
 
   // PB-027: a task, project, decision… in the URL is highlighted on its tab, as a PB-007 link does.
+  // The plain list (e.g. the breadcrumb's tab crumb, PB-026) clears the highlight.
   useEffect(() => {
-    if (collectionsLoaded && route?.id && route.view !== "Notes" && route.view !== "Calendar") setHighlightId(route.id);
+    if (!collectionsLoaded || !route || route.view === "Notes" || route.view === "Calendar") return;
+    setHighlightId(route.id);
   }, [location.pathname, collectionsLoaded]);
 
   async function run(action: () => Promise<void>, success: string) {
@@ -1072,18 +1087,19 @@ function App() {
   // `ignore` drops a response that arrives after the query or tab already changed.
   useEffect(() => {
     const query = noteQuery.trim();
-    if (!query) { setNoteResults(undefined); return; }
+    if (!query && !noteFilterCount) { setNoteResults(undefined); return; }
     let ignore = false;
     const timer = window.setTimeout(() => {
-      api<LifeObject[]>(`/api/v1/notes?${new URLSearchParams({ state: noteTab, q: query })}`)
+      api<LifeObject[]>(`/api/v1/notes?${noteListQuery(noteTab, query, noteFilters, displayTimeZone)}`)
         .then((results) => { if (!ignore) setNoteResults(results); })
         .catch((error: Error) => { if (!ignore) { setNoteResults([]); setMessage(error.message); } });
     }, 200);
     return () => { ignore = true; window.clearTimeout(timer); };
-  }, [noteQuery, noteTab, notes.length, deletedNotes.length]);
+  }, [noteQuery, noteTab, noteFilters, displayTimeZone, notes.length, deletedNotes.length]);
 
   const tabNotes = noteTab === "open" ? notes : deletedNotes;
-  const visibleNotes = noteQuery.trim() ? (noteResults ?? []) : tabNotes;
+  const noteSearching = Boolean(noteQuery.trim()) || noteFilterCount > 0;
+  const visibleNotes = noteSearching ? (noteResults ?? []) : tabNotes;
   const selectedDeleted = deletedNotes.find((note) => note.frontmatter.id === selectedDeletedId);
 
   const restoreNote = (note: LifeObject) => run(async () => {
@@ -1224,7 +1240,7 @@ function App() {
   const pendingHeaderNote = (current: Workspace) => {
     const match = (options: { id: string; title: string }[], object?: LifeObject) => object ? options.find((option) => foldText(option.title) === foldText(object.frontmatter.title))?.id ?? "" : "";
     return {
-      contentHash: "pending",
+      contentHash: PENDING_NOTE_HASH,
       frontmatter: {
         id: current.meeting.frontmatter.id, type: "meeting-note", title: `${current.meeting.frontmatter.title} notes`,
         primary_project_id: match(headerOptions.projects, current.context.project), primary_client_id: match(headerOptions.clients, current.context.client), primary_product_id: match(headerOptions.products, current.context.product),
@@ -1328,6 +1344,7 @@ function App() {
     </aside>
 
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
+      <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
       {missingItem && <article className="lease-warning" role="status"><span>NOT FOUND</span><p>{missingItem} Showing the {view === "Calendar" ? "day" : "list"} instead.</p></article>}
@@ -1382,7 +1399,7 @@ function App() {
           <div className="meeting-main">
             {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
-                <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3>{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
+                <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3><CopyLink object={workspace.persisted !== false ? workspace.meeting : undefined} />{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
                 <div className="context-grid">
                   <Meta label="When" value={workspace.meeting.frontmatter.is_all_day === true ? `${String(workspace.meeting.frontmatter.starts_at).slice(0, 10)} · All day` : formatDate(workspace.meeting.frontmatter.starts_at)} />
                   <Meta label="Project" value={workspace.context.project?.frontmatter.title ?? "Not linked"} />
@@ -1413,10 +1430,10 @@ function App() {
                     <input ref={imageInput} className="hidden-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); event.target.value = ""; }} />
                     <button disabled={readOnly} title="Horizontal divider" onClick={() => insertAtCursor("\n\n---\n\n")}>―</button>
                     <button disabled={readOnly} title="Insert table" onClick={() => insertAtCursor("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>
-                    <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertAtCursor(`[${object.frontmatter.title}](lifeos://object/${object.frontmatter.id})`); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
+                    <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertAtCursor(objectLinkMarkdown(object)); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
                   </div>
-                  <textarea ref={editor} disabled={!editorReady || busy || readOnly} value={meetingController.draft} onChange={(event) => meetingController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} placeholder="Capture meeting notes… Paste or drop an image here." />
-                </> : editorMode === "visual" && editorReady ? <VisualMarkdownEditor editorKey={`meeting:${editorSession}`} owner={meetingOwner} ensureOwner={ensureMeetingNote} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+                  <textarea ref={editor} disabled={!editorReady || busy || readOnly} value={meetingController.draft} onChange={(event) => meetingController.setDraft(event.target.value)} onPaste={(event) => { const paste = markdownPasteAction(event.clipboardData, objectLinks); if (paste?.kind === "image") { event.preventDefault(); void uploadImage(paste.file); } else if (paste) { event.preventDefault(); insertAtCursor(paste.markdown); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} placeholder="Capture meeting notes… Paste or drop an image here." />
+                </> : editorMode === "visual" && editorReady ? <VisualMarkdownEditor linkObjects={objectLinks} editorKey={`meeting:${editorSession}`} owner={meetingOwner} ensureOwner={ensureMeetingNote} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
                 <div className="editor-footer">
                   <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.pending && !meetingController.dirty ? "Not saved yet · nothing is written until you edit" : meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>
                   <MeetingNoteActions canDelete={Boolean(workspace.note)} deleteDisabled={busy || readOnly || meetingController.autoSaving} saveDisabled={!editorReady || busy || !meetingController.dirty || readOnly} onDelete={deleteMeetingNote} onSave={saveNote} />
@@ -1438,13 +1455,14 @@ function App() {
         <PageHeader eyebrow="NOTES" title="Recent notes" description="Open the latest meeting and knowledge notes, edit the Markdown, and save changes back to the portable repository." />
         <div className="notes-layout split-layout" style={notesSplit.style}>
           <article className="notes-list">
-            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteQuery.trim() ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
+            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteSearching ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
             <div className="notes-tabs" role="tablist" aria-label="Notes">
               <button role="tab" aria-selected={noteTab === "open"} className={noteTab === "open" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "open", id: selectedNoteId })}>Open <small>{notes.length}</small></button>
               <button role="tab" aria-selected={noteTab === "deleted"} className={noteTab === "deleted" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "deleted", id: selectedDeletedId })}>Deleted <small>{deletedNotes.length}</small></button>
             </div>
             <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
-            {!visibleNotes.length && <p className="muted">{noteQuery.trim() ? `No ${noteTab} notes match “${noteQuery.trim()}”.` : noteTab === "open" ? "No notes have been created yet." : "No deleted notes."}</p>}
+            <NoteFiltersPanel filters={noteFilters} onChange={setNoteFilters} tab={noteTab} projects={entityOptions(projects.map(({ project }) => project))} clients={entityOptions(clients.map(({ entity }) => entity))} products={entityOptions(products.map(({ entity }) => entity))} people={entityOptions(people.map(({ entity }) => entity))} />
+            {!visibleNotes.length && <p className="muted">{emptyNotesMessage(noteTab, noteQuery, noteFilters)}</p>}
             {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => void go({ view: "Notes", noteTab, id: note.frontmatter.id })}>
               <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
             </button>)}</div>)}
@@ -1468,10 +1486,10 @@ function App() {
                   <button disabled={readOnly} title="Bulleted list" onClick={() => transformNoteLines((line) => `- ${line.replace(/^[-*+]\s+/, "")}`)}>• List</button><button disabled={readOnly} title="Numbered list" onClick={() => transformNoteLines((line, index) => `${index + 1}. ${line.replace(/^\d+\.\s+/, "")}`)}>1. List</button><button disabled={readOnly} title="Task checkbox" onClick={() => transformNoteLines((line) => `- [ ] ${line.replace(/^- \[[ xX]\]\s+/, "")}`)}>☐ Task</button><button disabled={readOnly} title="Blockquote" onClick={() => transformNoteLines((line) => `> ${line.replace(/^>\s?/, "")}`)}>❯ Quote</button>
                   <button disabled={readOnly} title="Link" onClick={() => editNotes("[", "](https://)", "link text")}>Link</button><button disabled={readOnly || busy} title="Upload image" onClick={() => notesImageInput.current?.click()}>Image</button><input ref={notesImageInput} className="hidden-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadNotesImage(file); event.target.value = ""; }} />
                   <button disabled={readOnly} title="Horizontal divider" onClick={() => insertNotes("\n\n---\n\n")}>―</button><button disabled={readOnly} title="Insert table" onClick={() => insertNotes("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>
-                  <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertNotes(`[${object.frontmatter.title}](lifeos://object/${object.frontmatter.id})`); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
+                  <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertNotes(objectLinkMarkdown(object)); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
                 </div>
-                <textarea ref={notesEditor} disabled={busy || readOnly} value={notesController.draft} onChange={(event) => notesController.setDraft(event.target.value)} onPaste={(event) => { const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
-              </> : notesMode === "visual" ? <VisualMarkdownEditor editorKey={selectedNote.frontmatter.id} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} markdown={notesController.draft} readOnly={busy || readOnly} onChange={notesController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+                <textarea ref={notesEditor} disabled={busy || readOnly} value={notesController.draft} onChange={(event) => notesController.setDraft(event.target.value)} onPaste={(event) => { const paste = markdownPasteAction(event.clipboardData, objectLinks); if (paste?.kind === "image") { event.preventDefault(); void uploadNotesImage(paste.file); } else if (paste) { event.preventDefault(); insertNotes(paste.markdown); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
+              </> : notesMode === "visual" ? <VisualMarkdownEditor linkObjects={objectLinks} editorKey={selectedNote.frontmatter.id} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} markdown={notesController.draft} readOnly={busy || readOnly} onChange={notesController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
               <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}
@@ -1564,7 +1582,7 @@ function EntityCrudPage({ type, title, objects, linkables, labels, onSetExternal
   useEffect(() => setDrafts(Object.fromEntries(objects.map((object) => [object.frontmatter.id, { ...object.frontmatter }]))), [objects]);
   const setField = (id: string, key: string, value: unknown) => setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
   const create = () => { onCreate(type, { title: newTitle }); setNewTitle(""); };
-  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{[...entityFields[type], ...entityLinkFields[type], ...envelopeEntityFields].map((field) => "target" in field ? <EntityLinkPicker key={field.key} field={field} value={draft[field.key]} objects={linkables} labels={labels} selfId={object.frontmatter.id} disabled={busy || readOnly} onChange={(value) => setField(object.frontmatter.id, field.key, value)} /> : <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions">{type === "person" && <PersonExternalControl person={object} labels={labels} disabled={busy || readOnly} onChange={onSetExternal} />}{type === "person" && onConfirmReviewed && <PersonReviewControl person={object} disabled={busy || readOnly} onConfirm={() => onConfirmReviewed(object)} />}<EnvelopeBadges frontmatter={object.frontmatter} /><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button><HistoryLink objectId={object.frontmatter.id} title={object.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={onRestored} /></div></div>; })}</div></article></>;
+  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{[...entityFields[type], ...entityLinkFields[type], ...envelopeEntityFields].map((field) => "target" in field ? <EntityLinkPicker key={field.key} field={field} value={draft[field.key]} objects={linkables} labels={labels} selfId={object.frontmatter.id} disabled={busy || readOnly} onChange={(value) => setField(object.frontmatter.id, field.key, value)} /> : <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions">{type === "person" && <PersonExternalControl person={object} labels={labels} disabled={busy || readOnly} onChange={onSetExternal} />}{type === "person" && onConfirmReviewed && <PersonReviewControl person={object} disabled={busy || readOnly} onConfirm={() => onConfirmReviewed(object)} />}<EnvelopeBadges frontmatter={object.frontmatter} /><small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button><CopyLink object={object} /><HistoryLink objectId={object.frontmatter.id} title={object.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={onRestored} /></div></div>; })}</div></article></>;
 }
 
 /** #39: the person's badge label, and the External choice (Auto follows the email domain). Saves on change. */
