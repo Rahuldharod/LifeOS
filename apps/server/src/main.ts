@@ -5,24 +5,26 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
-import { MockAiProvider } from "@lifeos/ai";
-import { LifeOSApplication, type ReviewEdits, type Weekday } from "@lifeos/application";
+import { LifeOSApplication, type AutoBackups, type ReviewEdits, type Weekday } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
 import { MemoryIndex } from "@lifeos/index-memory";
-import { FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import { exitUnlessDataRoot, FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore, resolveBackupRoot, resolveDataRoot } from "@lifeos/object-store-markdown";
 import { KnownSecrets, MacOSKeychainSecretStore } from "@lifeos/secrets";
-import { connectionSettings, googleConnectionStatus, probeConnectionSecrets, secretRefs } from "./connections.js";
+import { connectionSettings, googleConnectionStatus, secretRefs } from "./connections.js";
+import { calendarSource } from "./calendar-source.js";
 import { httpError } from "./http-errors.js";
+import { shutDown } from "./shutdown.js";
+import { IdleRelease, idleReleaseMs, registerLease } from "./lease.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
 const deviceId = process.env.LIFEOS_DEVICE_ID ?? os.hostname();
-const defaultDataRoot = fileURLToPath(new URL("../../../../data/", import.meta.url));
-const defaultBackupRoot = fileURLToPath(new URL("../../../../backups/", import.meta.url));
-const dataRoot = process.env.LIFEOS_DATA_ROOT ? path.resolve(process.cwd(), process.env.LIFEOS_DATA_ROOT) : defaultDataRoot;
-const backupRoot = process.env.LIFEOS_BACKUP_ROOT ? path.resolve(process.cwd(), process.env.LIFEOS_BACKUP_ROOT) : defaultBackupRoot;
+// ADR 0014: the data lives in Google Drive and is found only through LIFEOS_DATA_ROOT. Before anything else runs
+// (Keychain, lease, index), refuse to start unless that folder holds `.lifeos/schema.md`.
+const dataRoot = await exitUnlessDataRoot(resolveDataRoot());
+const backupRoot = resolveBackupRoot();
 const googleRedirectUri = process.env.GOOGLE_REDIRECT_URI ?? `http://${host}:${port}/api/v1/connections/google/callback`;
 
 const store = new MarkdownObjectStore(dataRoot);
@@ -35,37 +37,33 @@ const secrets = new KnownSecrets(new MacOSKeychainSecretStore());
 if (process.env.GOOGLE_CLIENT_SECRET) await secrets.set(secretRefs.calendarClientSecret, process.env.GOOGLE_CLIENT_SECRET);
 if (process.env.GOOGLE_CLIENT_ID) await secrets.set(secretRefs.calendarClientId, process.env.GOOGLE_CLIENT_ID);
 // Dev mode (PB-001) forces the mock calendar: Google's OAuth callback belongs to the stable app on 4310. It reads no secret at startup.
-const mockCalendarOnly = process.env.LIFEOS_CALENDAR === "mock";
-let google: GoogleCalendarConnector | undefined;
+// #94: outside dev mode the mock never answers; a denied Keychain makes calendar reads offline (stored meetings + banner).
+const calendars = calendarSource({ secrets, mockOnly: process.env.LIFEOS_CALENDAR === "mock", mock: new MockCalendarConnector(), createGoogle: (clientId) => new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets }) });
 /** Startup and Retry: the only reads made just to know what is configured. A denied prompt leaves the card showing Retry. */
-const probeSecrets = async () => {
-  const clientId = await probeConnectionSecrets(secrets);
-  if (clientId && !google) google = new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets });
-};
-if (!mockCalendarOnly) await probeSecrets().catch((error) => console.error("Could not read Google connection secrets", error));
-const mockCalendar = new MockCalendarConnector();
-const calendar = { get provider() { return (google ?? mockCalendar).provider; }, listEvents: (from: Date, to: Date) => (google ?? mockCalendar).listEvents(from, to), listCalendars: () => (google ?? mockCalendar).listCalendars() };
-// The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild; the watcher ignores `_agent/`.
-const application = new LifeOSApplication(store, index, calendar, new MockAiProvider(), deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot));
+await calendars.probe().catch((error) => console.error("Could not read Google connection secrets", error));
+const calendar = calendars.calendar;
+// #98: no AI provider; Claude does the AI work through the skills (ADR 0008). The mock AI is for tests only.
+// The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild, only by the lease holder and only for files
+// whose summary changed; the watcher ignores `_agent/`.
+const application = new LifeOSApplication(store, index, calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease() });
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
+// #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
+let autoBackups: AutoBackups | undefined;
+/** #95: set when a stop begins; writes then answer 503 so the stop backup sees settled data. */
+let stopping = false;
+const backupWarning = async () => {
+  const warning = (await autoBackups?.status().catch(() => undefined))?.warning;
+  return warning ? { backupWarning: warning } : {};
+};
 
 // The stable app serves the UI itself (same origin); only the Vite dev UI needs CORS.
 await server.register(cors, { origin: ["http://127.0.0.1:5174", "http://localhost:5174"] });
 
-server.addHook("preHandler", async (request, reply) => {
-  const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
-  const allowedWithoutLease = request.url === "/api/v1/session/take-over" || request.url === "/api/v1/index/rebuild" || request.url === "/api/v1/settings/connections/retry";
-  if (mutating && !allowedWithoutLease && !(await session.refresh()).writeAllowed) {
-    return reply.status(423).send({ error: session.status().warning ?? "LifeOS is read-only because another device lease is active" });
-  }
-});
+// ADR 0003 and 0015: read-only enforcement, takeover, and the idle auto-handover of the device lease.
+const idle = new IdleRelease(session, idleReleaseMs());
+registerLease(server, { session, idle, stopping: () => stopping });
 
-server.addHook("onResponse", async (request, reply) => {
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && reply.statusCode < 400 && session.status().writeAllowed) await session.touch();
-});
-
-server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh() }));
-server.post("/api/v1/session/take-over", async () => session.takeOver());
+server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
 server.get("/api/v1/objects", async () => application.listObjects());
 server.get<{ Querystring: { q?: string; state?: string } }>("/api/v1/notes", async (request, reply) => {
   const state = request.query.state ?? "open";
@@ -83,6 +81,11 @@ server.put<{ Params: { id: string }; Body: { isExternal?: boolean | null; expect
   if (isExternal !== true && isExternal !== false && isExternal !== null) return reply.status(400).send({ error: "isExternal must be true, false or null" });
   if (typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
   return application.setPersonExternal(request.params.id, isExternal, expectedHash);
+});
+// #87: the user confirms an automatically created ("unreviewed") person.
+server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/people/:id/reviewed", async (request, reply) => {
+  if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required" });
+  return application.confirmPersonReviewed(request.params.id, request.body.expectedHash);
 });
 server.post("/api/v1/index/rebuild", async () => application.rebuildIndex());
 server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/events", async (request, reply) => {
@@ -123,12 +126,29 @@ server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/s
   if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to)) return reply.status(400).send({ error: "Enter a valid calendar date range" });
   return application.syncCalendar(from, to);
 });
-server.get("/api/v1/connections/google", async () => googleConnectionStatus(secrets, google, application.calendarSyncStatus()));
-server.get("/api/v1/settings/connections", async () => connectionSettings(secrets, google, application.calendarSyncStatus()));
+// #88 (PB-022b): like /calendar/events and /calendar/sync, but a calendar that cannot be read (network, expired
+// token, denied Keychain) answers 200 with the meetings already in LifeOS and an `offline` state, never an error.
+const calendarRange = (query: { from?: string; to?: string }) => {
+  const from = query.from ? new Date(query.from) : undefined;
+  const to = query.to ? new Date(query.to) : undefined;
+  return (from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from >= to) ? undefined : { from, to };
+};
+server.get<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/day", async (request, reply) => {
+  const range = calendarRange(request.query);
+  if (!range) return reply.status(400).send({ error: "Enter a valid calendar date range" });
+  return application.calendarDay(range.from, range.to);
+});
+server.post<{ Querystring: { from?: string; to?: string } }>("/api/v1/calendar/day/sync", async (request, reply) => {
+  const range = calendarRange(request.query);
+  if (!range) return reply.status(400).send({ error: "Enter a valid calendar date range" });
+  return application.calendarDay(range.from, range.to, { sync: true });
+});
+server.get("/api/v1/connections/google", async () => googleConnectionStatus(secrets, calendars.google, application.calendarSyncStatus()));
+server.get("/api/v1/settings/connections", async () => connectionSettings(secrets, calendars.google, application.calendarSyncStatus()));
 // #77: Retry on the Connections card after a denied Keychain prompt; may show the prompt again, since the user asked.
 server.post("/api/v1/settings/connections/retry", async () => {
-  await probeSecrets();
-  return connectionSettings(secrets, google, application.calendarSyncStatus());
+  await calendars.probe();
+  return connectionSettings(secrets, calendars.google, application.calendarSyncStatus());
 });
 server.post<{ Params: { provider: "calendar" | "drive" }; Body: { clientId: string; clientSecret: string } }>("/api/v1/settings/connections/google/:provider", async (request, reply) => {
   const clientId = request.body.clientId.trim();
@@ -136,7 +156,7 @@ server.post<{ Params: { provider: "calendar" | "drive" }; Body: { clientId: stri
   if (!clientId.endsWith(".apps.googleusercontent.com") || !clientSecret) return reply.status(400).send({ error: "Enter a valid Google OAuth client ID and client secret" });
   const prefix = request.params.provider === "calendar" ? "google:default" : "google-drive:default";
   await Promise.all([secrets.set(`${prefix}:client-id`, clientId), secrets.set(`${prefix}:client-secret`, clientSecret)]);
-  if (request.params.provider === "calendar") google = new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets });
+  if (request.params.provider === "calendar") calendars.useGoogle(clientId);
   return { configured: true, connected: false };
 });
 server.post<{ Body: { clientId: string; clientSecret: string } }>("/api/v1/connections/google/configure", async (request, reply) => {
@@ -144,18 +164,18 @@ server.post<{ Body: { clientId: string; clientSecret: string } }>("/api/v1/conne
   const clientSecret = request.body.clientSecret.trim();
   if (!clientId.endsWith(".apps.googleusercontent.com") || !clientSecret) return reply.status(400).send({ error: "Enter a valid Google OAuth Desktop client ID and client secret" });
   await Promise.all([secrets.set("google:default:client-id", clientId), secrets.set("google:default:client-secret", clientSecret)]);
-  google = new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets });
-  return googleConnectionStatus(secrets, google, application.calendarSyncStatus());
+  calendars.useGoogle(clientId);
+  return googleConnectionStatus(secrets, calendars.google, application.calendarSyncStatus());
 });
 server.get("/api/v1/connections/google/start", async (_request, reply) => {
-  if (!google) return reply.status(400).send({ error: "Configure the Google OAuth Desktop client before connecting Google Calendar" });
-  return { authorizationUrl: await google.authorizationUrl() };
+  if (!calendars.google) return reply.status(400).send({ error: "Configure the Google OAuth Desktop client before connecting Google Calendar" });
+  return { authorizationUrl: await calendars.google.authorizationUrl() };
 });
 server.get<{ Querystring: { code?: string; state?: string; error?: string } }>("/api/v1/connections/google/callback", async (request, reply) => {
-  if (!google) return reply.status(400).type("text/html").send("<h1>Google Calendar is not configured</h1>");
+  if (!calendars.google) return reply.status(400).type("text/html").send("<h1>Google Calendar is not configured</h1>");
   if (request.query.error) return reply.status(400).type("text/html").send(`<h1>Connection declined</h1><p>${request.query.error}</p>`);
   if (!request.query.code || !request.query.state) return reply.status(400).type("text/html").send("<h1>Invalid OAuth callback</h1>");
-  await google.completeAuthorization(request.query.code, request.query.state);
+  await calendars.google.completeAuthorization(request.query.code, request.query.state);
   await application.recordGoogleConnection();
   return reply.type("text/html").send('<!doctype html><meta charset="utf-8"><title>LifeOS connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;color:#173f32}a{color:#173f32}</style><h1>Google Calendar connected</h1><p>Your tokens are stored in macOS Keychain. You can return to LifeOS.</p><a href="/">Return to LifeOS</a>');
 });
@@ -214,7 +234,6 @@ server.post<{ Params: { id: string }; Body: { sensitivity?: "normal" | "restrict
   if (typeof request.body?.expectedHash !== "string" || typeof request.body.sensitivity !== "string") return reply.status(400).send({ error: "sensitivity and expectedHash are required" });
   return application.setSensitivity(request.params.id, request.body.sensitivity, request.body.expectedHash);
 });
-server.post<{ Params: { id: string } }>("/api/v1/meetings/:id/process", async (request) => application.processMeeting(request.params.id));
 server.post<{ Params: { id: string }; Body: { linkTo?: string } | undefined }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
 // Edits a pending proposal: title, owner, due, priority and context links (#34); `null` clears a field.
 server.patch<{ Params: { id: string }; Body: ReviewEdits }>("/api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));
@@ -229,7 +248,7 @@ server.get<{ Querystring: { date?: string } }>("/api/v1/today", async (request, 
 server.get<{ Querystring: { date?: string; timeZone?: string } }>("/api/v1/today/panels", async (request, reply) => {
   const { date, timeZone } = request.query;
   if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.status(400).send({ error: "date must be YYYY-MM-DD" });
-  return application.todayPanels({ date, timeZone });
+  return { ...await application.todayPanels({ date, timeZone }), ...await backupWarning() };
 });
 server.post<{ Body: { date?: string } }>("/api/v1/focus/replan", async (request, reply) => {
   if (typeof request.body?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(request.body.date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
@@ -295,8 +314,20 @@ server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v
 server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
 server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
 server.post<{ Params: { id: string } }>("/api/v1/history/:id/restore", async (request) => application.restoreVersion(request.params.id));
+// #85: one object's kept versions and the audit events about them, and restoring any kept version.
+// #92: the panel keeps the hash it was opened with and sends it back, so a save made since is never overwritten (409).
+server.get<{ Params: { id: string } }>("/api/v1/objects/:id/history", async (request) => application.historyPanel(request.params.id));
+server.post<{ Params: { id: string }; Body: { versionPath?: string; expectedHash?: string } }>("/api/v1/objects/:id/history/restore", async (request, reply) => {
+  if (typeof request.body?.versionPath !== "string" || typeof request.body.expectedHash !== "string") return reply.status(400).send({ error: "versionPath and expectedHash are required" });
+  return application.restoreKeptVersion(request.params.id, request.body.versionPath, request.body.expectedHash);
+});
 server.get("/api/v1/backups", async () => backups.list());
-server.post("/api/v1/backups", async () => backups.create());
+// "Back up now" (System and the backup warning): recorded like the automatic ones, so a success clears the warning.
+server.post("/api/v1/backups", async () => autoBackups ? autoBackups.runNow() : backups.create());
+// #95: always a JSON state, including before automatic backups start.
+server.get("/api/v1/backups/status", async () => autoBackups ? autoBackups.status() : application.backupStatus(backups));
+server.get("/api/v1/settings/backups", async () => application.getBackupSettings());
+server.put<{ Body: { offDriveFolder?: unknown; expectedHash?: string } }>("/api/v1/settings/backups", async (request) => application.saveBackupSettings({ offDriveFolder: request.body?.offDriveFolder }, request.body?.expectedHash));
 server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
 
 // Serves the production web build (PB-001): unknown non-API paths fall back to index.html.
@@ -328,34 +359,46 @@ try {
   await session.start();
   await application.rebuildIndex();
   // #69: record edits made while the app was closed before this start writes anything.
-  if (session.status().writeAllowed) await application.recordExternalChanges().catch((error) => server.log.error(error));
+  if (session.holdsLease()) await application.recordExternalChanges().catch((error) => server.log.error(error));
   // #56: an operation that cannot be recovered is logged and shown in System Health; the server still starts.
   await application.recoverOperations({ onError: (error, operation) => server.log.error({ err: error, operation: operation.id, kind: operation.kind }, "Operation recovery failed") });
   await application.rebuildIndex();
-  if (session.status().writeAllowed) await application.suggestPersonMerges().catch((error) => server.log.error(error));
+  if (session.holdsLease()) await application.suggestPersonMerges().catch((error) => server.log.error(error));
   // Inbox Drafts and Patch Drafts (ADR 0007, #32) are adopted at startup (which also finishes a batch a crash interrupted), shortly after
-  // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease.
-  const autoAdoption = application.startAutoAdoption({ canWrite: () => session.status().writeAllowed, onError: (error) => server.log.error(error) });
+  // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease
+  // (not after an idle release, ADR 0015).
+  const autoAdoption = application.startAutoAdoption({ canWrite: () => session.holdsLease(), onError: (error) => server.log.error(error) });
   await autoAdoption.runNow();
   await server.listen({ host, port });
+  // Backups (#84): at start, daily while running and at a clean stop; only while this device may write (ADR 0003). Backups only
+  // read the data folder into this Mac's own backup folder, so they keep running after an idle release (ADR 0015).
+  autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed || session.status().releasedAfterIdle, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
   let reconcileTimer: NodeJS.Timeout | undefined;
+  let reconciling: Promise<unknown> = Promise.resolve();
+  const driveCopyOfAppFolder = /^(\.lifeos|_agent|_inbox) \d+\//; // ADR 0016
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
-    if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
+    // Google Drive's conflict copies of app folders ("_agent 2/", "_inbox 2/") are ignored too: they must not trigger rebuilds.
+    if (!filename || driveCopyOfAppFolder.test(filename) || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
     if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/") || filename.startsWith("_inbox/patches/")) autoAdoption.notify(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.
-    const reconcile = () => session.status().writeAllowed ? application.recordExternalChanges() : application.rebuildIndex();
-    reconcileTimer = setTimeout(() => void reconcile().catch((error) => server.log.error(error)), 250);
+    const reconcile = () => session.holdsLease() ? application.recordExternalChanges() : application.rebuildIndex();
+    reconcileTimer = setTimeout(() => { reconciling = reconcile().catch((error) => server.log.error(error)); }, 250);
   });
-  const heartbeat = setInterval(() => void session.touch(), 60_000);
+  // Every minute: extend the lease, or release it after LIFEOS_IDLE_RELEASE_MINUTES without user activity (ADR 0015).
+  const heartbeat = setInterval(() => void idle.tick().catch((error) => server.log.error(error)), 60_000);
   heartbeat.unref();
+  // #95: writes stop, HTTP and adoption go idle, then the clean-stop backup, then the lease is released.
   const shutdown = async () => {
-    clearInterval(heartbeat);
-    clearTimeout(reconcileTimer);
-    autoAdoption.stop();
-    watcher.close();
-    await session.close();
-    await server.close();
+    await shutDown({
+      stopWrites: () => { stopping = true; },
+      stopTriggers: () => { clearInterval(heartbeat); clearTimeout(reconcileTimer); watcher.close(); },
+      closeHttp: () => server.close(),
+      waitForIdle: async () => { await autoAdoption.stop(); await reconciling; },
+      stopBackup: async () => { await autoBackups?.stop(); },
+      closeSession: () => session.close(),
+      log: (error, step) => server.log.error({ err: error, step }, "Stop step failed")
+    });
     process.exit(0);
   };
   process.once("SIGINT", () => void shutdown());

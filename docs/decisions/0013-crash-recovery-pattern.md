@@ -12,6 +12,7 @@ A step is **replay-safe** when running it again after a crash, or twice at once,
 | creates objects and may be replayed | Take IDs from the journal entry, keyed by role; wrap the replay in `ctx.replaying` | `run.newId(replayRoles.…)`, `replayableId`, `replayScope` |
 | writes an audit event a replay could write again | Write it only if no matching audit exists | `ctx.writeAuditOnce(…, { matchOn })`; look up audits with `ctx.findAudits` |
 | can be called twice at once (double-click, two tabs, watcher bursts) | Run calls one at a time per key | `OneAtATime.run(key, work)` |
+| reads the data a multi-file step writes (a backup snapshot during adoption) | Share that step's queue | `ctx.runExclusive` (adoption batches and backups, #95) |
 | creates a file that must not already exist | Publish it exclusively, with the fallback for file systems that refuse hard links | `createExclusive` (object store) |
 
 **Operations journal.** `operationKinds` (ports.ts) lists every kind; `Operation` is the one shape. Each kind has a startup recovery handler in `SystemModule.recovery`, except those in `notRecoveredAtStartup`: adoption replays `adopt-draft` and `adopt-batch` itself at the start of its next batch. A new kind does not compile until it gets a handler or joins that list.

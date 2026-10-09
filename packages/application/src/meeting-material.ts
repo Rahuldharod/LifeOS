@@ -296,6 +296,8 @@ export class MeetingMaterialModule {
 /**
  * The Summary section of a meeting body is fenced by these markers (#66), so finding its end never depends on
  * the headings the summary itself contains. Everything outside the markers is the user's and is never changed.
+ * Markers, heading and text are separated by blank lines (#96): the form the visual editor keeps byte-for-byte.
+ * Sections written before #96 without those blank lines are still read, and respaced when next replaced.
  */
 export const summaryStartMarker = "<!-- lifeos:summary:start -->";
 export const summaryEndMarker = "<!-- lifeos:summary:end -->";
@@ -312,7 +314,7 @@ const isMarkerLine = (line: string, marker: string) => line.trim() === marker;
  */
 export function withSummarySection(body: string, summary: string) {
   const text = summary.replace(markerPattern, "").trim();
-  const section = [summaryStartMarker, "## Summary", "", ...(text ? text.split("\n") : []), summaryEndMarker];
+  const section = [summaryStartMarker, "", "## Summary", "", ...(text ? [...text.split("\n"), ""] : []), summaryEndMarker];
   const lines = body.split("\n");
   const start = lines.findIndex((line) => isMarkerLine(line, summaryStartMarker));
   const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && isMarkerLine(line, summaryEndMarker));

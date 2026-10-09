@@ -1,5 +1,6 @@
 import { AdoptionModule, type AutoAdoptionOptions } from "./adoption.js";
 import { AgentIndexModule, type AgentIndexOptions } from "./agent-index.js";
+import { BackupModule, type AutoBackupOptions, type BackupService } from "./backups.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
 import { CaptureModule } from "./capture.js";
@@ -21,7 +22,7 @@ import { TodayModule, type TodaySettings } from "./today.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
-export type { ExternalChange } from "./history.js";
+export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
@@ -36,10 +37,13 @@ export type { AppliedPatch, UpdateChange, UpdateProposal } from "./patches.js";
 export type { DailyFocusView, FocusItem, FocusItemState, FocusOverrideAction, FocusOverrideChange, FocusOverrideState, ReplanRequest } from "./focus.js";
 export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords, defaultMaxMustDos, maxMustDosLimit, focusOverrideActions } from "./focus.js";
 import type { FocusOverrideChange } from "./focus.js";
+export type { CalendarDay, CalendarOffline, CalendarOfflineReason } from "./calendar.js";
 export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySettings, WaitingGroup, Weekday } from "./today.js";
 export { defaultTodaySettings, weekdays } from "./today.js";
-export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
+export { agentIndexContentWithoutTimestamp, agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
 export type { AgentIndexOptions, AgentIndexStatus } from "./agent-index.js";
+export { stopBackupTimeoutMs } from "./backups.js";
+export type { AutoBackupOptions, AutoBackups, BackupService, BackupSettings, BackupStatus, BackupSummary, BackupTrigger, BackupWarning, BackupWarningKind } from "./backups.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -63,12 +67,13 @@ export class LifeOSApplication {
   private readonly focus: DailyFocusModule;
   private readonly agentIndex: AgentIndexModule;
   private readonly todayModule: TodayModule;
+  private readonly backups: BackupModule;
 
   /**
    * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
    * `agentIndex` writes the derived Agent Index to `_agent/` after index rebuilds (ADR 0009); without it nothing is written.
    */
-  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string } = {}) {
+  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string; agentIndexCanWrite?: () => boolean } = {}) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.patches = new PatchModule(ctx);
     this.people = new PeopleModule(ctx);
@@ -86,9 +91,10 @@ export class LifeOSApplication {
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
     this.history = new HistoryModule(ctx);
-    const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone };
+    const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite };
     this.agentIndex = new AgentIndexModule(ctx, this.decisionsModule, this.adoption, inbox, agentIndex, agentIndexOptions);
     ctx.onRebuild = () => this.agentIndex.schedule();
+    this.backups = new BackupModule(ctx);
   }
 
   // System
@@ -108,6 +114,9 @@ export class LifeOSApplication {
   recordExternalChanges() { return this.history.recordExternalChanges(); }
   /** #79: restores the version copy an external-change audit event names. */
   restoreVersion(auditEventId: string) { return this.history.restoreVersion(auditEventId); }
+  objectHistory(objectId: string) { return this.history.objectHistory(objectId); }
+  historyPanel(objectId: string) { return this.history.historyPanel(objectId); }
+  restoreKeptVersion(objectId: string, versionPath: string, expectedHash: string) { return this.history.restoreKeptVersion(objectId, versionPath, expectedHash); }
   setSensitivity(id: string, sensitivity: Sensitivity, expectedHash: string) { return this.system.setSensitivity(id, sensitivity, expectedHash); }
 
   // Notes
@@ -156,6 +165,7 @@ export class LifeOSApplication {
   // People (#39): display labels (also the Agent Index's source, #43), the External override, internal domains
   personLabels() { return this.people.labels(); }
   setPersonExternal(id: string, isExternal: boolean | null, expectedHash: string) { return this.people.setExternal(id, isExternal, expectedHash); }
+  confirmPersonReviewed(id: string, expectedHash: string) { return this.people.confirmReviewed(id, expectedHash); }
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
   getSelfEmails() { return this.people.getSelfEmails(); }
@@ -177,6 +187,8 @@ export class LifeOSApplication {
   saveCalendarPreferences(input: { disabledCalendarIds: string[]; defaultCalendarId?: string }, expectedHash?: string) { return this.calendarModule.saveCalendarPreferences(input, expectedHash); }
   syncCalendar(from?: Date, to?: Date) { return this.calendarModule.syncCalendar(from, to); }
   calendarSyncStatus() { return this.calendarModule.calendarSyncStatus(); }
+  /** #88: the range from the calendar, or the meetings already in LifeOS, labelled offline, when it cannot be read. */
+  calendarDay(from?: Date, to?: Date, options?: { sync?: boolean }) { return this.calendarModule.calendarDay(from, to, options); }
   recordGoogleConnection() { return this.calendarModule.recordGoogleConnection(); }
 
   // Meetings
@@ -221,4 +233,11 @@ export class LifeOSApplication {
   // Patch Drafts: applied by adoption; listed and undone here
   appliedPatches() { return this.patches.appliedPatches(); }
   undoPatch(auditEventId: string) { return this.patches.undoPatch(auditEventId); }
+
+  // Backups (#84, ADR 0004): automatic at start, clean stop and daily; a weekly off-Drive copy; a warning on failure
+  startAutoBackups(service: BackupService, options?: AutoBackupOptions) { return this.backups.start(service, options); }
+  getBackupSettings() { return this.backups.settings(); }
+  /** The backup status before automatic backups start, so `/backups/status` always answers JSON (#95). */
+  backupStatus(service: BackupService) { return this.backups.idleStatus(service); }
+  saveBackupSettings(input: { offDriveFolder?: unknown }, expectedHash?: string) { return this.backups.saveSettings(input, expectedHash); }
 }

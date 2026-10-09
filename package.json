@@ -8,6 +8,8 @@
     "status": "node scripts/lifeos.mjs status",
     "update-app": "node scripts/lifeos.mjs update",
     "reconcile-meetings": "node --import tsx scripts/reconcile-meetings.mts",
+    "worktrees:prune": "node scripts/prune-worktrees.mjs",
+    "worktrees:check": "node scripts/prune-worktrees.mjs --check",
     "dev": "node scripts/seed-dev-data.mjs && corepack pnpm --parallel --filter @lifeos/server --filter @lifeos/web dev",
     "build": "corepack pnpm -r build",
     "typecheck": "tsc --noEmit",
@@ -27,6 +29,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "happy-dom": "^20.14.5",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
     "vitest": "^3.2.0"

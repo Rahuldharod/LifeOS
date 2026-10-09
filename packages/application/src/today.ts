@@ -1,13 +1,13 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import type { AdoptionModule, InboxStatus } from "./adoption.js";
-import type { CalendarModule } from "./calendar.js";
+import type { CalendarModule, CalendarOffline } from "./calendar.js";
 import { ObjectConflictError, type AppContext } from "./context.js";
 import type { EnrichmentModule, EnrichmentStatus } from "./enrichment.js";
 import type { EntitiesModule } from "./entities.js";
 import type { MeetingsModule } from "./meetings.js";
 import { openPointPeopleIds } from "./open-points.js";
 import type { PeopleModule, PeopleSetupWarning } from "./people.js";
-import { dueDate, isLive, isRestricted } from "./support.js";
+import { dueDate, isLive, isMeetingRestricted } from "./support.js";
 
 /**
  * Today's live panels (#48, PRD "Daily Focus and Today"). Every panel is computed on request from the
@@ -59,6 +59,8 @@ export interface TodayPanels {
   meetingHeavy: boolean;
   /** Set when the calendar could not be read; meetings then come from the index only. */
   calendarError?: string;
+  /** #88: set with `calendarError`: why the calendar could not be read and when it last synced, for the offline banner. */
+  calendarOffline?: CalendarOffline;
   openPointsForMeetings: MeetingOpenPoint[];
   reviewCount: number;
   inbox: Pick<InboxStatus, "awaiting" | "drafts" | "patches">;
@@ -147,7 +149,7 @@ export class TodayModule {
     // Most-waited-on people first; the unknown-person group always last.
     const waitingByPerson = [...groups.values()].sort((a, b) => Number(!a.personId) - Number(!b.personId) || b.tasks.length - a.tasks.length || a.label.localeCompare(b.label));
 
-    const { meetings, calendarError } = await this.dayMeetings(dayStart, dayEnd);
+    const { meetings, calendarError, calendarOffline } = await this.dayMeetings(dayStart, dayEnd);
     const meetingHours = Math.round(meetings.reduce((sum, meeting) => sum + Math.max(0, Math.min(Date.parse(meeting.endsAt), dayEnd) - Math.max(Date.parse(meeting.startsAt), dayStart)), 0) / 360_000) / 10;
     const nextMeetings = meetings.filter((meeting) => Date.parse(meeting.endsAt) > now.getTime()).map((meeting) => ({ ...meeting, inProgress: Date.parse(meeting.startsAt) <= now.getTime() }));
 
@@ -156,7 +158,7 @@ export class TodayModule {
     return {
       date, timeZone,
       overdue: tasks.overdue, dueToday: tasks.dueToday, upcomingHighPriority, waitingByPerson,
-      nextMeetings, meetingHours, meetingHeavy: meetingHours >= settings.meetingHoursThreshold, ...(calendarError ? { calendarError } : {}),
+      nextMeetings, meetingHours, meetingHeavy: meetingHours >= settings.meetingHoursThreshold, ...(calendarError ? { calendarError } : {}), ...(calendarOffline ? { calendarOffline } : {}),
       openPointsForMeetings: this.openPointsFor(meetings),
       reviewCount: tasks.reviewCount,
       inbox: { awaiting: inbox.awaiting, drafts: inbox.drafts, patches: inbox.patches },
@@ -214,6 +216,7 @@ export class TodayModule {
     const { ctx } = this;
     const result: Array<Omit<NextMeeting, "inProgress">> = [];
     let calendarError: string | undefined;
+    let calendarOffline: CalendarOffline | undefined;
     let fromCalendar = false;
     if (ctx.calendar) {
       try {
@@ -224,10 +227,11 @@ export class TodayModule {
           if (event.isAllDay || event.declined || (event.calendarId && disabledCalendarIds.includes(event.calendarId))) continue;
           if (Date.parse(event.endsAt) <= dayStart || Date.parse(event.startsAt) >= dayEnd) continue;
           const meeting = event.meetingId ? ctx.index.get(event.meetingId) : undefined;
-          result.push({ title: event.title, startsAt: event.startsAt, endsAt: event.endsAt, calendarEventId: event.externalId, ...(event.calendarName ? { calendarName: event.calendarName } : {}), ...(event.meetingId ? { meetingId: event.meetingId } : {}), ...(event.noteId ? { noteId: event.noteId } : {}), restricted: isRestricted(meeting) });
+          result.push({ title: event.title, startsAt: event.startsAt, endsAt: event.endsAt, calendarEventId: event.externalId, ...(event.calendarName ? { calendarName: event.calendarName } : {}), ...(event.meetingId ? { meetingId: event.meetingId } : {}), ...(event.noteId ? { noteId: event.noteId } : {}), restricted: isMeetingRestricted(meeting, ctx.index.all()) });
         }
       } catch (error) {
         calendarError = error instanceof Error ? error.message : String(error);
+        calendarOffline = this.calendarModule.offline(error);
       }
     }
     const listed = new Set(result.map((meeting) => meeting.meetingId).filter(Boolean));
@@ -237,9 +241,9 @@ export class TodayModule {
       const startsAt = String(meeting.frontmatter.starts_at), endsAt = String(meeting.frontmatter.ends_at);
       if (!(Date.parse(endsAt) > dayStart && Date.parse(startsAt) < dayEnd)) continue;
       const note = ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
-      result.push({ title: meeting.frontmatter.title, startsAt, endsAt, meetingId: meeting.frontmatter.id, ...(note ? { noteId: note.frontmatter.id } : {}), restricted: isRestricted(meeting) });
+      result.push({ title: meeting.frontmatter.title, startsAt, endsAt, meetingId: meeting.frontmatter.id, ...(note ? { noteId: note.frontmatter.id } : {}), restricted: isMeetingRestricted(meeting, ctx.index.all()) });
     }
-    return { meetings: result.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), calendarError };
+    return { meetings: result.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), calendarError, calendarOffline };
   }
 
   /**

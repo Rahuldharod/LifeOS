@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, link, mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { inboxFolders, type AgentIndexFile, type Operation, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
+import { agentIndexContentWithoutTimestamp, inboxFolders, type AgentIndexFile, type Operation, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
+
+export { dataRootMarker, dataRootProblem, exitUnlessDataRoot, resolveBackupRoot, resolveDataRoot } from "./data-root.js";
 
 /** Codes of file systems (some synced or network ones) that refuse hard links. */
 const hardLinkRefused = new Set(["EPERM", "ENOTSUP", "ENOSYS", "EXDEV", "EOPNOTSUPP"]);
@@ -47,6 +49,11 @@ export interface SessionStatus {
   leaseExpiresAt: string;
   writeAllowed: boolean;
   warning?: string;
+  /**
+   * ADR 0015: this device gave the lease up after a period without user activity. It stays read-only until the user
+   * takes it back (never automatically), exactly like a device that sees another device's lease.
+   */
+  releasedAfterIdle: boolean;
 }
 
 function hash(content: string) {
@@ -265,6 +272,11 @@ export class MarkdownObjectStore implements ObjectStore {
     return newest ? this.read(newest.relativePath) : undefined;
   }
 
+  /** #85: the kept copies of `id`, newest first (highest revision, then most recently saved), without reading them. */
+  async listVersions(id: string) {
+    return (await this.versionFiles(id, true)).map(({ relativePath, revision, hashPrefix }) => ({ relativePath, revision, hashPrefix }));
+  }
+
   async versionAt(id: string, instant: string) {
     const wanted = Date.parse(instant);
     // Oldest saved first within a revision, so the first copy found for the highest revision is the app's own save.
@@ -429,6 +441,9 @@ export class FilesystemAgentIndexWriter implements AgentIndexWriter {
     for (const file of files) {
       if (!file.name || file.name !== path.basename(file.name) || file.name.startsWith(".") || !file.name.endsWith(".md")) throw new Error(`Invalid Agent Index file name: ${file.name}`);
       const target = path.join(this.folder, file.name);
+      // Only the generation time changed: leave the file alone, so a synced folder has nothing to upload.
+      const current = await readFile(target, "utf8").catch(() => undefined);
+      if (current !== undefined && agentIndexContentWithoutTimestamp(current) === agentIndexContentWithoutTimestamp(file.content)) continue;
       const temporary = `${target}.${randomUUID()}.tmp`;
       await writeFile(temporary, file.content, { encoding: "utf8", flag: "wx" });
       await rename(temporary, target).catch(async (error) => { await rm(temporary, { force: true }); throw error; });
@@ -496,73 +511,101 @@ export class FilesystemSessionStore {
   private record?: SessionRecord;
   private writeAllowed = true;
   private warning?: string;
+  /** ADR 0015: set by `release()`, cleared only by `start()` and `takeOver()`. */
+  private released = false;
 
-  constructor(root: string, private readonly deviceId: string, private readonly leaseDurationMs = 5 * 60_000) {
+  /**
+   * The lease file syncs through Google Drive, so it is rewritten at most once per `renewEveryMs` (a third of the lease)
+   * while this device holds a live lease: a renewal or activity recorded sooner is skipped. Claims always write.
+   */
+  private readonly renewEveryMs: number;
+
+  constructor(root: string, private readonly deviceId: string, private readonly leaseDurationMs = 15 * 60_000, private readonly now: () => Date = () => new Date()) {
     this.sessionPath = path.join(path.resolve(root), ".lifeos", "session.md");
+    this.renewEveryMs = leaseDurationMs / 3;
   }
 
   async start() {
     await this.cleanupTemporaryFiles();
+    this.released = false;
     const existing = await this.readRecord();
-    const now = Date.now();
-    if (existing && existing.device_id !== this.deviceId && Date.parse(existing.lease_expires_at) > now) {
+    if (existing && this.isForeignActive(existing)) {
       this.record = existing;
       this.writeAllowed = false;
-      this.warning = `Device ${existing.device_id} has an active lease until ${existing.lease_expires_at}`;
+      this.warning = this.foreignWarning(existing);
       return this.status();
     }
     await this.claim();
     return this.status();
   }
 
+  /** The user's explicit takeover (also "Take back" after an idle release). */
   async takeOver() {
+    this.released = false;
     await this.claim();
     return this.status();
   }
 
   async refresh() {
     const existing = await this.readRecord();
-    if (existing && existing.device_id !== this.deviceId && Date.parse(existing.lease_expires_at) > Date.now()) {
-      this.record = existing;
+    if (existing) this.record = existing;
+    if (existing && this.isForeignActive(existing)) {
       this.writeAllowed = false;
-      this.warning = `Device ${existing.device_id} has an active lease until ${existing.lease_expires_at}`;
-    } else if (!existing || existing.device_id === this.deviceId || Date.parse(existing.lease_expires_at) <= Date.now()) {
+      this.warning = this.foreignWarning(existing);
+    } else if (this.released) {
+      this.writeAllowed = false;
+      this.warning = "This Mac released the lease after a period without activity, so it is read-only until you take it back";
+    } else {
       this.writeAllowed = true;
       this.warning = undefined;
-      if (existing) this.record = existing;
     }
     return this.status();
   }
 
+  /** User activity: claims a free lease or extends this device's own, and records the activity time. */
   async touch() {
     await this.refresh();
     if (!this.writeAllowed) return this.status();
-    const now = new Date();
-    const startedAt = this.record?.device_id === this.deviceId ? this.record.started_at : now.toISOString();
-    this.record = {
-      device_id: this.deviceId,
-      started_at: startedAt,
-      last_activity_at: now.toISOString(),
-      lease_expires_at: new Date(now.getTime() + this.leaseDurationMs).toISOString()
-    };
-    await this.writeRecord(this.record);
+    await this.write({ activity: true });
     return this.status();
   }
 
+  /**
+   * The background heartbeat: extends this device's own lease without counting as user activity. Unlike `touch()` it
+   * never claims a free lease, so a timer alone can never take the lease from a device that released it or let it go.
+   */
+  async renew() {
+    await this.refresh();
+    if (this.holdsLease()) await this.write({ activity: false });
+    return this.status();
+  }
+
+  /** True while this device holds the lease: only then may background work (adoption, external-edit audits) write objects. */
+  holdsLease() {
+    return this.writeAllowed && !this.released && this.record?.device_id === this.deviceId;
+  }
+
+  /** ADR 0015: gives the lease up after inactivity (expires it now). Read-only until `takeOver()`. */
+  async release() {
+    await this.refresh();
+    if (!this.holdsLease() || !this.record) return this.status();
+    const now = this.now().toISOString();
+    this.record = { ...this.record, lease_expires_at: now };
+    await this.writeRecord(this.record);
+    this.released = true;
+    return this.refresh();
+  }
+
   async close() {
-    if (!this.writeAllowed || this.record?.device_id !== this.deviceId) return;
-    const now = new Date().toISOString();
+    if (!this.writeAllowed || this.released || this.record?.device_id !== this.deviceId) return;
+    const now = this.now().toISOString();
     this.record = { ...this.record, last_activity_at: now, lease_expires_at: now };
     await this.writeRecord(this.record);
   }
 
   status(): SessionStatus {
-    const record = this.record ?? {
-      device_id: this.deviceId,
-      started_at: new Date(0).toISOString(),
-      last_activity_at: new Date(0).toISOString(),
-      lease_expires_at: new Date(0).toISOString()
-    };
+    const epoch = new Date(0).toISOString();
+    const record = this.record ?? { device_id: this.deviceId, started_at: epoch, last_activity_at: epoch, lease_expires_at: epoch };
     return {
       currentDeviceId: this.deviceId,
       activeDeviceId: record.device_id,
@@ -570,18 +613,48 @@ export class FilesystemSessionStore {
       lastActivityAt: record.last_activity_at,
       leaseExpiresAt: record.lease_expires_at,
       writeAllowed: this.writeAllowed,
-      warning: this.warning
+      warning: this.warning,
+      releasedAfterIdle: this.released
     };
+  }
+
+  private isForeignActive(record: SessionRecord) {
+    return record.device_id !== this.deviceId && Date.parse(record.lease_expires_at) > this.now().getTime();
+  }
+
+  private foreignWarning(record: SessionRecord) {
+    return `Device ${record.device_id} has an active lease until ${record.lease_expires_at}`;
   }
 
   private async claim() {
     this.writeAllowed = true;
     this.warning = undefined;
-    const now = new Date();
+    const now = this.now();
     this.record = {
       device_id: this.deviceId,
       started_at: now.toISOString(),
       last_activity_at: now.toISOString(),
+      lease_expires_at: new Date(now.getTime() + this.leaseDurationMs).toISOString()
+    };
+    await this.writeRecord(this.record);
+  }
+
+  /**
+   * Claims or extends this device's lease; `activity` also moves `last_activity_at` (user activity only). Skipped when
+   * this device's lease and activity time were written within `renewEveryMs`, so `last_activity_at` lags by at most that.
+   */
+  private async write({ activity }: { activity: boolean }) {
+    const now = this.now();
+    const own = this.record?.device_id === this.deviceId ? this.record : undefined;
+    if (own) {
+      const recent = (at: string) => now.getTime() - Date.parse(at) < this.renewEveryMs;
+      const leaseRenewedRecently = Date.parse(own.lease_expires_at) - now.getTime() > this.leaseDurationMs - this.renewEveryMs;
+      if (leaseRenewedRecently && (!activity || recent(own.last_activity_at))) return;
+    }
+    this.record = {
+      device_id: this.deviceId,
+      started_at: own?.started_at ?? now.toISOString(),
+      last_activity_at: activity || !own ? now.toISOString() : own.last_activity_at,
       lease_expires_at: new Date(now.getTime() + this.leaseDurationMs).toISOString()
     };
     await this.writeRecord(this.record);

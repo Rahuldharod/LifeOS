@@ -1,6 +1,6 @@
 # ADR 0009: Agents read a derived, disposable Agent Index
 
-- Status: Accepted
+- Status: Accepted; amended by [ADR 0016](0016-quiet-drive-writes.md) (2026-10-09): a file is written only when its content changed, and only by the lease holder.
 - Date: 2026-10-04
 - Source: Phase A PRD (spec #21)
 - Supersedes: the map #1 assumption that Agents scan object files directly to answer questions.
