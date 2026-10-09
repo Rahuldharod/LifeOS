@@ -47,6 +47,7 @@ import { LeaseBanner, takeoverCaution } from "./LeaseBanner.js";
 import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
+import { PermanentDeleteButton } from "./PermanentDelete.js";
 import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
 
 type CrepeInstance = {
@@ -1378,7 +1379,7 @@ function App() {
             {noteTab === "deleted" ? (!selectedDeleted ? <article className="empty-state"><h3>Select a deleted note</h3><p>Deleted notes are kept on disk. Choose one to read it or restore it.</p></article> : <article className="editor-card">
               <div className="editor-heading"><div><span>DELETED {selectedDeleted.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedDeleted.frontmatter.title}</h3></div></div>
               <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{selectedDeleted.body || "_Empty note._"}</ReactMarkdown></div>
-              <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
+              <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><PermanentDeleteButton key={selectedDeleted.frontmatter.id} note={selectedDeleted} disabled={busy || readOnly} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onDeleted={async (deleted) => { if (deleted) setSelectedDeletedId(undefined); await loadCollections(); }} /><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedDeleted.frontmatter.created_at)} /><Meta label="Deleted" value={formatDate(String(selectedDeleted.frontmatter.deleted_at))} /><Meta label="Revision" value={String(selectedDeleted.frontmatter.revision)} /><Meta label="File" value={selectedDeleted.relativePath} /></div>
             </article>) :
             selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :

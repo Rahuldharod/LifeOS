@@ -22,6 +22,8 @@ import { TodayModule, type TodaySettings } from "./today.js";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
+export { NoteReferencedError } from "./notes.js";
+export type { ObjectReference, PurgeCheck } from "./notes.js";
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
@@ -84,11 +86,11 @@ export class LifeOSApplication {
     this.review = new ReviewModule(ctx, this.meetings, this.decisionsModule);
     this.openPointsModule = new OpenPointsModule(ctx, this.decisionsModule);
     this.enrichment = new EnrichmentModule(ctx, this.meetings, this.calendarModule, inbox);
-    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment, this.openPointsModule, this.patches);
+    this.notesModule = new NotesModule(ctx);
+    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment, this.openPointsModule, this.patches, this.notesModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.focus = new DailyFocusModule(ctx, inbox);
     this.todayModule = new TodayModule(ctx, this.entitiesModule, this.adoption, this.enrichment, this.meetings, this.calendarModule, this.people);
-    this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
     this.history = new HistoryModule(ctx);
     const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite };
@@ -127,6 +129,10 @@ export class LifeOSApplication {
   updateNoteMetadata(id: string, changes: Record<string, unknown>, expectedHash: string) { return this.notesModule.updateNoteMetadata(id, changes, expectedHash); }
   deleteNote(id: string, expectedHash: string) { return this.notesModule.deleteNote(id, expectedHash); }
   restoreNote(id: string, expectedHash: string) { return this.notesModule.restoreNote(id, expectedHash); }
+  /** PB-030: front-matter references that block a permanent delete, and body links it would leave missing. */
+  notePurgeCheck(id: string) { return this.notesModule.purgeCheck(id); }
+  /** PB-030: deletes a deleted note's file and kept versions for good (ADR 0017). */
+  purgeNote(id: string, expectedHash: string) { return this.notesModule.purgeNote(id, expectedHash); }
 
   // Entities
   entities(type: EntityType) { return this.entitiesModule.entities(type); }

@@ -354,6 +354,25 @@ export class MarkdownObjectStore implements ObjectStore {
     }
   }
 
+  /**
+   * PB-030: removes an object file, only while it still has `expectedHash`. Hidden `.lifeos/` paths are refused:
+   * they are not objects. A missing file is not an error (replay after a crash).
+   */
+  async remove(relativePath: string, expectedHash: string) {
+    const target = this.safePath(relativePath);
+    if (relativePath.split(/[\\/]/)[0] === ".lifeos" || !relativePath.endsWith(".md")) throw new Error(`Not an object file: ${relativePath}`);
+    const current = await readFile(target, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+    if (current === undefined) return;
+    if (hash(current) !== expectedHash) throw new ObjectConflictError(`Object changed since it was opened: ${relativePath}`);
+    await rm(target, { force: true });
+  }
+
+  /** PB-030: removes the kept copies of `id` (ADR 0012). Idempotent. */
+  async removeVersions(id: string) {
+    if (!id || id !== path.basename(id) || id.startsWith(".")) throw new Error(`Invalid object ID: ${id}`);
+    await rm(this.safePath(this.versionFolder(id)), { recursive: true, force: true });
+  }
+
   private safePath(relativePath: string) {
     const target = path.resolve(this.root, relativePath);
     if (target !== this.root && !target.startsWith(`${this.root}${path.sep}`)) throw new Error("Path escapes the LifeOS data root");

@@ -17,6 +17,7 @@ import { calendarSource } from "./calendar-source.js";
 import { httpError } from "./http-errors.js";
 import { shutDown } from "./shutdown.js";
 import { IdleRelease, idleReleaseMs, registerLease } from "./lease.js";
+import { registerNotePurge } from "./note-purge-routes.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
@@ -229,6 +230,7 @@ server.delete<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api
   if (typeof request.body?.expectedHash !== "string") return reply.status(400).send({ error: "expectedHash is required to delete a note" });
   return application.deleteNote(request.params.id, request.body.expectedHash);
 });
+registerNotePurge(server, application);
 server.post<{ Params: { id: string }; Body: { expectedHash: string } }>("/api/v1/objects/:id/archive", async (request) => application.archiveObject(request.params.id, request.body.expectedHash));
 server.post<{ Params: { id: string }; Body: { sensitivity?: "normal" | "restricted"; expectedHash?: string } }>("/api/v1/objects/:id/sensitivity", async (request, reply) => {
   if (typeof request.body?.expectedHash !== "string" || typeof request.body.sensitivity !== "string") return reply.status(400).send({ error: "sensitivity and expectedHash are required" });

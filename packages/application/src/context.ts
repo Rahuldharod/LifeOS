@@ -94,6 +94,16 @@ export class AppContext {
           return written;
         } finally { this.trackWrite(id, -1); }
       },
+      // PB-030: a removal counts as an app write, so external-edit detection never reports it as deleted outside the app.
+      remove: store.remove ? async (relativePath, expectedHash) => {
+        const id = this.index.all().find((object) => object.relativePath === relativePath)?.frontmatter.id;
+        if (id) { this.assertWritable(id); this.trackWrite(id, 1); }
+        try {
+          await store.remove!(relativePath, expectedHash);
+          if (id) this.known.delete(id);
+        } finally { if (id) this.trackWrite(id, -1); }
+      } : undefined,
+      removeVersions: store.removeVersions?.bind(store),
       keepVersion: store.keepVersion?.bind(store),
       latestVersion: store.latestVersion?.bind(store),
       latestVersionInfo: store.latestVersionInfo?.bind(store),

@@ -1,11 +1,39 @@
-import type { ObjectEnvelope } from "@lifeos/domain";
-import { foldForSearch, type AppContext } from "./context.js";
-import { isLive, sameValue } from "./support.js";
+import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
+import { foldForSearch, ObjectConflictError, type AppContext } from "./context.js";
+import { operationKinds, type Operation } from "./ports.js";
+import { isLive, OneAtATime, sameValue } from "./support.js";
 
 const noteTypes = ["meeting-note", "knowledge-note"];
 
+/** Another object that points at a note, as the permanent-delete check lists it (PB-030). */
+export interface ObjectReference { id: string; type: string; title: string }
+
+/**
+ * What stands in the way of deleting a note permanently (PB-030). `blockers` reference it in their front matter
+ * (`*_id` / `*_ids`) and refuse the delete; `bodyLinks` only link to it in their text (`lifeos://object/<id>`),
+ * which is a warning: those links will show as missing.
+ */
+export interface PurgeCheck { blockers: ObjectReference[]; bodyLinks: ObjectReference[] }
+
+/** PB-030: the note is still referenced in other objects' front matter; `references` lists them. Mapped to HTTP 409. */
+export class NoteReferencedError extends Error {
+  override name = "NoteReferencedError";
+  constructor(message: string, readonly references: ObjectReference[]) { super(message); }
+}
+
+interface PurgePayload { noteId: string; relativePath: string; title: string; contentHash: string }
+
+/** True when a front-matter field named `*_id` or `*_ids` holds `id`. */
+function referencesInFrontmatter(frontmatter: ObjectEnvelope, id: string) {
+  return Object.entries(frontmatter).some(([field, value]) =>
+    (field.endsWith("_id") && value === id) || (field.endsWith("_ids") && Array.isArray(value) && value.includes(id)));
+}
+
 /** Meeting and knowledge notes: listing, search, body and metadata edits, delete and restore. */
 export class NotesModule {
+  /** PB-030: one permanent delete per note at a time (double-click, two tabs; ADR 0013). */
+  private readonly purges = new OneAtATime();
+
   constructor(private readonly ctx: AppContext) {}
 
   notes() {
@@ -96,7 +124,7 @@ export class NotesModule {
   /**
    * Deletes a meeting or knowledge note as a tombstone (PB-021): `deleted_at` is set and the file
    * stays on disk, so another device cannot resurrect it and it can be restored by hand. Physical
-   * removal is a separate maintenance step. The meeting itself is kept; opening its event again
+   * removal is a separate, explicit step (`purgeNote`, PB-030). The meeting itself is kept; opening its event again
    * starts a fresh note. Idempotent: deleting an already-deleted note returns it unchanged.
    */
   async deleteNote(id: string, expectedHash: string) {
@@ -128,5 +156,98 @@ export class NotesModule {
     await this.ctx.writeAudit("note.restored", id, now, { type: current.frontmatter.type, meeting_id: meetingId });
     await this.ctx.rebuildIndex();
     return updated;
+  }
+
+  /** PB-030: what the confirmation pop-up shows before a permanent delete. Only for deleted notes. */
+  purgeCheck(id: string): PurgeCheck {
+    this.tombstoned(id);
+    return this.references(id);
+  }
+
+  /**
+   * Deletes a deleted note for good (PB-030, ADR 0017): removes its Markdown file, then its kept versions, then
+   * writes a `note.purged` audit with its id and title only. Refused unless the note is tombstoned, unchanged since
+   * `expectedHash`, and no other object references it in its front matter. Journalled (ADR 0013): a crash between
+   * the steps is finished at the next start, or by retrying the same delete.
+   */
+  purgeNote(id: string, expectedHash: string) {
+    return this.purges.run(id, async () => {
+      if (!expectedHash) throw new Error("expectedHash is required to delete a note permanently");
+      if (!this.ctx.objects.remove) throw new Error("This object store cannot delete files");
+      const pending = (await this.ctx.objects.incompleteOperations?.() ?? [])
+        .find((operation) => operation.kind === operationKinds.purgeNote && operation.payload.noteId === id);
+      if (pending) {
+        // A retry after a crash: finish the delete the user already confirmed.
+        await this.ctx.rebuildIndex();
+        const finished = await this.finishPurge(pending);
+        if (finished) return finished;
+      }
+      const current = this.tombstoned(id);
+      if (current.contentHash !== expectedHash) throw new ObjectConflictError(`Note changed since it was opened: ${current.relativePath}`);
+      const { blockers } = this.references(id);
+      if (blockers.length) throw new NoteReferencedError(`Still referenced by ${blockers.length === 1 ? "1 object" : `${blockers.length} objects`}; remove those links first`, blockers);
+      const payload: PurgePayload = { noteId: id, relativePath: current.relativePath, title: current.frontmatter.title, contentHash: expectedHash };
+      const operation: Operation = { id: uuidV7(), kind: operationKinds.purgeNote, payload: { ...payload } };
+      await this.ctx.objects.prepareOperation?.(operationKinds.purgeNote, operation.payload, operation.id);
+      const finished = await this.finishPurge(operation);
+      if (!finished) throw new ObjectConflictError(`Note changed since it was opened: ${current.relativePath}`);
+      return finished;
+    });
+  }
+
+  /** Startup recovery of an interrupted `purge-note` (ADR 0013). */
+  async recoverPurge(operation: Operation) {
+    await this.ctx.rebuildIndex();
+    await this.purges.run(String(operation.payload.noteId), () => this.finishPurge(operation));
+  }
+
+  /**
+   * Runs the remaining steps of a journalled permanent delete; each is safe to repeat. While the file is still
+   * there it is checked again (still deleted, unchanged, unreferenced): if anything moved on, nothing is removed
+   * and the operation is closed (rolled back), returning undefined.
+   */
+  private async finishPurge(operation: Operation) {
+    const { noteId, title, contentHash } = operation.payload as unknown as PurgePayload;
+    const current = this.ctx.index.get(noteId);
+    if (current) {
+      const unchanged = current.contentHash === contentHash && !!current.frontmatter.deleted_at && !this.references(noteId).blockers.length;
+      try {
+        if (!unchanged) throw new ObjectConflictError(`Note changed since it was opened: ${current.relativePath}`);
+        await this.ctx.objects.remove!(current.relativePath, contentHash);
+      } catch (error) {
+        // Nothing was removed: close the operation so recovery never deletes without the user's guard.
+        await this.ctx.objects.completeOperation?.(operation.id);
+        if (error instanceof Error && error.name === "ObjectConflictError") return undefined;
+        throw error;
+      }
+    }
+    await this.ctx.objects.removeVersions?.(noteId);
+    const now = new Date().toISOString();
+    await this.ctx.writeAuditOnce("note.purged", noteId, now, { operation_id: operation.id, title }, { matchOn: ["operation_id"] });
+    await this.ctx.objects.completeOperation?.(operation.id);
+    await this.ctx.rebuildIndex();
+    return { id: noteId, title };
+  }
+
+  private tombstoned(id: string) {
+    const current = this.ctx.required(id);
+    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be deleted permanently");
+    if (!current.frontmatter.deleted_at) throw new Error("Only deleted notes can be deleted permanently; delete the note first");
+    return current;
+  }
+
+  private references(id: string): PurgeCheck {
+    const link = `lifeos://object/${id}`;
+    const blockers: ObjectReference[] = [];
+    const bodyLinks: ObjectReference[] = [];
+    for (const object of this.ctx.index.all()) {
+      const { frontmatter } = object;
+      // Audit events name the note in `object_id` by design; they are history, not links.
+      if (frontmatter.id === id || frontmatter.type === "audit-event") continue;
+      const reference = { id: frontmatter.id, type: frontmatter.type, title: frontmatter.title };
+      if (referencesInFrontmatter(frontmatter, id)) blockers.push(reference);
+      else if (object.body.includes(link)) bodyLinks.push(reference);
+    }
+    return { blockers, bodyLinks };
   }
 }
