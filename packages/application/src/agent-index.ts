@@ -17,7 +17,17 @@ import { isLive, isMeetingRestricted, isRestricted, OneAtATime } from "./support
 export const agentIndexContractVersion = 1;
 export const agentIndexFileNames = ["overview.md", "tasks.md", "waiting-on.md", "open-points.md", "decisions.md", "projects-clients-products.md", "people.md", "meetings.md", "pending-adoption.md"] as const;
 export const defaultAgentIndexDebounceMs = 1500;
-export interface AgentIndexOptions { debounceMs?: number; timeZone?: string }
+/** `canWrite`: false while another device holds the lease (ADR 0003); nothing is written then. */
+export interface AgentIndexOptions { debounceMs?: number; timeZone?: string; canWrite?: () => boolean }
+
+/**
+ * A file's content without its generation time: a writer compares this to skip files whose summary did not
+ * change, so a rebuild that changes nothing touches no file (and a synced folder uploads nothing).
+ */
+export const agentIndexContentWithoutTimestamp = (content: string) => {
+  const generated = /^generated_at: (\S+)$/m.exec(content)?.[1];
+  return generated ? content.replaceAll(generated, "") : content;
+};
 export interface AgentIndexStatus { generatedAt?: string; error?: string }
 
 const day = 86_400_000;
@@ -38,10 +48,12 @@ export class AgentIndexModule {
   private state: AgentIndexStatus = {};
   private readonly debounceMs: number;
   readonly timeZone: string;
+  private readonly canWrite: () => boolean;
 
   constructor(private readonly ctx: AppContext, private readonly decisions: DecisionsModule, private readonly adoption: AdoptionModule, private readonly inbox?: InboxStore, private readonly writer?: AgentIndexWriter, options: AgentIndexOptions = {}) {
     this.debounceMs = options.debounceMs ?? defaultAgentIndexDebounceMs;
     this.timeZone = options.timeZone ?? "Europe/Paris";
+    this.canWrite = options.canWrite ?? (() => true);
   }
 
   /** Debounced: a burst of rebuilds (an adoption batch, a review acceptance) produces one write. */
@@ -52,12 +64,16 @@ export class AgentIndexModule {
     this.timer.unref?.();
   }
 
-  /** Writes now (cancelling any pending timer). Writes are serialized; a failure is kept for System Health, never thrown. */
+  /**
+   * Writes now (cancelling any pending timer). Writes are serialized; a failure is kept for System Health, never thrown.
+   * Skipped while this device may not write, so only the lease holder writes `_agent/` (two writers make Drive conflict copies).
+   */
   write(options: { now?: Date } = {}): Promise<AgentIndexStatus> {
     clearTimeout(this.timer);
     this.timer = undefined;
     if (!this.writer) return Promise.resolve(this.state);
     return this.running.run("write", async () => {
+      if (!this.canWrite()) return this.state;
       try {
         const now = options.now ?? new Date();
         await this.writer!.write(await this.build(now));

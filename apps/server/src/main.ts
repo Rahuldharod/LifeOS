@@ -43,8 +43,9 @@ const calendars = calendarSource({ secrets, mockOnly: process.env.LIFEOS_CALENDA
 await calendars.probe().catch((error) => console.error("Could not read Google connection secrets", error));
 const calendar = calendars.calendar;
 // #98: no AI provider; Claude does the AI work through the skills (ADR 0008). The mock AI is for tests only.
-// The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild; the watcher ignores `_agent/`.
-const application = new LifeOSApplication(store, index, calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot));
+// The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild, only by the lease holder and only for files
+// whose summary changed; the watcher ignores `_agent/`.
+const application = new LifeOSApplication(store, index, calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease() });
 const server = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 // #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
 let autoBackups: AutoBackups | undefined;
@@ -374,8 +375,10 @@ try {
   autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed || session.status().releasedAfterIdle, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
   let reconcileTimer: NodeJS.Timeout | undefined;
   let reconciling: Promise<unknown> = Promise.resolve();
+  const driveCopyOfAppFolder = /^(\.lifeos|_agent|_inbox) \d+\//; // ADR 0016
   const watcher = watch(dataRoot, { recursive: true }, (_event, filename) => {
-    if (!filename || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
+    // Google Drive's conflict copies of app folders ("_agent 2/", "_inbox 2/") are ignored too: they must not trigger rebuilds.
+    if (!filename || driveCopyOfAppFolder.test(filename) || filename.startsWith(".lifeos/") || filename.startsWith("_agent/")) return;
     if (filename.startsWith("_inbox/")) { if (filename.startsWith("_inbox/drafts/") || filename.startsWith("_inbox/patches/")) autoAdoption.notify(); return; }
     clearTimeout(reconcileTimer);
     // U4, U5: record edits made outside the app; read-only (another device holds the lease) only refreshes the index.

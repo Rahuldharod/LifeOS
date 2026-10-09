@@ -20,12 +20,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function setUp(idleMinutes = 15) {
+async function setUp(idleMinutes = 15, leaseMinutes = 5) {
   const root = await mkdtemp(path.join(tmpdir(), "lifeos-idle-"));
   roots.push(root);
   const clock = { now: Date.parse("2026-10-07T08:00:00.000Z") };
   const advance = (minutes: number) => { clock.now += minutes * minute; };
-  const device = (id: string) => new FilesystemSessionStore(root, id, 5 * minute, () => new Date(clock.now));
+  const device = (id: string) => new FilesystemSessionStore(root, id, leaseMinutes * minute, () => new Date(clock.now));
   const session = device("desk-mac");
   await session.start();
   const idle = new IdleRelease(session, idleMinutes * minute, () => clock.now);
@@ -138,6 +138,60 @@ describe("what counts as activity", () => {
     expect(countsAsActivity("POST", "/api/v1/capture")).toBe(true);
     expect(countsAsActivity("GET", "/api/v1/notes")).toBe(false);
     for (const url of ["/api/v1/backups", "/api/v1/backups/b1/verify", "/api/v1/calendar/day/sync?from=x", "/api/v1/index/rebuild", "/api/v1/settings/connections/retry", "/api/v1/inbox/adopt"]) expect(countsAsActivity("POST", url)).toBe(false);
+  });
+});
+
+describe("few lease-file writes (the lease file syncs through Google Drive)", () => {
+  /** Counts how many times the lease file's content changes while `run` executes, sampling after every step. */
+  const countWrites = async (leaseFile: () => Promise<Record<string, string>>, steps: Array<() => Promise<unknown>>) => {
+    let last = JSON.stringify(await leaseFile());
+    let writes = 0;
+    for (const step of steps) {
+      await step();
+      const now = JSON.stringify(await leaseFile());
+      if (now !== last) writes += 1;
+      last = now;
+    }
+    return writes;
+  };
+
+  it("defaults to a 15-minute lease", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-idle-"));
+    roots.push(root);
+    const now = new Date("2026-10-07T08:00:00.000Z");
+    const session = new FilesystemSessionStore(root, "desk-mac", undefined, () => now);
+    await session.start();
+    expect(session.status().leaseExpiresAt).toBe(new Date(now.getTime() + 15 * minute).toISOString());
+  });
+
+  it("GIVEN a 15-minute lease WHEN the minute heartbeat runs for 15 minutes THEN the file is rewritten only every 5 minutes, and the lease never lapses", async () => {
+    const { session, leaseFile, advance, idle, clock } = await setUp(60, 15);
+    const writes = await countWrites(leaseFile, Array.from({ length: 15 }, () => async () => {
+      advance(1);
+      await idle.tick();
+      expect(Date.parse((await leaseFile()).lease_expires_at!)).toBeGreaterThan(clock.now + 9 * minute);
+    }));
+    expect(writes).toBe(3);
+    expect(session.holdsLease()).toBe(true);
+  });
+
+  it("GIVEN a 15-minute lease WHEN the user is active every minute THEN activity is recorded at most every 5 minutes", async () => {
+    const { request, leaseFile, advance, idle, clock } = await setUp(60, 15);
+    const writes = await countWrites(leaseFile, Array.from({ length: 15 }, () => async () => {
+      advance(1);
+      await idle.tick();
+      await request("POST", "/api/v1/session/activity");
+    }));
+    expect(writes).toBe(3);
+    expect(clock.now - Date.parse((await leaseFile()).last_activity_at!)).toBeLessThan(5 * minute);
+  });
+
+  it("GIVEN the lease expired WHEN the user is active THEN it is claimed at once, however recent the last write", async () => {
+    const { session, leaseFile, advance, request, clock } = await setUp(60, 15);
+    advance(16);
+    expect((await request("POST", "/api/v1/session/activity")).json()).toMatchObject({ writeAllowed: true });
+    expect(session.holdsLease()).toBe(true);
+    expect((await leaseFile()).lease_expires_at).toBe(new Date(clock.now + 15 * minute).toISOString());
   });
 });
 

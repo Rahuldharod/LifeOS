@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,10 +29,10 @@ async function seed(root: string, folder: string, type: string, title: string, f
 }
 
 /** A long debounce by default: tests write explicitly, so no timer fires while a temp root is being removed. */
-async function vault(writer?: AgentIndexWriter, debounceMs = 60_000) {
+async function vault(writer?: AgentIndexWriter, debounceMs = 60_000, canWrite?: () => boolean) {
   const root = await mkdtemp(path.join(tmpdir(), "lifeos-agent-index-"));
   roots.push(root);
-  const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), undefined, undefined, "test", new FilesystemInboxStore(root), writer ?? new FilesystemAgentIndexWriter(root), { agentIndexDebounceMs: debounceMs, timeZone: "Europe/Paris" });
+  const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), undefined, undefined, "test", new FilesystemInboxStore(root), writer ?? new FilesystemAgentIndexWriter(root), { agentIndexDebounceMs: debounceMs, timeZone: "Europe/Paris", agentIndexCanWrite: canWrite });
   return { root, application };
 }
 
@@ -74,6 +74,8 @@ async function populated() {
 const read = (root: string, name: string) => readFile(path.join(root, "_agent", name), "utf8");
 const files = ["overview.md", "tasks.md", "waiting-on.md", "open-points.md", "decisions.md", "projects-clients-products.md", "people.md", "meetings.md", "pending-adoption.md"];
 /** The part of a file between a heading and the next heading of the same level. */
+/** The ID of the self person in a populated vault. */
+const populatedSelf = async (root: string) => (await readFile(path.join(root, "people", (await readdir(path.join(root, "people"))).find((name) => name.startsWith("robin-doe"))!), "utf8")).match(/^id: (.+)$/m)![1]!;
 const section = (content: string, heading: string) => content.split(heading)[1]?.split(/\n## /)[0] ?? "";
 
 describe("Agent Index (#43)", () => {
@@ -298,5 +300,40 @@ describe("Agent Index (#43)", () => {
     fail = false;
     await application.writeAgentIndex({ now });
     expect((await application.health()).diagnostics).toEqual([]);
+  });
+
+  it("leaves a file untouched when only its generation time would change, so Drive has nothing to upload", async () => {
+    const { root, application } = await populated();
+    await application.writeAgentIndex({ now });
+    const before = await Promise.all(files.map(async (name) => ({ name, content: await read(root, name), mtimeMs: (await stat(path.join(root, "_agent", name))).mtimeMs })));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await application.writeAgentIndex({ now: new Date(now.getTime() + 60_000) });
+    for (const file of before) {
+      expect(await read(root, file.name)).toBe(file.content);
+      expect((await stat(path.join(root, "_agent", file.name))).mtimeMs).toBe(file.mtimeMs);
+    }
+    expect(application.agentIndexStatus().generatedAt).toBe(new Date(now.getTime() + 60_000).toISOString());
+
+    // A real change rewrites only the files it affects, with the new generation time.
+    await application.createEntity("task", { title: "Fresh task", status: "Next", owner_person_id: (await populatedSelf(root)) });
+    const later = new Date(now.getTime() + 120_000);
+    await application.writeAgentIndex({ now: later });
+    expect(await read(root, "tasks.md")).toContain("Fresh task");
+    expect(await read(root, "tasks.md")).toContain(`generated_at: ${later.toISOString()}`);
+    expect(await read(root, "decisions.md")).toBe(before.find((file) => file.name === "decisions.md")!.content);
+  });
+
+  it("writes nothing while this device does not hold the lease (ADR 0003), so two Macs never race on _agent/", async () => {
+    let holdsLease = false;
+    const writes: AgentIndexFile[][] = [];
+    const writer: AgentIndexWriter = { async write(files) { writes.push(files); } };
+    const { application } = await vault(writer, 60_000, () => holdsLease);
+    await application.rebuildIndex();
+    await application.writeAgentIndex({ now });
+    expect(writes).toHaveLength(0);
+    expect(application.agentIndexStatus().generatedAt).toBeUndefined();
+    holdsLease = true;
+    await application.writeAgentIndex({ now });
+    expect(writes).toHaveLength(1);
   });
 });

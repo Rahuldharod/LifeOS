@@ -126,6 +126,7 @@ You do not need to stop LifeOS when you leave a Mac. After **15 minutes** withou
 | You come back to the desktop | A **Read-only on this Mac** banner shows. Click **Take back** |
 | You click Take back while the laptop holds the lease | The banner warns you first: close LifeOS on the laptop and let Google Drive finish syncing |
 | LifeOS is left open but nobody touches it | It still lets go after 15 minutes. It never takes the lease back by itself |
+| A Mac crashes or sleeps with LifeOS open | The other Mac stays read-only for up to 15 minutes, until the lease expires, or click **Take over** once Drive has synced (ADR 0016) |
 
 What counts as "using it": typing, clicking, scrolling or moving the mouse in the LifeOS tab while it is visible and in front, and saving changes. Backups, calendar syncs and drafts adopted in the background do not count.
 

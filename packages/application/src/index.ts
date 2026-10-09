@@ -40,7 +40,7 @@ import type { FocusOverrideChange } from "./focus.js";
 export type { CalendarDay, CalendarOffline, CalendarOfflineReason } from "./calendar.js";
 export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySettings, WaitingGroup, Weekday } from "./today.js";
 export { defaultTodaySettings, weekdays } from "./today.js";
-export { agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
+export { agentIndexContentWithoutTimestamp, agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
 export type { AgentIndexOptions, AgentIndexStatus } from "./agent-index.js";
 export { stopBackupTimeoutMs } from "./backups.js";
 export type { AutoBackupOptions, AutoBackups, BackupService, BackupSettings, BackupStatus, BackupSummary, BackupTrigger, BackupWarning, BackupWarningKind } from "./backups.js";
@@ -73,7 +73,7 @@ export class LifeOSApplication {
    * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
    * `agentIndex` writes the derived Agent Index to `_agent/` after index rebuilds (ADR 0009); without it nothing is written.
    */
-  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string } = {}) {
+  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string; agentIndexCanWrite?: () => boolean } = {}) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.patches = new PatchModule(ctx);
     this.people = new PeopleModule(ctx);
@@ -91,7 +91,7 @@ export class LifeOSApplication {
     this.notesModule = new NotesModule(ctx);
     this.capture = new CaptureModule(ctx);
     this.history = new HistoryModule(ctx);
-    const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone };
+    const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite };
     this.agentIndex = new AgentIndexModule(ctx, this.decisionsModule, this.adoption, inbox, agentIndex, agentIndexOptions);
     ctx.onRebuild = () => this.agentIndex.schedule();
     this.backups = new BackupModule(ctx);

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, link, mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { inboxFolders, type AgentIndexFile, type Operation, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
+import { agentIndexContentWithoutTimestamp, inboxFolders, type AgentIndexFile, type Operation, type AgentIndexWriter, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type ObjectStore } from "@lifeos/application";
 import { areaProblem, isArea, isUuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { parse, stringify } from "yaml";
 
@@ -441,6 +441,9 @@ export class FilesystemAgentIndexWriter implements AgentIndexWriter {
     for (const file of files) {
       if (!file.name || file.name !== path.basename(file.name) || file.name.startsWith(".") || !file.name.endsWith(".md")) throw new Error(`Invalid Agent Index file name: ${file.name}`);
       const target = path.join(this.folder, file.name);
+      // Only the generation time changed: leave the file alone, so a synced folder has nothing to upload.
+      const current = await readFile(target, "utf8").catch(() => undefined);
+      if (current !== undefined && agentIndexContentWithoutTimestamp(current) === agentIndexContentWithoutTimestamp(file.content)) continue;
       const temporary = `${target}.${randomUUID()}.tmp`;
       await writeFile(temporary, file.content, { encoding: "utf8", flag: "wx" });
       await rename(temporary, target).catch(async (error) => { await rm(temporary, { force: true }); throw error; });
@@ -511,8 +514,15 @@ export class FilesystemSessionStore {
   /** ADR 0015: set by `release()`, cleared only by `start()` and `takeOver()`. */
   private released = false;
 
-  constructor(root: string, private readonly deviceId: string, private readonly leaseDurationMs = 5 * 60_000, private readonly now: () => Date = () => new Date()) {
+  /**
+   * The lease file syncs through Google Drive, so it is rewritten at most once per `renewEveryMs` (a third of the lease)
+   * while this device holds a live lease: a renewal or activity recorded sooner is skipped. Claims always write.
+   */
+  private readonly renewEveryMs: number;
+
+  constructor(root: string, private readonly deviceId: string, private readonly leaseDurationMs = 15 * 60_000, private readonly now: () => Date = () => new Date()) {
     this.sessionPath = path.join(path.resolve(root), ".lifeos", "session.md");
+    this.renewEveryMs = leaseDurationMs / 3;
   }
 
   async start() {
@@ -629,10 +639,18 @@ export class FilesystemSessionStore {
     await this.writeRecord(this.record);
   }
 
-  /** Claims or extends this device's lease; `activity` also moves `last_activity_at` (user activity only). */
+  /**
+   * Claims or extends this device's lease; `activity` also moves `last_activity_at` (user activity only). Skipped when
+   * this device's lease and activity time were written within `renewEveryMs`, so `last_activity_at` lags by at most that.
+   */
   private async write({ activity }: { activity: boolean }) {
     const now = this.now();
     const own = this.record?.device_id === this.deviceId ? this.record : undefined;
+    if (own) {
+      const recent = (at: string) => now.getTime() - Date.parse(at) < this.renewEveryMs;
+      const leaseRenewedRecently = Date.parse(own.lease_expires_at) - now.getTime() > this.leaseDurationMs - this.renewEveryMs;
+      if (leaseRenewedRecently && (!activity || recent(own.last_activity_at))) return;
+    }
     this.record = {
       device_id: this.deviceId,
       started_at: own?.started_at ?? now.toISOString(),
