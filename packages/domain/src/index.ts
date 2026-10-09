@@ -37,6 +37,10 @@ export const envelopeSchema = z.object({
   tags: z.array(z.string()).optional()
 }).loose();
 
+const id = z.uuid();
+/** An object's primary project, client and product. All optional, so older files without them stay valid. */
+const contextFields = { primary_project_id: id.optional(), primary_client_id: id.optional(), primary_product_id: id.optional() };
+
 export const taskSchema = envelopeSchema.extend({
   type: z.literal("task"),
   status: z.enum(["Inbox", "Next", "Waiting", "Done", "Cancelled"]),
@@ -48,7 +52,9 @@ export const taskSchema = envelopeSchema.extend({
   due_timezone: z.string().optional(),
   completed_at: z.iso.datetime().optional(),
   cancelled_at: z.iso.datetime().optional(),
-  dependency_ids: z.array(z.uuid()).optional()
+  dependency_ids: z.array(z.uuid()).optional(),
+  // PB-010: tasks carry the same context links as notes.
+  ...contextFields
 }).superRefine((task, context) => {
   if (task.due_on && task.due_at) context.addIssue({ code: "custom", message: "due_on and due_at are mutually exclusive" });
   if (task.due_at && !task.due_timezone) context.addIssue({ code: "custom", message: "due_timezone is required with due_at" });
@@ -67,9 +73,7 @@ export type DecisionStatus = typeof decisionStatuses[number];
 export const openPointStatuses = ["open", "resolved", "closed"] as const;
 export type OpenPointStatus = typeof openPointStatuses[number];
 
-const id = z.uuid();
 const ids = z.array(id);
-const contextFields = { primary_project_id: id.optional(), primary_client_id: id.optional(), primary_product_id: id.optional() };
 /** Where a proposed field came from: a source object (`source_id`, set when the reference resolved) and/or the Agent's raw reference (`source_ref`), plus a fragment or a locator such as a timestamp or section. */
 const evidenceSchema = z.object({ source_id: id.optional(), source_ref: z.string().min(1).optional(), fragment_id: z.string().min(1).optional(), locator: z.string().optional(), quote: z.string().optional() }).loose()
   .refine((entry) => entry.source_id !== undefined || entry.source_ref !== undefined, "evidence needs a source_id or a source_ref");

@@ -1,10 +1,12 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
 import { decisionPeopleIds } from "./decisions.js";
+import { checkEntityLinks } from "./entity-links.js";
 import { openPointPeopleIds } from "./open-points.js";
 import { dueDate, isRestricted } from "./support.js";
 
-export type EntityType = "task" | "project" | "client" | "product" | "person";
+import type { EntityType } from "@lifeos/shared";
+export type { EntityType };
 
 const entityTypes: EntityType[] = ["task", "project", "client", "product", "person"];
 /** Envelope fields the user may set on any entity (#30). `origin` is deliberately absent: it is fixed at creation. */
@@ -31,7 +33,8 @@ export class EntitiesModule {
       product: ["status", "description", "owner_person_id"],
       person: ["given_name", "family_name", "organization_name", "job_title", "timezone", "is_self"]
     };
-    const selected = Object.fromEntries(Object.entries(fields).filter(([key, value]) => [...allowed[type], ...envelopeFields].includes(key) && value !== "" && value !== undefined));
+    const selected = Object.fromEntries(Object.entries(fields).filter(([key, value]) => [...allowed[type], ...envelopeFields].includes(key) && value !== "" && value !== undefined && value !== null));
+    checkEntityLinks(this.ctx, type, selected);
     if (type === "task") {
       selected.status ??= "Inbox";
       selected.owner_person_id ??= (await this.ctx.ensureSelfPerson(now)).frontmatter.id;
@@ -60,6 +63,7 @@ export class EntitiesModule {
     const selected = Object.fromEntries(Object.entries(fields).filter(([key]) => [...allowed[type], ...envelopeFields].includes(key)));
     if (selected.area === "" || selected.area === null) selected.area = undefined;
     if (typeof selected.title === "string" && !selected.title.trim()) throw new Error("Title is required");
+    checkEntityLinks(this.ctx, type, selected, current.frontmatter);
     const now = new Date().toISOString();
     if (type === "task") {
       if (selected.status === "Done") selected.completed_at = now; else if (selected.status) selected.completed_at = undefined;
@@ -94,6 +98,7 @@ export class EntitiesModule {
     const now = new Date().toISOString();
     const allowed = ["title", "status", "priority", "owner_person_id", "waiting_for_person_id", "due_on", "due_at", "due_timezone", "expected_output", "primary_project_id", "primary_client_id", "primary_product_id", "dependency_ids"];
     const safe = Object.fromEntries(Object.entries(changes).filter(([key]) => allowed.includes(key)));
+    checkEntityLinks(this.ctx, "task", safe, task.frontmatter);
     if (safe.status === "Done") safe.completed_at = now; else safe.completed_at = undefined;
     if (safe.status === "Cancelled") safe.cancelled_at = now; else safe.cancelled_at = undefined;
     const updated = await this.ctx.update(task, safe, { expectedHash, now });
