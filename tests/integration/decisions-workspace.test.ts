@@ -130,7 +130,7 @@ describe("decisions workspace", () => {
     const project = await application.createEntity("project", { title: "Pilot" });
     const person = await application.createEntity("person", { title: "Ada Lovelace" });
     const a = await application.createDecision({ title: "A", decided_at: "2026-09-01T09:00:00.000Z", primary_project_id: project.frontmatter.id, primary_client_id: client.frontmatter.id });
-    const b = await application.createDecision({ title: "B", decided_at: "2026-09-15T09:00:00.000Z", primary_product_id: product.frontmatter.id, people_ids: [person.frontmatter.id] });
+    await application.createDecision({ title: "B", decided_at: "2026-09-15T09:00:00.000Z", primary_product_id: product.frontmatter.id, people_ids: [person.frontmatter.id] });
     const c = await application.createDecision({ title: "C", decided_at: "2026-09-30T09:00:00.000Z", primary_client_id: client.frontmatter.id });
     await application.updateDecision(c.frontmatter.id, { status: "reversed" }, c.contentHash);
     const titles = (filters: Parameters<LifeOSApplication["decisions"]>[0] = {}) => application.decisions(filters).map((decision) => decision.frontmatter.title);

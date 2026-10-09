@@ -100,13 +100,6 @@ type StoredAsset = { relativePath: string; markdownPath: string; sha256: string;
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
 
-function formatEventDate(event: Event) {
-  if (!event.isAllDay) return formatDate(event.startsAt);
-  const timeZone = storedDisplayTimeZone();
-  const safeMidday = `${event.startsAt.slice(0, 10)}T12:00:00.000Z`;
-  return `${new Date(safeMidday).toLocaleDateString([], { dateStyle: "medium", timeZone })} · All day`;
-}
-
 function dateInTimeZone(value: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value;
@@ -906,11 +899,6 @@ function App() {
     await loadCollections();
   }, `Undid the change to ${patch.title}`);
 
-  const changeTask = (task: LifeObject, changes: Record<string, unknown>) => run(async () => {
-    await api(`/api/v1/tasks/${task.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes, expectedHash: task.contentHash }) });
-    await loadCollections();
-  }, "Task updated");
-
   const ingestSource = () => run(async () => {
     await api("/api/v1/sources/text", { method: "POST", body: JSON.stringify({ title: sourceTitle, text: sourceText }) });
     setSourceTitle(""); setSourceText(""); await loadCollections();
@@ -1038,7 +1026,7 @@ function App() {
     const language = window.prompt("Code language (for example: typescript, python, sql)", "typescript");
     if (language === null) return;
     const selected = editor.current ? meetingController.draft.slice(editor.current.selectionStart, editor.current.selectionEnd) : "";
-    insertMarkdown(`\n\n\`\`\`${language.trim()}\n`, "\n\`\`\`\n\n", selected || "code");
+    insertMarkdown(`\n\n\`\`\`${language.trim()}\n`, "\n```\n\n", selected || "code");
   }
 
   // The meeting note, creating it first if the event has none yet (inserting an image is a real edit).
@@ -1458,7 +1446,7 @@ function App() {
             <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
             {!visibleNotes.length && <p className="muted">{noteQuery.trim() ? `No ${noteTab} notes match “${noteQuery.trim()}”.` : noteTab === "open" ? "No notes have been created yet." : "No deleted notes."}</p>}
             {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => void go({ view: "Notes", noteTab, id: note.frontmatter.id })}>
-              <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`\[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
+              <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
             </button>)}</div>)}
           </article>
           <div {...notesSplit.dividerProps} />
@@ -1476,7 +1464,7 @@ function App() {
                 <div className="toolbar">
                   <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { if (event.target.value) transformNoteLines((line) => `${"#".repeat(Number(event.target.value))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading"); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
                   <button disabled={readOnly} title="Bold" onClick={() => editNotes("**", "**")}>B</button><button disabled={readOnly} title="Italic" onClick={() => editNotes("*", "*")}><i>I</i></button><button disabled={readOnly} title="Inline code" onClick={() => editNotes("`", "`", "code")}>{"</>"}</button>
-                  <button disabled={readOnly} title="Fenced code block" onClick={() => { const language = window.prompt("Code language", "typescript"); if (language !== null) editNotes(`\n\n\`\`\`${language.trim()}\n`, "\n\`\`\`\n\n", "code"); }}>Code block</button>
+                  <button disabled={readOnly} title="Fenced code block" onClick={() => { const language = window.prompt("Code language", "typescript"); if (language !== null) editNotes(`\n\n\`\`\`${language.trim()}\n`, "\n```\n\n", "code"); }}>Code block</button>
                   <button disabled={readOnly} title="Bulleted list" onClick={() => transformNoteLines((line) => `- ${line.replace(/^[-*+]\s+/, "")}`)}>• List</button><button disabled={readOnly} title="Numbered list" onClick={() => transformNoteLines((line, index) => `${index + 1}. ${line.replace(/^\d+\.\s+/, "")}`)}>1. List</button><button disabled={readOnly} title="Task checkbox" onClick={() => transformNoteLines((line) => `- [ ] ${line.replace(/^- \[[ xX]\]\s+/, "")}`)}>☐ Task</button><button disabled={readOnly} title="Blockquote" onClick={() => transformNoteLines((line) => `> ${line.replace(/^>\s?/, "")}`)}>❯ Quote</button>
                   <button disabled={readOnly} title="Link" onClick={() => editNotes("[", "](https://)", "link text")}>Link</button><button disabled={readOnly || busy} title="Upload image" onClick={() => notesImageInput.current?.click()}>Image</button><input ref={notesImageInput} className="hidden-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadNotesImage(file); event.target.value = ""; }} />
                   <button disabled={readOnly} title="Horizontal divider" onClick={() => insertNotes("\n\n---\n\n")}>―</button><button disabled={readOnly} title="Insert table" onClick={() => insertNotes("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>

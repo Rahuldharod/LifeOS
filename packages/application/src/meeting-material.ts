@@ -1,4 +1,4 @@
-import { uuidV7, type LifeOSObject } from "@lifeos/domain";
+import { type LifeOSObject } from "@lifeos/domain";
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
