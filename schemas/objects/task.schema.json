@@ -13,7 +13,11 @@
     "waiting_for_person_id": { "type": "string", "format": "uuid" },
     "due_on": { "type": "string", "format": "date" },
     "due_at": { "type": "string", "format": "date-time" },
-    "due_timezone": { "type": "string" }
+    "due_timezone": { "type": "string" },
+    "dependency_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+    "primary_project_id": { "type": "string", "format": "uuid" },
+    "primary_client_id": { "type": "string", "format": "uuid" },
+    "primary_product_id": { "type": "string", "format": "uuid" }
   },
   "additionalProperties": true
 }

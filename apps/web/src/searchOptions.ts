@@ -3,7 +3,7 @@
 // word with the query come first, then the rest alphabetically.
 
 /** `suffix` is extra text shown after the title (the red " - ext" marker, #39); it is not searched. */
-export type SearchOption = { id: string; title: string; suffix?: string };
+export type SearchOption = { id: string; title: string; suffix?: string; tag?: string };
 
 export const foldText = (value: string) => value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 

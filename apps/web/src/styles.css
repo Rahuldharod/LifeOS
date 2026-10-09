@@ -118,6 +118,11 @@ article small { color: #6c766f; }
 .search-select-list li.active { background: #e8ece8; }
 .search-select-list li[aria-selected="true"] { font-weight: 750; }
 .search-select-list li.empty { color: #758078; cursor: default; }
+.link-tag { margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #f6e7c8; color: #6b4a12; font-size: 11px; font-weight: 750; white-space: nowrap; }
+/* PB-010: pickers on the entity forms sit in the same grid as the plain fields. */
+.crud-fields .search-select-box { min-height: 42px; border-color: #c9c8be; border-radius: 8px; }
+.crud-fields .search-select-box input { width: auto; border: 0; padding: .45rem .3rem; }
+.crud-fields .search-select.multi { grid-column: 1 / -1; }
 .mode-switch { display: flex; padding: 3px; border-radius: 8px; background: #eceae1; }
 .mode-switch button { padding: 6px 11px; border: 0; border-radius: 6px; background: transparent; color: #647269; font-size: 12px; font-weight: 700; }
 .mode-switch button.selected { background: white; color: #23483c; box-shadow: 0 1px 4px #263d3420; }
