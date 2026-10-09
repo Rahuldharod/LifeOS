@@ -67,11 +67,11 @@ export class NotesModule {
     const to = filters.to ? Date.parse(filters.to) : Infinity;
     if (Number.isNaN(from) || Number.isNaN(to) || from > to) throw new Error("Enter a valid date range");
     const dateField = state === "deleted" ? "deleted_at" : "updated_at";
-    const contextual = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
+    const needsMeetingNote = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
     const notes = (state === "deleted" ? this.deletedNotes() : this.notes()).filter(({ frontmatter }) => {
       const stamp = Date.parse(String(frontmatter[dateField]));
       return (!types.length || types.includes(frontmatter.type))
-        && (!contextual || frontmatter.type === "meeting-note")
+        && (!needsMeetingNote || frontmatter.type === "meeting-note")
         && (!filters.projectId || frontmatter.primary_project_id === filters.projectId)
         && (!filters.clientId || frontmatter.primary_client_id === filters.clientId)
         && (!filters.productId || frontmatter.primary_product_id === filters.productId)
