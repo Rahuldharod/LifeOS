@@ -55,6 +55,8 @@ import { PermanentDeleteButton } from "./PermanentDelete.js";
 import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
 import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
+import { Breadcrumbs } from "./Breadcrumbs.js";
+import { buildTrail } from "./trail.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -676,6 +678,7 @@ function App() {
   const routeData = { notes, deletedNotes, objects: objectLinks, pendingReviewIds: reviews.filter((review) => review.frontmatter.status === "pending").map((review) => review.frontmatter.id) };
   const routeProblem = collectionsLoaded && route ? routeTarget(route, routeData) : undefined;
   const missingItem = routeProblem?.kind === "missing" ? routeProblem.message : undefined;
+  const trail = collectionsLoaded && route ? buildTrail(route, { ...routeData, reviews }, { today: dateInTimeZone(new Date(), displayTimeZone), unsavedMeeting: workspace?.persisted === false }) : [];
 
   // PB-027: the note in the URL is the open note (on load, Back/Forward, and every in-app open).
   // This is the only place a note change primes the notes controller.
@@ -718,8 +721,10 @@ function App() {
   }, [location.pathname, collectionsLoaded]);
 
   // PB-027: a task, project, decision… in the URL is highlighted on its tab, as a PB-007 link does.
+  // The plain list (e.g. the breadcrumb's tab crumb, PB-026) clears the highlight.
   useEffect(() => {
-    if (collectionsLoaded && route?.id && route.view !== "Notes" && route.view !== "Calendar") setHighlightId(route.id);
+    if (!collectionsLoaded || !route || route.view === "Notes" || route.view === "Calendar") return;
+    setHighlightId(route.id);
   }, [location.pathname, collectionsLoaded]);
 
   async function run(action: () => Promise<void>, success: string) {
@@ -1335,6 +1340,7 @@ function App() {
     </aside>
 
     <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
+      <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
       {missingItem && <article className="lease-warning" role="status"><span>NOT FOUND</span><p>{missingItem} Showing the {view === "Calendar" ? "day" : "list"} instead.</p></article>}
