@@ -29,6 +29,12 @@ function referencesInFrontmatter(frontmatter: ObjectEnvelope, id: string) {
     (field.endsWith("_id") && value === id) || (field.endsWith("_ids") && Array.isArray(value) && value.includes(id)));
 }
 
+/**
+ * Notes list filters (#105). `from`/`to` are ISO instants, inclusive, on `updated_at` (open tab) or `deleted_at`
+ * (deleted tab). Project, client, product and person match meeting notes only (person: the note's own `people_ids`).
+ */
+export type NoteFilters = { types?: string[]; projectId?: string; clientId?: string; productId?: string; personId?: string; from?: string; to?: string };
+
 /** Meeting and knowledge notes: listing, search, body and metadata edits, delete and restore. */
 export class NotesModule {
   /** PB-030: one permanent delete per note at a time (double-click, two tabs; ADR 0013). */
@@ -54,8 +60,24 @@ export class NotesModule {
    * appears in its title or body, ignoring case and accents. It never touches the filesystem, so
    * cost depends on the notes already loaded, not on the folder. A blank query returns the whole tab.
    */
-  searchNotes(query: string, state: "open" | "deleted" = "open") {
-    const notes = state === "deleted" ? this.deletedNotes() : this.notes();
+  searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) {
+    const types = filters.types ?? [];
+    if (types.some((type) => !noteTypes.includes(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
+    const from = filters.from ? Date.parse(filters.from) : -Infinity;
+    const to = filters.to ? Date.parse(filters.to) : Infinity;
+    if (Number.isNaN(from) || Number.isNaN(to) || from > to) throw new Error("Enter a valid date range");
+    const dateField = state === "deleted" ? "deleted_at" : "updated_at";
+    const contextual = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
+    const notes = (state === "deleted" ? this.deletedNotes() : this.notes()).filter(({ frontmatter }) => {
+      const stamp = Date.parse(String(frontmatter[dateField]));
+      return (!types.length || types.includes(frontmatter.type))
+        && (!contextual || frontmatter.type === "meeting-note")
+        && (!filters.projectId || frontmatter.primary_project_id === filters.projectId)
+        && (!filters.clientId || frontmatter.primary_client_id === filters.clientId)
+        && (!filters.productId || frontmatter.primary_product_id === filters.productId)
+        && (!filters.personId || (Array.isArray(frontmatter.people_ids) && frontmatter.people_ids.includes(filters.personId)))
+        && stamp >= from && stamp <= to;
+    });
     const words = foldForSearch(query).split(/\s+/).filter(Boolean);
     if (!words.length) return notes;
     return notes.filter((note) => {

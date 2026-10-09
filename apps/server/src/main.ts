@@ -66,10 +66,11 @@ registerLease(server, { session, idle, stopping: () => stopping });
 
 server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
 server.get("/api/v1/objects", async () => application.listObjects());
-server.get<{ Querystring: { q?: string; state?: string } }>("/api/v1/notes", async (request, reply) => {
-  const state = request.query.state ?? "open";
+// #105: `type` repeats for multi-select (`?type=meeting-note&type=knowledge-note`); a bad type or date answers 400 from the use case.
+server.get<{ Querystring: { q?: string; state?: string; type?: string | string[]; projectId?: string; clientId?: string; productId?: string; personId?: string; from?: string; to?: string } }>("/api/v1/notes", async (request, reply) => {
+  const { q, state = "open", type, ...filters } = request.query;
   if (state !== "open" && state !== "deleted") return reply.status(400).send({ error: "state must be open or deleted" });
-  return application.searchNotes(request.query.q ?? "", state);
+  return application.searchNotes(q ?? "", state, { ...filters, types: type === undefined ? undefined : [type].flat() });
 });
 server.get<{ Params: { type: "task" | "project" | "client" | "product" | "person" } }>("/api/v1/entities/:type", async (request) => application.entities(request.params.type));
 server.post<{ Params: { type: "task" | "project" | "client" | "product" | "person" }; Body: { fields: Record<string, unknown> } }>("/api/v1/entities/:type", async (request) => application.createEntity(request.params.type, request.body.fields));

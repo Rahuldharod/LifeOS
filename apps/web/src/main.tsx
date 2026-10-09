@@ -22,6 +22,8 @@ import { foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink } from "./lifeosLinks.js";
 import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
+import { NoteFiltersPanel, entityOptions } from "./NoteFiltersPanel.js";
+import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
 import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { MeetingEnrichment } from "./MeetingEnrichment.js";
@@ -355,6 +357,10 @@ function App() {
   const [deletedNotes, setDeletedNotes] = useState<LifeObject[]>([]);
   const noteTab: "open" | "deleted" = route?.view === "Notes" && route.noteTab === "deleted" ? "deleted" : "open";
   const [noteQuery, setNoteQuery] = useState("");
+  // #105: filters survive Open/Deleted and Back from a note; they reset only when leaving the Notes view.
+  const [noteFilters, setNoteFilters] = useState(noNoteFilters);
+  const noteFilterCount = activeNoteFilterCount(noteFilters);
+  useEffect(() => { if (route?.view !== "Notes") setNoteFilters(noNoteFilters); }, [route?.view]);
   const [noteResults, setNoteResults] = useState<LifeObject[]>();
   const [selectedDeletedId, setSelectedDeletedId] = useState<string>();
   const [highlightId, setHighlightId] = useState<string>();
@@ -1072,18 +1078,19 @@ function App() {
   // `ignore` drops a response that arrives after the query or tab already changed.
   useEffect(() => {
     const query = noteQuery.trim();
-    if (!query) { setNoteResults(undefined); return; }
+    if (!query && !noteFilterCount) { setNoteResults(undefined); return; }
     let ignore = false;
     const timer = window.setTimeout(() => {
-      api<LifeObject[]>(`/api/v1/notes?${new URLSearchParams({ state: noteTab, q: query })}`)
+      api<LifeObject[]>(`/api/v1/notes?${noteListQuery(noteTab, query, noteFilters, displayTimeZone)}`)
         .then((results) => { if (!ignore) setNoteResults(results); })
         .catch((error: Error) => { if (!ignore) { setNoteResults([]); setMessage(error.message); } });
     }, 200);
     return () => { ignore = true; window.clearTimeout(timer); };
-  }, [noteQuery, noteTab, notes.length, deletedNotes.length]);
+  }, [noteQuery, noteTab, noteFilters, displayTimeZone, notes.length, deletedNotes.length]);
 
   const tabNotes = noteTab === "open" ? notes : deletedNotes;
-  const visibleNotes = noteQuery.trim() ? (noteResults ?? []) : tabNotes;
+  const noteSearching = Boolean(noteQuery.trim()) || noteFilterCount > 0;
+  const visibleNotes = noteSearching ? (noteResults ?? []) : tabNotes;
   const selectedDeleted = deletedNotes.find((note) => note.frontmatter.id === selectedDeletedId);
 
   const restoreNote = (note: LifeObject) => run(async () => {
@@ -1438,13 +1445,14 @@ function App() {
         <PageHeader eyebrow="NOTES" title="Recent notes" description="Open the latest meeting and knowledge notes, edit the Markdown, and save changes back to the portable repository." />
         <div className="notes-layout split-layout" style={notesSplit.style}>
           <article className="notes-list">
-            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteQuery.trim() ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
+            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteSearching ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
             <div className="notes-tabs" role="tablist" aria-label="Notes">
               <button role="tab" aria-selected={noteTab === "open"} className={noteTab === "open" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "open", id: selectedNoteId })}>Open <small>{notes.length}</small></button>
               <button role="tab" aria-selected={noteTab === "deleted"} className={noteTab === "deleted" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "deleted", id: selectedDeletedId })}>Deleted <small>{deletedNotes.length}</small></button>
             </div>
             <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
-            {!visibleNotes.length && <p className="muted">{noteQuery.trim() ? `No ${noteTab} notes match “${noteQuery.trim()}”.` : noteTab === "open" ? "No notes have been created yet." : "No deleted notes."}</p>}
+            <NoteFiltersPanel filters={noteFilters} onChange={setNoteFilters} tab={noteTab} projects={entityOptions(projects.map(({ project }) => project))} clients={entityOptions(clients.map(({ entity }) => entity))} products={entityOptions(products.map(({ entity }) => entity))} people={entityOptions(people.map(({ entity }) => entity))} />
+            {!visibleNotes.length && <p className="muted">{emptyNotesMessage(noteTab, noteQuery, noteFilters)}</p>}
             {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => void go({ view: "Notes", noteTab, id: note.frontmatter.id })}>
               <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
             </button>)}</div>)}
