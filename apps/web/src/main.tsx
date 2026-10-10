@@ -10,7 +10,7 @@ import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api, ApiError, useServerConnection } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
-import { enabledCalendars, noCalendarPrefs, reconcileFilter, resolveDefaultFilter } from "./calendarPrefs.js";
+import { useCalendar } from "./useCalendar.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
 import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
@@ -20,7 +20,7 @@ import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions, isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
-import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
+import { dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
@@ -56,12 +56,12 @@ import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { BackupWarning } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { PermanentDeleteButton } from "./PermanentDelete.js";
-import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay } from "./CalendarOffline.js";
+import { CalendarOfflineBanner } from "./CalendarOffline.js";
 import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { buildTrail } from "./trail.js";
-import type { AppliedPatch, BackupSummary, BackupVerification, CalendarDay, CalendarEvent, CalendarOffline, CalendarOption, CalendarPreferences as CalendarPrefs, EnrichmentStatus, EntityRollup, EntityType, FocusChange, GoogleConnection, InboxStatus, LifeObject, ObjectLink, PersonLabel, ProjectRollup, ReviewEdits, ReviewEvidence, SystemHealth, Today, TodayPanels, Workspace } from "@lifeos/contracts";
+import type { AppliedPatch, BackupSummary, BackupVerification, CalendarEvent, EnrichmentStatus, EntityRollup, EntityType, FocusChange, GoogleConnection, InboxStatus, LifeObject, ObjectLink, PersonLabel, ProjectRollup, ReviewEdits, ReviewEvidence, SystemHealth, Today, TodayPanels, Workspace } from "@lifeos/contracts";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -80,10 +80,6 @@ function dateInTimeZone(value: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value;
   return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function dayRange(date: string, timeZone: string) {
-  return { from: zonedMidnight(date, timeZone).toISOString(), to: zonedMidnight(addCalendarDays(date, 1), timeZone).toISOString() };
 }
 
 function formatEventTime(value: string, timeZone: string) {
@@ -310,7 +306,6 @@ function App() {
   const location = useLocation();
   const route = parseRoute(location.pathname);
   const view: View = route?.view ?? "Today";
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [today, setToday] = useState<Today>({ tasks: [], overdue: [], dueToday: [], upcoming: [], waiting: [], topThree: [], reviewCount: 0 });
   const [todayPanels, setTodayPanels] = useState<TodayPanels>();
@@ -347,26 +342,17 @@ function App() {
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
-  // PB-022a: a failed load or sync is shown in the timeline instead of an "empty day".
-  const [calendarError, setCalendarError] = useState<string>();
-  // #88: the calendar could not be read; the timeline lists the meetings already in LifeOS under a banner.
-  const [calendarOffline, setCalendarOffline] = useState<CalendarOffline>();
   const [connections, setConnections] = useState<ConnectionsState>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
   const [selectedDate, setSelectedDate] = useState(() => (route?.view === "Calendar" && route.date) || dateInTimeZone(new Date(), storedDisplayTimeZone()));
   // PB-027: open items in the URL are resolved only once the lists they live in have loaded.
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
-  const [calendarFilter, setCalendarFilter] = useState("all");
-  const [calendarSources, setCalendarSources] = useState<Record<string, { name: string; color?: string }>>({});
-  // Every calendar the account can view; empty until loaded, or when the calendar connection is unavailable.
-  const [calendarCatalog, setCalendarCatalog] = useState<CalendarOption[]>([]);
-  const [calendarCatalogLoaded, setCalendarCatalogLoaded] = useState(false);
-  const [calendarPrefs, setCalendarPrefs] = useState<CalendarPrefs>(noCalendarPrefs);
-  const defaultFilterApplied = useRef(false);
+  const refreshGoogleConnection = () => { void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined); };
+  const [message, setMessage] = useState("Loading local workspace…");
+  const calendar = useCalendar({ selectedDate, displayTimeZone, onFailure: setMessage, onGoogleStatusStale: refreshGoogleConnection });
   const [editorMode, setEditorMode] = useState<"visual" | "write" | "preview">("visual");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("Loading local workspace…");
   const editor = useRef<HTMLTextAreaElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
@@ -460,7 +446,7 @@ function App() {
       // PB-027: the new meeting gets its own URL, replacing the event's, while the user is still on it.
       const here = parseRoute(locationRef.current.pathname);
       if (here?.view === "Calendar" && !here.id && !settlingNavigation.current) followRoute({ view: "Calendar", date: target.date, id: next.meeting.frontmatter.id }, { replace: true, shown: true });
-      setEvents((current) => current.map((event) => event.externalId === target.externalId && event.calendarId === target.calendarId
+      calendar.updateEvents((current) => current.map((event) => event.externalId === target.externalId && event.calendarId === target.calendarId
         ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
         : event));
       createdWorkspace.current = next;
@@ -528,52 +514,7 @@ function App() {
     if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else if (!previewTarget.current) meetingController.reset();
   };
 
-  // Preferences live in the synced data folder; the calendar list comes from Google. Either may fail independently.
-  const loadCalendarCatalog = async () => {
-    const [catalog, prefs] = await Promise.all([
-      api("GET /api/v1/calendar/calendars").catch(() => [] as CalendarOption[]),
-      api("GET /api/v1/settings/calendar-preferences").catch(() => undefined)
-    ]);
-    setCalendarCatalog(catalog);
-    if (prefs) setCalendarPrefs(prefs);
-    setCalendarCatalogLoaded(true);
-  };
-
-  /** Saves to the synced settings file; resolves to an error message, or undefined on success. */
-  const saveCalendarPrefs =async (next: CalendarPrefs): Promise<string | undefined> => {
-    try {
-      setCalendarPrefs(await api("PUT /api/v1/settings/calendar-preferences", { body: { ...next, expectedHash: calendarPrefs.contentHash } }));
-      return undefined;
-    } catch (error) {
-      await loadCalendarCatalog();
-      return error instanceof ApiError && error.status === 409 ? "These preferences were changed on another device. The latest version is loaded; make your change again." : error instanceof Error ? error.message : "Could not save calendar preferences";
-    }
-  };
-
-  /** #88: an unreadable calendar answers with the meetings already in LifeOS and an offline state, not an error. */
-  const showCalendarDay = (day: CalendarDay) => {
-    setEvents(day.events);
-    setCalendarError(undefined);
-    setCalendarOffline(day.offline);
-    // Google rejected the tokens: refresh status so the Reconnect banner appears.
-    if (day.offline?.reason === "auth") void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
-  };
-
-  const loadCalendarDay = async (date = selectedDate) => {
-    const range = dayRange(date, displayTimeZone);
-    const day = await api("GET /api/v1/calendar/day", { query: range });
-    showCalendarDay(day);
-    const nextEvents = day.events;
-    setCalendarSources((current) => {
-      const next = { ...current };
-      if (!day.offline) for (const event of nextEvents) if (event.calendarId) next[event.calendarId] = { name: event.calendarName ?? event.calendarId, color: event.calendarColor };
-      return next;
-    });
-    return day;
-  };
-
   useEffect(() => {
-    void loadCalendarCatalog();
     // PB-027: the URL replaced these; drop what older versions left behind.
     try { for (const key of ["lifeos.activeView", "lifeos.activeNoteId", "lifeos.activeMeetingId"]) localStorage.removeItem(key); } catch { /* storage unavailable */ }
     Promise.all([api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), loadCollections()])
@@ -581,20 +522,6 @@ function App() {
       .catch((error: Error) => setMessage(error.message))
       .finally(() => setCollectionsLoaded(true));
   }, []);
-
-  const calendarFailed = (error: unknown) => {
-    const text = error instanceof Error ? error.message : "Calendar could not be loaded";
-    setEvents([]);
-    setCalendarOffline(undefined);
-    setCalendarError(text);
-    // A 401 means Google rejected the tokens; refresh status so the Reconnect banner appears.
-    if (error instanceof ApiError && error.status === 401) void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
-    return text;
-  };
-
-  useEffect(() => {
-    loadCalendarDay().catch((error: Error) => setMessage(calendarFailed(error)));
-  }, [selectedDate, displayTimeZone]);
 
   // PB-027: `/` and unknown paths go to the last page this browser showed (or Today), without a history entry.
   useEffect(() => {
@@ -723,7 +650,7 @@ function App() {
     setWorkspace(next); setEditorMode("visual"); setEditorSession((current) => current + 1);
     followRoute({ view: "Calendar", date: selectedDate, id: next.persisted !== false ? next.meeting.frontmatter.id : undefined }, { shown: true });
     if (next.persisted !== false) {
-      setEvents((current) => current.map((event) => event.externalId === externalId && event.calendarId === calendarId
+      calendar.updateEvents((current) => current.map((event) => event.externalId === externalId && event.calendarId === calendarId
         ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
         : event));
     }
@@ -891,11 +818,7 @@ function App() {
   }, "Opening Google authorization");
 
   const syncGoogle = () => run(async () => {
-    const range = dayRange(selectedDate, displayTimeZone);
-    let day: CalendarDay;
-    try { day = await api("POST /api/v1/calendar/day/sync", { query: range }); }
-    catch (error) { calendarFailed(error); throw error; }
-    showCalendarDay(day);
+    const day = await calendar.syncDay();
     await loadCollections();
     if (day.offline) throw new Error(`Google Calendar could not be synchronized: ${day.offline.error}`);
   }, "Google Calendar synchronized");
@@ -904,12 +827,8 @@ function App() {
   // #94: success only when the calendar is back; after a Keychain denial it asks the Keychain again first.
   const retryCalendar = () => run(async () => {
     try {
-      await retryCalendarDay(calendarOffline, {
-        reprobeKeychain: () => retryConnections(),
-        loadDay: () => loadCalendarDay()
-      });
+      await calendar.retry({ reprobeKeychain: () => retryConnections() });
     } catch (error) {
-      if (!(error instanceof CalendarStillOfflineError)) calendarFailed(error);
       await loadTodayPanels().catch(() => undefined);
       throw error;
     }
@@ -1099,7 +1018,7 @@ function App() {
     const noteId = workspace.note?.frontmatter.id;
     setWorkspace(undefined);
     followRoute({ view: "Calendar", date: selectedDate }, { replace: true });
-    setEvents((current) => current.map((event) => event.noteId === noteId ? { ...event, hasNote: false, noteId: undefined } : event));
+    calendar.updateEvents((current) => current.map((event) => event.noteId === noteId ? { ...event, hasNote: false, noteId: undefined } : event));
   });
 
   const saveSelectedNote = async () => {
@@ -1273,26 +1192,8 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
-  // Open on the default calendar once the list is known; afterwards only drop a selection that is no longer offered.
-  useEffect(() => {
-    if (!calendarCatalogLoaded) return;
-    if (!defaultFilterApplied.current) {
-      defaultFilterApplied.current = true;
-      setCalendarFilter(resolveDefaultFilter(offeredCalendars, calendarPrefs));
-    } else setCalendarFilter((current) => reconcileFilter(current, offeredCalendars));
-  }, [calendarCatalogLoaded, calendarCatalog, calendarPrefs]);
-
   const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
-  const offeredCalendars: CalendarOption[] = calendarCatalog.length
-    ? enabledCalendars(calendarCatalog, calendarPrefs)
-    : Object.entries(calendarSources).map(([id, source]) => ({ id, name: source.name, color: source.color })).filter((calendar) => !calendarPrefs.disabledCalendarIds.includes(calendar.id));
-  const filteredEvents = events
-    .filter((event) => !event.calendarId || !calendarPrefs.disabledCalendarIds.includes(event.calendarId))
-    .filter((event) => calendarFilter === "all" || event.calendarId === calendarFilter)
-    .sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
-  const allDayEvents = filteredEvents.filter((event) => event.isAllDay);
-  const timedEvents = filteredEvents.filter((event) => !event.isAllDay);
 
   return <main>
     <aside>
@@ -1313,7 +1214,7 @@ function App() {
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
       {missingItem && <article className="lease-warning" role="status"><span>NOT FOUND</span><p>{missingItem} Showing the {view === "Calendar" ? "day" : "list"} instead.</p></article>}
-      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => void go({ view: "Inbox" })} onOpenSettingsCard={openSettingsCard} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
+      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={calendar.events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => void go({ view: "Inbox" })} onOpenSettingsCard={openSettingsCard} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
@@ -1325,26 +1226,26 @@ function App() {
             <div className="event-list-heading"><span>DAY TIMELINE</span><button onClick={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}>Today</button></div>
             <div className="calendar-controls">
               <label><small>Date</small><input type="date" value={selectedDate} onChange={(event) => { if (event.target.value) void go(calendarRoute(event.target.value)); }} /></label>
-              <label><small>Calendar</small><select value={calendarFilter} onChange={(event) => setCalendarFilter(event.target.value)}>
+              <label><small>Calendar</small><select value={calendar.filter} onChange={(event) => calendar.setFilter(event.target.value)}>
                 <option value="all">All calendars</option>
-                {[...offeredCalendars].sort((left, right) => left.name.localeCompare(right.name)).map((calendar) => <option value={calendar.id} key={calendar.id}>{calendar.name}</option>)}
+                {[...calendar.offered].sort((left, right) => left.name.localeCompare(right.name)).map((calendar) => <option value={calendar.id} key={calendar.id}>{calendar.name}</option>)}
               </select></label>
             </div>
             <h3 className="timeline-date">{new Date(`${selectedDate}T12:00:00.000Z`).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone })}</h3>
-            <CalendarOfflineBanner offline={calendarOffline} timeZone={displayTimeZone} busy={busy} onRetry={() => void retryCalendar()} />
-            {calendarError
-              ? <div className="timeline-empty timeline-error" role="alert"><b>Calendar could not be loaded</b><small>{calendarError}</small></div>
-              : !filteredEvents.length && !calendarOffline && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
+            <CalendarOfflineBanner offline={calendar.offline} timeZone={displayTimeZone} busy={busy} onRetry={() => void retryCalendar()} />
+            {calendar.error
+              ? <div className="timeline-empty timeline-error" role="alert"><b>Calendar could not be loaded</b><small>{calendar.error}</small></div>
+              : !calendar.filteredEvents.length && !calendar.offline && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
             <div className="timeline">
-              {allDayEvents.map((event) => <div className="timeline-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
+              {calendar.allDayEvents.map((event) => <div className="timeline-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
                 <span className="timeline-time">All day</span><span className="timeline-rail"><i style={{ background: event.calendarColor ?? "#5f8b7c" }} /></span>
                 <button className={`event${event.hasNote ? " has-note" : ""}`} disabled={busy} onClick={() => openEvent(event)}>
                   <span className="event-title"><b>{event.title}</b>{event.hasNote && <span className="note-badge">✓ Note created</span>}</span>
                   <small>{event.calendarName ?? "Calendar"}</small>
                 </button>
               </div>)}
-              {timedEvents.map((event, index) => {
-                const previousEnd = index ? Math.max(...timedEvents.slice(0, index).map((candidate) => Date.parse(candidate.endsAt))) : undefined;
+              {calendar.timedEvents.map((event, index) => {
+                const previousEnd = index ? Math.max(...calendar.timedEvents.slice(0, index).map((candidate) => Date.parse(candidate.endsAt))) : undefined;
                 const gap = previousEnd === undefined ? 0 : Date.parse(event.startsAt) - previousEnd;
                 return <React.Fragment key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
                   {gap > 60_000 && <div className="timeline-gap"><span /><span className="gap-rail">•••</span><small>{formatGap(gap)}</small></div>}
@@ -1508,7 +1409,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendarCatalog} calendarCatalogLoaded={calendarCatalogLoaded} calendarPrefs={calendarPrefs} onLoadCalendars={loadCalendarCatalog} onSaveCalendarPrefs={saveCalendarPrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={loadCollections} />}
+      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendar.catalog} calendarCatalogLoaded={calendar.catalogLoaded} calendarPrefs={calendar.prefs} onLoadCalendars={calendar.loadCatalog} onSaveCalendarPrefs={calendar.savePrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={loadCollections} />}
     </section>
   </main>;
 }

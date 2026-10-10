@@ -22,6 +22,11 @@ export function zonedDateTime(date: string, time: string, timeZone: string) {
   return new Date(guess);
 }
 
+/** The UTC instants bounding `date` (YYYY-MM-DD) in `timeZone`, as the calendar endpoints' day-range query. */
+export function dayRange(date: string, timeZone: string) {
+  return { from: zonedMidnight(date, timeZone).toISOString(), to: zonedMidnight(addCalendarDays(date, 1), timeZone).toISOString() };
+}
+
 export function zonedMidnight(date: string, timeZone: string) {
   return zonedDateTime(date, "00:00", timeZone);
 }
