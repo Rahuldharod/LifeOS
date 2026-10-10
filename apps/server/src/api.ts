@@ -227,7 +227,8 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return assets.put({ ownerRelativePath: object.relativePath, fileName: request.body.fileName, mimeType: request.body.mimeType, content });
   });
   server.get<{ Params: { "*": string } }>("/api/v1/assets/*", async (request, reply) => {
-    const relativePath = decodeURIComponent(request.params["*"]);
+    // Fastify has already percent-decoded the wildcard once; decoding again would break names containing "%" (#141).
+    const relativePath = request.params["*"];
     const extension = path.extname(relativePath).toLowerCase();
     const mimeTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
     const mimeType = mimeTypes[extension];
