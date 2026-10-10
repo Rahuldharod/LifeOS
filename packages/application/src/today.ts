@@ -122,8 +122,7 @@ export class TodayModule {
     this.setting = new SyncedSetting(ctx, {
       key: "today", title: "Today",
       body: "# Today\n\nMeeting-hours threshold for flagging a meeting-heavy day (information only), and when the morning routine writes the Daily Focus brief.\n",
-      changedMessage: "Today settings changed on another device; reload and try again",
-      removedMessage: "Today settings were removed; reload and try again"
+      name: "Today settings"
     });
   }
 

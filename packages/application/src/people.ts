@@ -2,12 +2,12 @@ import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
 import { byIdentifier, isLive, OneAtATime } from "./support.js";
-import { SyncedSetting } from "./synced-settings.js";
+import { SyncedSetting, type SyncedSettingSpec } from "./synced-settings.js";
 
 /** The synced internal-domains setting (ADR 0005): one fixed file. Unset means nobody is External by email (#54). */
-const internalDomainsPath = "settings/internal-domains.md";
+const internalDomainsKey = "internal-domains";
 /** The synced self-email setting (#54): every address of the user, all resolving to the single self person (PRD story 73). Unset means none. */
-const selfEmailsPath = "settings/self-emails.md";
+const selfEmailsKey = "self-emails";
 /** Appended to an External person's label. The words are always there, so red styling is never the only signal. */
 export const EXTERNAL_SUFFIX = " - ext";
 /** Personal mail providers: the domain names a mailbox, not an organisation. */
@@ -79,13 +79,9 @@ function selfEmailsFrom(frontmatter: ObjectEnvelope | undefined) {
   return [...new Set(raw.map(normalizeEmail).filter((email): email is string => Boolean(email)))];
 }
 
-/** #75: a list-valued synced setting; a stale or missing file is a conflict named after the setting (`name`). */
-function listSetting(ctx: AppContext, key: string, title: string, name: string, body: string) {
-  return new SyncedSetting(ctx, {
-    key, title, body,
-    changedMessage: `${name} changed on another device; reload and try again`,
-    removedMessage: `${name} setting was removed; reload and try again`
-  });
+/** #75: a list-valued synced setting; a missing file is "<name> setting was removed". */
+function listSetting(ctx: AppContext, spec: SyncedSettingSpec) {
+  return new SyncedSetting(ctx, { ...spec, removedMessage: `${spec.name} setting was removed; reload and try again` });
 }
 
 const settingIn = (index: Pick<AppContext["index"], "all">, relativePath: string) => index.all().find((object) => object.frontmatter.type === "app-setting" && object.relativePath === relativePath);
@@ -123,7 +119,7 @@ const cleanText = (value: unknown) => typeof value === "string" ? value.trim().r
  */
 /** Internal domains from the indexed setting file, empty when unset (#39, #54). Every "is this person external?" check uses this. */
 export function internalDomainsOf(index: Pick<AppContext["index"], "all">) {
-  return domainsFrom(settingIn(index, internalDomainsPath)?.frontmatter);
+  return domainsFrom(settingIn(index, SyncedSetting.relativePathOf(internalDomainsKey))?.frontmatter);
 }
 
 /** Whether a new address on `domain` is External: only decidable once internal domains are set. */
@@ -133,7 +129,7 @@ export function isExternalDomain(internalDomains: readonly string[], domain: str
 
 /** The user's own addresses from the indexed setting file; empty when unset (#54). */
 export function selfEmailsOf(index: Pick<AppContext["index"], "all">) {
-  return selfEmailsFrom(settingIn(index, selfEmailsPath)?.frontmatter);
+  return selfEmailsFrom(settingIn(index, SyncedSetting.relativePathOf(selfEmailsKey))?.frontmatter);
 }
 
 /** #76: set while the user's own addresses or the internal domains are unset, so Today and System Health can point to Settings. */
@@ -183,10 +179,14 @@ export class PeopleModule {
   private readonly selfEmailsSetting: SyncedSetting;
 
   constructor(private readonly ctx: AppContext) {
-    this.internalDomainsSetting = listSetting(ctx, "internal-domains", "Internal domains", "Internal domains",
-      "# Internal domains\n\nEmail domains of your own organisations. People with addresses only on other domains are shown as External (\"Name - ext\").\n");
-    this.selfEmailsSetting = listSetting(ctx, "self-emails", "My email addresses", "Your email addresses",
-      "# My email addresses\n\nEvery address you use. Calendar attendees with one of these addresses are you (the self person).\n");
+    this.internalDomainsSetting = listSetting(ctx, {
+      key: internalDomainsKey, title: "Internal domains", name: "Internal domains",
+      body: "# Internal domains\n\nEmail domains of your own organisations. People with addresses only on other domains are shown as External (\"Name - ext\").\n"
+    });
+    this.selfEmailsSetting = listSetting(ctx, {
+      key: selfEmailsKey, title: "My email addresses", name: "Your email addresses",
+      body: "# My email addresses\n\nEvery address you use. Calendar attendees with one of these addresses are you (the self person).\n"
+    });
   }
 
   /** Internal domains from the indexed setting file (empty when unset). Synchronous so labels stay a cheap read. */

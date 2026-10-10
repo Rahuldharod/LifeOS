@@ -121,8 +121,7 @@ export class BackupModule {
     this.setting = new SyncedSetting(ctx, {
       key: "backups", title: "Backups",
       body: "# Backups\n\nEach device's weekly copy of the latest backup goes to its own folder outside Google Drive (four generations are kept).\n",
-      changedMessage: "Backup settings changed on another device; reload and try again",
-      removedMessage: "Backup settings were removed; reload and try again"
+      name: "Backup settings"
     });
   }
 

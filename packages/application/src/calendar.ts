@@ -40,8 +40,7 @@ export class CalendarModule {
     this.preferences = new SyncedSetting(ctx, {
       key: "calendar-preferences", title: "Calendar preferences",
       body: "# Calendar preferences\n\nWhich calendars the Calendar view offers, and which one opens by default.\n",
-      changedMessage: "Calendar preferences changed on another device; reload and try again",
-      removedMessage: "Calendar preferences were removed; reload and try again"
+      name: "Calendar preferences"
     });
   }
 

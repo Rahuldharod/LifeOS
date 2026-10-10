@@ -212,8 +212,7 @@ export class DailyFocusModule {
     this.setting = new SyncedSetting(ctx, {
       key: "daily-focus", title: "Daily Focus",
       body: "# Daily Focus\n\n`max_must_dos`: how many must-dos Today's Top 3 shows (1 to 5, default 3).\n",
-      changedMessage: "The Daily Focus settings changed on another device; reload and try again",
-      removedMessage: "The Daily Focus settings were removed; reload and try again"
+      name: "The Daily Focus settings"
     });
   }
 

@@ -18,9 +18,10 @@ const spec = {
   key: "example",
   title: "Example",
   body: "# Example\n\nWhat this setting does.\n",
-  changedMessage: "Example settings changed on another device; reload and try again",
-  removedMessage: "Example settings were removed; reload and try again"
+  name: "Example settings"
 };
+const changedMessage = "Example settings changed on another device; reload and try again";
+const removedMessage = "Example settings were removed; reload and try again";
 
 async function setup(device = "laptop") {
   const root = await mkdtemp(path.join(tmpdir(), "lifeos-synced-settings-"));
@@ -72,7 +73,7 @@ describe("SyncedSetting (#117, ADR 0005)", () => {
 
     for (const error of [stale, blind]) {
       expect(error).toBeInstanceOf(ObjectConflictError);
-      expect((error as Error).message).toBe(spec.changedMessage);
+      expect((error as Error).message).toBe(changedMessage);
     }
     expect((await setting.read())?.frontmatter).toMatchObject({ colour: "red", revision: 2 });
   });
@@ -85,7 +86,7 @@ describe("SyncedSetting (#117, ADR 0005)", () => {
     const error = await setting.save(() => ({ colour: "green" }), first.contentHash).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ObjectConflictError);
-    expect((error as Error).message).toBe(spec.removedMessage);
+    expect((error as Error).message).toBe(removedMessage);
     expect(await setting.read()).toBeUndefined();
   });
 
@@ -190,6 +191,6 @@ describe("a hand-edited settings file round-trips through a save (#117)", () => 
     await application.saveBackupSettings({ offDriveFolder: folder }, contentHash);
 
     const after = await readFile(path.join(root, "settings", "backups.md"), "utf8");
-    expectLines(after, before.flatMap((line) => line === "revision: 4" ? ["revision: 5"] : line.startsWith("updated_at:") ? [updatedAt] : line === "updated_by_device: desk-mac" ? ["updated_by_device: laptop"] : line === "  desk-mac: /Volumes/Backup/LifeOS" ? [line, `  laptop: ${folder}`] : [line]));
+    expectLines(after, before.flatMap((line): Array<string | RegExp> => line === "revision: 4" ? ["revision: 5"] : line.startsWith("updated_at:") ? [updatedAt] : line === "updated_by_device: desk-mac" ? ["updated_by_device: laptop"] : line === "  desk-mac: /Volumes/Backup/LifeOS" ? [line, `  laptop: ${folder}`] : [line]));
   });
 });
