@@ -124,7 +124,6 @@ describe("Calendar offline fallback (#88)", () => {
     expect(retried.events.map((event) => event.title)).toEqual(["Standup"]);
     const panels = await application.todayPanels({ date: "2026-10-05", now, timeZone: "Europe/Paris" });
     expect(panels.calendarOffline).toBeUndefined();
-    expect(panels.calendarError).toBeUndefined();
   });
 
   it("Today's panels carry the offline state with the last sync time, and list the stored meetings", async () => {

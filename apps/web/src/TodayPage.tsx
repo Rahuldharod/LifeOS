@@ -21,7 +21,7 @@ export type TodayPanels = {
   date: string; overdue: LifeObject[]; dueToday: LifeObject[]; upcomingHighPriority: LifeObject[];
   waitingByPerson: Array<WaitingGroup & { tasks: LifeObject[] }>;
   nextMeetings: Array<{ title: string; startsAt: string; endsAt: string; inProgress: boolean; meetingId?: string; noteId?: string; calendarEventId?: string; calendarName?: string; restricted: boolean }>;
-  meetingHours: number; meetingHeavy: boolean; calendarError?: string;
+  meetingHours: number; meetingHeavy: boolean;
   /** #88: set when the calendar could not be read; Next meetings then lists the meetings already in LifeOS. */
   calendarOffline?: CalendarOffline;
   openPointsForMeetings: Array<{ openPoint: LifeObject; meetingId: string; meetingTitle: string; link: "raised-in" | "project" | "client" | "people" }>;
@@ -152,9 +152,8 @@ function TodayLivePanels({ panels, onOpenInbox, calendar }: { panels: TodayPanel
     <LivePanel title="Due today" items={panels.dueToday} empty="Nothing due today." row={taskRow((task) => `Due today${task.frontmatter.priority ? ` · ${String(task.frontmatter.priority)} priority` : ""}`)} />
     <LivePanel title="Upcoming high priority" items={panels.upcomingHighPriority} empty="No upcoming high-priority work." row={taskRow((task) => `High priority · ${dueText(task) ? `due ${dueText(task)}` : "no due date"}`)} />
     <LivePanel title="Waiting by person" items={panels.waitingByPerson} empty="Nothing waiting on someone else." row={(group) => <WaitingGroupRow key={group.personId ?? "unknown"} group={group} />} />
-    <LivePanel title="Next meetings" items={panels.nextMeetings} empty={panels.calendarError ? "No meetings found in LifeOS for the rest of today." : "No more meetings today."}
-      note={<>{panels.calendarOffline ? <CalendarOfflineBanner offline={panels.calendarOffline} timeZone={calendar.timeZone} busy={calendar.busy} onRetry={calendar.onRetry} />
-        : panels.calendarError && <p className="muted" role="status">Calendar could not be read ({panels.calendarError}); showing meetings already in LifeOS.</p>}<p className="muted">{panels.meetingHours} h of meetings today{panels.meetingHeavy ? ` · Meeting-heavy day (${panels.settings.meetingHoursThreshold} h or more)` : ""}</p></>}
+    <LivePanel title="Next meetings" items={panels.nextMeetings} empty={panels.calendarOffline ? "No meetings found in LifeOS for the rest of today." : "No more meetings today."}
+      note={<><CalendarOfflineBanner offline={panels.calendarOffline} timeZone={calendar.timeZone} busy={calendar.busy} onRetry={calendar.onRetry} /><p className="muted">{panels.meetingHours} h of meetings today{panels.meetingHeavy ? ` · Meeting-heavy day (${panels.settings.meetingHoursThreshold} h or more)` : ""}</p></>}
       row={(meeting) => <div className="object-row" key={meeting.meetingId ?? meeting.calendarEventId}><i /><div><b>{meeting.title}{meeting.restricted && <LockBadge frontmatter={{ sensitivity: "restricted" }} />}</b><small>{[meeting.inProgress ? "Now" : undefined, meetingTime(meeting), meeting.calendarName, meeting.noteId ? "Has notes" : undefined].filter(Boolean).join(" · ")}</small></div></div>} />
     <LivePanel title="Open points for today's meetings" items={panels.openPointsForMeetings} empty="No open points linked to today's meetings."
       row={(entry) => <div className="object-row" key={entry.openPoint.frontmatter.id}><i /><div><b>{entry.openPoint.frontmatter.title}<LockBadge frontmatter={entry.openPoint.frontmatter} /></b><small>{[`${openPointLinkText[entry.link]} ${entry.meetingTitle}`, entry.openPoint.frontmatter.importance ? `${String(entry.openPoint.frontmatter.importance)} importance` : undefined].filter(Boolean).join(" · ")}</small></div></div>} />

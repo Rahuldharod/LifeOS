@@ -156,7 +156,7 @@ describe("Today meetings panels", () => {
     // early 1 + now 1 + later 1.5 + manual 0.5 + restricted 0.5
     expect(view.meetingHours).toBe(4.5);
     expect(view.meetingHeavy).toBe(false);
-    expect(view.calendarError).toBeUndefined();
+    expect(view.calendarOffline).toBeUndefined();
   });
 
   it("#92: shows a meeting as restricted when only its note is restricted (#63), from the calendar and from the index", async () => {
@@ -189,7 +189,8 @@ describe("Today meetings panels", () => {
     await meeting(store, "Synced earlier", at("12:00"), at("13:00"), { external_refs: [{ provider: "google", external_id: "x", calendar_id: "work" }] });
     await application.rebuildIndex();
     const view = await panels(application);
-    expect(view.calendarError).toBe("network down");
+    expect(view.calendarOffline?.error).toBe("network down");
+    expect(view).not.toHaveProperty("calendarError");
     expect(view.nextMeetings.map((entry) => entry.title)).toEqual(["Synced earlier"]);
   });
 
@@ -200,7 +201,7 @@ describe("Today meetings panels", () => {
     await application.rebuildIndex();
     const view = await panels(application);
     expect(view.nextMeetings.map((entry) => entry.title)).toEqual(["Afternoon"]);
-    expect(view.calendarError).toBeUndefined();
+    expect(view.calendarOffline).toBeUndefined();
   });
 
   it("lists open points linked to today's meetings: raised there, same project or client, or shared non-self attendees", async () => {

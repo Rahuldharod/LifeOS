@@ -1,6 +1,7 @@
 // #88 (PRD story 86, PB-022b): when Google Calendar cannot be read, Today and the Calendar view list the meetings
 // already stored in LifeOS under this banner, with a Retry that reloads the calendar without a page reload.
 import React from "react";
+import { InlineNotice } from "./InlineNotice.js";
 
 export type CalendarOfflineReason = "network" | "auth" | "keychain-denied";
 export type CalendarOffline = { reason: CalendarOfflineReason; error: string; lastSuccessfulSyncAt?: string };
@@ -44,9 +45,8 @@ export async function retryCalendarDay<Event>(offline: CalendarOffline | undefin
 /** Renders nothing while the calendar is online. Status is said in words, never by colour alone. */
 export function CalendarOfflineBanner({ offline, timeZone, busy, onRetry }: { offline?: CalendarOffline; timeZone?: string; busy: boolean; onRetry: () => void }) {
   if (!offline) return null;
-  return <div className="timeline-empty timeline-error calendar-offline" role="status">
-    <b>{calendarOfflineText(offline, timeZone)}</b>
+  return <InlineNotice as="div" className="timeline-empty timeline-error calendar-offline" role="status" title={calendarOfflineText(offline, timeZone)}>
     <small>{reasonText[offline.reason]}{offline.reason === "network" && offline.error ? ` (${offline.error})` : ""}.</small>
     <button type="button" disabled={busy} onClick={onRetry}>Retry</button>
-  </div>;
+  </InlineNotice>;
 }
