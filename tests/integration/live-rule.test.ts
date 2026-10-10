@@ -127,3 +127,63 @@ describe("the Live rule (#118)", () => {
     expect(byId.frontmatter.primary_project_id).toBe(project.frontmatter.id);
   });
 });
+
+async function dropDraft(root: string, name: string, fields: Record<string, unknown>, body = "") {
+  const target = path.join(root, "_inbox", "drafts", name);
+  await mkdir(path.dirname(target), { recursive: true });
+  const yaml = Object.entries({ lifeos_draft: 1, draft_key: name, origin: "user-dictated", captured_at: "2026-10-05T09:15:00+02:00", ...fields })
+    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n");
+  await writeFile(target, `---\n${yaml}\n---\n${body}`);
+  const past = new Date(Date.now() - 60_000);
+  await utimes(target, past, past);
+}
+
+// Decision 2026-10-10: an identifier (email, URL, merge by ID) works like an explicit ID, so it reaches an
+// archived object (deleted ones stay out) and never creates a duplicate. The archived object stays archived.
+describe("identifiers reach archived objects (#118)", () => {
+  const ofType = async (application: LifeOSApplication, type: string) => (await application.listObjects()).filter((object) => object.frontmatter.type === type);
+
+  it("a person draft whose email belongs to an archived person adopts as that person", async () => {
+    const { root, store, application } = await vault();
+    const person = await seed(store, "person", "Alex Archived", { identifiers: [{ kind: "email", value: "alex@example.com" }] });
+    await application.rebuildIndex();
+    await archive(application, person.frontmatter.id);
+
+    await dropDraft(root, "alex.md", { kind: "person", title: "Alexander Archived", email: "ALEX@example.com" });
+    const [result] = (await application.adoptDrafts()).drafts;
+    expect(result).toMatchObject({ outcome: "adopted", objectIds: [person.frontmatter.id] });
+    expect(await ofType(application, "person")).toHaveLength(1);
+    expect((await application.object(person.frontmatter.id)).frontmatter.archived_at).toEqual(expect.any(String));
+  });
+
+  it("a source draft whose URL belongs to an archived source reuses it; a deleted one is not reused", async () => {
+    const { root, store, application } = await vault();
+    const archived = await seed(store, "source", "Loyalty article", { source_type: "web-link", url: "https://example.com/loyalty", captured_at: at("06:00"), ingestion_status: "captured" });
+    await seed(store, "source", "Gone article", { source_type: "web-link", url: "https://example.com/gone", captured_at: at("06:00"), ingestion_status: "captured", deleted_at: at("06:10") });
+    await application.rebuildIndex();
+    await archive(application, archived.frontmatter.id);
+
+    await dropDraft(root, "again.md", { kind: "source", title: "Loyalty article again", url: "https://example.com/loyalty" });
+    await dropDraft(root, "gone.md", { kind: "source", title: "Gone article again", url: "https://example.com/gone" });
+    const { drafts } = await application.adoptDrafts();
+    expect(drafts.map((draft) => draft.objectIds)).toContainEqual([archived.frontmatter.id]);
+    const live = (await ofType(application, "source")).filter((source) => !source.frontmatter.deleted_at);
+    expect(live.map((source) => source.frontmatter.url).sort()).toEqual(["https://example.com/gone", "https://example.com/loyalty"]);
+    expect((await application.object(archived.frontmatter.id)).frontmatter.archived_at).toEqual(expect.any(String));
+  });
+
+  it("a person merge goes ahead when one side is archived", async () => {
+    const meetingEvent = { ...event("e1", "Pilot", new Date(Date.now() + 3_600_000).toISOString(), new Date(Date.now() + 5_400_000).toISOString()), attendeeDetails: [{ email: "marie.curie@example.com", displayName: "Marie Curie" }] } as CalendarEvent;
+    const { application } = await vault([meetingEvent]);
+    const keep = await application.createEntity("person", { title: "Marie Curie" });
+    await application.createMeetingFromEvent("e1");
+    const dup = (await ofType(application, "person")).find((person) => person.frontmatter.origin === "calendar")!;
+    const [reviewId] = await application.suggestPersonMerges();
+    expect(reviewId).toBeDefined();
+    const proposed = application.object(reviewId!).frontmatter.proposed_fields as Record<string, string>;
+    await archive(application, proposed.merge_person_id === dup.frontmatter.id ? dup.frontmatter.id : keep.frontmatter.id);
+
+    await application.acceptReviewItem(reviewId!);
+    expect(application.object(proposed.merge_person_id!).frontmatter).toMatchObject({ merged_into_person_id: proposed.keep_person_id, deleted_at: expect.any(String) });
+  });
+});

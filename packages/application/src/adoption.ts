@@ -724,8 +724,9 @@ export class AdoptionModule {
     const byId = this.ctx.index.get(reference);
     if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id;
     const folded = foldForSearch(reference);
-    const matches = this.ctx.index.all().filter((object) => isLive(object) && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
-      && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference || (!!webUrl(reference) && webUrl(object.frontmatter.url) === webUrl(reference))) || (object.frontmatter.type === "source" && object.frontmatter.external_id === reference));
+    // A title matches live objects only; a URL is an identifier, so like an ID it also reaches archived ones (decision 2026-10-10).
+    const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
+      && ((isLive(object) && foldForSearch(object.frontmatter.title) === folded) || object.frontmatter.url === reference || (!!webUrl(reference) && webUrl(object.frontmatter.url) === webUrl(reference))) || (object.frontmatter.type === "source" && object.frontmatter.external_id === reference));
     return matches.length === 1 ? matches[0]!.frontmatter.id : undefined;
   }
 
@@ -831,9 +832,9 @@ export class AdoptionModule {
     return id;
   }
 
-  /** The live Source stored under this URL (compared in canonical form), if any. */
+  /** The Source stored under this URL (compared in canonical form), if any. Like an ID, a URL reaches an archived Source (not a deleted one). */
   private sourceByUrl(url: string) {
-    return this.ctx.index.all().find((object) => object.frontmatter.type === "source" && isLive(object) && webUrl(object.frontmatter.url) === url);
+    return this.ctx.index.all().find((object) => object.frontmatter.type === "source" && !object.frontmatter.deleted_at && webUrl(object.frontmatter.url) === url);
   }
 
   /**
@@ -870,7 +871,8 @@ export class AdoptionModule {
     // People by email first (PRD): a known address means this person already exists, unless it is the person
     // this draft's own interrupted first attempt wrote (#59): then the replay goes on to the merge suggestions.
     const id = run.newId(replayRoles.main);
-    const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && isLive(object) && personEmails(object).some((email) => emails.includes(email)));
+    // An email is an identifier: like an ID it reaches an archived person (not a deleted one), so no duplicate is created.
+    const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at && personEmails(object).some((email) => emails.includes(email)));
     if (known && known.frontmatter.id !== id) return [known.frontmatter.id];
     const narrative = draft.body.trim();
     if (!known) await this.ctx.objects.write({
