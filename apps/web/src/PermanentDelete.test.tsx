@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api.js";
+import { fakeApi, type FakeCallInput } from "./fakeApi.js";
 import { PermanentDeleteDialog, purgeNote } from "./PermanentDelete.js";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -40,13 +41,13 @@ describe("PermanentDeleteDialog (PB-030)", () => {
 
 describe("purgeNote (PB-030)", () => {
   it("sends the expected hash to the permanent-delete route", async () => {
-    const calls: Array<[string, RequestInit | undefined]> = [];
-    await purgeNote(note, async <T,>(url: string, options?: RequestInit) => { calls.push([url, options]); return {} as T; });
-    expect(calls).toEqual([[`/api/v1/notes/${note.frontmatter.id}/permanent`, { method: "DELETE", body: JSON.stringify({ expectedHash: "hash-1" }) }]]);
+    const calls: Array<[string, FakeCallInput | undefined]> = [];
+    await purgeNote(note, fakeApi((endpoint, input) => { calls.push([endpoint, input]); return {}; }));
+    expect(calls).toEqual([["DELETE /api/v1/notes/:id/permanent", { params: { id: note.frontmatter.id }, body: { expectedHash: "hash-1" } }]]);
   });
 
   it("turns a conflict into a plain message", async () => {
-    const failing = async <T,>(): Promise<T> => { throw new ApiError("Object changed since it was opened", 409); };
+    const failing = fakeApi(() => { throw new ApiError("Object changed since it was opened", 409); });
     await expect(purgeNote(note, failing)).rejects.toThrow("changed elsewhere");
   });
 });

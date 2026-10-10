@@ -1,12 +1,6 @@
 // #77: connection status is loaded on its own, so a Keychain problem only ever affects the Connections card.
 import React from "react";
-
-export type ConnectionSettings = {
-  calendar: { configured: boolean; connected: boolean; reason?: "expired" };
-  drive: { configured: boolean; connected: boolean };
-  /** "denied" after the user clicked Deny on a macOS Keychain prompt. */
-  keychain?: "ok" | "denied";
-};
+import type { ConnectionSettings } from "@lifeos/contracts";
 
 export type ConnectionsState = { settings?: ConnectionSettings; keychainDenied: boolean; error?: string };
 

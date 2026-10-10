@@ -1,8 +1,9 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CalendarOfflineBanner, calendarOfflineText, retryCalendarDay, type CalendarOffline } from "./CalendarOffline.js";
-import { TodayPage, type TodayPanels } from "./TodayPage.js";
+import type { CalendarOffline, TodayPanels } from "@lifeos/contracts";
+import { CalendarOfflineBanner, calendarOfflineText, retryCalendarDay } from "./CalendarOffline.js";
+import { TodayPage } from "./TodayPage.js";
 
 const offline: CalendarOffline = { reason: "network", error: "fetch failed", lastSuccessfulSyncAt: "2026-10-05T07:00:00.000Z" };
 

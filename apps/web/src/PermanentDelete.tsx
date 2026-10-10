@@ -2,17 +2,15 @@
 // cannot be undone from the app and that backups still hold it. Front-matter references block the delete and are
 // listed as links; body links only warn. The delete is a guarded write: a stale hash fails with a plain message.
 import React, { useState } from "react";
-import { api, ApiError } from "./api.js";
+import type { PurgeCheck, PurgeReference } from "@lifeos/contracts";
+import { api, ApiError, type Api } from "./api.js";
 
-export type PurgeReference = { id: string; type: string; title: string };
-export type PurgeCheck = { blockers: PurgeReference[]; bodyLinks: PurgeReference[] };
 type PurgeNoteTarget = { frontmatter: { id: string; title: string }; contentHash: string };
-type Call = <T>(url: string, options?: RequestInit) => Promise<T>;
 
 /** Deletes the note through DELETE /notes/:id/permanent, guarded by its content hash. */
-export async function purgeNote(note: PurgeNoteTarget, call: Call = api) {
+export async function purgeNote(note: PurgeNoteTarget, call: Api = api) {
   try {
-    await call(`/api/v1/notes/${note.frontmatter.id}/permanent`, { method: "DELETE", body: JSON.stringify({ expectedHash: note.contentHash }) });
+    await call("DELETE /api/v1/notes/:id/permanent", { params: { id: note.frontmatter.id }, body: { expectedHash: note.contentHash } });
   } catch (error) {
     if (error instanceof ApiError && error.status === 409 && !/referenced/i.test(error.message)) throw new Error("This note was changed elsewhere, so it was not deleted. The latest version is loaded; try again.");
     throw error;
@@ -63,7 +61,7 @@ export function PermanentDeleteButton({ note, disabled, run, onOpen, onDeleted }
 }) {
   const [check, setCheck] = useState<PurgeCheck>();
   const [busy, setBusy] = useState(false);
-  const load = () => api<PurgeCheck>(`/api/v1/notes/${note.frontmatter.id}/purge-check`);
+  const load = () => api("GET /api/v1/notes/:id/purge-check", { params: { id: note.frontmatter.id } });
   const start = () => void run(async () => setCheck(await load()), "Confirm the permanent delete");
   const confirm = async () => {
     setBusy(true);

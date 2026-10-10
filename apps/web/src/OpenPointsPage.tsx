@@ -11,9 +11,7 @@ import { SearchSelect } from "./SearchSelect.js";
 import { entityOptions } from "./searchOptions.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 
-type LifeObject = { frontmatter: Record<string, unknown> & { id: string; type: string; title: string; revision: number }; body: string; relativePath: string; contentHash: string };
-type Evidence = { field: string; sourceId: string; sourceTitle?: string; fragmentId: string; text?: string; locator?: unknown };
-type OpenPointDetail = { openPoint: LifeObject; resolutionDecision?: LifeObject; meeting?: LifeObject; sources: LifeObject[]; people: LifeObject[]; owner?: LifeObject; project?: LifeObject; client?: LifeObject; product?: LifeObject; review?: LifeObject; evidence: Evidence[] };
+import type { LifeObject, OpenPointDetail } from "@lifeos/contracts";
 type Props = {
   projects: LifeObject[]; clients: LifeObject[]; products: LifeObject[]; people: LifeObject[];
   busy: boolean; readOnly: boolean; timeZone: string; highlightId?: string;
@@ -40,11 +38,11 @@ export function OpenPointsPage({ projects, clients, products, people, busy, read
   const titleOf = (id: unknown, list: LifeObject[]) => list.find((object) => object.frontmatter.id === id)?.frontmatter.title;
 
   const loadList = useCallback(async () => {
-    try { setPoints(await api<LifeObject[]>(`/api/v1/open-points${query ? `?${query}` : ""}`)); setListError(undefined); }
+    try { setPoints(await api("GET /api/v1/open-points", { query: new URLSearchParams(query) })); setListError(undefined); }
     catch (error) { setListError(error instanceof Error ? error.message : "Could not load open points"); }
   }, [query]);
   const loadDetail = useCallback(async (id: string) => {
-    try { setDetail(await api<OpenPointDetail>(`/api/v1/open-points/${id}`)); }
+    try { setDetail(await api("GET /api/v1/open-points/:id", { params: { id } })); }
     catch { setDetail(undefined); setSelectedId(undefined); }
   }, []);
   useEffect(() => { void loadList(); }, [loadList]);
@@ -59,7 +57,7 @@ export function OpenPointsPage({ projects, clients, products, people, busy, read
   const create = () => run(async () => {
     // An open point raised while filtering by a project, client, product or person starts linked to it.
     const fields = { title: newTitle, primary_project_id: filters.projectId, primary_client_id: filters.clientId, primary_product_id: filters.productId, people_ids: filters.personId ? [filters.personId] : undefined };
-    const created = await api<LifeObject>("/api/v1/open-points", { method: "POST", body: JSON.stringify({ fields }) });
+    const created = await api("POST /api/v1/open-points", { body: { fields } });
     setNewTitle("");
     setSelectedId(created.frontmatter.id);
     await refresh(created.frontmatter.id);
@@ -114,25 +112,25 @@ function OpenPointPanel({ detail, projects, clients, products, people, busy, rea
   const isOpen = value.status === "open";
   const locked = busy || readOnly;
   // Decisions to link are loaded only when the user starts resolving.
-  useEffect(() => { if (action?.kind === "resolve" && !decisions.length) void api<LifeObject[]>("/api/v1/decisions").then(setDecisions).catch(() => setDecisions([])); }, [action?.kind, decisions.length]);
+  useEffect(() => { if (action?.kind === "resolve" && !decisions.length) void api("GET /api/v1/decisions").then(setDecisions).catch(() => setDecisions([])); }, [action?.kind, decisions.length]);
 
   /** One guarded write; on a conflict `run` shows the error and the refresh loads what is on disk now. */
-  const write = async (path: string, method: "PATCH" | "POST", fields: Record<string, unknown>, success: string) => {
-    const done = await run(async () => { await api(`/api/v1/open-points/${value.id}${path}`, { method, body: JSON.stringify({ fields, expectedHash: openPoint.contentHash }) }); }, success);
+  const write = async (endpoint: "PATCH /api/v1/open-points/:id" | `POST /api/v1/open-points/:id/${"resolve" | "resolve-with-decision" | "close"}`, fields: Record<string, unknown>, success: string) => {
+    const done = await run(async () => { await api(endpoint, { params: { id: value.id }, body: { fields, expectedHash: openPoint.contentHash } }); }, success);
     if (done) setAction(undefined);
     await refresh(value.id);
   };
   const save = () => {
     const { resolution_summary, close_reason, ...fields } = draft;
     // The outcome wording is only sent for the status that owns it.
-    return write("", "PATCH", { ...fields, ...(value.status === "resolved" ? { resolution_summary } : {}), ...(value.status === "closed" ? { close_reason } : {}) }, "Open point saved");
+    return write("PATCH /api/v1/open-points/:id", { ...fields, ...(value.status === "resolved" ? { resolution_summary } : {}), ...(value.status === "closed" ? { close_reason } : {}) }, "Open point saved");
   };
   const submitAction = () => {
     if (!action) return;
-    if (action.kind === "resolve") return write("/resolve", "POST", { resolution_summary: action.summary, resolution_decision_id: action.decisionId }, "Open point resolved");
-    if (action.kind === "decide") return write("/resolve-with-decision", "POST", { title: action.title, decision_text: action.decision_text, rationale: action.rationale }, "Decision recorded and open point resolved");
+    if (action.kind === "resolve") return write("POST /api/v1/open-points/:id/resolve", { resolution_summary: action.summary, resolution_decision_id: action.decisionId }, "Open point resolved");
+    if (action.kind === "decide") return write("POST /api/v1/open-points/:id/resolve-with-decision", { title: action.title, decision_text: action.decision_text, rationale: action.rationale }, "Decision recorded and open point resolved");
     if (!window.confirm("Close this open point? This is final.")) return;
-    return write("/close", "POST", { reason: action.reason }, "Open point closed");
+    return write("POST /api/v1/open-points/:id/close", { reason: action.reason }, "Open point closed");
   };
   const actionReady = action?.kind === "resolve" ? Boolean(action.summary.trim() || action.decisionId) : action?.kind === "decide" ? Boolean(action.title.trim()) : Boolean(action);
 

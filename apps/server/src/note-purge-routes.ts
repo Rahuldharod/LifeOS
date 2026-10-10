@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { route } from "./route.js";
 import type { LifeOSApplication } from "@lifeos/application";
 
 /**
@@ -7,8 +8,8 @@ import type { LifeOSApplication } from "@lifeos/application";
  */
 export function registerNotePurge(server: FastifyInstance, application: Pick<LifeOSApplication, "notePurgeCheck" | "purgeNote">) {
   // What the confirmation pop-up lists: blocking references and body links that will show as missing.
-  server.get<{ Params: { id: string } }>("/api/v1/notes/:id/purge-check", async (request) => application.notePurgeCheck(request.params.id));
-  server.delete<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id/permanent", async (request, reply) => {
+  route(server, "GET /api/v1/notes/:id/purge-check", async (request) => application.notePurgeCheck(request.params.id));
+  route(server, "DELETE /api/v1/notes/:id/permanent", async (request, reply) => {
     if (typeof request.body?.expectedHash !== "string" || !request.body.expectedHash) return reply.status(400).send({ error: "expectedHash is required to delete a note permanently" });
     return application.purgeNote(request.params.id, request.body.expectedHash);
   });

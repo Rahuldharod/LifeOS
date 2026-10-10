@@ -3,7 +3,8 @@
 // archived or deleted is shown by its stored name with a tag and kept until the user changes it.
 import React from "react";
 import type { EntityLinkField } from "@lifeos/shared";
-import { personOption, type PersonLabel } from "./personLabels.js";
+import type { PersonLabel } from "@lifeos/contracts";
+import { personOption } from "./personLabels.js";
 import { SearchSelect } from "./SearchSelect.js";
 import type { SearchOption } from "./searchOptions.js";
 
