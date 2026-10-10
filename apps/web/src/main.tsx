@@ -1145,7 +1145,10 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
-  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
+  const prototypeMode = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV && new URLSearchParams(window.location.search).has("variant");
+  const navigation: View[] = prototypeMode
+    ? ["Today", "Calendar", "Tasks", "Notes", "Inbox", "Decisions", "Open Points", "Knowledge", "System"]
+    : ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
 
   return <main>
