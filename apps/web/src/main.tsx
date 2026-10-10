@@ -18,11 +18,11 @@ import { EditorFrame } from "./EditorFrame.js";
 import { NoteHeader, PENDING_NOTE_HASH } from "./NoteHeader.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions, isRestricted } from "./envelope.js";
-import { foldText } from "./searchOptions.js";
+import { entityOptions, foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink, type LinkedObject } from "./lifeosLinks.js";
 import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
-import { NoteFiltersPanel, entityOptions } from "./NoteFiltersPanel.js";
+import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
 import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
@@ -1230,9 +1230,8 @@ function App() {
   };
   const saveNotesDetails = (changes: Record<string, unknown>) => saveDetails(notesController, fetchLatestNote, changes);
   const saveMeetingNoteDetails = (changes: Record<string, unknown>) => saveDetails(meetingController, fetchLatestWorkspace, changes);
-  const optionsOf = (objects: LifeObject[]) => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));
   const labels = labelMap(personLabels);
-  const headerOptions = { projects: optionsOf(projects.map(({ project }) => project)), clients: optionsOf(clients.map(({ entity }) => entity)), products: optionsOf(products.map(({ entity }) => entity)), people: people.map(({ entity }) => personOption(labels, entity)) };
+  const headerOptions = { projects: entityOptions(projects.map(({ project }) => project)), clients: entityOptions(clients.map(({ entity }) => entity)), products: entityOptions(products.map(({ entity }) => entity)), people: people.map(({ entity }) => personOption(labels, entity)) };
 
   // The header of a note that does not exist yet: the event's own project, client, product and
   // attendees are shown when they match an object LifeOS already has (by name), and the rest stay

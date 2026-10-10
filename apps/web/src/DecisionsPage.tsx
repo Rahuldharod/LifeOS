@@ -8,6 +8,7 @@ import { CopyLink } from "./CopyLink.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
+import { entityOptions } from "./searchOptions.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { zonedDateTime, zonedInputValue } from "./zonedTime.js";
 
@@ -23,7 +24,6 @@ type Props = {
 
 const statusLabels: Record<string, string> = { active: "Active", superseded: "Superseded", reversed: "Reversed" };
 const statusLabel = (value: unknown) => statusLabels[String(value)] ?? String(value);
-const options = (objects: LifeObject[]) => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const locatorText = (locator: unknown) => locator && typeof locator === "object" ? Object.entries(locator).map(([key, value]) => `${key} ${String(value)}`).join(", ") : "";
 
@@ -72,10 +72,10 @@ export function DecisionsPage({ projects, clients, products, people, busy, readO
     <article className="decision-filters" aria-label="Filter decisions">
       <span>FILTERS</span>
       <div className="decision-filter-grid">
-        <SearchSelect label="Project" options={options(projects)} value={filters.projectId} onChange={(value) => setFilter("projectId", value)} placeholder="Any project" />
-        <SearchSelect label="Client" options={options(clients)} value={filters.clientId} onChange={(value) => setFilter("clientId", value)} placeholder="Any client" />
-        <SearchSelect label="Product" options={options(products)} value={filters.productId} onChange={(value) => setFilter("productId", value)} placeholder="Any product" />
-        <SearchSelect label="Person" options={options(people)} value={filters.personId} onChange={(value) => setFilter("personId", value)} placeholder="Anyone" />
+        <SearchSelect label="Project" options={entityOptions(projects)} value={filters.projectId} onChange={(value) => setFilter("projectId", value)} placeholder="Any project" />
+        <SearchSelect label="Client" options={entityOptions(clients)} value={filters.clientId} onChange={(value) => setFilter("clientId", value)} placeholder="Any client" />
+        <SearchSelect label="Product" options={entityOptions(products)} value={filters.productId} onChange={(value) => setFilter("productId", value)} placeholder="Any product" />
+        <SearchSelect label="Person" options={entityOptions(people)} value={filters.personId} onChange={(value) => setFilter("personId", value)} placeholder="Anyone" />
         <label><small>Status</small><select value={filters.status} onChange={(event) => setFilter("status", event.target.value)}><option value="">Any status</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label><small>Decided from</small><input type="date" value={filters.fromDay} max={filters.toDay || undefined} onChange={(event) => setFilter("fromDay", event.target.value)} /></label>
         <label><small>Decided to</small><input type="date" value={filters.toDay} min={filters.fromDay || undefined} onChange={(event) => setFilter("toDay", event.target.value)} /></label>
@@ -149,10 +149,10 @@ function DecisionPanel({ detail, projects, clients, products, people, busy, read
       <label><small>Status</small>{active
         ? <select value={draft.status} disabled={locked} onChange={(event) => set("status", event.target.value)}><option value="active">Active</option><option value="reversed">Reversed (final)</option></select>
         : <b>{statusLabel(value.status)} (final)</b>}</label>
-      <SearchSelect label="Project" options={options(projects)} value={draft.primary_project_id} disabled={locked} onChange={(next) => set("primary_project_id", next)} />
-      <SearchSelect label="Client" options={options(clients)} value={draft.primary_client_id} disabled={locked} onChange={(next) => set("primary_client_id", next)} />
-      <SearchSelect label="Product" options={options(products)} value={draft.primary_product_id} disabled={locked} onChange={(next) => set("primary_product_id", next)} />
-      <SearchSelect multi label="People" options={options(people)} value={draft.people_ids} disabled={locked} onChange={(next) => set("people_ids", next)} />
+      <SearchSelect label="Project" options={entityOptions(projects)} value={draft.primary_project_id} disabled={locked} onChange={(next) => set("primary_project_id", next)} />
+      <SearchSelect label="Client" options={entityOptions(clients)} value={draft.primary_client_id} disabled={locked} onChange={(next) => set("primary_client_id", next)} />
+      <SearchSelect label="Product" options={entityOptions(products)} value={draft.primary_product_id} disabled={locked} onChange={(next) => set("primary_product_id", next)} />
+      <SearchSelect multi label="People" options={entityOptions(people)} value={draft.people_ids} disabled={locked} onChange={(next) => set("people_ids", next)} />
     </div>
     <SensitivityToggle object={decision} noun="decision" disabled={locked} run={run} onChanged={() => refresh(value.id)} />
     <div className="crud-actions">

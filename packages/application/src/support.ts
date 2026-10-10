@@ -51,6 +51,16 @@ export function validTimeZone(zone: string) {
   try { new Intl.DateTimeFormat("en", { timeZone: zone }); return true; } catch { return false; }
 }
 
+/**
+ * A filter's instant range (#116) as epoch milliseconds, both ends inclusive; a missing or blank bound is
+ * open (-Infinity / Infinity). Throws "Enter a valid date range" for an unparseable bound or `from` after `to`.
+ */
+export function parseInstantRange(from?: string, to?: string) {
+  const range = { from: from ? Date.parse(from) : -Infinity, to: to ? Date.parse(to) : Infinity };
+  if (Number.isNaN(range.from) || Number.isNaN(range.to) || range.from > range.to) throw new Error("Enter a valid date range");
+  return range;
+}
+
 /** A task's due date as `YYYY-MM-DD`: `due_on`, else the date part of `due_at`, else undefined. */
 export const dueDate = (task: WithFrontmatter) =>
   typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : undefined;
