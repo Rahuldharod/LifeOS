@@ -1,4 +1,4 @@
-import { mkdir, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readdir, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { FilesystemSessionStore } from "@lifeos/object-store-markdown";
@@ -100,5 +100,26 @@ describe("background work and the device lease (ADR 0015)", () => {
     const { start, get } = await api({ idleReleaseMs: 50, timing: { ...quick.timing, heartbeatMs: 20 } });
     await start();
     await vi.waitFor(async () => expect((await get("/api/v1/health")).json().session).toMatchObject({ writeAllowed: false, releasedAfterIdle: true }), { timeout: 5_000 });
+  });
+
+  const snapshots = async (backupRoot: string) => (await readdir(backupRoot).catch(() => [] as string[])).filter((name) => !name.startsWith("."));
+
+  it("background work starts only once the server is listening", async () => {
+    const { backupRoot, start } = await api(quick);
+    let seenAtListen: string[] | undefined;
+    // While listening is under way, the start backup has not been asked for yet; once it has, the backup follows.
+    await start(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); seenAtListen = await snapshots(backupRoot); });
+    expect(seenAtListen).toEqual([]);
+    await vi.waitFor(async () => expect(await snapshots(backupRoot)).not.toEqual([]), { timeout: 5_000 });
+  });
+
+  it("GIVEN listening fails THEN start rethrows, no background work starts and the lease is released", async () => {
+    const { root, backupRoot, start } = await api(quick);
+    await expect(start(async () => { throw new Error("port 4310 in use"); })).rejects.toThrow("port 4310 in use");
+    await dropDraft(root);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await snapshots(backupRoot)).toEqual([]);
+    expect((await readdir(path.join(root, "tasks"))).sort()).toEqual(["task.md"]);
+    expect(await new FilesystemSessionStore(root, "laptop").start()).toMatchObject({ writeAllowed: true, activeDeviceId: "laptop" });
   });
 });

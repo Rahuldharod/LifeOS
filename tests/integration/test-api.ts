@@ -45,7 +45,8 @@ export async function testApi(options: Partial<ApiOptions> & { files?: Record<st
   const calendars = calendarSource({ secrets, mockOnly: true, mock: new MockCalendarConnector(), createGoogle: () => { throw new Error("No Google Calendar in tests"); } });
   const api = await buildApi({ dataRoot: root, backupRoot, deviceId: "desk-mac", secrets, calendars, idleReleaseMs: 15 * 60_000, webRoot: path.join(root, "no-web-build"), ...overrides });
   apis.push(api);
-  const start = async () => { const background = await api.start(); running.push(background); return background; };
+  /** Runs startup; `listen` stands in for opening the port (no port is opened in tests). */
+  const start = async (listen: () => PromiseLike<unknown> = () => api.server.ready()) => { const background = await api.start(listen); running.push(background); return background; };
   const get = (url: string) => api.server.inject({ method: "GET", url });
   const send = (method: Exclude<Method, "GET">, url: string, payload: object = {}) => api.server.inject({ method, url, payload });
   /** The web client's call (`apps/web/src/api.ts`): JSON in and out, and the server's error message thrown on 4xx/5xx. */
@@ -55,5 +56,5 @@ export async function testApi(options: Partial<ApiOptions> & { files?: Record<st
     if (response.statusCode >= 400) throw new Error(payload.error ?? `Request failed: ${response.statusCode}`);
     return payload;
   };
-  return { root, api, start, get, send, call };
+  return { root, backupRoot, api, start, get, send, call };
 }

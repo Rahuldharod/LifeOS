@@ -1,5 +1,5 @@
-// The start script: reads the environment, picks the real adapters, builds the API (./api.ts), runs its startup,
-// listens and stops cleanly on SIGINT/SIGTERM. Routes, lease wiring and background work live in the API module.
+// The start script: reads the environment, picks the real adapters, builds the API (./api.ts), runs its startup
+// (which listens before starting background work) and stops cleanly on SIGINT/SIGTERM. Routes, lease wiring and background work live in the API module.
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
@@ -41,8 +41,7 @@ const api = await buildApi({
 });
 
 try {
-  const running = await api.start();
-  await api.server.listen({ host, port });
+  const running = await api.start(() => api.server.listen({ host, port }));
   const shutdown = async () => {
     await running.stop();
     process.exit(0);

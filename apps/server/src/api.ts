@@ -1,8 +1,8 @@
 /**
  * #120: the localhost API as an importable module. `buildApi` wires the application, the device lease and every
  * route onto a Fastify instance for one data root, without opening a port, so tests call it through `inject`.
- * `start()` runs the startup work and starts the background triggers; `main.ts` only reads the environment,
- * refuses a data root without `.lifeos/schema.md` (ADR 0014), listens and handles signals.
+ * `start(listen)` runs the startup work, calls `listen`, and only then starts the background triggers; `main.ts` only
+ * reads the environment, refuses a data root without `.lifeos/schema.md` (ADR 0014), opens the port and handles signals.
  *
  * Background object writers (adoption, external-edit audits, person-merge suggestions, the Agent Index) run only
  * while this device holds the lease; the heartbeat runs the idle check (ADR 0015).
@@ -57,10 +57,11 @@ export interface LifeOSApi {
   server: FastifyInstance;
   /**
    * Claims the lease (or starts read-only), rebuilds the index, recovers interrupted operations, adopts waiting drafts,
-   * then starts automatic backups, the data-folder watcher and the lease heartbeat. Throws if startup fails.
+   * calls `listen` (opens the port), and only once it is listening starts automatic backups, the data-folder watcher
+   * and the lease heartbeat. If any step throws, adoption stops, the lease is released and the error is rethrown.
    * `stop()` is the clean stop (#95): writes answer 503, triggers stop, HTTP closes, the stop backup runs, the lease is released.
    */
-  start(): Promise<{ stop(): Promise<void> }>;
+  start(listen: () => PromiseLike<unknown>): Promise<{ stop(): Promise<void> }>;
 }
 
 export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
@@ -352,7 +353,22 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     reply.status(statusCode).send(body);
   });
 
-  async function start() {
+  async function start(listen: () => PromiseLike<unknown>) {
+    let autoAdoption: ReturnType<typeof application.startAutoAdoption> | undefined;
+    try {
+      autoAdoption = await beforeListen();
+      await listen();
+      return afterListen(autoAdoption);
+    } catch (error) {
+      // Undo what started, then release the lease this start claimed (the clean stop's release path) so another device is not locked out.
+      autoBackups?.dispose();
+      await autoAdoption?.stop().catch(() => undefined);
+      await session.close().catch((closeError) => server.log.error(closeError));
+      throw error;
+    }
+  }
+
+  async function beforeListen() {
     await session.start();
     await application.rebuildIndex();
     // #69: record edits made while the app was closed before this start writes anything.
@@ -366,6 +382,11 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     // (not after an idle release, ADR 0015).
     const autoAdoption = application.startAutoAdoption({ canWrite: () => session.holdsLease(), onError: (error) => server.log.error(error), sweepMs: timing.adoptionSweepMs, debounceMs: timing.adoptionDebounceMs });
     await autoAdoption.runNow();
+    return autoAdoption;
+  }
+
+  /** As before #120: background work starts only once the server is listening. */
+  function afterListen(autoAdoption: ReturnType<typeof application.startAutoAdoption>) {
     // Backups (#84): at start, daily while running and at a clean stop; only while this device may write (ADR 0003). Backups only
     // read the data folder into this Mac's own backup folder, so they keep running after an idle release (ADR 0015).
     autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed || session.status().releasedAfterIdle, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
