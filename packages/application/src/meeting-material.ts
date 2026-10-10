@@ -1,9 +1,10 @@
-import { type LifeOSObject } from "@lifeos/domain";
+import { confidenceLabels, type Confidence, type LifeOSObject } from "@lifeos/domain";
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
 import type { MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
+import { proposeReviewItem, reviseReviewItem } from "./review-items.js";
 import { inheritContextLinks, isLive, isMeetingRestricted, liveMeetingNote, objectIdPattern, replayRoles } from "./support.js";
 
 /**
@@ -43,7 +44,6 @@ export const materialSourceTypes =[...expectedMaterial, "drive-doc"] as const;
 const defaultProvider: Record<string, string> = { "meet-transcript": "google-drive", "meet-recording": "google-drive", "drive-doc": "google-drive", "gong-call": "gong", "gong-summary-email": "gmail" };
 const sourceLabels: Record<string, string> = { "meet-transcript": "Meet transcript", "meet-recording": "Meet recording", "drive-doc": "Drive doc", "gong-call": "Gong call", "gong-summary-email": "Gong summary email" };
 const proposalKinds = ["task", "decision", "open-point"];
-const confidences = ["High", "Medium", "Low"];
 /** How far back the calendar is searched for an event that has no meeting yet. */
 const eventLookbackMs = 30 * 86_400_000;
 
@@ -82,7 +82,7 @@ export class MeetingMaterialModule {
     const sources = this.parseSources(fields.sources, issues);
     const unavailable = parseUnavailable(fields.unavailable, sources, issues);
     const summary = draft.body.trim();
-    const summaryConfidence = fields.summary_confidence === undefined ? "Medium" : confidences.find((value) => value.toLowerCase() === text(fields.summary_confidence).toLowerCase());
+    const summaryConfidence = fields.summary_confidence === undefined ? "Medium" : confidenceLabels.find((value) => value.toLowerCase() === text(fields.summary_confidence).toLowerCase());
     if (!summaryConfidence) issues.push(`summary_confidence: unknown confidence "${text(fields.summary_confidence)}" (expected High, Medium or Low)`);
     const proposals = this.parseProposals(draft, issues);
     for (const proposal of proposals) {
@@ -252,7 +252,7 @@ export class MeetingMaterialModule {
    * One summary per meeting at a time: the same text is never proposed twice, and a newer text replaces a
    * still-pending proposal rather than adding a second one. After accept or reject, a different text is new.
    */
-  private async upsertSummary(summary: string, confidence: string, meeting: LifeOSObject, sourceIds: string[], draft: ParsedDraft, run: AdoptionRun) {
+  private async upsertSummary(summary: string, confidence: Confidence, meeting: LifeOSObject, sourceIds: string[], draft: ParsedDraft, run: AdoptionRun) {
     const { ctx } = this;
     const summaries = this.reviewsFor(meeting.frontmatter.id).filter((review) => review.frontmatter.review_type === summaryReviewType);
     const same = summaries.find((review) => foldName(text((review.frontmatter.proposed_fields as Record<string, unknown>)?.summary)) === foldName(summary));
@@ -262,23 +262,15 @@ export class MeetingMaterialModule {
     const pending = summaries.find((review) => review.frontmatter.status === "pending");
     if (pending) {
       const merged = [...new Set([...idList(pending.frontmatter.source_ids), ...sourceIds])];
-      await ctx.update(pending, { proposed_fields: { summary }, confidence_label: confidence, source_ids: merged, agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt }, { expectedHash: pending.contentHash, now: run.now, body });
+      await reviseReviewItem(ctx, run, pending, { proposed: { summary }, confidence, body, sourceIds: merged, fields: { draft_key: draft.draftKey, captured_at: draft.capturedAt } });
       return pending.frontmatter.id;
     }
-    const id = run.newId(roles.summary);
-    await ctx.objects.write({
-      relativePath: `review-items/${markdownFileName(title, id, run.now)}`,
-      frontmatter: {
-        ...ctx.envelope(id, "review-item", title, run.now, "agent-extracted"),
-        review_type: summaryReviewType, target_object_type: "meeting", target_object_id: meeting.frontmatter.id, source_meeting_id: meeting.frontmatter.id,
-        proposed_fields: { summary }, field_evidence: {}, confidence_label: confidence as "High" | "Medium" | "Low", status: "pending",
-        agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...inheritContextLinks(meeting),
-        // U7: generated here, at adoption, never taken from the draft.
-        operation_id: run.newId(replayRoles.operation(roles.summary))
-      },
-      body
+    const review = await proposeReviewItem(ctx, run, {
+      role: roles.summary, reviewType: summaryReviewType, title, target: { type: "meeting", id: meeting.frontmatter.id },
+      proposed: { summary }, confidence, body, sourceIds, origin: "agent-extracted",
+      fields: { source_meeting_id: meeting.frontmatter.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, ...inheritContextLinks(meeting) }
     });
-    return id;
+    return review.frontmatter.id;
   }
 
   private reviewsFor(meetingId: string) {

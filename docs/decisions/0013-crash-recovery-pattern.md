@@ -10,6 +10,7 @@ A step is **replay-safe** when running it again after a crash, or twice at once,
 |---|---|---|
 | writes several files that must all land, or be undone | Journal it before the first write; recovery finishes or rolls it back | `prepareOperation` / `completeOperation`, and a handler in `SystemModule.recovery` |
 | creates objects and may be replayed | Take IDs from the journal entry, keyed by role; wrap the replay in `ctx.replaying` | `run.newId(replayRoles.…)`, `replayableId`, `replayScope` |
+| proposes a Review Item (#122) | Write it through the one factory: replayable ID and operation ID, source sensitivity carried (ADR 0018); a step with no journal entry seeds its IDs from what it proposes from and records its Agent run once; a step revising its own pending item revises it there too | `proposeReviewItem`, `seededRun`, `recordAgentRun`, `reviseReviewItem` (review-items.ts) |
 | writes an audit event a replay could write again | Write it only if no matching audit exists | `ctx.writeAuditOnce(…, { matchOn })`; look up audits with `ctx.findAudits` |
 | can be called twice at once (double-click, two tabs, watcher bursts) | Run calls one at a time per key | `OneAtATime.run(key, work)` |
 | reads the data a multi-file step writes (a backup snapshot during adoption) | Share that step's queue | `ctx.runExclusive` (adoption batches and backups, #95) |

@@ -6,6 +6,8 @@ The stable app is a single localhost process on port 4310 that serves the API an
 
 The server has two parts (#120). `apps/server/src/api.ts` builds the API for a given data root and adapters: every route, the lease hooks, and `start(listen)`: the startup work, then `listen`, and only once the server is listening the background triggers (watcher, heartbeat, backups). If startup fails, `start` releases the lease it claimed and rethrows. Tests build it on a temporary root and call it through Fastify's `inject` (`tests/integration/test-api.ts`). `main.ts` only reads the environment, refuses a root without `.lifeos/schema.md`, picks the real adapters, passes `start` the call that opens the port, and handles stop signals. Shared request checks live once in `request-checks.ts`.
 
+The wire contract (#121) is `packages/contracts`: every JSON endpoint keyed by `"METHOD /path"`, with its params, query, body and reply shape. Types only, no Node dependencies. The server registers each route from its key (`route()` in `apps/server/src/route.ts`), so the use case's result must fit the declared reply; the browser calls by the same key (`api()` in `apps/web/src/api.ts`) and declares no response types of its own. A change on one side that the other does not match fails `pnpm typecheck`. Nothing is validated at runtime.
+
 The first complete flow now works without bypassing these boundaries:
 
 1. Select a Google or mock calendar event from the timezone-aware day timeline.

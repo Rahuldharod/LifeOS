@@ -2,7 +2,7 @@
 // this page uses are loaded and saved here; App passes in what other pages share (timezone, calendars, connections).
 import React, { useEffect, useState } from "react";
 import { api, ApiError } from "./api.js";
-import type { CalendarOption, CalendarPrefs } from "./calendarPrefs.js";
+import type { CalendarOption, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, TodaySettings, Weekday } from "@lifeos/contracts";
 import { ConnectionsNotice, type ConnectionsState } from "./connections.js";
 import { PageHeader } from "./pageParts.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
@@ -10,8 +10,6 @@ import { SaveStatus, type SaveState } from "./SaveStatus.js";
 import { BackupFolderCard } from "./BackupFolderCard.js";
 import { internalDomainsCardId, selfEmailsCardId } from "./SelfEmailWarning.js";
 
-export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
-export type TodaySettings = { meetingHoursThreshold: number; briefTime: string; briefTimeZone: string; briefDays: Weekday[]; contentHash?: string };
 type Props = {
   displayTimeZone: string; onDisplayTimeZoneChange: (zone: string) => void;
   calendarCatalog: CalendarOption[]; calendarCatalogLoaded: boolean; calendarPrefs: CalendarPrefs; onLoadCalendars: () => Promise<void>; onSaveCalendarPrefs: (prefs: CalendarPrefs) => Promise<string | undefined>;
@@ -28,16 +26,16 @@ const availableTimeZones = (() => {
 
 export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged }: Props) {
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
-  const [internalDomains, setInternalDomains] = useState<{ domains: string[]; contentHash?: string }>();
-  const [selfEmails, setSelfEmails] = useState<{ emails: string[]; contentHash?: string }>();
-  const [focusSettings, setFocusSettings] = useState<{ maxMustDos: number; contentHash?: string }>();
+  const [internalDomains, setInternalDomains] = useState<InternalDomains>();
+  const [selfEmails, setSelfEmails] = useState<SelfEmails>();
+  const [focusSettings, setFocusSettings] = useState<FocusSettings>();
 
-  const loadInternalDomains = async () => setInternalDomains(await api<{ domains: string[]; contentHash?: string }>("/api/v1/settings/internal-domains").catch(() => undefined));
+  const loadInternalDomains = async () => setInternalDomains(await api("GET /api/v1/settings/internal-domains").catch(() => undefined));
 
   /** #39: saves the synced internal-domains setting; resolves to an error message, or undefined on success. */
   const saveInternalDomains = async (domains: string[]): Promise<string | undefined> => {
     try {
-      setInternalDomains(await api<{ domains: string[]; contentHash?: string }>("/api/v1/settings/internal-domains", { method: "PUT", body: JSON.stringify({ domains, expectedHash: internalDomains?.contentHash }) }));
+      setInternalDomains(await api("PUT /api/v1/settings/internal-domains", { body: { domains, expectedHash: internalDomains?.contentHash } }));
       await onChanged();
       return undefined;
     } catch (error) {
@@ -46,12 +44,12 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     }
   };
 
-  const loadSelfEmails = async () => setSelfEmails(await api<{ emails: string[]; contentHash?: string }>("/api/v1/settings/self-emails").catch(() => undefined));
+  const loadSelfEmails = async () => setSelfEmails(await api("GET /api/v1/settings/self-emails").catch(() => undefined));
 
   /** #54: saves the synced self-email setting; resolves to an error message, or undefined on success. */
   const saveSelfEmails = async (emails: string[]): Promise<string | undefined> => {
     try {
-      setSelfEmails(await api<{ emails: string[]; contentHash?: string }>("/api/v1/settings/self-emails", { method: "PUT", body: JSON.stringify({ emails, expectedHash: selfEmails?.contentHash }) }));
+      setSelfEmails(await api("PUT /api/v1/settings/self-emails", { body: { emails, expectedHash: selfEmails?.contentHash } }));
       // #76: reloads Today and System Health so their "not set" warning goes away at once.
       await onChanged();
       return undefined;
@@ -61,11 +59,11 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     }
   };
 
-  const loadTodaySettings = async () => setTodaySettings(await api<TodaySettings>("/api/v1/settings/today").catch(() => undefined));
+  const loadTodaySettings = async () => setTodaySettings(await api("GET /api/v1/settings/today").catch(() => undefined));
   /** #48: saves the synced Today settings; resolves to an error message, or undefined on success. */
   const saveTodaySettings = async (changes: Omit<TodaySettings, "contentHash">): Promise<string | undefined> => {
     try {
-      setTodaySettings(await api<TodaySettings>("/api/v1/settings/today", { method: "PUT", body: JSON.stringify({ ...changes, expectedHash: todaySettings?.contentHash }) }));
+      setTodaySettings(await api("PUT /api/v1/settings/today", { body: { ...changes, expectedHash: todaySettings?.contentHash } }));
       await onChanged();
       return undefined;
     } catch (error) {
@@ -74,11 +72,11 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     }
   };
 
-  const loadFocusSettings = async () => setFocusSettings(await api<{ maxMustDos: number; contentHash?: string }>("/api/v1/settings/daily-focus").catch(() => undefined));
+  const loadFocusSettings = async () => setFocusSettings(await api("GET /api/v1/settings/daily-focus").catch(() => undefined));
   /** #47: saves the synced max must-dos setting; resolves to an error message, or undefined on success. */
   const saveFocusSettings = async (maxMustDos: number): Promise<string | undefined> => {
     try {
-      setFocusSettings(await api<{ maxMustDos: number; contentHash?: string }>("/api/v1/settings/daily-focus", { method: "PUT", body: JSON.stringify({ maxMustDos, expectedHash: focusSettings?.contentHash }) }));
+      setFocusSettings(await api("PUT /api/v1/settings/daily-focus", { body: { maxMustDos, expectedHash: focusSettings?.contentHash } }));
       await onChanged();
       return undefined;
     } catch (error) {

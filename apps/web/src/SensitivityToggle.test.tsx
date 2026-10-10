@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api.js";
+import { fakeApi, type FakeCallInput } from "./fakeApi.js";
 import { changeSensitivity, SensitivityToggle, sensitivityToast, type SensitivityObject } from "./SensitivityToggle.js";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -39,22 +40,24 @@ describe("SensitivityToggle (#86)", () => {
 
 describe("changeSensitivity (#86)", () => {
   it("flips the value with a guarded write to the sensitivity endpoint", async () => {
-    const calls: Array<{ url: string; options?: RequestInit }> = [];
-    const call = async <T,>(url: string, options?: RequestInit) => { calls.push({ url, options }); return {} as T; };
+    const calls: Array<{ endpoint: string; input?: FakeCallInput }> = [];
+    const call = fakeApi((endpoint, input) => { calls.push({ endpoint, input }); return {}; });
     await changeSensitivity(object(), "decision", call);
     await changeSensitivity(object("restricted"), "decision", call);
-    expect(calls.map((entry) => entry.url)).toEqual(["/api/v1/objects/0190a1b2-0000-7000-8000-000000000001/sensitivity", "/api/v1/objects/0190a1b2-0000-7000-8000-000000000001/sensitivity"]);
-    expect(calls.map((entry) => entry.options?.method)).toEqual(["POST", "POST"]);
-    expect(calls.map((entry) => JSON.parse(String(entry.options?.body)))).toEqual([{ sensitivity: "restricted", expectedHash: "hash-1" }, { sensitivity: "normal", expectedHash: "hash-1" }]);
+    const id = "0190a1b2-0000-7000-8000-000000000001";
+    expect(calls).toEqual([
+      { endpoint: "POST /api/v1/objects/:id/sensitivity", input: { params: { id }, body: { sensitivity: "restricted", expectedHash: "hash-1" } } },
+      { endpoint: "POST /api/v1/objects/:id/sensitivity", input: { params: { id }, body: { sensitivity: "normal", expectedHash: "hash-1" } } }
+    ]);
   });
 
   it("explains a conflict in plain words instead of the raw hash error", async () => {
-    const call = async () => { throw new ApiError("Expected content hash abc but found def", 409); };
+    const call = fakeApi(() => { throw new ApiError("Expected content hash abc but found def", 409); });
     await expect(changeSensitivity(object(), "open point", call)).rejects.toThrow("This open point was changed elsewhere, so its sensitivity was not changed. The latest version is loaded; try again.");
   });
 
   it("passes other errors through unchanged", async () => {
-    const call = async () => { throw new ApiError("LifeOS server is not reachable", 0); };
+    const call = fakeApi(() => { throw new ApiError("LifeOS server is not reachable", 0); });
     await expect(changeSensitivity(object(), "meeting", call)).rejects.toThrow("LifeOS server is not reachable");
   });
 });

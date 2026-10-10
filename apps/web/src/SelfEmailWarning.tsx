@@ -2,9 +2,9 @@
 // so the gap is not noticed only by visiting Settings. Words carry the message (never colour alone) and
 // each link is a button that moves focus to the matching Settings card.
 import React from "react";
+import type { SetupWarning } from "@lifeos/contracts";
 import { WarningCard } from "./WarningCard.js";
 
-export type SetupWarning = { selfEmailsMissing: boolean; internalDomainsMissing: boolean };
 /** The Settings cards the warning links to. */
 export const selfEmailsCardId = "settings-self-emails";
 export const internalDomainsCardId = "settings-internal-domains";

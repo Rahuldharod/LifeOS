@@ -2,11 +2,11 @@
 // #95: a local path, so it is stored per device (ADR 0005): each Mac has its own folder, and the card says so.
 // It loads and saves itself, like the other Settings cards, and reports through the shared SaveStatus line.
 import React, { useEffect, useState } from "react";
+import type { BackupSettings } from "@lifeos/contracts";
 import { api, ApiError } from "./api.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
 
 export const backupFolderCardId = "settings-backup-folder";
-type BackupSettings = { offDriveFolder?: string; contentHash?: string };
 
 export function BackupFolderCard({ disabled }: { disabled: boolean }) {
   const [setting, setSetting] = useState<BackupSettings>();
@@ -14,7 +14,7 @@ export function BackupFolderCard({ disabled }: { disabled: boolean }) {
   const [status, setStatus] = useState<SaveState>();
   const [saving, setSaving] = useState(false);
   const load = async () => {
-    const loaded = await api<BackupSettings>("/api/v1/settings/backups").catch(() => undefined);
+    const loaded = await api("GET /api/v1/settings/backups").catch(() => undefined);
     setSetting(loaded);
     setText(loaded?.offDriveFolder ?? "");
   };
@@ -23,7 +23,7 @@ export function BackupFolderCard({ disabled }: { disabled: boolean }) {
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await api<BackupSettings>("/api/v1/settings/backups", { method: "PUT", body: JSON.stringify({ offDriveFolder: text.trim(), expectedHash: setting?.contentHash }) });
+      const saved = await api("PUT /api/v1/settings/backups", { body: { offDriveFolder: text.trim(), expectedHash: setting?.contentHash } });
       setSetting(saved);
       setText(saved.offDriveFolder ?? "");
       setStatus({ kind: "saved", text: saved.offDriveFolder ? "Saved. The next backup copies here if the last copy is a week old." : "Saved. No off-Drive copy will be made." });

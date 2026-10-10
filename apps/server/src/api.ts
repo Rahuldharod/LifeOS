@@ -11,7 +11,7 @@ import path from "node:path";
 import { watch } from "node:fs";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { LifeOSApplication, type AutoBackups, type CalendarConnector, type ReviewEdits, type Weekday } from "@lifeos/application";
+import { LifeOSApplication, type AutoBackups, type CalendarConnector } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { MemoryIndex } from "@lifeos/index-memory";
@@ -25,6 +25,7 @@ import { registerNotePurge } from "./note-purge-routes.js";
 import { registerNotesList } from "./notes-list-route.js";
 import { calendarRange, hasExpectedHash, invalidCalendarRange, isCalendarDay } from "./request-checks.js";
 import { shutDown } from "./shutdown.js";
+import { route } from "./route.js";
 import { registerWebApp } from "./web-app.js";
 
 /** What the routes need from the Google Calendar connector beyond reading calendars. */
@@ -92,85 +93,84 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   const idle = new IdleRelease(session, options.idleReleaseMs);
   registerLease(server, { session, idle, stopping: () => stopping });
 
-  server.get("/api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
-  server.get("/api/v1/objects", async () => application.listObjects());
+  route(server, "GET /api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
+  route(server, "GET /api/v1/objects", async () => application.listObjects());
   registerNotesList(server, application);
-  server.get<{ Params: { type: "task" | "project" | "client" | "product" | "person" } }>("/api/v1/entities/:type", async (request) => application.entities(request.params.type));
-  server.post<{ Params: { type: "task" | "project" | "client" | "product" | "person" }; Body: { fields: Record<string, unknown> } }>("/api/v1/entities/:type", async (request) => application.createEntity(request.params.type, request.body.fields));
-  server.patch<{ Params: { id: string }; Body: { fields: Record<string, unknown>; expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.updateEntity(request.params.id, request.body.fields, request.body.expectedHash));
-  server.delete<{ Params: { id: string }; Body: { expectedHash: string } }>("/api/v1/entities/by-id/:id", async (request) => application.deleteEntity(request.params.id, request.body.expectedHash));
+  route(server, "GET /api/v1/entities/:type", async (request) => application.entities(request.params.type));
+  route(server, "POST /api/v1/entities/:type", async (request) => application.createEntity(request.params.type, request.body.fields));
+  route(server, "PATCH /api/v1/entities/by-id/:id", async (request) => application.updateEntity(request.params.id, request.body.fields, request.body.expectedHash));
+  route(server, "DELETE /api/v1/entities/by-id/:id", async (request) => application.deleteEntity(request.params.id, request.body.expectedHash));
   // #39: display labels for badges and pickers, and the manual External override (null = back to the email rule).
-  server.get("/api/v1/people/labels", async () => application.personLabels());
-  server.put<{ Params: { id: string }; Body: { isExternal?: boolean | null; expectedHash?: string } }>("/api/v1/people/:id/external", async (request, reply) => {
+  route(server, "GET /api/v1/people/labels", async () => application.personLabels());
+  route(server, "PUT /api/v1/people/:id/external", async (request, reply) => {
     const { isExternal } = request.body ?? {};
     if (isExternal !== true && isExternal !== false && isExternal !== null) return reply.status(400).send({ error: "isExternal must be true, false or null" });
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required" });
     return application.setPersonExternal(request.params.id, isExternal, request.body.expectedHash);
   });
   // #87: the user confirms an automatically created ("unreviewed") person.
-  server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/people/:id/reviewed", async (request, reply) => {
+  route(server, "POST /api/v1/people/:id/reviewed", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required" });
     return application.confirmPersonReviewed(request.params.id, request.body.expectedHash);
   });
-  server.post("/api/v1/index/rebuild", async () => application.rebuildIndex());
+  route(server, "POST /api/v1/index/rebuild", async () => application.rebuildIndex());
 
-  type RangeQuery = { Querystring: { from?: string; to?: string } };
-  server.get<RangeQuery>("/api/v1/calendar/events", async (request, reply) => {
+  route(server, "GET /api/v1/calendar/events", async (request, reply) => {
     const range = calendarRange(request.query);
     if (!range) return reply.status(400).send({ error: invalidCalendarRange });
     return application.listCalendarEvents(range.from, range.to);
   });
-  server.get("/api/v1/calendar/calendars", async () => application.listCalendars());
-  server.get("/api/v1/settings/calendar-preferences", async () => application.getCalendarPreferences());
-  server.put<{ Body: { disabledCalendarIds?: string[]; defaultCalendarId?: string; expectedHash?: string } }>("/api/v1/settings/calendar-preferences", async (request) => {
+  route(server, "GET /api/v1/calendar/calendars", async () => application.listCalendars());
+  route(server, "GET /api/v1/settings/calendar-preferences", async () => application.getCalendarPreferences());
+  route(server, "PUT /api/v1/settings/calendar-preferences", async (request) => {
     const { disabledCalendarIds = [], defaultCalendarId, expectedHash } = request.body ?? {};
     return application.saveCalendarPreferences({ disabledCalendarIds, defaultCalendarId }, expectedHash);
   });
-  server.get("/api/v1/settings/internal-domains", async () => application.getInternalDomains());
-  server.put<{ Body: { domains?: unknown[]; expectedHash?: string } }>("/api/v1/settings/internal-domains", async (request, reply) => {
+  route(server, "GET /api/v1/settings/internal-domains", async () => application.getInternalDomains());
+  route(server, "PUT /api/v1/settings/internal-domains", async (request, reply) => {
     const { domains, expectedHash } = request.body ?? {};
     if (!Array.isArray(domains)) return reply.status(400).send({ error: "domains must be a list" });
     return application.saveInternalDomains(domains, expectedHash);
   });
   // #54: the user's own addresses live in a synced setting, never in code.
-  server.get("/api/v1/settings/self-emails", async () => application.getSelfEmails());
-  server.put<{ Body: { emails?: unknown[]; expectedHash?: string } }>("/api/v1/settings/self-emails", async (request, reply) => {
+  route(server, "GET /api/v1/settings/self-emails", async () => application.getSelfEmails());
+  route(server, "PUT /api/v1/settings/self-emails", async (request, reply) => {
     const { emails, expectedHash } = request.body ?? {};
     if (!Array.isArray(emails)) return reply.status(400).send({ error: "emails must be a list" });
     return application.saveSelfEmails(emails, expectedHash);
   });
   // #48: meeting-hours threshold and brief time; invalid values answer 400 with every problem named.
-  server.get("/api/v1/settings/today", async () => application.getTodaySettings());
-  server.put<{ Body: { meetingHoursThreshold?: number; briefTime?: string; briefTimeZone?: string; briefDays?: Weekday[]; expectedHash?: string } }>("/api/v1/settings/today", async (request) => {
+  route(server, "GET /api/v1/settings/today", async () => application.getTodaySettings());
+  route(server, "PUT /api/v1/settings/today", async (request) => {
     const { expectedHash, meetingHoursThreshold, briefTime, briefTimeZone, briefDays } = request.body ?? {};
     const changes = Object.fromEntries(Object.entries({ meetingHoursThreshold, briefTime, briefTimeZone, briefDays }).filter(([, value]) => value !== undefined));
     return application.saveTodaySettings(changes, expectedHash);
   });
-  server.post<RangeQuery>("/api/v1/calendar/sync", async (request, reply) => {
+  route(server, "POST /api/v1/calendar/sync", async (request, reply) => {
     const range = calendarRange(request.query);
     if (!range) return reply.status(400).send({ error: invalidCalendarRange });
     return application.syncCalendar(range.from, range.to);
   });
   // #88 (PB-022b): like /calendar/events and /calendar/sync, but a calendar that cannot be read (network, expired
   // token, denied Keychain) answers 200 with the meetings already in LifeOS and an `offline` state, never an error.
-  server.get<RangeQuery>("/api/v1/calendar/day", async (request, reply) => {
+  route(server, "GET /api/v1/calendar/day", async (request, reply) => {
     const range = calendarRange(request.query);
     if (!range) return reply.status(400).send({ error: invalidCalendarRange });
     return application.calendarDay(range.from, range.to);
   });
-  server.post<RangeQuery>("/api/v1/calendar/day/sync", async (request, reply) => {
+  route(server, "POST /api/v1/calendar/day/sync", async (request, reply) => {
     const range = calendarRange(request.query);
     if (!range) return reply.status(400).send({ error: invalidCalendarRange });
     return application.calendarDay(range.from, range.to, { sync: true });
   });
-  server.get("/api/v1/connections/google", async () => googleConnectionStatus(secrets, calendars.google, application.calendarSyncStatus()));
-  server.get("/api/v1/settings/connections", async () => connectionSettings(secrets, calendars.google, application.calendarSyncStatus()));
+  route(server, "GET /api/v1/connections/google", async () => googleConnectionStatus(secrets, calendars.google, application.calendarSyncStatus()));
+  route(server, "GET /api/v1/settings/connections", async () => connectionSettings(secrets, calendars.google, application.calendarSyncStatus()));
   // #77: Retry on the Connections card after a denied Keychain prompt; may show the prompt again, since the user asked.
-  server.post("/api/v1/settings/connections/retry", async () => {
+  route(server, "POST /api/v1/settings/connections/retry", async () => {
     await calendars.probe();
     return connectionSettings(secrets, calendars.google, application.calendarSyncStatus());
   });
-  server.post<{ Params: { provider: "calendar" | "drive" }; Body: { clientId: string; clientSecret: string } }>("/api/v1/settings/connections/google/:provider", async (request, reply) => {
+  route(server, "POST /api/v1/settings/connections/google/:provider", async (request, reply) => {
     const clientId = request.body.clientId.trim();
     const clientSecret = request.body.clientSecret.trim();
     if (!clientId.endsWith(".apps.googleusercontent.com") || !clientSecret) return reply.status(400).send({ error: "Enter a valid Google OAuth client ID and client secret" });
@@ -179,7 +179,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (request.params.provider === "calendar") calendars.useGoogle(clientId);
     return { configured: true, connected: false };
   });
-  server.post<{ Body: { clientId: string; clientSecret: string } }>("/api/v1/connections/google/configure", async (request, reply) => {
+  route(server, "POST /api/v1/connections/google/configure", async (request, reply) => {
     const clientId = request.body.clientId.trim();
     const clientSecret = request.body.clientSecret.trim();
     if (!clientId.endsWith(".apps.googleusercontent.com") || !clientSecret) return reply.status(400).send({ error: "Enter a valid Google OAuth Desktop client ID and client secret" });
@@ -187,7 +187,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     calendars.useGoogle(clientId);
     return googleConnectionStatus(secrets, calendars.google, application.calendarSyncStatus());
   });
-  server.get("/api/v1/connections/google/start", async (_request, reply) => {
+  route(server, "GET /api/v1/connections/google/start", async (_request, reply) => {
     if (!calendars.google) return reply.status(400).send({ error: "Configure the Google OAuth Desktop client before connecting Google Calendar" });
     return { authorizationUrl: await calendars.google.authorizationUrl() };
   });
@@ -200,13 +200,13 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return reply.type("text/html").send('<!doctype html><meta charset="utf-8"><title>LifeOS connected</title><style>body{font-family:system-ui;max-width:560px;margin:80px auto;color:#173f32}a{color:#173f32}</style><h1>Google Calendar connected</h1><p>Your tokens are stored in macOS Keychain. You can return to LifeOS.</p><a href="/">Return to LifeOS</a>');
   });
   // Opening an event is a pure read (PB-020): it returns the existing workspace or a non-persisted preview.
-  server.get<{ Querystring: { externalId: string; calendarId?: string; from?: string; to?: string } }>("/api/v1/meetings/preview", async (request, reply) => {
+  route(server, "GET /api/v1/meetings/preview", async (request, reply) => {
     const range = calendarRange(request.query);
     if (!request.query.externalId || !range) return reply.status(400).send({ error: invalidCalendarRange });
     return application.previewMeetingFromEvent(request.query.externalId, range.from, range.to, request.query.calendarId);
   });
   // Materializes the meeting + note; the web calls it only on the first real edit, with that text as `body`.
-  server.post<{ Body: { externalId: string; calendarId?: string; from?: string; to?: string; body?: string } }>("/api/v1/meetings/from-event", async (request, reply) => {
+  route(server, "POST /api/v1/meetings/from-event", async (request, reply) => {
     const range = calendarRange(request.body);
     if (!range) return reply.status(400).send({ error: invalidCalendarRange });
     if (request.body.body !== undefined && typeof request.body.body !== "string") return reply.status(400).send({ error: "Note body must be text" });
@@ -215,10 +215,10 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     void application.suggestPersonMerges().catch((error) => server.log.error(error));
     return created;
   });
-  server.get<{ Params: { externalId: string } }>("/api/v1/meetings/from-event/:externalId", async (request) => application.meetingFromEvent(request.params.externalId));
-  server.get<{ Params: { id: string } }>("/api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
-  server.put<{ Params: { id: string }; Body: { body: string; expectedHash: string } }>("/api/v1/objects/:id/body", async (request) => application.updateBody(request.params.id, request.body.body, request.body.expectedHash));
-  server.post<{ Params: { id: string }; Body: { fileName: string; mimeType: string; contentBase64: string } }>("/api/v1/objects/:id/assets", async (request) => {
+  route(server, "GET /api/v1/meetings/from-event/:externalId", async (request) => application.meetingFromEvent(request.params.externalId));
+  route(server, "GET /api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
+  route(server, "PUT /api/v1/objects/:id/body", async (request) => application.updateBody(request.params.id, request.body.body, request.body.expectedHash));
+  route(server, "POST /api/v1/objects/:id/assets", async (request) => {
     const object = application.object(request.params.id);
     const encoded = request.body.contentBase64.replace(/^data:[^;]+;base64,/, "");
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error("Invalid base64 image data");
@@ -234,116 +234,116 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!mimeType) return reply.status(404).send({ error: "Unsupported asset" });
     return reply.type(mimeType).send(await assets.read(relativePath));
   });
-  server.patch<{ Params: { id: string }; Body: { changes?: Record<string, unknown>; expectedHash?: string } }>("/api/v1/notes/:id", async (request, reply) => {
+  route(server, "PATCH /api/v1/notes/:id", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required to edit a note" });
     if (!request.body.changes || typeof request.body.changes !== "object") return reply.status(400).send({ error: "changes are required" });
     return application.updateNoteMetadata(request.params.id, request.body.changes, request.body.expectedHash);
   });
-  server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id/restore", async (request, reply) => {
+  route(server, "POST /api/v1/notes/:id/restore", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required to restore a note" });
     return application.restoreNote(request.params.id, request.body.expectedHash);
   });
-  server.delete<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/notes/:id", async (request, reply) => {
+  route(server, "DELETE /api/v1/notes/:id", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required to delete a note" });
     return application.deleteNote(request.params.id, request.body.expectedHash);
   });
   registerNotePurge(server, application);
-  server.post<{ Params: { id: string }; Body: { expectedHash: string } }>("/api/v1/objects/:id/archive", async (request) => application.archiveObject(request.params.id, request.body.expectedHash));
-  server.post<{ Params: { id: string }; Body: { sensitivity?: "normal" | "restricted"; expectedHash?: string } }>("/api/v1/objects/:id/sensitivity", async (request, reply) => {
+  route(server, "POST /api/v1/objects/:id/archive", async (request) => application.archiveObject(request.params.id, request.body.expectedHash));
+  route(server, "POST /api/v1/objects/:id/sensitivity", async (request, reply) => {
     if (!hasExpectedHash(request.body) || typeof request.body.sensitivity !== "string") return reply.status(400).send({ error: "sensitivity and expectedHash are required" });
     return application.setSensitivity(request.params.id, request.body.sensitivity, request.body.expectedHash);
   });
-  server.post<{ Params: { id: string }; Body: { linkTo?: string } | undefined }>("/api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
+  route(server, "POST /api/v1/review-items/:id/accept", async (request) => application.acceptReviewItem(request.params.id, { linkTo: typeof request.body?.linkTo === "string" ? request.body.linkTo : undefined }));
   // Edits a pending proposal: title, owner, due, priority and context links (#34); `null` clears a field.
-  server.patch<{ Params: { id: string }; Body: ReviewEdits }>("/api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));
-  server.post<{ Params: { id: string } }>("/api/v1/review-items/:id/reject", async (request) => application.rejectReviewItem(request.params.id));
+  route(server, "PATCH /api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));
+  route(server, "POST /api/v1/review-items/:id/reject", async (request) => application.rejectReviewItem(request.params.id));
   // #46: `date` is the user's local date (the browser knows the display time zone); it picks the Daily Focus brief.
-  server.get<{ Querystring: { date?: string } }>("/api/v1/today", async (request, reply) => {
+  route(server, "GET /api/v1/today", async (request, reply) => {
     const date = request.query.date;
     if (date !== undefined && !isCalendarDay(date)) return reply.status(400).send({ error: "date must be YYYY-MM-DD" });
     return application.today({ date });
   });
   // #48: the live panels; `timeZone` (IANA, the browser's display zone) sets the local day's boundaries for meetings.
-  server.get<{ Querystring: { date?: string; timeZone?: string } }>("/api/v1/today/panels", async (request, reply) => {
+  route(server, "GET /api/v1/today/panels", async (request, reply) => {
     const { date, timeZone } = request.query;
     if (date !== undefined && !isCalendarDay(date)) return reply.status(400).send({ error: "date must be YYYY-MM-DD" });
     return { ...await application.todayPanels({ date, timeZone }), ...await backupWarning() };
   });
-  server.post<{ Body: { date?: string } }>("/api/v1/focus/replan", async (request, reply) => {
+  route(server, "POST /api/v1/focus/replan", async (request, reply) => {
     if (!isCalendarDay(request.body?.date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
     return application.requestReplan(request.body.date);
   });
   // #47: one change to the date's Top 3 (pin, unpin, replace, dismiss, restore, reset); 409 when expectedHash is stale.
-  server.post<{ Body: { date?: string; action?: unknown; taskId?: unknown; replacementId?: unknown; expectedHash?: unknown } }>("/api/v1/focus/overrides", async (request, reply) => {
+  route(server, "POST /api/v1/focus/overrides", async (request, reply) => {
     const { date, action, taskId, replacementId, expectedHash } = request.body ?? {};
     if (!isCalendarDay(date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
     if (expectedHash !== undefined && typeof expectedHash !== "string") return reply.status(400).send({ error: "expectedHash must be text" });
     return application.overrideFocus(date, { action, taskId, replacementId }, expectedHash);
   });
-  server.get("/api/v1/settings/daily-focus", async () => application.getFocusSettings());
-  server.put<{ Body: { maxMustDos?: unknown; expectedHash?: string } }>("/api/v1/settings/daily-focus", async (request) => application.saveFocusSettings({ maxMustDos: request.body?.maxMustDos }, request.body?.expectedHash));
-  server.get("/api/v1/tasks", async () => application.tasks());
-  server.patch<{ Params: { id: string }; Body: { changes: Record<string, unknown>; expectedHash: string } }>("/api/v1/tasks/:id", async (request) => application.updateTask(request.params.id, request.body.changes, request.body.expectedHash));
-  server.post<{ Body: { text: string } }>("/api/v1/capture", async (request) => application.quickCapture(request.body.text));
-  server.get<{ Querystring: { q?: string } }>("/api/v1/knowledge", async (request) => application.knowledge(request.query.q));
-  server.post<{ Body: { title: string; text: string } }>("/api/v1/sources/text", async (request) => application.ingestTextSource(request.body.title, request.body.text));
-  server.get<{ Params: { type: "client" | "product" | "person" } }>("/api/v1/rollups/:type", async (request) => application.rollups(request.params.type));
-  server.get("/api/v1/projects", async () => application.projects());
+  route(server, "GET /api/v1/settings/daily-focus", async () => application.getFocusSettings());
+  route(server, "PUT /api/v1/settings/daily-focus", async (request) => application.saveFocusSettings({ maxMustDos: request.body?.maxMustDos }, request.body?.expectedHash));
+  route(server, "GET /api/v1/tasks", async () => application.tasks());
+  route(server, "PATCH /api/v1/tasks/:id", async (request) => application.updateTask(request.params.id, request.body.changes, request.body.expectedHash));
+  route(server, "POST /api/v1/capture", async (request) => application.quickCapture(request.body.text));
+  route(server, "GET /api/v1/knowledge", async (request) => application.knowledge(request.query.q));
+  route(server, "POST /api/v1/sources/text", async (request) => application.ingestTextSource(request.body.title, request.body.text));
+  route(server, "GET /api/v1/rollups/:type", async (request) => application.rollups(request.params.type));
+  route(server, "GET /api/v1/projects", async () => application.projects());
 
   /** A guarded write to a Decision or Open Point: `fields` plus the expected hash of the version they edit. */
   type FieldsWrite = { Params: { id: string }; Body: { fields?: Record<string, unknown>; expectedHash?: string } };
-  const fieldsWrite = (write: (id: string, fields: Record<string, unknown>, expectedHash: string) => Promise<unknown>) => async (request: FastifyRequest<FieldsWrite>, reply: FastifyReply) => {
+  const fieldsWrite = <Reply>(write: (id: string, fields: Record<string, unknown>, expectedHash: string) => Promise<Reply>) => async (request: FastifyRequest<FieldsWrite>, reply: FastifyReply) => {
     if (!hasExpectedHash(request.body) || !request.body.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields and expectedHash are required" });
     return write(request.params.id, request.body.fields, request.body.expectedHash);
   };
   // #41 Decisions workspace. Filters: projectId, clientId, productId, personId, status, from/to (ISO instants on decided_at).
-  server.get<{ Querystring: { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string } }>("/api/v1/decisions", async (request) => application.decisions(request.query));
-  server.get<{ Params: { id: string } }>("/api/v1/decisions/:id", async (request) => application.decision(request.params.id));
-  server.post<{ Body: { fields?: Record<string, unknown> } }>("/api/v1/decisions", async (request, reply) => {
+  route(server, "GET /api/v1/decisions", async (request) => application.decisions(request.query));
+  route(server, "GET /api/v1/decisions/:id", async (request) => application.decision(request.params.id));
+  route(server, "POST /api/v1/decisions", async (request, reply) => {
     if (!request.body?.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields are required" });
     return application.createDecision(request.body.fields);
   });
-  server.patch<FieldsWrite>("/api/v1/decisions/:id", fieldsWrite((id, fields, hash) => application.updateDecision(id, fields, hash)));
-  server.post<FieldsWrite>("/api/v1/decisions/:id/supersede", fieldsWrite((id, fields, hash) => application.supersedeDecision(id, fields, hash)));
+  route(server, "PATCH /api/v1/decisions/:id", fieldsWrite((id, fields, hash) => application.updateDecision(id, fields, hash)));
+  route(server, "POST /api/v1/decisions/:id/supersede", fieldsWrite((id, fields, hash) => application.supersedeDecision(id, fields, hash)));
   // #42 Open Points workspace: same filters as Decisions (from/to on raised_at); resolve, resolve with a new decision, close.
-  server.get<{ Querystring: { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string } }>("/api/v1/open-points", async (request) => application.openPoints(request.query));
-  server.get<{ Params: { id: string } }>("/api/v1/open-points/:id", async (request) => application.openPoint(request.params.id));
-  server.post<{ Body: { fields?: Record<string, unknown> } }>("/api/v1/open-points", async (request, reply) => {
+  route(server, "GET /api/v1/open-points", async (request) => application.openPoints(request.query));
+  route(server, "GET /api/v1/open-points/:id", async (request) => application.openPoint(request.params.id));
+  route(server, "POST /api/v1/open-points", async (request, reply) => {
     if (!request.body?.fields || typeof request.body.fields !== "object") return reply.status(400).send({ error: "fields are required" });
     return application.createOpenPoint(request.body.fields);
   });
-  server.patch<FieldsWrite>("/api/v1/open-points/:id", fieldsWrite((id, fields, hash) => application.updateOpenPoint(id, fields, hash)));
-  server.post<FieldsWrite>("/api/v1/open-points/:id/resolve", fieldsWrite((id, fields, hash) => application.resolveOpenPoint(id, fields, hash)));
-  server.post<FieldsWrite>("/api/v1/open-points/:id/resolve-with-decision", fieldsWrite((id, fields, hash) => application.resolveOpenPointWithDecision(id, fields, hash)));
-  server.post<FieldsWrite>("/api/v1/open-points/:id/close", fieldsWrite((id, fields, hash) => application.closeOpenPoint(id, fields, hash)));
+  route(server, "PATCH /api/v1/open-points/:id", fieldsWrite((id, fields, hash) => application.updateOpenPoint(id, fields, hash)));
+  route(server, "POST /api/v1/open-points/:id/resolve", fieldsWrite((id, fields, hash) => application.resolveOpenPoint(id, fields, hash)));
+  route(server, "POST /api/v1/open-points/:id/resolve-with-decision", fieldsWrite((id, fields, hash) => application.resolveOpenPointWithDecision(id, fields, hash)));
+  route(server, "POST /api/v1/open-points/:id/close", fieldsWrite((id, fields, hash) => application.closeOpenPoint(id, fields, hash)));
   // Each item carries its evidence per field, with sources looked up now (missing ones come back unresolved).
-  server.get("/api/v1/review-items", async () => application.reviews().map((review) => ({ ...review, evidence: application.reviewEvidence(review.frontmatter.id) })));
-  server.get("/api/v1/inbox/drafts", async () => application.inboxStatus());
-  server.post("/api/v1/inbox/adopt", async () => application.adoptDrafts());
-  server.get("/api/v1/enrichment", async () => application.enrichmentStatus());
-  server.post("/api/v1/enrichment/work-orders", async () => application.requestEnrichment());
-  server.post<{ Params: { id: string }; Body: { expectedHash?: string } }>("/api/v1/meetings/:id/enrichment/gave-up", async (request, reply) => {
+  route(server, "GET /api/v1/review-items", async () => application.reviews().map((review) => ({ ...review, evidence: application.reviewEvidence(review.frontmatter.id) })));
+  route(server, "GET /api/v1/inbox/drafts", async () => application.inboxStatus());
+  route(server, "POST /api/v1/inbox/adopt", async () => application.adoptDrafts());
+  route(server, "GET /api/v1/enrichment", async () => application.enrichmentStatus());
+  route(server, "POST /api/v1/enrichment/work-orders", async () => application.requestEnrichment());
+  route(server, "POST /api/v1/meetings/:id/enrichment/gave-up", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required" });
     return application.markEnrichmentGaveUp(request.params.id, request.body.expectedHash);
   });
-  server.get("/api/v1/inbox/patches", async () => application.appliedPatches());
-  server.post<{ Params: { id: string } }>("/api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
-  server.post<{ Params: { id: string } }>("/api/v1/history/:id/restore", async (request) => application.restoreVersion(request.params.id));
+  route(server, "GET /api/v1/inbox/patches", async () => application.appliedPatches());
+  route(server, "POST /api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
+  route(server, "POST /api/v1/history/:id/restore", async (request) => application.restoreVersion(request.params.id));
   // #85: one object's kept versions and the audit events about them, and restoring any kept version.
   // #92: the panel keeps the hash it was opened with and sends it back, so a save made since is never overwritten (409).
-  server.get<{ Params: { id: string } }>("/api/v1/objects/:id/history", async (request) => application.historyPanel(request.params.id));
-  server.post<{ Params: { id: string }; Body: { versionPath?: string; expectedHash?: string } }>("/api/v1/objects/:id/history/restore", async (request, reply) => {
+  route(server, "GET /api/v1/objects/:id/history", async (request) => application.historyPanel(request.params.id));
+  route(server, "POST /api/v1/objects/:id/history/restore", async (request, reply) => {
     if (typeof request.body?.versionPath !== "string" || !hasExpectedHash(request.body)) return reply.status(400).send({ error: "versionPath and expectedHash are required" });
     return application.restoreKeptVersion(request.params.id, request.body.versionPath, request.body.expectedHash);
   });
-  server.get("/api/v1/backups", async () => backups.list());
+  route(server, "GET /api/v1/backups", async () => backups.list());
   // "Back up now" (System and the backup warning): recorded like the automatic ones, so a success clears the warning.
-  server.post("/api/v1/backups", async () => autoBackups ? autoBackups.runNow() : backups.create());
+  route(server, "POST /api/v1/backups", async () => autoBackups ? autoBackups.runNow() : backups.create());
   // #95: always a JSON state, including before automatic backups start.
-  server.get("/api/v1/backups/status", async () => autoBackups ? autoBackups.status() : application.backupStatus(backups));
-  server.get("/api/v1/settings/backups", async () => application.getBackupSettings());
-  server.put<{ Body: { offDriveFolder?: unknown; expectedHash?: string } }>("/api/v1/settings/backups", async (request) => application.saveBackupSettings({ offDriveFolder: request.body?.offDriveFolder }, request.body?.expectedHash));
-  server.post<{ Params: { id: string } }>("/api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
+  route(server, "GET /api/v1/backups/status", async () => autoBackups ? autoBackups.status() : application.backupStatus(backups));
+  route(server, "GET /api/v1/settings/backups", async () => application.getBackupSettings());
+  route(server, "PUT /api/v1/settings/backups", async (request) => application.saveBackupSettings({ offDriveFolder: request.body?.offDriveFolder }, request.body?.expectedHash));
+  route(server, "POST /api/v1/backups/:id/verify", async (request) => backups.verifyRestorable(request.params.id));
 
   // Serves the production web build (PB-001), with every app URL falling back to index.html (PB-027).
   registerWebApp(server, options.webRoot);

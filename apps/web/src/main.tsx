@@ -10,7 +10,7 @@ import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api, ApiError, useServerConnection } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
-import { enabledCalendars, noCalendarPrefs, reconcileFilter, resolveDefaultFilter, type CalendarOption, type CalendarPrefs } from "./calendarPrefs.js";
+import { enabledCalendars, noCalendarPrefs, reconcileFilter, resolveDefaultFilter } from "./calendarPrefs.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
 import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
@@ -24,7 +24,7 @@ import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
-import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice, type PersonLabel } from "./personLabels.js";
+import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { MeetingEnrichment } from "./MeetingEnrichment.js";
 import { PersonReviewControl } from "./PersonReview.js";
@@ -42,10 +42,10 @@ import { displayTimeZone as storedDisplayTimeZone, formatDate, formatTime } from
 import { contextLinkFields, entityLinkFields } from "@lifeos/shared";
 import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
-import { TodayPage, type DailyFocus, type EnrichmentStatus, type FocusChange, type Today, type TodayPanels } from "./TodayPage.js";
+import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
-import { loadConnections, type ConnectionSettings, type ConnectionsState } from "./connections.js";
-import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
+import { loadConnections, type ConnectionsState } from "./connections.js";
+import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
 import { KnowledgeSourceForm, sourcePreservedToast } from "./KnowledgeSourceForm.js";
 import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
@@ -53,14 +53,15 @@ import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
 import { LeaseBanner, takeoverCaution } from "./LeaseBanner.js";
 import { useActivityHeartbeat } from "./activityHeartbeat.js";
-import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
+import { BackupWarning } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { PermanentDeleteButton } from "./PermanentDelete.js";
-import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay, type CalendarDay, type CalendarOffline } from "./CalendarOffline.js";
+import { CalendarOfflineBanner, CalendarStillOfflineError, retryCalendarDay } from "./CalendarOffline.js";
 import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { buildTrail } from "./trail.js";
+import type { AppliedPatch, BackupSummary, BackupVerification, CalendarDay, CalendarEvent, CalendarOffline, CalendarOption, CalendarPreferences as CalendarPrefs, EnrichmentStatus, EntityRollup, EntityType, FocusChange, GoogleConnection, InboxStatus, LifeObject, ObjectLink, PersonLabel, ProjectRollup, ReviewEdits, ReviewEvidence, SystemHealth, Today, TodayPanels, Workspace } from "@lifeos/contracts";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -72,39 +73,6 @@ type CrepeInstance = {
 };
 type CrepeConstructor = new (config: { root: Node; defaultValue: string; features?: Record<string, boolean>; featureConfigs?: Record<string, unknown> }) => CrepeInstance;
 
-type Frontmatter = Record<string, unknown> & {
-  id: string;
-  title: string;
-  type: string;
-  status?: string;
-  revision: number;
-  created_at: string;
-  updated_at: string;
-};
-type LifeObject = { frontmatter: Frontmatter; body: string; relativePath: string; contentHash: string };
-type Event = { externalId: string; calendarId?: string; calendarName?: string; calendarColor?: string; title: string; startsAt: string; endsAt: string; timezone: string; isAllDay?: boolean; attendees: string[]; projectName?: string; hasNote?: boolean; meetingId?: string; noteId?: string; stored?: true };
-type Workspace = {
-  /** False for the read-only preview of a calendar event with no meeting/note on disk yet (PB-020). */
-  persisted?: boolean;
-  meeting: LifeObject;
-  note?: LifeObject;
-  reviews: LifeObject[];
-  tasks: LifeObject[];
-  context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
-};
-type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
-type EntityRollup = { entity: LifeObject; related: LifeObject[] };
-type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string; releasedAfterIdle?: boolean };
-type InboxDrafts = { awaiting: number; drafts?: number; patches?: number; failed: Array<{ path: string; reason: string }> };
-type AdoptionBatch = { drafts: Array<{ outcome: "adopted" | "applied" | "review" | "duplicate" | "failed" | "skipped" }> };
-type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
-type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; idleReleaseMinutes?: number; setupWarning?: SetupWarning; backupWarning?: BackupWarningState };
-type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
-type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
-type GoogleConnection = { configured: boolean; connected: boolean; provider: string; missing?: string[]; reason?: "expired"; lastSuccessfulSyncAt?: string; lastError?: string };
-type EntityType = "task" | "project" | "client" | "product" | "person";
-type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
-type StoredAsset = { relativePath: string; markdownPath: string; sha256: string; deduplicated: boolean; mimeType: string };
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
 
@@ -191,7 +159,7 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
       const uploadManagedImage = async (file: File) => {
         const target = latest.current.owner ?? await latest.current.ensureOwner?.();
         if (!target) throw new Error("Could not create the note to attach this image to");
-        const stored = await api<StoredAsset>(`/api/v1/objects/${target.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64: await fileContentBase64(file) }) });
+        const stored = await api("POST /api/v1/objects/:id/assets", { params: { id: target.id }, body: { fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64: await fileContentBase64(file) } });
         return `/api/v1/assets/${encodeURIComponent(stored.relativePath.replace(/^assets\//, ""))}`;
       };
       instance = new Crepe({
@@ -225,9 +193,7 @@ function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnl
   return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }
 
-type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };
 type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
-type ReviewEdits = Record<string, string | null>;
 /** Which proposal fields the user may edit before accepting, per target type (#34). */
 const reviewEditable: Record<string, string[]> = {
   task: ["owner_person_id", "due_on", "priority", ...contextLinkFields],
@@ -344,7 +310,7 @@ function App() {
   const location = useLocation();
   const route = parseRoute(location.pathname);
   const view: View = route?.view ?? "Today";
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [today, setToday] = useState<Today>({ tasks: [], overdue: [], dueToday: [], upcoming: [], waiting: [], topThree: [], reviewCount: 0 });
   const [todayPanels, setTodayPanels] = useState<TodayPanels>();
@@ -375,7 +341,7 @@ function App() {
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceText, setSourceText] = useState("");
   const [health, setHealth] = useState<SystemHealth>();
-  const [inboxDrafts, setInboxDrafts] = useState<InboxDrafts>({ awaiting: 0, failed: [] });
+  const [inboxDrafts, setInboxDrafts] = useState<InboxStatus>({ awaiting: 0, drafts: 0, patches: 0, failed: [] });
   const [enrichment, setEnrichment] = useState<EnrichmentStatus>({ proposedGaveUp: [], staleWorkOrders: [] });
   const [appliedPatches, setAppliedPatches] = useState<AppliedPatch[]>([]);
   const [backups, setBackups] = useState<BackupSummary[]>([]);
@@ -413,7 +379,7 @@ function App() {
   const releasedAfterIdle = readOnly && health?.session.releasedAfterIdle === true;
   // ADR 0015: real input in this tab keeps (or, when free, claims) the write lease; the answer refreshes read-only state.
   useActivityHeartbeat(async () => {
-    const session = await api<SessionStatus>("/api/v1/session/activity", { method: "POST" });
+    const session = await api("POST /api/v1/session/activity");
     setHealth((current) => current ? { ...current, session } : current);
   });
 
@@ -423,7 +389,7 @@ function App() {
   // Deliberately does NOT call notesController.open() — that would hard-reset the draft and skip
   // conflict detection entirely.
   const fetchLatestNote = useCallback(async () => {
-    const refreshed = await api<LifeObject[]>("/api/v1/notes");
+    const refreshed = await api("GET /api/v1/notes");
     setNotes(refreshed);
     return refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
   }, [selectedNoteId]);
@@ -432,7 +398,7 @@ function App() {
   // no workspace is open. Deliberately does NOT call meetingController.open() for the same reason.
   const fetchLatestWorkspace = useCallback(async () => {
     if (!workspace || workspace.persisted === false) return undefined;
-    const next = await api<Workspace>(`/api/v1/meetings/${workspace.meeting.frontmatter.id}/workspace`);
+    const next = await api("GET /api/v1/meetings/:id/workspace", { params: { id: workspace.meeting.frontmatter.id } });
     setWorkspace(next);
     return next.note;
   }, [workspace]);
@@ -473,7 +439,7 @@ function App() {
       const target = previewTarget.current;
       if (!target) return undefined;
       const range = dayRange(target.date, target.timeZone);
-      let next = await api<Workspace>("/api/v1/meetings/from-event", { method: "POST", body: JSON.stringify({ externalId: target.externalId, calendarId: target.calendarId, ...range, body }) });
+      let next = await api("POST /api/v1/meetings/from-event", { body: { externalId: target.externalId, calendarId: target.calendarId, ...range, body } });
       const held = { ...pendingDetails.current };
       if (next.note && Array.isArray(held.people_ids)) {
         // Attendees the header could not show (LifeOS had no matching person yet) were just created from the
@@ -484,8 +450,8 @@ function App() {
       if (next.note && Object.keys(held).length) {
         // A failure here leaves a valid note with the calendar's defaults; say so rather than lose it silently.
         try {
-          await api(`/api/v1/notes/${next.note.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes: held, expectedHash: next.note.contentHash }) });
-          next = await api<Workspace>(`/api/v1/meetings/${next.meeting.frontmatter.id}/workspace`);
+          await api("PATCH /api/v1/notes/:id", { params: { id: next.note.frontmatter.id }, body: { changes: held, expectedHash: next.note.contentHash } });
+          next = await api("GET /api/v1/meetings/:id/workspace", { params: { id: next.meeting.frontmatter.id } });
           pendingDetails.current = {};
         } catch (error) { setMessage(`Note created, but your title and links could not be applied: ${error instanceof Error ? error.message : "unknown error"}`); }
       }
@@ -538,26 +504,26 @@ function App() {
 
   const loadCollections = async () => {
     // Without labels, badges fall back to full titles rather than failing the whole load.
-    const labelsRequest = api<PersonLabel[]>("/api/v1/people/labels").catch(() => [] as PersonLabel[]);
+    const labelsRequest = api("GET /api/v1/people/labels").catch(() => [] as PersonLabel[]);
     const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
-      api<Today>(`/api/v1/today?date=${dateInTimeZone(new Date(), displayTimeZone)}`), api<LifeObject[]>("/api/v1/tasks"),
-      api<ProjectRollup[]>("/api/v1/projects"), api<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>("/api/v1/review-items"), api<SystemHealth>("/api/v1/health"), api<BackupSummary[]>("/api/v1/backups"), api<LifeObject[]>("/api/v1/knowledge"), api<EntityRollup[]>("/api/v1/rollups/client"), api<EntityRollup[]>("/api/v1/rollups/product"), api<EntityRollup[]>("/api/v1/rollups/person"), api<ObjectLink[]>("/api/v1/objects"), api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted"), api<InboxDrafts>("/api/v1/inbox/drafts")
+      api("GET /api/v1/today", { query: { date: dateInTimeZone(new Date(), displayTimeZone) } }), api("GET /api/v1/tasks"),
+      api("GET /api/v1/projects"), api("GET /api/v1/review-items"), api("GET /api/v1/health"), api("GET /api/v1/backups"), api("GET /api/v1/knowledge"), api("GET /api/v1/rollups/:type", { params: { type: "client" } }), api("GET /api/v1/rollups/:type", { params: { type: "product" } }), api("GET /api/v1/rollups/:type", { params: { type: "person" } }), api("GET /api/v1/objects"), api("GET /api/v1/notes"), api("GET /api/v1/notes", { query: { state: "deleted" } }), api("GET /api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
-    setAppliedPatches(await api<AppliedPatch[]>("/api/v1/inbox/patches"));
+    setAppliedPatches(await api("GET /api/v1/inbox/patches"));
     // #77: loaded on its own; a Keychain problem only shows on the Connections card, never fails a load or a save.
-    void loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections"), connections?.settings).then(setConnections);
+    void loadConnections(() => api("GET /api/v1/settings/connections"), connections?.settings).then(setConnections);
     // #44: loaded on its own so a failure here never blanks the other panels.
-    void api<EnrichmentStatus>("/api/v1/enrichment").then(setEnrichment).catch(() => undefined);
+    void api("GET /api/v1/enrichment").then(setEnrichment).catch(() => undefined);
     // #48: likewise; it may wait on the calendar, so it never holds up the rest of the page.
     void loadTodayPanels();
     setPersonLabels(await labelsRequest);
   };
 
-  const loadTodayPanels = () => api<TodayPanels>(`/api/v1/today/panels?date=${dateInTimeZone(new Date(), displayTimeZone)}&timeZone=${encodeURIComponent(displayTimeZone)}`).then(setTodayPanels).catch(() => undefined);
+  const loadTodayPanels = () => api("GET /api/v1/today/panels", { query: { date: dateInTimeZone(new Date(), displayTimeZone), timeZone: displayTimeZone } }).then(setTodayPanels).catch(() => undefined);
 
   const refreshWorkspace = async (meetingId: string) => {
-    const next = await api<Workspace>(`/api/v1/meetings/${meetingId}/workspace`);
+    const next = await api("GET /api/v1/meetings/:id/workspace", { params: { id: meetingId } });
     setWorkspace(next);
     if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else if (!previewTarget.current) meetingController.reset();
   };
@@ -565,8 +531,8 @@ function App() {
   // Preferences live in the synced data folder; the calendar list comes from Google. Either may fail independently.
   const loadCalendarCatalog = async () => {
     const [catalog, prefs] = await Promise.all([
-      api<CalendarOption[]>("/api/v1/calendar/calendars").catch(() => [] as CalendarOption[]),
-      api<CalendarPrefs>("/api/v1/settings/calendar-preferences").catch(() => undefined)
+      api("GET /api/v1/calendar/calendars").catch(() => [] as CalendarOption[]),
+      api("GET /api/v1/settings/calendar-preferences").catch(() => undefined)
     ]);
     setCalendarCatalog(catalog);
     if (prefs) setCalendarPrefs(prefs);
@@ -576,7 +542,7 @@ function App() {
   /** Saves to the synced settings file; resolves to an error message, or undefined on success. */
   const saveCalendarPrefs =async (next: CalendarPrefs): Promise<string | undefined> => {
     try {
-      setCalendarPrefs(await api<CalendarPrefs>("/api/v1/settings/calendar-preferences", { method: "PUT", body: JSON.stringify({ ...next, expectedHash: calendarPrefs.contentHash }) }));
+      setCalendarPrefs(await api("PUT /api/v1/settings/calendar-preferences", { body: { ...next, expectedHash: calendarPrefs.contentHash } }));
       return undefined;
     } catch (error) {
       await loadCalendarCatalog();
@@ -585,17 +551,17 @@ function App() {
   };
 
   /** #88: an unreadable calendar answers with the meetings already in LifeOS and an offline state, not an error. */
-  const showCalendarDay = (day: CalendarDay<Event>) => {
+  const showCalendarDay = (day: CalendarDay) => {
     setEvents(day.events);
     setCalendarError(undefined);
     setCalendarOffline(day.offline);
     // Google rejected the tokens: refresh status so the Reconnect banner appears.
-    if (day.offline?.reason === "auth") void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
+    if (day.offline?.reason === "auth") void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
   };
 
   const loadCalendarDay = async (date = selectedDate) => {
     const range = dayRange(date, displayTimeZone);
-    const day = await api<CalendarDay<Event>>(`/api/v1/calendar/day?${new URLSearchParams(range)}`);
+    const day = await api("GET /api/v1/calendar/day", { query: range });
     showCalendarDay(day);
     const nextEvents = day.events;
     setCalendarSources((current) => {
@@ -610,7 +576,7 @@ function App() {
     void loadCalendarCatalog();
     // PB-027: the URL replaced these; drop what older versions left behind.
     try { for (const key of ["lifeos.activeView", "lifeos.activeNoteId", "lifeos.activeMeetingId"]) localStorage.removeItem(key); } catch { /* storage unavailable */ }
-    Promise.all([api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), loadCollections()])
+    Promise.all([api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), loadCollections()])
       .then(() => setMessage("Local workspace ready"))
       .catch((error: Error) => setMessage(error.message))
       .finally(() => setCollectionsLoaded(true));
@@ -622,7 +588,7 @@ function App() {
     setCalendarOffline(undefined);
     setCalendarError(text);
     // A 401 means Google rejected the tokens; refresh status so the Reconnect banner appears.
-    if (error instanceof ApiError && error.status === 401) void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
+    if (error instanceof ApiError && error.status === 401) void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
     return text;
   };
 
@@ -716,7 +682,7 @@ function App() {
     void (async () => {
       // A meeting created a moment ago may not be in the object list yet; ask the server once more.
       let objects = objectLinks;
-      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { objects = await api<ObjectLink[]>("/api/v1/objects").catch(() => objects); setObjectLinks(objects); }
+      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { objects = await api("GET /api/v1/objects").catch(() => objects); setObjectLinks(objects); }
       if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { close(); return; }
       previewTarget.current = undefined;
       setEditorMode("visual"); setEditorSession((session) => session + 1);
@@ -744,16 +710,16 @@ function App() {
   // over a non-persisted preview. Nothing is written until the user makes a real edit.
   // PB-027: the open note is saved first, and the opened meeting gets its own URL (an unsaved event
   // has no id yet, so it stays on the day's URL until its first edit creates the meeting).
-  const openEvent = async (selectedEvent: Event) => {
+  const openEvent = async (selectedEvent: CalendarEvent) => {
     if (!(await leaveEditors())) return false;
     // #88: offline, a stored meeting opens from LifeOS; the preview would need the calendar.
     if (selectedEvent.stored && selectedEvent.meetingId) { followRoute({ view: "Calendar", date: selectedDate, id: selectedEvent.meetingId }); return true; }
     return previewEvent(selectedEvent);
   };
-  const previewEvent = (selectedEvent: Event) => run(async () => {
+  const previewEvent = (selectedEvent: CalendarEvent) => run(async () => {
     const { externalId, calendarId } = selectedEvent;
     const range = dayRange(selectedDate, displayTimeZone);
-    const next = await api<Workspace>(`/api/v1/meetings/preview?${new URLSearchParams({ externalId, ...(calendarId ? { calendarId } : {}), ...range })}`);
+    const next = await api("GET /api/v1/meetings/preview", { query: { externalId, ...(calendarId ? { calendarId } : {}), ...range } });
     setWorkspace(next); setEditorMode("visual"); setEditorSession((current) => current + 1);
     followRoute({ view: "Calendar", date: selectedDate, id: next.persisted !== false ? next.meeting.frontmatter.id : undefined }, { shown: true });
     if (next.persisted !== false) {
@@ -797,7 +763,7 @@ function App() {
     if (here?.id === id && here.view !== "Notes" && here.view !== "Calendar") followRoute({ view: here.view }, { replace: true });
   };
   const accept = (review: LifeObject) => reviewRequests.run(review.frontmatter.id, () => run(async () => {
-    await api(`/api/v1/review-items/${review.frontmatter.id}/accept`, { method: "POST" });
+    await api("POST /api/v1/review-items/:id/accept", { params: { id: review.frontmatter.id } });
     leaveFinishedItem(review.frontmatter.id);
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
@@ -817,47 +783,47 @@ function App() {
   const linkActionsFor = (reviewId: string): LinkCardActions => ({
     onLink: (linkTo) => reviewStep(reviewId, () => acceptLink(api, reviewId, linkTo), "Link saved"),
     onCreate: async (type, title) => { setBusy(true); try { return await createLinkTarget(api, type, title); } finally { setBusy(false); } },
-    onReject: () => reviewStep(reviewId, () => api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" }), "Proposal rejected")
+    onReject: () => reviewStep(reviewId, () => api("POST /api/v1/review-items/:id/reject", { params: { id: reviewId } }), "Proposal rejected")
   });
 
   const reject = (reviewId: string) => reviewRequests.run(reviewId, () => run(async () => {
-    await api(`/api/v1/review-items/${reviewId}/reject`, { method: "POST" });
+    await api("POST /api/v1/review-items/:id/reject", { params: { id: reviewId } });
     leaveFinishedItem(reviewId);
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
   }, "Proposal rejected"));
 
   const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
-    await api(`/api/v1/review-items/${reviewId}`, { method: "PATCH", body: JSON.stringify(changes) });
+    await api("PATCH /api/v1/review-items/:id", { params: { id: reviewId }, body: changes });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
     await loadCollections();
   }, "Proposal updated");
 
   const takeOverSession = () => run(async () => {
-    await api("/api/v1/session/take-over", { method: "POST" });
+    await api("POST /api/v1/session/take-over");
     await loadCollections();
   }, "This device now holds the advisory write lease");
 
   const createBackup = () => run(async () => {
-    const created = await api<BackupSummary>("/api/v1/backups", { method: "POST" });
-    const verification = await api<BackupVerification>(`/api/v1/backups/${created.backupId}/verify`, { method: "POST" });
+    const created = await api("POST /api/v1/backups");
+    const verification = await api("POST /api/v1/backups/:id/verify", { params: { id: created.backupId } });
     setLastVerification(verification);
     await loadCollections();
   }, "Snapshot created and restoration drill passed");
 
   const verifyBackup = (backupId: string) => run(async () => {
-    setLastVerification(await api<BackupVerification>(`/api/v1/backups/${backupId}/verify`, { method: "POST" }));
+    setLastVerification(await api("POST /api/v1/backups/:id/verify", { params: { id: backupId } }));
   }, "Backup restoration drill completed");
 
   const submitCapture = () => run(async () => {
-    await api("/api/v1/capture", { method: "POST", body: JSON.stringify({ text: capture }) });
+    await api("POST /api/v1/capture", { body: { text: capture } });
     setCapture(""); await loadCollections();
   }, "Captured as an Inbox task");
 
   const adoptDrafts = async () => {
     setBusy(true);
     try {
-      const batch = await api<AdoptionBatch>("/api/v1/inbox/adopt", { method: "POST" });
+      const batch = await api("POST /api/v1/inbox/adopt");
       const count = (outcome: string) => batch.drafts.filter((draft) => draft.outcome === outcome).length;
       await loadCollections();
       setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("applied")} patches applied, ${count("review")} sent to review, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
@@ -869,7 +835,7 @@ function App() {
   const requestEnrichment = async () => {
     setBusy(true);
     try {
-      const result = await api<{ message: string }>("/api/v1/enrichment/work-orders", { method: "POST" });
+      const result = await api("POST /api/v1/enrichment/work-orders");
       await loadCollections();
       setMessage(result.message);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Enrichment request failed"); }
@@ -880,7 +846,7 @@ function App() {
   const requestReplan = async () => {
     setBusy(true);
     try {
-      const result = await api<{ message: string }>("/api/v1/focus/replan", { method: "POST", body: JSON.stringify({ date: dateInTimeZone(new Date(), displayTimeZone) }) });
+      const result = await api("POST /api/v1/focus/replan", { body: { date: dateInTimeZone(new Date(), displayTimeZone) } });
       await loadCollections();
       setMessage(result.message);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Re-plan request failed"); }
@@ -893,7 +859,7 @@ function App() {
     if (!focus) return;
     setBusy(true);
     try {
-      const next = await api<DailyFocus>("/api/v1/focus/overrides", { method: "POST", body: JSON.stringify({ date: focus.date, ...change, expectedHash: focus.override?.contentHash }) });
+      const next = await api("POST /api/v1/focus/overrides", { body: { date: focus.date, ...change, expectedHash: focus.override?.contentHash } });
       setToday((current) => ({ ...current, focus: next }));
       setMessage({ pin: "Pinned to today's Top 3", unpin: "Unpinned", replace: "Replaced in today's Top 3", dismiss: "Dismissed for today", restore: "Restored to today's Top 3", reset: "Your Top 3 changes for today were cleared" }[change.action]);
     } catch (error) {
@@ -905,29 +871,29 @@ function App() {
   const giveUpEnrichment = (meetingId: string) => run(async () => {
     const meeting = objectLinks.find((object) => object.frontmatter.id === meetingId);
     if (!meeting) throw new Error("Meeting not found; refresh and try again");
-    await api(`/api/v1/meetings/${meetingId}/enrichment/gave-up`, { method: "POST", body: JSON.stringify({ expectedHash: meeting.contentHash }) });
+    await api("POST /api/v1/meetings/:id/enrichment/gave-up", { params: { id: meetingId }, body: { expectedHash: meeting.contentHash } });
     await loadCollections();
   }, "Stopped waiting for material for this meeting");
 
   const undoPatch = (patch: AppliedPatch) => run(async () => {
-    await api(`/api/v1/inbox/patches/${patch.auditEventId}/undo`, { method: "POST" });
+    await api("POST /api/v1/inbox/patches/:id/undo", { params: { id: patch.auditEventId } });
     await loadCollections();
   }, `Undid the change to ${patch.title}`);
 
   const ingestSource = () => run(async () => {
-    await api("/api/v1/sources/text", { method: "POST", body: JSON.stringify({ title: sourceTitle, text: sourceText }) });
+    await api("POST /api/v1/sources/text", { body: { title: sourceTitle, text: sourceText } });
     setSourceTitle(""); setSourceText(""); await loadCollections();
   }, sourcePreservedToast);
 
   const connectGoogle = () => run(async () => {
-    const response = await api<{ authorizationUrl: string }>("/api/v1/connections/google/start");
+    const response = await api("GET /api/v1/connections/google/start");
     window.location.assign(response.authorizationUrl);
   }, "Opening Google authorization");
 
   const syncGoogle = () => run(async () => {
     const range = dayRange(selectedDate, displayTimeZone);
-    let day: CalendarDay<Event>;
-    try { day = await api<CalendarDay<Event>>(`/api/v1/calendar/day/sync?${new URLSearchParams(range)}`, { method: "POST" }); }
+    let day: CalendarDay;
+    try { day = await api("POST /api/v1/calendar/day/sync", { query: range }); }
     catch (error) { calendarFailed(error); throw error; }
     showCalendarDay(day);
     await loadCollections();
@@ -951,48 +917,48 @@ function App() {
   }, "Calendar reloaded");
 
   const createEntity = (type: EntityType, fields: Record<string, unknown>) => run(async () => {
-    await api(`/api/v1/entities/${type}`, { method: "POST", body: JSON.stringify({ fields }) });
+    await api("POST /api/v1/entities/:type", { params: { type }, body: { fields } });
     await loadCollections();
   }, `${type} created`);
 
   const updateEntity = (object: LifeObject, fields: Record<string, unknown>) => run(async () => {
-    await api(`/api/v1/entities/by-id/${object.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ fields, expectedHash: object.contentHash }) });
+    await api("PATCH /api/v1/entities/by-id/:id", { params: { id: object.frontmatter.id }, body: { fields, expectedHash: object.contentHash } });
     await loadCollections();
   }, `${object.frontmatter.type} updated`);
 
   const setPersonExternal = (object: LifeObject, choice: ExternalChoice) => run(async () => {
-    await api(`/api/v1/people/${object.frontmatter.id}/external`, { method: "PUT", body: JSON.stringify({ isExternal: externalChoiceValue(choice), expectedHash: object.contentHash }) });
+    await api("PUT /api/v1/people/:id/external", { params: { id: object.frontmatter.id }, body: { isExternal: externalChoiceValue(choice), expectedHash: object.contentHash } });
     await loadCollections();
   }, choice === "auto" ? "External flag follows the email domain again" : `Marked ${choice}`);
 
   // #87: confirming an automatically created person clears its "unreviewed" marker (guarded by the content hash).
   const confirmPersonReviewed = (object: LifeObject) => run(async () => {
-    await api(`/api/v1/people/${object.frontmatter.id}/reviewed`, { method: "POST", body: JSON.stringify({ expectedHash: object.contentHash }) });
+    await api("POST /api/v1/people/:id/reviewed", { params: { id: object.frontmatter.id }, body: { expectedHash: object.contentHash } });
     await loadCollections();
   }, `${object.frontmatter.title} confirmed`);
 
   // #87: Give up from the meeting page, guarded by the meeting's own content hash.
   const giveUpMeetingEnrichment = (meeting: LifeObject) => run(async () => {
-    await api(`/api/v1/meetings/${meeting.frontmatter.id}/enrichment/gave-up`, { method: "POST", body: JSON.stringify({ expectedHash: meeting.contentHash }) });
+    await api("POST /api/v1/meetings/:id/enrichment/gave-up", { params: { id: meeting.frontmatter.id }, body: { expectedHash: meeting.contentHash } });
     await Promise.all([refreshWorkspace(meeting.frontmatter.id), loadCollections()]);
   }, "Stopped waiting for material for this meeting");
 
   const deleteEntity = (object: LifeObject) => run(async () => {
-    await api(`/api/v1/entities/by-id/${object.frontmatter.id}`, { method: "DELETE", body: JSON.stringify({ expectedHash: object.contentHash }) });
+    await api("DELETE /api/v1/entities/by-id/:id", { params: { id: object.frontmatter.id }, body: { expectedHash: object.contentHash } });
     leaveFinishedItem(object.frontmatter.id);
     await loadCollections();
   }, `${object.frontmatter.type} moved to deleted state`);
 
   const saveGoogleSecrets = (provider: "calendar" | "drive", clientId: string, clientSecret: string) => run(async () => {
-    await api(`/api/v1/settings/connections/google/${provider}`, { method: "POST", body: JSON.stringify({ clientId, clientSecret }) });
-    setConnections(await loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections"), connections?.settings));
-    if (provider === "calendar") setGoogleConnection(await api<GoogleConnection>("/api/v1/connections/google"));
+    await api("POST /api/v1/settings/connections/google/:provider", { params: { provider }, body: { clientId, clientSecret } });
+    setConnections(await loadConnections(() => api("GET /api/v1/settings/connections"), connections?.settings));
+    if (provider === "calendar") setGoogleConnection(await api("GET /api/v1/connections/google"));
   }, `Google ${provider} credentials saved to Keychain`);
 
   /** #77: after a denied Keychain prompt; reads the secrets again, so macOS may ask once more. */
   const retryConnections = async () => {
-    setConnections(await loadConnections(() => api<ConnectionSettings>("/api/v1/settings/connections/retry", { method: "POST" }), connections?.settings));
-    void api<GoogleConnection>("/api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
+    setConnections(await loadConnections(() => api("POST /api/v1/settings/connections/retry"), connections?.settings));
+    void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
   };
 
   function insertMarkdown(before: string, after = "", placeholder = "text") {
@@ -1071,7 +1037,7 @@ function App() {
       });
       const owner = await ensureMeetingNote();
       if (!owner) throw new Error("Could not create the note to attach this image to");
-      const stored = await api<StoredAsset>(`/api/v1/objects/${owner.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 }) });
+      const stored = await api("POST /api/v1/objects/:id/assets", { params: { id: owner.id }, body: { fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 } });
       const markdown = `![${altText.trim()}](${stored.markdownPath})`;
       meetingController.setDraft(`${draft.slice(0, insertionStart)}${markdown}${draft.slice(insertionEnd)}`);
       requestAnimationFrame(() => { editor.current?.focus(); editor.current?.setSelectionRange(insertionStart + markdown.length, insertionStart + markdown.length); });
@@ -1090,7 +1056,7 @@ function App() {
     if (!query && !noteFilterCount) { setNoteResults(undefined); return; }
     let ignore = false;
     const timer = window.setTimeout(() => {
-      api<LifeObject[]>(`/api/v1/notes?${noteListQuery(noteTab, query, noteFilters, displayTimeZone)}`)
+      api("GET /api/v1/notes", { query: new URLSearchParams(noteListQuery(noteTab, query, noteFilters, displayTimeZone)) })
         .then((results) => { if (!ignore) setNoteResults(results); })
         .catch((error: Error) => { if (!ignore) { setNoteResults([]); setMessage(error.message); } });
     }, 200);
@@ -1103,7 +1069,7 @@ function App() {
   const selectedDeleted = deletedNotes.find((note) => note.frontmatter.id === selectedDeletedId);
 
   const restoreNote = (note: LifeObject) => run(async () => {
-    const restored = await api<LifeObject>(`/api/v1/notes/${note.frontmatter.id}/restore`, { method: "POST", body: JSON.stringify({ expectedHash: note.contentHash }) });
+    const restored = await api("POST /api/v1/notes/:id/restore", { params: { id: note.frontmatter.id }, body: { expectedHash: note.contentHash } });
     await loadCollections();
     setSelectedDeletedId(undefined); setNoteQuery("");
     // Replaced: Back should not return to the deleted copy that no longer exists.
@@ -1116,7 +1082,7 @@ function App() {
     const unsaved = controller.dirty ? "\n\nUnsaved changes in this note will be lost." : "";
     if (!window.confirm(`Delete "${note.frontmatter.title}"?\n\nIt disappears from LifeOS. The Markdown file is kept and marked as deleted.${unsaved}`)) return false;
     return run(async () => {
-      await api(`/api/v1/notes/${note.frontmatter.id}`, { method: "DELETE", body: JSON.stringify({ expectedHash: note.contentHash }) });
+      await api("DELETE /api/v1/notes/:id", { params: { id: note.frontmatter.id }, body: { expectedHash: note.contentHash } });
       clearCachedDraft(note.frontmatter.id);
       controller.reset();
       afterDelete();
@@ -1156,14 +1122,14 @@ function App() {
   const openLifeosLink = async (href: string) => {
     try {
       if (!(await leaveEditors())) return;
-      const objects = await api<ObjectLink[]>("/api/v1/objects");
+      const objects = await api("GET /api/v1/objects");
       setObjectLinks(objects);
       const target = resolveLifeosLink(href, objects);
       if (target.kind === "invalid") return;
       if (target.kind === "missing") { setMessage("That linked object no longer exists."); return; }
       if (target.kind === "unsupported") { setMessage(`Opening a ${target.type.replace("-", " ")} from a link is not supported yet.`); return; }
       if (target.kind === "note") {
-        const [open, deleted] = await Promise.all([api<LifeObject[]>("/api/v1/notes"), api<LifeObject[]>("/api/v1/notes?state=deleted")]);
+        const [open, deleted] = await Promise.all([api("GET /api/v1/notes"), api("GET /api/v1/notes", { query: { state: "deleted" } })]);
         setNotes(open); setDeletedNotes(deleted); setNoteQuery("");
         const live = open.find((note) => note.frontmatter.id === target.id);
         const gone = deleted.find((note) => note.frontmatter.id === target.id);
@@ -1223,7 +1189,7 @@ function App() {
     return run(async () => {
       const latest = await fetchLatest();
       if (!latest) throw new Error("This note no longer exists");
-      await api(`/api/v1/notes/${latest.frontmatter.id}`, { method: "PATCH", body: JSON.stringify({ changes, expectedHash: latest.contentHash }) });
+      await api("PATCH /api/v1/notes/:id", { params: { id: latest.frontmatter.id }, body: { changes, expectedHash: latest.contentHash } });
       await fetchLatest();
       await loadCollections();
     }, "Note details saved");
@@ -1291,7 +1257,7 @@ function App() {
       const contentBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1] ?? ""); reader.onerror = () => reject(reader.error ?? new Error("Could not read the image")); reader.readAsDataURL(file);
       });
-      const stored = await api<StoredAsset>(`/api/v1/objects/${selectedNote.frontmatter.id}/assets`, { method: "POST", body: JSON.stringify({ fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 }) });
+      const stored = await api("POST /api/v1/objects/:id/assets", { params: { id: selectedNote.frontmatter.id }, body: { fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 } });
       const markdown = `![${altText.trim()}](${stored.markdownPath})`;
       notesController.setDraft(`${notesDraft.slice(0, start)}${markdown}${notesDraft.slice(end)}`);
       setMessage(stored.deduplicated ? "Existing image reused; Markdown link inserted" : "Image stored locally; Markdown link inserted");

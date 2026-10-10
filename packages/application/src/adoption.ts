@@ -1,4 +1,4 @@
-import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { confidenceLabels, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { adoptDailyFocus } from "./focus.js";
 import type { MeetingsModule } from "./meetings.js";
@@ -8,6 +8,7 @@ import { operationKinds, type InboxDocument, type InboxFile, type InboxFolder, t
 import { internalDomainsOf, isExternalDomain, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver, type ReferenceField } from "./resolution.js";
+import { proposeReviewItem } from "./review-items.js";
 import { byIdentifier, contextLinkFields, inheritContextLinks, isLive, isStringList, replayableId, replayRoles, replayScope, type ReplayRole } from "./support.js";
 
 /**
@@ -651,7 +652,7 @@ export class AdoptionModule {
   private async proposeExtracted(draft: ParsedDraft, run: AdoptionRun, options: ProposeOptions = {}) {
     const { fields: raw } = draft;
     const { issues, fields, links, unresolved } = this.kindFields(draft);
-    const confidence = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === text(raw.confidence).toLowerCase());
+    const confidence = confidenceLabels.find((candidate) => candidate.toLowerCase() === text(raw.confidence).toLowerCase());
     if (raw.confidence === undefined) issues.push("confidence: missing; an extracted draft must say how sure the Agent is (High, Medium or Low)");
     else if (!confidence) issues.push(`confidence: unknown confidence "${text(raw.confidence)}" (expected High, Medium or Low)`);
     const narrative = draft.body.trim();
@@ -670,24 +671,20 @@ export class AdoptionModule {
 
     const role = options.role ?? replayRoles.main;
     const created = named ? await this.linkSources(named.urls, draft, run, fields, role) : [];
-    const id = run.newId(role);
     const sourceIds = [...new Set([...named?.ids ?? [], ...created, ...evidenceIds])];
-    await this.ctx.objects.write({
-      relativePath: `review-items/${markdownFileName(draft.title, id, run.now)}`,
-      frontmatter: {
-        ...this.ctx.envelope(id, "review-item", draft.title, run.now, "agent-extracted"),
-        ...(fields.sensitivity !== undefined ? { sensitivity: fields.sensitivity as ObjectEnvelope["sensitivity"] } : {}),
-        review_type: "create", target_object_type: draft.kind, proposed_fields: proposed, field_evidence: evidence, confidence_label: confidence!,
-        status: "pending", agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...reviewLinks,
+    const review = await proposeReviewItem(this.ctx, run, {
+      role, reviewType: "create", title: draft.title, target: { type: draft.kind }, proposed, confidence: confidence!,
+      body: proposalBody(draft.title, narrative), sourceIds, evidence, origin: "agent-extracted",
+      ...(fields.sensitivity !== undefined ? { sensitivity: fields.sensitivity as ObjectEnvelope["sensitivity"] } : {}),
+      fields: {
+        draft_key: draft.draftKey, captured_at: draft.capturedAt, ...reviewLinks,
         // Names that matched nothing or several objects stay visible here; the user picks the link while editing
         // the proposal, so no separate link-resolution item is raised for an object that does not exist yet.
         ...(unresolved.length ? { unresolved_references: unresolved } : {}),
-        ...options.extra,
-        // U7: generated here, at adoption, never taken from the draft.
-        operation_id: run.newId(replayRoles.operation(role))
-      },
-      body: proposalBody(draft.title, narrative)
+        ...options.extra
+      }
     });
+    const id = review.frontmatter.id;
     return [id, ...created];
   }
 

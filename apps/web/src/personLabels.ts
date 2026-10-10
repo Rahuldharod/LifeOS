@@ -1,8 +1,8 @@
 // Display labels for people (#39). The server computes them (`GET /api/v1/people/labels`); the web
 // only looks them up and falls back to the title for a person the labels do not know yet.
+import type { PersonLabel } from "@lifeos/contracts";
 import type { SearchOption } from "./searchOptions.js";
 
-export type PersonLabel = { id: string; name: string; label: string; suffix?: string; isExternal: boolean; externalSource: "self" | "override" | "email" | "stored"; unreviewed?: boolean };
 type PersonLike = { frontmatter: { id: string; title: string } };
 
 export const labelMap = (labels: PersonLabel[]) => new Map(labels.map((label) => [label.id, label]));

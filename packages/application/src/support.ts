@@ -140,6 +140,12 @@ export const replayRoles = {
   link: (field: string, reference: string) => role(`link:${field}:${reference}`),
   /** A person-merge Review Item, by its (order-free) pair key. */
   merge: (pair: string) => role(`merge:${pair}`),
+  /** The Agent run of a step that proposes Review Items outside adoption (processing a meeting, a pasted Source). */
+  agentRun: role("agent-run"),
+  /** The Knowledge Note proposed from a pasted Source. */
+  knowledge: role("knowledge"),
+  /** A meeting output Review Item for one version of the note, by what it proposes: its type and normalised title. */
+  meetingOutput: (type: string, title: string) => role(`output:${createHash("sha256").update(`${type}\n${title.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase()}`).digest("hex").slice(0, 16)}`),
   /** `child` raised inside `parent`'s handler, e.g. a merge suggestion raised for the main object. */
   within: (parent: ReplayRole, child: ReplayRole) => role(`${parent}/${child}`),
   /** The operation ID of the Review Item with role `of`. */

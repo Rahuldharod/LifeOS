@@ -90,7 +90,7 @@ How an object came to exist: app, user-dictated, agent-extracted, calendar, impo
 _Avoid_: Source (a Source is an object)
 
 **Sensitivity**:
-Whether Agents and exports may use an object: normal or restricted. Restricted objects show a lock badge in the app and are left out of the Agent Index, Work Orders and the brief.
+Whether Agents and exports may use an object: normal or restricted. Restricted objects show a lock badge in the app and are left out of the Agent Index, Work Orders and the brief. A Review Item is restricted when anything it was drawn from is.
 
 **Restricted meeting**:
 A meeting that is restricted itself or whose meeting note is restricted. Every exclusion of a meeting uses this one rule.

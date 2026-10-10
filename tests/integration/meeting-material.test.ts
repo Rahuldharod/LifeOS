@@ -341,6 +341,27 @@ describe("meeting-material adoption", () => {
     expect(await ofType(application, "meeting-note")).toHaveLength(1);
   });
 
+  it("a newer summary drawing on a restricted Source makes the pending summary restricted (#122, ADR 0018)", async () => {
+    const { root, application } = await vault([event("evt-1"), event("evt-2")]);
+    await dropDraft(root, "other.md", material({ key: "other", meeting: "evt-2", sources: ["gong-call"], proposals: "proposals: []" }));
+    await application.adoptDrafts();
+    const [gong] = await ofType(application, "source");
+    await application.setSensitivity(gong!.frontmatter.id, "restricted", gong!.contentHash);
+    await dropDraft(root, "one.md", material({ key: "one", sources: ["meet-transcript"], proposals: "proposals: []" }));
+    await application.adoptDrafts();
+    const summaryOf = () => application.reviews().filter((review) => review.frontmatter.review_type === "summary" && review.frontmatter.status === "pending" && ["one", "two"].includes(String(review.frontmatter.draft_key)));
+    expect(summaryOf()).toHaveLength(1);
+    expect(summaryOf()[0]!.frontmatter.sensitivity).toBeUndefined();
+
+    await dropDraft(root, "two.md", material({ key: "two", sources: ["meet-transcript", "gong-call"], proposals: "proposals: []", summary: "Fuller summary.\n" }));
+    await application.adoptDrafts();
+
+    expect(summaryOf()).toHaveLength(1);
+    const [summary] = summaryOf();
+    expect(summary!.frontmatter.source_ids).toContain(gong!.frontmatter.id);
+    expect(summary!.frontmatter.sensitivity).toBe("restricted");
+  });
+
   it("keeps a source's link to another meeting and lists it on this one instead", async () => {
     const { root, application } = await vault([event("evt-1"), event("evt-2")]);
     await dropDraft(root, "one.md", material({ key: "one", sources: ["gong-call"], proposals: "proposals: []" }));

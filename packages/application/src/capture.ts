@@ -1,6 +1,7 @@
-import { uuidV7 } from "@lifeos/domain";
+import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
-import { isLive } from "./support.js";
+import { proposeReviewItem, recordAgentRun, seededRun } from "./review-items.js";
+import { isLive, replayRoles } from "./support.js";
 
 /** Quick capture, pasted-text sources and the knowledge notes proposed from them. */
 export class CaptureModule {
@@ -28,19 +29,40 @@ export class CaptureModule {
   async ingestTextSource(title: string, text: string) {
     const { ctx } = this;
     if (!title.trim() || !text.trim()) throw new Error("Source title and text are required");
-    const now = new Date().toISOString();
-    const sourceId = uuidV7();
+    const cleanTitle = title.trim(), cleanText = text.trim();
     const fragmentId = "fragment-1";
-    const source = await ctx.objects.write({ relativePath: `sources/${markdownFileName(title, sourceId, now)}`, frontmatter: { ...ctx.envelope(sourceId, "source", title.trim(), now), source_type: "pasted-text", captured_at: now, ingestion_status: "captured", fragments: [{ id: fragmentId, text: text.trim(), locator: { kind: "full-text" } }] }, body: `# ${title.trim()}\n\n${text.trim()}\n` });
+    // #122: a paste whose proposal is still unfinished or pending (a retry after a crash) reuses its Source, so the
+    // proposal replays below. Once the proposal was accepted or rejected, pasting again is deliberate: a new Source.
+    const pasted = ctx.ai?.proposeKnowledgeNote ? ctx.index.all().find((object) => object.frontmatter.type === "source" && object.frontmatter.source_type === "pasted-text" && isLive(object) && object.frontmatter.title === cleanTitle && (object.frontmatter.fragments as Array<{ text?: unknown }> | undefined)?.[0]?.text === cleanText && this.proposalOpen(object)) : undefined;
+    const now = new Date().toISOString();
+    const sourceId = pasted?.frontmatter.id ?? uuidV7();
+    const source = pasted ?? await ctx.objects.write({ relativePath: `sources/${markdownFileName(cleanTitle, sourceId, now)}`, frontmatter: { ...ctx.envelope(sourceId, "source", cleanTitle, now), source_type: "pasted-text", captured_at: now, ingestion_status: "captured", fragments: [{ id: fragmentId, text: cleanText, locator: { kind: "full-text" } }] }, body: `# ${cleanTitle}\n\n${cleanText}\n` });
     // #98: without an AI provider (the live app) this only saves; Claude proposes Knowledge Notes through the skills (ADR 0008).
     if (!ctx.ai?.proposeKnowledgeNote) {
       await ctx.rebuildIndex();
       return source;
     }
-    const proposal = await ctx.ai.proposeKnowledgeNote(text);
-    const reviewId = uuidV7();
-    await ctx.objects.write({ relativePath: `review-items/${markdownFileName(proposal.title, reviewId, now)}`, frontmatter: { ...ctx.envelope(reviewId, "review-item", proposal.title, now), review_type: "create", target_object_type: "knowledge-note", proposed_fields: { title: proposal.title, body: proposal.body }, field_evidence: { title: [{ source_id: sourceId, fragment_id: fragmentId }], body: [{ source_id: sourceId, fragment_id: fragmentId }] }, confidence_label: proposal.confidence, status: "pending", source_ids: [sourceId], operation_id: uuidV7() }, body: `# Knowledge proposal\n\n${proposal.body}` });
+    const proposal = await ctx.ai.proposeKnowledgeNote(cleanText);
+    const run = await recordAgentRun(ctx, proposalRun(ctx, source), {
+      operation: "knowledge-proposal", title: "Propose knowledge note", inputSummary: cleanTitle, outputSummary: "1 proposal",
+      relatedObjectIds: [sourceId], body: `# Agent run\n\nProposed a knowledge note from ${cleanTitle}.\n`
+    });
+    const evidence = [{ source_id: sourceId, fragment_id: fragmentId }];
+    await proposeReviewItem(ctx, run, {
+      role: replayRoles.knowledge, reviewType: "create", title: proposal.title, target: { type: "knowledge-note" },
+      proposed: { title: proposal.title, body: proposal.body }, confidence: proposal.confidence, sourceIds: [sourceId],
+      evidence: { title: evidence, body: evidence }, body: `# Knowledge proposal\n\n${proposal.body}`
+    });
     await ctx.rebuildIndex();
     return source;
   }
+
+  /** Whether the knowledge proposal of a pasted Source is not yet written (an interrupted paste) or still pending. */
+  private proposalOpen(source: LifeOSObject) {
+    const review = this.ctx.index.get(proposalRun(this.ctx, source).newId(replayRoles.knowledge));
+    return !review || review.frontmatter.status === "pending";
+  }
 }
+
+/** IDs come from the Source (ADR 0013): the proposal for one Source is written once, however often it is retried. */
+const proposalRun = (ctx: AppContext, source: LifeOSObject) => seededRun(ctx, `knowledge-proposal:${source.frontmatter.id}`, String(source.frontmatter.captured_at ?? source.frontmatter.created_at));

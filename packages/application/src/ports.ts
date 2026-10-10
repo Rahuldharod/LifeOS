@@ -1,4 +1,4 @@
-import type { LifeOSObject, ObjectEnvelope } from "@lifeos/domain";
+import type { Confidence, LifeOSObject, ObjectEnvelope } from "@lifeos/domain";
 
 export interface ObjectStore {
   list(): Promise<LifeOSObject[]>;
@@ -131,8 +131,8 @@ export interface CalendarAttendee {
 }
 
 export interface AiProvider {
-  proposeMeetingOutputs(note: string): Promise<Array<{ type: "task" | "decision" | "open-point"; title: string; confidence: "High" | "Medium" | "Low" }>>;
-  proposeKnowledgeNote?(source: string): Promise<{ title: string; body: string; confidence: "High" | "Medium" | "Low" }>;
+  proposeMeetingOutputs(note: string): Promise<Array<{ type: "task" | "decision" | "open-point"; title: string; confidence: Confidence }>>;
+  proposeKnowledgeNote?(source: string): Promise<{ title: string; body: string; confidence: Confidence }>;
 }
 
 export interface SecretStore {

@@ -1,8 +1,6 @@
-export type CalendarOption = { id: string; name: string; color?: string };
+import type { CalendarOption, CalendarPreferences as CalendarPrefs } from "@lifeos/contracts";
 
 /** Calendar preferences, stored in the synced data folder (settings/calendar-preferences.md) so every device shares them. */
-export type CalendarPrefs = { disabledCalendarIds: string[]; defaultCalendarId?: string; contentHash?: string };
-
 export const noCalendarPrefs: CalendarPrefs = { disabledCalendarIds: [] };
 
 /** Calendars offered in the Calendar view's drop-down: everything the account can view, minus the ones switched off. */
