@@ -4,6 +4,7 @@ import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
 import type { MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
+import { proposeReviewItem } from "./review-items.js";
 import { inheritContextLinks, isLive, isMeetingRestricted, liveMeetingNote, objectIdPattern, replayRoles } from "./support.js";
 
 /**
@@ -265,20 +266,12 @@ export class MeetingMaterialModule {
       await ctx.update(pending, { proposed_fields: { summary }, confidence_label: confidence, source_ids: merged, agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt }, { expectedHash: pending.contentHash, now: run.now, body });
       return pending.frontmatter.id;
     }
-    const id = run.newId(roles.summary);
-    await ctx.objects.write({
-      relativePath: `review-items/${markdownFileName(title, id, run.now)}`,
-      frontmatter: {
-        ...ctx.envelope(id, "review-item", title, run.now, "agent-extracted"),
-        review_type: summaryReviewType, target_object_type: "meeting", target_object_id: meeting.frontmatter.id, source_meeting_id: meeting.frontmatter.id,
-        proposed_fields: { summary }, field_evidence: {}, confidence_label: confidence as "High" | "Medium" | "Low", status: "pending",
-        agent_run_id: run.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, source_ids: sourceIds, ...inheritContextLinks(meeting),
-        // U7: generated here, at adoption, never taken from the draft.
-        operation_id: run.newId(replayRoles.operation(roles.summary))
-      },
-      body
+    const review = await proposeReviewItem(ctx, { now: run.now, agentRunId: run.id, newId: run.newId }, {
+      role: roles.summary, reviewType: summaryReviewType, title, target: { type: "meeting", id: meeting.frontmatter.id },
+      proposed: { summary }, confidence: confidence as "High" | "Medium" | "Low", body, sourceIds, origin: "agent-extracted",
+      fields: { source_meeting_id: meeting.frontmatter.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, ...inheritContextLinks(meeting) }
     });
-    return id;
+    return review.frontmatter.id;
   }
 
   private reviewsFor(meetingId: string) {
