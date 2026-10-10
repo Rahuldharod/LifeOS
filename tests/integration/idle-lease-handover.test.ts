@@ -252,13 +252,5 @@ describe("background writers", () => {
       await adoption.stop();
     }
   });
-
-  it("the server wires every background object writer to holding the lease, and the heartbeat to the idle check", async () => {
-    const source = await readFile(path.join(process.cwd(), "apps/server/src/main.ts"), "utf8"); // vitest runs from the repository root
-    expect(source).toMatch(/startAutoAdoption\(\{ canWrite: \(\) => session\.holdsLease\(\)/);
-    expect(source).toMatch(/const reconcile = \(\) => session\.holdsLease\(\) \? application\.recordExternalChanges\(\)/);
-    expect(source).toMatch(/setInterval\(\(\) => void idle\.tick\(\)/);
-    expect(source).not.toMatch(/setInterval\(\(\) => void session\.touch\(\)/);
-    expect(source).not.toMatch(/status\(\)\.writeAllowed\) await application\./);
-  });
+  // The server's own wiring (adoption, external-edit audits and the heartbeat, through the real API) is tested in server-api.test.ts (#120).
 });
