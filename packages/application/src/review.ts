@@ -7,7 +7,8 @@ import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
 import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeReviewType, survivingPersonId } from "./person-merge.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { contextLinkFields, inheritContextLinks, isLive, OneAtATime, sameValue, validTimeZone } from "./support.js";
+import { proposeReviewItem, seededRun } from "./review-items.js";
+import { contextLinkFields, inheritContextLinks, isLive, isRestricted, OneAtATime, replayRoles, sameValue, validTimeZone } from "./support.js";
 
 
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
@@ -40,40 +41,31 @@ export class ReviewModule {
     if (!ctx.ai) throw new Error("AI provider is not configured");
     const workspace = await this.meetings.meetingWorkspace(meetingId);
     if (!workspace.note) throw new Error("Meeting has no canonical note");
+    const note = workspace.note;
+    // #122: IDs come from this version of the note (ADR 0013), so a retry after a crash finds what the first attempt wrote.
+    const run = seededRun(ctx, `meeting-outputs:${note.frontmatter.id}:${note.contentHash}`, note.frontmatter.updated_at);
     const pending = workspace.reviews.filter((review) => review.frontmatter.status === "pending");
-    if (pending.length) return pending;
-    const proposals = await ctx.ai.proposeMeetingOutputs(workspace.note.body);
-    const now = new Date().toISOString();
-    const agentRunId = uuidV7();
-    await ctx.objects.write({
-      relativePath: `agent-runs/${markdownFileName("Process meeting", agentRunId, now)}`,
-      frontmatter: { ...ctx.envelope(agentRunId, "agent-run", "Process meeting", now), operation: "meeting-extraction", provider: "mock", model: "deterministic-mock", prompt_version: "1", status: "succeeded", started_at: now, completed_at: now, input_summary: workspace.note.frontmatter.title, output_summary: `${proposals.length} proposals`, related_object_ids: [meetingId, workspace.note.frontmatter.id] },
-      body: `# Agent run\n\nProcessed ${workspace.note.frontmatter.title}.\n`
-    });
+    // Proposals still waiting from an earlier version of the note (or from adoption) are returned, not added to.
+    if (pending.some((review) => !run.owns(review.frontmatter.id))) return pending;
+    const proposals = await ctx.ai.proposeMeetingOutputs(note.body);
+    const agentRunId = run.newId(replayRoles.agentRun);
+    await run.replay(() => ctx.objects.write({
+      relativePath: `agent-runs/${markdownFileName("Process meeting", agentRunId, run.now)}`,
+      frontmatter: { ...ctx.envelope(agentRunId, "agent-run", "Process meeting", run.now), operation: "meeting-extraction", provider: "mock", model: "deterministic-mock", prompt_version: "1", status: "succeeded", started_at: run.now, completed_at: run.now, input_summary: note.frontmatter.title, output_summary: `${proposals.length} proposals`, related_object_ids: [meetingId, note.frontmatter.id] },
+      body: `# Agent run\n\nProcessed ${note.frontmatter.title}.\n`
+    }));
     const created: LifeOSObject[] = [];
-    for (const proposal of proposals) {
-      const id = uuidV7();
-      created.push(await ctx.objects.write({
-        relativePath: `review-items/${markdownFileName(proposal.title, id, now)}`,
-        frontmatter: {
-          ...ctx.envelope(id, "review-item", proposal.title, now),
-          review_type: "create",
-          target_object_type: proposal.type,
-          proposed_fields: { title: proposal.title, status: "Inbox" },
-          confidence_label: proposal.confidence,
-          field_evidence: {},
-          status: "pending",
-          agent_run_id: agentRunId,
-          source_meeting_id: meetingId,
-          source_ids: [workspace.note.frontmatter.id],
-          ...inheritContextLinks(workspace.meeting),
-          operation_id: uuidV7()
-        },
+    for (const [position, proposal] of proposals.entries()) {
+      created.push(await proposeReviewItem(ctx, { ...run, agentRunId }, {
+        role: replayRoles.meetingOutput(position), reviewType: "create", title: proposal.title, target: { type: proposal.type },
+        proposed: { title: proposal.title, status: "Inbox" }, confidence: proposal.confidence, sourceIds: [note.frontmatter.id],
+        fields: { source_meeting_id: meetingId, ...inheritContextLinks(workspace.meeting) },
         body: `# Proposal\n\n${proposal.title}\n`
       }));
     }
     await ctx.rebuildIndex();
-    return created;
+    // A retry returns only what still waits: an item accepted or rejected since is not proposed again.
+    return created.filter((review) => review.frontmatter.status === "pending");
   }
 
   /** `linkTo` is the object chosen for a `link-resolution` item; other review types ignore it. */
@@ -114,7 +106,8 @@ export class ReviewModule {
     if (!folder) throw new Error(`Unsupported review target: ${targetType}`);
     // Proposed fields carried over as they stand after the user's edits.
     const pick = (keys: string[]) => Object.fromEntries(keys.filter((key) => proposed[key] !== undefined).map((key) => [key, proposed[key]]));
-    const extras = pick(["area", "sensitivity", "subjects", "tags", "captured_at", "people_ids"]);
+    // #122: a proposal drawn from something restricted makes a restricted object (ADR 0010), whatever its fields say.
+    const extras = { ...pick(["area", "sensitivity", "subjects", "tags", "captured_at", "people_ids"]), ...(isRestricted(review) ? { sensitivity: "restricted" as const } : {}) };
     const ownerId = typeof proposed.owner_person_id === "string" ? proposed.owner_person_id : owner.frontmatter.id;
     const common = { source_meeting_id: review.frontmatter.source_meeting_id, source_ids: review.frontmatter.source_ids ?? [], ...Object.fromEntries(contextLinkFields.map((key) => [key, review.frontmatter[key]])) };
     const fields = targetType === "task"

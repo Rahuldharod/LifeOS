@@ -5,6 +5,7 @@ import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext }
 import { decisionFields } from "./decisions.js";
 import { operationKinds, type InboxDocument, type Operation } from "./ports.js";
 import { ReferenceResolver, referenceFields, type ReferenceField } from "./resolution.js";
+import { proposeReviewItem } from "./review-items.js";
 import { isLive, replayRoles, sameValue, validTimeZone } from "./support.js";
 
 /**
@@ -334,20 +335,15 @@ export class PatchModule {
 
   /** Writes the `update` Review Item (current vs proposed per field) and the audit event that makes re-sends idempotent. */
   private async raiseReview(patch: ParsedPatch, target: LifeOSObject, before: Record<string, unknown>, after: Record<string, unknown>, reasons: string[], run: AdoptionRun) {
-    const id = run.newId(replayRoles.review);
     const changes: UpdateChange[] = Object.keys(after).map((field) => ({ field, current: before[field], proposed: after[field] }));
     const title = `Change ${[...changes.map((change) => change.field), ...(patch.appendNote ? ["note"] : [])].join(", ")} on ${target.frontmatter.title}`;
     const proposal: UpdateProposal = { changes, ...(patch.appendNote ? { append_note: patch.appendNote } : {}), reasons, base_revision: target.frontmatter.revision, base_hash: target.contentHash, draft_key: patch.draftKey, captured_at: patch.capturedAt };
     const cell = (value: unknown) => value === null ? "(none)" : (typeof value === "string" ? value : JSON.stringify(value)).replace(/\|/g, "\\|").replace(/\n/g, " ");
     const table = changes.length ? `\n\n| Field | Current | Proposed |\n| --- | --- | --- |\n${changes.map((change) => `| ${change.field} | ${cell(change.current)} | ${cell(change.proposed)} |`).join("\n")}` : "";
     const note = patch.appendNote ? `\n\nNote to append:\n\n${patch.appendNote.split("\n").map((line) => `> ${line}`).join("\n")}` : "";
-    await this.ctx.objects.write({
-      relativePath: `review-items/${markdownFileName(title, id, run.now)}`,
-      frontmatter: {
-        ...this.ctx.envelope(id, "review-item", title, run.now, patch.origin),
-        review_type: "update", target_object_type: target.frontmatter.type, target_object_id: target.frontmatter.id, proposed_fields: { ...proposal },
-        confidence_label: patch.origin === "agent-extracted" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: run.newId(replayRoles.operation(replayRoles.review)), source_ids: [], agent_run_id: run.id
-      },
+    const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now: run.now, agentRunId: run.id, newId: run.newId }, {
+      role: replayRoles.review, reviewType: "update", title, target: { type: target.frontmatter.type, id: target.frontmatter.id }, proposed: { ...proposal },
+      confidence: patch.origin === "agent-extracted" ? "Medium" : "High", origin: patch.origin,
       body: `# ${title}\n\n${reasons.map((reason) => `- ${reason}`).join("\n")}${table}${note}\n`
     });
     await this.ctx.writeAuditOnce(reviewRaisedAction, id, run.now, { draft_key: patch.draftKey, content_hash: patch.contentHash, draft_path: patch.file.relativePath, agent_run_id: run.id, origin: patch.origin, captured_at: patch.capturedAt, target_object_id: target.frontmatter.id, reasons }, { matchOn: ["draft_key", "content_hash"] });

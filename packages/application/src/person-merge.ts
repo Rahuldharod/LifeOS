@@ -2,6 +2,7 @@ import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { internalDomainsOf, personEmails } from "./people.js";
 import { operationKinds, type Operation } from "./ports.js";
+import { proposeReviewItem } from "./review-items.js";
 import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./support.js";
 
 /**
@@ -140,13 +141,12 @@ export class PersonMergeModule {
 
   private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: (role: ReplayRole) => string) {
     const role = replayRoles.merge(pairKey(keep.frontmatter.id, merge.frontmatter.id));
-    const id = newId(role);
     const title = `Merge ${merge.frontmatter.title} into ${keep.frontmatter.title}`;
     const reason = match === "email" ? "Both have the same email address." : match === "email-local-part" ? "Their email addresses match on two internal domains." : "Their names match.";
     const proposal: PersonMergeProposal = { keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match, keep_title: keep.frontmatter.title, merge_title: merge.frontmatter.title };
-    await this.ctx.objects.write({
-      relativePath: `review-items/${markdownFileName(title, id, now)}`,
-      frontmatter: { ...this.ctx.envelope(id, "review-item", title, now), review_type: personMergeReviewType, target_object_type: "person", proposed_fields: { ...proposal }, confidence_label: match === "name" ? "Medium" : "High", field_evidence: {}, status: "pending", operation_id: newId(replayRoles.operation(role)) },
+    const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now, newId }, {
+      role, reviewType: personMergeReviewType, title, target: { type: "person" }, proposed: { ...proposal }, confidence: match === "name" ? "Medium" : "High",
+      readsFrom: [keep.frontmatter.id, merge.frontmatter.id],
       body: `# Possible duplicate person\n\n${reason} Accepting moves every reference from ${merge.frontmatter.title} to ${keep.frontmatter.title} and deletes ${merge.frontmatter.title}. Nothing changes until you accept.\n`
     });
     await this.auditSuggestion(id, proposal, now);

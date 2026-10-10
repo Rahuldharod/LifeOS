@@ -140,6 +140,12 @@ export const replayRoles = {
   link: (field: string, reference: string) => role(`link:${field}:${reference}`),
   /** A person-merge Review Item, by its (order-free) pair key. */
   merge: (pair: string) => role(`merge:${pair}`),
+  /** The Agent run of a step that proposes Review Items outside adoption (processing a meeting, a pasted Source). */
+  agentRun: role("agent-run"),
+  /** The Knowledge Note proposed from a pasted Source. */
+  knowledge: role("knowledge"),
+  /** The meeting output Review Item at `position` in the AI's answer for one version of the note. */
+  meetingOutput: (position: number) => role(`output:${position}`),
   /** `child` raised inside `parent`'s handler, e.g. a merge suggestion raised for the main object. */
   within: (parent: ReplayRole, child: ReplayRole) => role(`${parent}/${child}`),
   /** The operation ID of the Review Item with role `of`. */

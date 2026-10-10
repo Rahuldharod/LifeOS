@@ -1,6 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { personEmails } from "./people.js";
+import { proposeReviewItem } from "./review-items.js";
 import { byIdentifier, isLive, isRestricted, objectIdPattern, replayRoles, type ReplayRole } from "./support.js";
 
 /**
@@ -148,18 +149,13 @@ export class ReferenceResolver {
     for (const item of unresolved) {
       const spec = referenceFields[item.field];
       const role = replayRoles.link(item.field, item.reference);
-      const id = newId(role);
       const title = `Link ${item.field.replace("_", " ")} "${item.reference}" on ${target.title}`;
       const why = item.problem === "ambiguous" ? `matches ${item.candidates.length} ${spec.type}s:\n\n${item.candidates.map((candidate) => `- ${candidate.title} (${candidate.id})`).join("\n")}` : `matches no ${spec.type}.`;
-      await this.ctx.objects.write({
-        relativePath: `review-items/${markdownFileName(title, id, context.now)}`,
-        frontmatter: {
-          ...this.ctx.envelope(id, "review-item", title, context.now, context.origin),
-          review_type: "link-resolution", target_object_type: target.type, target_object_id: target.id,
-          proposed_fields: { reference_field: item.field, reference: item.reference, link_field: spec.linkField, list: spec.list, candidate_type: spec.type, problem: item.problem, candidates: item.candidates },
-          confidence_label: "Low", field_evidence: {}, status: "pending", operation_id: newId(replayRoles.operation(role)), source_ids: context.sourceIds ?? [],
-          ...(context.agentRunId ? { agent_run_id: context.agentRunId } : {})
-        },
+      const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now: context.now, agentRunId: context.agentRunId, newId }, {
+        role, reviewType: "link-resolution", title, target: { type: target.type, id: target.id }, origin: context.origin, confidence: "Low", sourceIds: context.sourceIds,
+        // The target may not be in the index yet (adoption creates it just before), so its own sensitivity is passed too.
+        ...(target.sensitivity === "restricted" ? { sensitivity: target.sensitivity } : {}),
+        proposed: { reference_field: item.field, reference: item.reference, link_field: spec.linkField, list: spec.list, candidate_type: spec.type, problem: item.problem, candidates: item.candidates },
         body: `# ${title}\n\n"${item.reference}" ${why}\n`
       });
       ids.push(id);
