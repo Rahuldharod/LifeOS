@@ -1,13 +1,14 @@
-import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import type { LifeOSObject, ObjectEnvelope } from "@lifeos/domain";
 import type { AdoptionModule, InboxStatus } from "./adoption.js";
 import type { CalendarModule, CalendarOffline } from "./calendar.js";
-import { ObjectConflictError, type AppContext } from "./context.js";
+import type { AppContext } from "./context.js";
 import type { EnrichmentModule, EnrichmentStatus } from "./enrichment.js";
 import type { EntitiesModule } from "./entities.js";
 import type { MeetingsModule } from "./meetings.js";
 import { openPointPeopleIds } from "./open-points.js";
 import type { PeopleModule, PeopleSetupWarning } from "./people.js";
 import { dueDate, isLive, isMeetingRestricted } from "./support.js";
+import { SyncedSetting } from "./synced-settings.js";
 
 /**
  * Today's live panels (#48, PRD "Daily Focus and Today"). Every panel is computed on request from the
@@ -71,7 +72,6 @@ export interface TodayPanels {
   setupWarning?: PeopleSetupWarning;
 }
 
-const todaySettingsPath = "settings/today.md";
 const timeOfDay = /^([01]\d|2[0-3]):[0-5]\d$/;
 const importanceRank = (value: unknown) => value === "High" ? 0 : value === "Medium" ? 1 : value === "Low" ? 2 : 3;
 const linkRank: Record<OpenPointLink, number> = { "raised-in": 0, project: 1, client: 2, people: 3 };
@@ -120,7 +120,16 @@ export class TodayModule {
     private readonly meetings: MeetingsModule,
     private readonly calendarModule: CalendarModule,
     private readonly people: PeopleModule
-  ) {}
+  ) {
+    this.setting = new SyncedSetting(ctx, {
+      key: "today", title: "Today",
+      body: "# Today\n\nMeeting-hours threshold for flagging a meeting-heavy day (information only), and when the morning routine writes the Daily Focus brief.\n",
+      changedMessage: "Today settings changed on another device; reload and try again",
+      removedMessage: "Today settings were removed; reload and try again"
+    });
+  }
+
+  private readonly setting: SyncedSetting;
 
   /** `date` is the user's local date; `timeZone` sets that day's boundaries for meetings (default: the brief's zone). */
   async panels(options: { date?: string; now?: Date; timeZone?: string } = {}): Promise<TodayPanels> {
@@ -171,14 +180,18 @@ export class TodayModule {
 
   /** Read from disk so another device's edit is seen at once (as for the other synced settings, ADR 0005). */
   async settings(): Promise<TodaySettings> {
-    const current = await this.readSetting();
+    const current = await this.setting.read();
     return { ...settingsFrom(current?.frontmatter), ...(current ? { contentHash: current.contentHash } : {}) };
   }
 
   async saveSettings(input: Partial<Omit<TodaySettings, "contentHash">>, expectedHash?: string): Promise<TodaySettings> {
-    const { ctx } = this;
-    const current = await this.readSetting();
-    const merged = { ...settingsFrom(current?.frontmatter), ...input };
+    const written = await this.setting.save((current) => this.settingFields(current, input), expectedHash);
+    return { ...settingsFrom(written.frontmatter), contentHash: written.contentHash };
+  }
+
+  /** Validates the merged settings (all problems at once) and maps them to front matter. */
+  private settingFields(current: ObjectEnvelope | undefined, input: Partial<Omit<TodaySettings, "contentHash">>) {
+    const merged = { ...settingsFrom(current), ...input };
     const problems: string[] = [];
     if (typeof merged.meetingHoursThreshold !== "number" || !Number.isFinite(merged.meetingHoursThreshold) || merged.meetingHoursThreshold < 0 || merged.meetingHoursThreshold > 24) problems.push("Meeting-hours threshold must be a number of hours from 0 to 24");
     if (typeof merged.briefTime !== "string" || !timeOfDay.test(merged.briefTime)) problems.push("Brief time must be HH:MM (24-hour)");
@@ -186,25 +199,12 @@ export class TodayModule {
     const days = Array.isArray(merged.briefDays) ? merged.briefDays : [];
     if (!days.length || days.some((day) => !weekdays.includes(day))) problems.push(`Brief days must be one or more of ${weekdays.join(", ")}`);
     if (problems.length) throw new Error(problems.join("; "));
-    if (current && current.contentHash !== expectedHash) throw new ObjectConflictError("Today settings changed on another device; reload and try again");
-    if (!current && expectedHash) throw new ObjectConflictError("Today settings were removed; reload and try again");
-    const now = new Date().toISOString();
-    const written = await ctx.objects.write({
-      relativePath: todaySettingsPath,
-      expectedHash: current?.contentHash,
-      frontmatter: {
-        ...current?.frontmatter,
-        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: ctx.deviceId } : ctx.envelope(uuidV7(), "app-setting", "Today", now)),
-        setting_key: "today",
-        meeting_hours_threshold: merged.meetingHoursThreshold,
-        brief_time: merged.briefTime,
-        brief_time_zone: merged.briefTimeZone,
-        brief_days: weekdays.filter((day) => days.includes(day))
-      } as ObjectEnvelope,
-      body: current?.body ?? "# Today\n\nMeeting-hours threshold for flagging a meeting-heavy day (information only), and when the morning routine writes the Daily Focus brief.\n"
-    });
-    await ctx.rebuildIndex();
-    return { ...settingsFrom(written.frontmatter), contentHash: written.contentHash };
+    return {
+      meeting_hours_threshold: merged.meetingHoursThreshold,
+      brief_time: merged.briefTime,
+      brief_time_zone: merged.briefTimeZone,
+      brief_days: weekdays.filter((day) => days.includes(day))
+    };
   }
 
   /**
@@ -273,10 +273,5 @@ export class TodayModule {
       if (best) rows.push(best);
     }
     return rows.sort((a, b) => linkRank[a.link] - linkRank[b.link] || importanceRank(a.openPoint.frontmatter.importance) - importanceRank(b.openPoint.frontmatter.importance) || String(b.openPoint.frontmatter.raised_at ?? b.openPoint.frontmatter.created_at).localeCompare(String(a.openPoint.frontmatter.raised_at ?? a.openPoint.frontmatter.created_at)));
-  }
-
-  private async readSetting() {
-    try { return await this.ctx.objects.read(todaySettingsPath); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   }
 }

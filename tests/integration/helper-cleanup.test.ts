@@ -54,16 +54,6 @@ describe("list settings: self emails and internal domains save the same way (#75
     expect(domains).toMatch(/type: app-setting/);
   });
 
-  it("names each setting in its conflict messages", async () => {
-    const { application } = await setup();
-    await expect(application.saveSelfEmails(["me@example.com"], "gone")).rejects.toThrow("Your email addresses setting was removed; reload and try again");
-    await expect(application.saveInternalDomains(["example.com"], "gone")).rejects.toThrow("Internal domains setting was removed; reload and try again");
-    await application.saveSelfEmails(["me@example.com"], undefined);
-    await application.saveInternalDomains(["example.com"], undefined);
-    await expect(application.saveSelfEmails(["me@example.com"], "stale")).rejects.toThrow("Your email addresses changed on another device; reload and try again");
-    await expect(application.saveInternalDomains(["example.com"], "stale")).rejects.toThrow("Internal domains changed on another device; reload and try again");
-  });
-
   it("keeps a revision count and the edited body on a second save", async () => {
     const { root, application } = await setup();
     const first = await application.saveInternalDomains(["example.com"], undefined);

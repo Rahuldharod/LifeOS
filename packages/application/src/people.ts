@@ -1,7 +1,8 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
-import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
+import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
 import { isLive, OneAtATime } from "./support.js";
+import { SyncedSetting } from "./synced-settings.js";
 
 /** The synced internal-domains setting (ADR 0005): one fixed file. Unset means nobody is External by email (#54). */
 const internalDomainsPath = "settings/internal-domains.md";
@@ -76,6 +77,15 @@ function domainsFrom(frontmatter: ObjectEnvelope | undefined) {
 function selfEmailsFrom(frontmatter: ObjectEnvelope | undefined) {
   const raw = Array.isArray(frontmatter?.self_emails) ? frontmatter.self_emails as unknown[] : [];
   return [...new Set(raw.map(normalizeEmail).filter((email): email is string => Boolean(email)))];
+}
+
+/** #75: a list-valued synced setting; a stale or missing file is a conflict named after the setting (`name`). */
+function listSetting(ctx: AppContext, key: string, title: string, name: string, body: string) {
+  return new SyncedSetting(ctx, {
+    key, title, body,
+    changedMessage: `${name} changed on another device; reload and try again`,
+    removedMessage: `${name} setting was removed; reload and try again`
+  });
 }
 
 const settingIn = (index: Pick<AppContext["index"], "all">, relativePath: string) => index.all().find((object) => object.frontmatter.type === "app-setting" && object.relativePath === relativePath);
@@ -169,7 +179,15 @@ export class PeopleModule {
   /** Resolution runs one call at a time, so concurrent meetings sharing a new attendee agree on one person. */
   private readonly queue = new OneAtATime();
 
-  constructor(private readonly ctx: AppContext) {}
+  private readonly internalDomainsSetting: SyncedSetting;
+  private readonly selfEmailsSetting: SyncedSetting;
+
+  constructor(private readonly ctx: AppContext) {
+    this.internalDomainsSetting = listSetting(ctx, "internal-domains", "Internal domains", "Internal domains",
+      "# Internal domains\n\nEmail domains of your own organisations. People with addresses only on other domains are shown as External (\"Name - ext\").\n");
+    this.selfEmailsSetting = listSetting(ctx, "self-emails", "My email addresses", "Your email addresses",
+      "# My email addresses\n\nEvery address you use. Calendar attendees with one of these addresses are you (the self person).\n");
+  }
 
   /** Internal domains from the indexed setting file (empty when unset). Synchronous so labels stay a cheap read. */
   internalDomains() {
@@ -188,64 +206,43 @@ export class PeopleModule {
 
   /** Read from disk so another device's edit is seen at once (as for calendar preferences). */
   async getInternalDomains(): Promise<{ domains: string[]; contentHash?: string }> {
-    const current = await this.readSetting(internalDomainsPath);
+    const current = await this.internalDomainsSetting.read();
     return { domains: domainsFrom(current?.frontmatter), ...(current ? { contentHash: current.contentHash } : {}) };
   }
 
   /** The user's own addresses (#54), read from disk like the internal domains. Empty when unset. */
   async getSelfEmails(): Promise<{ emails: string[]; contentHash?: string }> {
-    const current = await this.readSetting(selfEmailsPath);
+    const current = await this.selfEmailsSetting.read();
     return { emails: selfEmailsFrom(current?.frontmatter), ...(current ? { contentHash: current.contentHash } : {}) };
   }
 
   /** Saves the user's addresses (lowercased, de-duplicated). Blank entries are ignored; invalid ones are named in the error. An empty list is allowed. */
   async saveSelfEmails(input: unknown[], expectedHash?: string) {
-    const { values: emails, contentHash } = await this.saveListSetting({
-      relativePath: selfEmailsPath, settingKey: "self-emails", field: "self_emails", name: "Your email addresses", title: "My email addresses",
-      body: "# My email addresses\n\nEvery address you use. Calendar attendees with one of these addresses are you (the self person).\n",
-      normalize: normalizeEmail, invalid: "Not an email address"
+    const { values: emails, contentHash } = await this.saveListSetting(this.selfEmailsSetting, {
+      field: "self_emails", normalize: normalizeEmail, invalid: "Not an email address"
     }, input, expectedHash);
     return { emails, contentHash };
   }
 
   /** Saves the internal domains (lowercased, "@" stripped, de-duplicated). Blank entries are ignored; invalid ones are named in the error. */
   async saveInternalDomains(input: unknown[], expectedHash?: string) {
-    const { values: domains, contentHash } = await this.saveListSetting({
-      relativePath: internalDomainsPath, settingKey: "internal-domains", field: "internal_domains", name: "Internal domains", title: "Internal domains",
-      body: "# Internal domains\n\nEmail domains of your own organisations. People with addresses only on other domains are shown as External (\"Name - ext\").\n",
-      normalize: normalizeDomain, invalid: "Not a domain name", required: "Enter at least one internal domain"
+    const { values: domains, contentHash } = await this.saveListSetting(this.internalDomainsSetting, {
+      field: "internal_domains", normalize: normalizeDomain, invalid: "Not a domain name", required: "Enter at least one internal domain"
     }, input, expectedHash);
     return { domains, contentHash };
   }
 
   /**
    * #75: saves a list-valued app setting file (self emails, internal domains). Blank entries are ignored, the rest are
-   * normalized and de-duplicated, invalid ones are named in the error. A guarded write: a stale or missing file is a
-   * conflict named after the setting (`name`). `required`, when given, is the error for an empty list.
+   * normalized and de-duplicated, invalid ones are named in the error. `required`, when given, is the error for an empty list.
    */
-  private async saveListSetting(setting: { relativePath: string; settingKey: string; field: string; name: string; title: string; body: string; normalize: (value: unknown) => string | undefined; invalid: string; required?: string }, input: unknown[], expectedHash?: string) {
-    const { ctx } = this;
+  private async saveListSetting(setting: SyncedSetting, list: { field: string; normalize: (value: unknown) => string | undefined; invalid: string; required?: string }, input: unknown[], expectedHash?: string) {
     const entries = (Array.isArray(input) ? input : []).filter((value) => typeof value !== "string" || value.trim());
-    const invalid = entries.filter((value) => !setting.normalize(value)).map(String);
-    if (invalid.length) throw new Error(`${setting.invalid}: ${invalid.join(", ")}`);
-    const values = [...new Set(entries.map((value) => setting.normalize(value)!))];
-    if (setting.required && !values.length) throw new Error(setting.required);
-    const current = await this.readSetting(setting.relativePath);
-    if (current && current.contentHash !== expectedHash) throw new ObjectConflictError(`${setting.name} changed on another device; reload and try again`);
-    if (!current && expectedHash) throw new ObjectConflictError(`${setting.name} setting was removed; reload and try again`);
-    const now = new Date().toISOString();
-    const written = await ctx.objects.write({
-      relativePath: setting.relativePath,
-      expectedHash: current?.contentHash,
-      frontmatter: {
-        ...current?.frontmatter,
-        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: ctx.deviceId } : ctx.envelope(uuidV7(), "app-setting", setting.title, now)),
-        setting_key: setting.settingKey,
-        [setting.field]: values
-      } as ObjectEnvelope,
-      body: current?.body ?? setting.body
-    });
-    await ctx.rebuildIndex();
+    const invalid = entries.filter((value) => !list.normalize(value)).map(String);
+    if (invalid.length) throw new Error(`${list.invalid}: ${invalid.join(", ")}`);
+    const values = [...new Set(entries.map((value) => list.normalize(value)!))];
+    if (list.required && !values.length) throw new Error(list.required);
+    const written = await setting.save(() => ({ [list.field]: values }), expectedHash);
     return { values, contentHash: written.contentHash };
   }
 
@@ -284,11 +281,6 @@ export class PeopleModule {
   /** Self addresses from the indexed setting file; synchronous for matching. */
   private selfEmails() {
     return selfEmailsOf(this.ctx.index);
-  }
-
-  private async readSetting(relativePath: string) {
-    try { return await this.ctx.objects.read(relativePath); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   }
 
   /** Read-only: the existing person, or an unsaved stand-in with the name a real one would get. */

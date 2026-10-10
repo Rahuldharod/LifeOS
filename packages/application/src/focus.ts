@@ -4,6 +4,7 @@ import { markdownFileName, ObjectConflictError, type AppContext } from "./contex
 import { workOrderContractVersion } from "./enrichment.js";
 import type { InboxStore } from "./ports.js";
 import { isLive, isRestricted, objectIdPattern, replayRoles } from "./support.js";
+import { SyncedSetting } from "./synced-settings.js";
 
 /**
  * Daily Focus (ADR 0011, PRD "Daily Focus and Today"). The morning routine writes the brief as a
@@ -20,7 +21,6 @@ export const maxDeferCandidates = 3;
 /** Max must-dos (PRD "Settings"): how many items the effective Top 3 shows. A synced app-setting (ADR 0005). */
 export const defaultMaxMustDos = maxTopThree;
 export const maxMustDosLimit = 5;
-export const focusSettingsPath = "settings/daily-focus.md";
 /** #47: what the user can do to one date's Top 3. `restore` un-dismisses; `reset` clears every choice for the date. */
 export const focusOverrideActions = ["pin", "unpin", "replace", "dismiss", "restore", "reset"] as const;
 export type FocusOverrideAction = typeof focusOverrideActions[number];
@@ -104,11 +104,6 @@ function overrideState(object: LifeOSObject | undefined): FocusOverrideState | u
 function maxMustDosOf(frontmatter: Record<string, unknown> | undefined) {
   const value = frontmatter?.max_must_dos;
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= maxMustDosLimit ? value : defaultMaxMustDos;
-}
-
-async function readIfPresent(ctx: AppContext, relativePath: string) {
-  try { return await ctx.objects.read(relativePath); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
 }
 
 /**
@@ -211,7 +206,16 @@ export async function adoptDailyFocus(ctx: AppContext, draft: ParsedDraft, run: 
 }
 
 export class DailyFocusModule {
-  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore) {}
+  private readonly setting: SyncedSetting;
+
+  constructor(private readonly ctx: AppContext, private readonly inbox?: InboxStore) {
+    this.setting = new SyncedSetting(ctx, {
+      key: "daily-focus", title: "Daily Focus",
+      body: "# Daily Focus\n\n`max_must_dos`: how many must-dos Today's Top 3 shows (1 to 5, default 3).\n",
+      changedMessage: "The Daily Focus settings changed on another device; reload and try again",
+      removedMessage: "The Daily Focus settings were removed; reload and try again"
+    });
+  }
 
   /**
    * Today's brief with live status. `ruleTopThree` is the deterministic Top 3 (priority, then due
@@ -290,7 +294,7 @@ export class DailyFocusModule {
     if (!focusOverrideActions.includes(action)) throw new Error("action: must be pin, unpin, replace, dismiss, restore or reset");
     const taskId = action === "reset" ? "" : this.idOf(change.taskId, "taskId");
     const now = options.now ?? new Date();
-    const current = await readIfPresent(this.ctx, overridePath(date));
+    const current = await this.ctx.objects.readIfPresent(overridePath(date));
     if (current && current.contentHash !== expectedHash) throw new ObjectConflictError("Today's Top 3 was changed on another device; the latest is loaded, make your change again");
     if (!current && expectedHash) throw new ObjectConflictError("Today's Top 3 changes were removed on another device; the latest is loaded, make your change again");
     const state = overrideState(current) ?? { pinned: [], replaced: [], dismissed: [] };
@@ -345,34 +349,19 @@ export class DailyFocusModule {
 
   /** The max must-dos setting, with the hash for a guarded save (none until it is first saved). */
   async settings(): Promise<{ maxMustDos: number; contentHash?: string }> {
-    const current = await readIfPresent(this.ctx, focusSettingsPath);
+    const current = await this.setting.read();
     return { maxMustDos: maxMustDosOf(current?.frontmatter), ...(current ? { contentHash: current.contentHash } : {}) };
   }
 
   async saveSettings(input: { maxMustDos?: unknown }, expectedHash?: string) {
     const value = input.maxMustDos;
     if (!(typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= maxMustDosLimit)) throw new Error(`Max must-dos must be a whole number from 1 to ${maxMustDosLimit}`);
-    const current = await readIfPresent(this.ctx, focusSettingsPath);
-    if (current && current.contentHash !== expectedHash) throw new ObjectConflictError("The Daily Focus settings changed on another device; reload and try again");
-    if (!current && expectedHash) throw new ObjectConflictError("The Daily Focus settings were removed; reload and try again");
-    const now = new Date().toISOString();
-    const written = await this.ctx.objects.write({
-      relativePath: focusSettingsPath,
-      expectedHash: current?.contentHash,
-      frontmatter: {
-        ...current?.frontmatter,
-        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: this.ctx.deviceId } : this.ctx.envelope(uuidV7(), "app-setting", "Daily Focus", now)),
-        setting_key: "daily-focus",
-        max_must_dos: value
-      } as ObjectEnvelope,
-      body: current?.body ?? "# Daily Focus\n\n`max_must_dos`: how many must-dos Today's Top 3 shows (1 to 5, default 3).\n"
-    });
-    await this.ctx.rebuildIndex();
+    const written = await this.setting.save(() => ({ max_must_dos: value }), expectedHash);
     return { maxMustDos: value, contentHash: written.contentHash };
   }
 
   private maxMustDos() {
-    return maxMustDosOf(this.ctx.index.all().find((object) => object.relativePath === focusSettingsPath && object.frontmatter.type === "app-setting")?.frontmatter);
+    return maxMustDosOf(this.ctx.index.all().find((object) => object.relativePath === this.setting.relativePath && object.frontmatter.type === "app-setting")?.frontmatter);
   }
 
   private idOf(value: unknown, field: string) {

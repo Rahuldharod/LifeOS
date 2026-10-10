@@ -171,10 +171,8 @@ export class HistoryModule {
   /** Writes the copy at `versionPath` over the object (or creates it at `fallbackPath` if deleted), then audits it. */
   private async putBack(id: string, versionPath: string, fallbackPath: string, metadata: Record<string, unknown>, now: Date, expectedHash?: string) {
     const { ctx } = this;
-    const kept = await ctx.objects.read(versionPath).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") throw new Error(versionPrunedMessage);
-      throw error;
-    });
+    const kept = await ctx.objects.readIfPresent(versionPath);
+    if (!kept) throw new Error(versionPrunedMessage);
     const current = ctx.index.get(id);
     const timestamp = now.toISOString();
     const restored = await ctx.objects.write({
