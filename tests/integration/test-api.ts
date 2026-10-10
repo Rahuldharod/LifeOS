@@ -9,6 +9,7 @@ import { MockCalendarConnector } from "@lifeos/connectors";
 import { KnownSecrets, MemorySecretStore } from "@lifeos/secrets";
 import { buildApi, type ApiOptions, type LifeOSApi } from "../../apps/server/src/api.js";
 import { calendarSource } from "../../apps/server/src/calendar-source.js";
+import { endpointUrl, type Api } from "../../apps/web/src/api.js";
 
 const roots: string[] = [];
 const running: Array<{ stop(): Promise<void> }> = [];
@@ -49,12 +50,18 @@ export async function testApi(options: Partial<ApiOptions> & { files?: Record<st
   const start = async (listen: () => PromiseLike<unknown> = () => api.server.ready()) => { const background = await api.start(listen); running.push(background); return background; };
   const get = (url: string) => api.server.inject({ method: "GET", url });
   const send = (method: Exclude<Method, "GET">, url: string, payload: object = {}) => api.server.inject({ method, url, payload });
-  /** The web client's call (`apps/web/src/api.ts`): JSON in and out, and the server's error message thrown on 4xx/5xx. */
-  const call = async <T>(url: string, init?: RequestInit): Promise<T> => {
-    const response = await api.server.inject({ method: (init?.method ?? "GET") as Method, url, ...(init?.body ? { payload: String(init.body), headers: { "content-type": "application/json" } } : {}) });
-    const payload = response.json() as T & { error?: string };
+  /**
+   * The web client's call (`apps/web/src/api.ts`) by wire-contract endpoint (#121), sent through inject: the same URL,
+   * JSON in and out, and the server's error message thrown on 4xx/5xx.
+   */
+  const call = (async (endpoint: string, input?: { params?: Record<string, string>; query?: Record<string, string | string[] | undefined> | URLSearchParams; body?: unknown }) => {
+    const space = endpoint.indexOf(" ");
+    const url = endpointUrl(endpoint.slice(space + 1), input?.params, input?.query);
+    const body = input?.body === undefined ? undefined : JSON.stringify(input.body);
+    const response = await api.server.inject({ method: endpoint.slice(0, space) as Method, url, ...(body ? { payload: body, headers: { "content-type": "application/json" } } : {}) });
+    const payload = response.json() as { error?: string };
     if (response.statusCode >= 400) throw new Error(payload.error ?? `Request failed: ${response.statusCode}`);
     return payload;
-  };
+  }) as Api;
   return { root, backupRoot, api, start, get, send, call };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, parseEmails, personLabel, personOption, type PersonLabel } from "./personLabels.js";
+import type { PersonLabel } from "@lifeos/contracts";
+import { externalChoiceOf, externalChoiceValue, labelMap, parseDomains, parseEmails, personLabel, personOption } from "./personLabels.js";
 
 const labels = labelMap([
   { id: "a", name: "Kim", label: "Kim - ext", suffix: " - ext", isExternal: true, externalSource: "email" },

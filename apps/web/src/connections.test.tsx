@@ -2,7 +2,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api.js";
-import { ConnectionsNotice, loadConnections, type ConnectionSettings } from "./connections.js";
+import type { ConnectionSettings } from "@lifeos/contracts";
+import { ConnectionsNotice, loadConnections } from "./connections.js";
 
 const configured: ConnectionSettings = { calendar: { configured: true, connected: true }, drive: { configured: false, connected: false }, keychain: "ok" };
 

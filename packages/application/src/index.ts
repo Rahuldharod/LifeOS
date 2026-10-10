@@ -106,7 +106,7 @@ export class LifeOSApplication {
     const diagnostics = [...health.diagnostics, ...this.agentIndex.diagnostics()];
     // #76: a setup warning, not an integrity problem, so it never turns the status to "attention".
     const setupWarning = this.people.setupWarning();
-    return { ...health, status: diagnostics.length ? "attention" : "healthy", diagnostics, ...(setupWarning ? { setupWarning } : {}) };
+    return { ...health, status: diagnostics.length ? "attention" as const : "healthy" as const, diagnostics, ...(setupWarning ? { setupWarning } : {}) };
   }
   recoverOperations(options?: Parameters<SystemModule["recoverOperations"]>[0]) { return this.system.recoverOperations(options); }
   listObjects() { return this.system.listObjects(); }

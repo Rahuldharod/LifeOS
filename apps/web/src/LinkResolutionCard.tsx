@@ -4,7 +4,7 @@
 import React, { useState } from "react";
 import { PersonName } from "./PersonName.js";
 import { linkResolutionView, type LinkOption } from "./linkResolution.js";
-import type { PersonLabel } from "./personLabels.js";
+import type { PersonLabel } from "@lifeos/contracts";
 
 export type LinkCardActions = {
   /** Accepts with `linkTo`; rejects (throws) with the server's message on failure. */

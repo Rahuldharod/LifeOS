@@ -247,6 +247,9 @@ importers:
       '@lifeos/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors
+      '@lifeos/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@lifeos/index-memory':
         specifier: workspace:*
         version: link:../../packages/index-memory
@@ -265,6 +268,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@lifeos/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@lifeos/shared':
         specifier: workspace:*
         version: link:../../packages/shared

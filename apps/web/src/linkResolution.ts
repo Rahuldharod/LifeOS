@@ -1,13 +1,13 @@
 // Link-resolution Review Items (#33, card #57): a name that matched zero or several objects. The card
 // lists the candidates by display label, and accepting sends the chosen one as `linkTo`.
-import { personLabel, type PersonLabel } from "./personLabels.js";
+import type { EntityType, PersonLabel } from "@lifeos/contracts";
+import type { Api } from "./api.js";
+import { personLabel } from "./personLabels.js";
 
 type ReviewLike = { frontmatter: { id: string; title: string } & Record<string, unknown> };
 type Proposal = { reference_field?: unknown; reference?: unknown; candidate_type?: unknown; problem?: unknown; candidates?: unknown };
 /** One pickable candidate: the short name, plus the " - ext" marker for external people (styled separately). */
 export type LinkOption = { id: string; name: string; suffix?: string };
-/** `api` from ./api.js, passed in so the requests can be tested without a server. */
-export type ApiCall = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 /** Types the entities route can create (`POST /api/v1/entities/:type`); meetings come from the calendar. */
 const creatable = ["person", "project", "client", "product"];
@@ -52,11 +52,12 @@ export function acceptToast(frontmatter: Record<string, unknown>) {
 }
 
 /** Accepts a link-resolution item, linking the chosen candidate. */
-export const acceptLink = (call: ApiCall, reviewId: string, linkTo: string) =>
-  call<unknown>(`/api/v1/review-items/${reviewId}/accept`, { method: "POST", body: JSON.stringify({ linkTo }) });
+export const acceptLink = (call: Api, reviewId: string, linkTo: string) =>
+  call("POST /api/v1/review-items/:id/accept", { params: { id: reviewId }, body: { linkTo } });
 
 /** Creates the missing object, titled with the unresolved text, so it can then be linked. */
-export async function createLinkTarget(call: ApiCall, type: string, title: string): Promise<LinkOption> {
-  const created = await call<{ frontmatter: { id: string; title: string } }>(`/api/v1/entities/${type}`, { method: "POST", body: JSON.stringify({ fields: { title } }) });
+export async function createLinkTarget(call: Api, type: string, title: string): Promise<LinkOption> {
+  // The card offers Create only for the `creatable` types, so `type` is one the entities route takes.
+  const created = await call("POST /api/v1/entities/:type", { params: { type: type as EntityType }, body: { fields: { title } } });
   return { id: created.frontmatter.id, name: created.frontmatter.title };
 }

@@ -12,6 +12,7 @@
     "@lifeos/assets-filesystem": "workspace:*",
     "@lifeos/backup-filesystem": "workspace:*",
     "@lifeos/connectors": "workspace:*",
+    "@lifeos/contracts": "workspace:*",
     "@lifeos/index-memory": "workspace:*",
     "@lifeos/object-store-markdown": "workspace:*",
     "@lifeos/secrets": "workspace:*",

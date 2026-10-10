@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { acceptLink, acceptToast, createLinkTarget, linkResolutionView } from "./linkResolution.js";
-import { labelMap, type PersonLabel } from "./personLabels.js";
+import type { PersonLabel } from "@lifeos/contracts";
+import { labelMap } from "./personLabels.js";
 
 // #57: link-resolution Review Items get their own card: a candidate picker, then accept with `linkTo`.
 
@@ -56,12 +57,12 @@ describe("requests", () => {
   it("accept sends the chosen candidate as linkTo", async () => {
     const call = vi.fn().mockResolvedValue({});
     await acceptLink(call, "r1", "p2");
-    expect(call).toHaveBeenCalledWith("/api/v1/review-items/r1/accept", { method: "POST", body: JSON.stringify({ linkTo: "p2" }) });
+    expect(call).toHaveBeenCalledWith("POST /api/v1/review-items/:id/accept", { params: { id: "r1" }, body: { linkTo: "p2" } });
   });
 
   it("create posts the unresolved text as the new object's title and returns its ID and title", async () => {
     const call = vi.fn().mockResolvedValue({ frontmatter: { id: "new", title: "Joel" } });
     await expect(createLinkTarget(call, "person", "Joel")).resolves.toEqual({ id: "new", name: "Joel" });
-    expect(call).toHaveBeenCalledWith("/api/v1/entities/person", { method: "POST", body: JSON.stringify({ fields: { title: "Joel" } }) });
+    expect(call).toHaveBeenCalledWith("POST /api/v1/entities/:type", { params: { type: "person" }, body: { fields: { title: "Joel" } } });
   });
 });

@@ -10,6 +10,7 @@
  * What never counts: the lease heartbeat timer, automatic adoption, automatic backups, the file watcher, and reads.
  */
 import type { FastifyInstance } from "fastify";
+import { route } from "./route.js";
 import type { SessionStatus } from "@lifeos/object-store-markdown";
 
 export interface LeaseSession {
@@ -82,13 +83,13 @@ export function registerLease(server: FastifyInstance, options: { session: Lease
     if (session.status().writeAllowed) await session.touch();
   });
 
-  server.post("/api/v1/session/take-over", async () => {
+  route(server, "POST /api/v1/session/take-over", async () => {
     idle.activity();
     return session.takeOver();
   });
 
   // The browser's "someone is here" signal. It never takes back a released lease: only Take back does.
-  server.post("/api/v1/session/activity", async () => {
+  route(server, "POST /api/v1/session/activity", async () => {
     idle.activity();
     return session.touch();
   });

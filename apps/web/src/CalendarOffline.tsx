@@ -1,12 +1,9 @@
 // #88 (PRD story 86, PB-022b): when Google Calendar cannot be read, Today and the Calendar view list the meetings
 // already stored in LifeOS under this banner, with a Retry that reloads the calendar without a page reload.
 import React from "react";
+import type { CalendarOffline, CalendarOfflineReason } from "@lifeos/contracts";
 import { InlineNotice } from "./InlineNotice.js";
 
-export type CalendarOfflineReason = "network" | "auth" | "keychain-denied";
-export type CalendarOffline = { reason: CalendarOfflineReason; error: string; lastSuccessfulSyncAt?: string };
-/** `GET /api/v1/calendar/day` and `POST /api/v1/calendar/day/sync`. */
-export type CalendarDay<Event> = { events: Event[]; offline?: CalendarOffline };
 
 const reasonText: Record<CalendarOfflineReason, string> = {
   network: "Google Calendar could not be reached",
@@ -35,7 +32,7 @@ export class CalendarStillOfflineError extends Error {
  * prompt is fine), then reloads the day. Resolves only when the calendar is back; while still offline it rejects,
  * so no success message is shown and the banner stays.
  */
-export async function retryCalendarDay<Event>(offline: CalendarOffline | undefined, steps: { reprobeKeychain: () => Promise<unknown>; loadDay: () => Promise<CalendarDay<Event>> }) {
+export async function retryCalendarDay<Day extends { events: unknown[]; offline?: CalendarOffline }>(offline: CalendarOffline | undefined, steps: { reprobeKeychain: () => Promise<unknown>; loadDay: () => Promise<Day> }) {
   if (offline?.reason === "keychain-denied") await steps.reprobeKeychain().catch(() => undefined);
   const day = await steps.loadDay();
   if (day.offline) throw new CalendarStillOfflineError(day.offline);

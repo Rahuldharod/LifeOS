@@ -4,35 +4,13 @@ import React, { useState } from "react";
 import { LockBadge } from "./EnvelopeBadges.js";
 import { formatTime } from "./dateFormat.js";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
-import type { TodaySettings } from "./SettingsPage.js";
 import { awaitingAdoptionLabel, daysBetween } from "./todayPanels.js";
-import { SelfEmailWarning, type SetupWarning } from "./SelfEmailWarning.js";
-import { BackupWarning, type BackupWarningState } from "./BackupWarning.js";
-import { CalendarOfflineBanner, type CalendarOffline } from "./CalendarOffline.js";
-import { CappedRows, GiveUpRow, LivePanel, WaitingGroupRow, type WaitingGroup } from "./TodayLists.js";
+import { SelfEmailWarning } from "./SelfEmailWarning.js";
+import { BackupWarning } from "./BackupWarning.js";
+import { CalendarOfflineBanner } from "./CalendarOffline.js";
+import { CappedRows, GiveUpRow, LivePanel, WaitingGroupRow } from "./TodayLists.js";
+import type { DailyFocus, EnrichmentStatus, FocusChange, FocusItem, LifeObject, Today, TodayPanels } from "@lifeos/contracts";
 
-type LifeObject = { frontmatter: Record<string, unknown> & { id: string; title: string; type: string; status?: string; revision: number; created_at: string; updated_at: string }; body: string; relativePath: string; contentHash: string };
-type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
-export type FocusChange = { action: "pin" | "unpin" | "replace" | "dismiss" | "restore" | "reset"; taskId?: string; replacementId?: string };
-export type DailyFocus = { date: string; brief?: { id: string; title: string; path: string; generatedAt: string; body: string; lengthWarning?: string }; iOwe: FocusItem[]; top3: FocusItem[]; top3Source: "brief" | "rule"; maxMustDos: number; override?: { contentHash: string }; dismissedTop3: FocusItem[]; waitingAndDecisions: FocusItem[]; meetingPrep: FocusItem[]; dayShape?: { meetingHours: number; freeHours: number }; deferCandidates: FocusItem[]; restrictedHidden: number };
-export type Today = { tasks: LifeObject[]; overdue: LifeObject[]; dueToday: LifeObject[]; upcoming: LifeObject[]; waiting: LifeObject[]; topThree: Array<{ task: LifeObject; reason: string }>; reviewCount: number; focus?: DailyFocus };
-/** #48: Today's live panels, computed by the server on each load (never from the brief). */
-export type TodayPanels = {
-  date: string; overdue: LifeObject[]; dueToday: LifeObject[]; upcomingHighPriority: LifeObject[];
-  waitingByPerson: Array<WaitingGroup & { tasks: LifeObject[] }>;
-  nextMeetings: Array<{ title: string; startsAt: string; endsAt: string; inProgress: boolean; meetingId?: string; noteId?: string; calendarEventId?: string; calendarName?: string; restricted: boolean }>;
-  meetingHours: number; meetingHeavy: boolean;
-  /** #88: set when the calendar could not be read; Next meetings then lists the meetings already in LifeOS. */
-  calendarOffline?: CalendarOffline;
-  openPointsForMeetings: Array<{ openPoint: LifeObject; meetingId: string; meetingTitle: string; link: "raised-in" | "project" | "client" | "people" }>;
-  reviewCount: number; inbox: { awaiting: number; drafts: number; patches: number }; failedDrafts: Array<{ path: string; reason: string }>;
-  staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }>; settings: TodaySettings;
-  /** #76: present while the user's own email addresses or the internal domains are unset. */
-  setupWarning?: SetupWarning;
-  /** #84: present when a backup or the off-Drive copy failed, or none succeeded in 26 hours. */
-  backupWarning?: BackupWarningState;
-};
-export type EnrichmentStatus = { proposedGaveUp: Array<{ meetingId: string; title: string; requestedAt: string }>; staleWorkOrders: Array<{ path: string; requestedAt: string; ageDays: number }> };
 
 type Props = {
   today: Today; panels?: TodayPanels; enrichment: EnrichmentStatus; eventCount: number; capture: string; busy: boolean; readOnly: boolean;

@@ -12,9 +12,7 @@ import { entityOptions } from "./searchOptions.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { zonedDateTime, zonedInputValue } from "./zonedTime.js";
 
-type LifeObject = { frontmatter: Record<string, unknown> & { id: string; type: string; title: string; revision: number }; body: string; relativePath: string; contentHash: string };
-type Evidence = { field: string; sourceId: string; sourceTitle?: string; fragmentId: string; text?: string; locator?: unknown };
-type DecisionDetail = { decision: LifeObject; supersedes?: LifeObject; supersededBy?: LifeObject; meeting?: LifeObject; sources: LifeObject[]; people: LifeObject[]; project?: LifeObject; client?: LifeObject; product?: LifeObject; review?: LifeObject; evidence: Evidence[]; resolvesOpenPoints?: LifeObject[] };
+import type { DecisionDetail, LifeObject } from "@lifeos/contracts";
 type Props = {
   projects: LifeObject[]; clients: LifeObject[]; products: LifeObject[]; people: LifeObject[];
   busy: boolean; readOnly: boolean; timeZone: string; highlightId?: string;
@@ -38,11 +36,11 @@ export function DecisionsPage({ projects, clients, products, people, busy, readO
   const titleOf = (id: unknown, list: LifeObject[]) => list.find((object) => object.frontmatter.id === id)?.frontmatter.title;
 
   const loadList = useCallback(async () => {
-    try { setDecisions(await api<LifeObject[]>(`/api/v1/decisions${query ? `?${query}` : ""}`)); setListError(undefined); }
+    try { setDecisions(await api("GET /api/v1/decisions", { query: new URLSearchParams(query) })); setListError(undefined); }
     catch (error) { setListError(error instanceof Error ? error.message : "Could not load decisions"); }
   }, [query]);
   const loadDetail = useCallback(async (id: string) => {
-    try { setDetail(await api<DecisionDetail>(`/api/v1/decisions/${id}`)); }
+    try { setDetail(await api("GET /api/v1/decisions/:id", { params: { id } })); }
     catch { setDetail(undefined); setSelectedId(undefined); }
   }, []);
   useEffect(() => { void loadList(); }, [loadList]);
@@ -57,7 +55,7 @@ export function DecisionsPage({ projects, clients, products, people, busy, readO
   const create = () => run(async () => {
     // A decision recorded while filtering by a project, client, product or person starts linked to it.
     const fields = { title: newTitle, primary_project_id: filters.projectId, primary_client_id: filters.clientId, primary_product_id: filters.productId, people_ids: filters.personId ? [filters.personId] : undefined };
-    const created = await api<LifeObject>("/api/v1/decisions", { method: "POST", body: JSON.stringify({ fields }) });
+    const created = await api("POST /api/v1/decisions", { body: { fields } });
     setNewTitle("");
     setSelectedId(created.frontmatter.id);
     await refresh(created.frontmatter.id);
@@ -118,7 +116,7 @@ function DecisionPanel({ detail, projects, clients, products, people, busy, read
     if (changes.status === value.status) delete changes.status;
     if (changes.status === "reversed" && !window.confirm("Mark this decision reversed? This is final.")) return;
     // On a conflict `run` shows the error and the refresh loads what is on disk now, so nothing is overwritten blindly.
-    await run(async () => { await api(`/api/v1/decisions/${value.id}`, { method: "PATCH", body: JSON.stringify({ fields: changes, expectedHash: decision.contentHash }) }); }, "Decision saved");
+    await run(async () => { await api("PATCH /api/v1/decisions/:id", { params: { id: value.id }, body: { fields: changes, expectedHash: decision.contentHash } }); }, "Decision saved");
     await refresh(value.id);
   };
 
@@ -126,7 +124,7 @@ function DecisionPanel({ detail, projects, clients, products, people, busy, read
     if (!successor) return;
     let nextId: string | undefined;
     const done = await run(async () => {
-      const result = await api<{ decision: LifeObject }>(`/api/v1/decisions/${value.id}/supersede`, { method: "POST", body: JSON.stringify({ fields: successor, expectedHash: decision.contentHash }) });
+      const result = await api("POST /api/v1/decisions/:id/supersede", { params: { id: value.id }, body: { fields: successor, expectedHash: decision.contentHash } });
       nextId = result.decision.frontmatter.id;
     }, "Decision superseded");
     if (done && nextId) { setSuccessor(undefined); onSelect(nextId); await refresh(nextId); } else await refresh(value.id);

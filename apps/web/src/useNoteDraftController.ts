@@ -119,7 +119,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
     setUndoable(undefined);
     setAutoSaving(true);
     try {
-      const updated = await api<DraftControllerNote>(`/api/v1/objects/${saveBase.noteId}/body`, { method: "PUT", body: JSON.stringify(noteSaveRequest(saveBase, bodyToSave)) });
+      const updated = await api("PUT /api/v1/objects/:id/body", { params: { id: saveBase.noteId }, body: noteSaveRequest(saveBase, bodyToSave) });
       onSaved(updated);
       setBase((current) => current?.noteId === saveBase.noteId ? noteDraftBase(updated) : current);
       if (activeDraft.current === bodyToSave) clearCachedDraft(saveBase.noteId); else cacheDraft(saveBase.noteId, activeDraft.current, updated.contentHash);
@@ -275,7 +275,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
       const latest = await fetchLatest();
       if (!latest) { onMessage("This note no longer exists on disk."); return; }
       const rebased = noteSaveRequest(noteDraftBase(latest), bodyToSave);
-      const updated = await api<DraftControllerNote>(`/api/v1/objects/${latest.frontmatter.id}/body`, { method: "PUT", body: JSON.stringify(rebased) });
+      const updated = await api("PUT /api/v1/objects/:id/body", { params: { id: latest.frontmatter.id }, body: rebased });
       onSaved(updated);
       setBase(noteDraftBase(updated)); setDraftState(updated.body); setConflict(false);
       clearCachedDraft(updated.frontmatter.id);
