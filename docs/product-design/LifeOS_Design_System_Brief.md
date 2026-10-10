@@ -1,6 +1,6 @@
 # LifeOS design system: decisions from the first grilling session
 
-**Status:** Page-layout discovery approved. Design-system specification and production implementation remain. Recorded 10 October 2026 on `codex/design-system-prototypes`. These are design decisions, not a production UI release.
+**Status:** Page-layout discovery and production specification are approved. Production implementation remains. Recorded 10 October 2026 on `codex/design-system-prototypes`. These are design decisions, not a production UI release.
 
 ## Purpose and experience
 
@@ -96,7 +96,23 @@ The review prototype for these decisions is `apps/web/layout-prototype.html`. It
 
 ## Remaining before production implementation
 
-No further product-level page-layout decision is currently open. The remaining work is specification and validation:
+No further product-level page-layout decision is currently open. The production specification is [GitHub issue #127](https://github.com/Rahuldharod/LifeOS/issues/127). Its approved implementation sequence is:
+
+1. [Design tokens and application shell — #129](https://github.com/Rahuldharod/LifeOS/issues/129)
+2. [Tasks workspace and reusable list/detail foundation — #130](https://github.com/Rahuldharod/LifeOS/issues/130)
+3. [Global Search and Capture — #131](https://github.com/Rahuldharod/LifeOS/issues/131)
+4. [Priority-first Today — #132](https://github.com/Rahuldharod/LifeOS/issues/132)
+5. [Calendar workspace — #133](https://github.com/Rahuldharod/LifeOS/issues/133)
+6. [Notes workspace and conflict comparison — #134](https://github.com/Rahuldharod/LifeOS/issues/134)
+7. [Inbox review workspace — #135](https://github.com/Rahuldharod/LifeOS/issues/135)
+8. [Decisions and Open Points workspaces — #136](https://github.com/Rahuldharod/LifeOS/issues/136)
+9. [Knowledge workspace — #137](https://github.com/Rahuldharod/LifeOS/issues/137)
+10. [Grouped Settings workspace — #138](https://github.com/Rahuldharod/LifeOS/issues/138)
+11. [Connections and Data & devices Settings — #139](https://github.com/Rahuldharod/LifeOS/issues/139)
+12. [Reference data inside Settings — #140](https://github.com/Rahuldharod/LifeOS/issues/140)
+13. [Accessibility, responsive and release validation — #142](https://github.com/Rahuldharod/LifeOS/issues/142)
+
+GitHub's native blocking relationships define the implementation frontier. Start with issue #129, then work any unblocked `ready-for-agent` ticket. The remaining production work is:
 
 1. Convert the approved direction into named typography, spacing, radius, border, focus and colour-role tokens. Confirm every interactive state meets WCAG 2.2 AA contrast requirements.
 2. Specify reusable list rows, detail headers, sticky action bars, form controls, banners, empty states, skeletons, confirmations, Search and Capture overlays.
