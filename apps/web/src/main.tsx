@@ -22,7 +22,8 @@ import { areaOptions, isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
 import { MarkdownEditor, ModeSwitch, type EditorOwner } from "./MarkdownEditor.js";
 import { MarkdownPreview } from "./MarkdownPreview.js";
-import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
+import { withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
+import { useLifeosLinks } from "./useLifeosLinks.js";
 import { dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
@@ -803,58 +804,11 @@ function App() {
     } finally { setBusy(false); }
   };
 
-  // PB-007: a `lifeos://object/<id>` link opens the object inside the app. The object list is fetched
-  // fresh so a link to something created a moment ago still works, and the note being edited is saved
-  // first so leaving it can never drop text. PB-027: each link opened is a history entry.
-  const openLifeosLink = async (href: string) => {
-    try {
-      if (!(await leaveEditors())) return;
-      const objects = await refreshObjectLinks();
-      const target = resolveLifeosLink(href, objects);
-      if (target.kind === "invalid") return;
-      if (target.kind === "missing") { setMessage("That linked object no longer exists."); return; }
-      if (target.kind === "unsupported") { setMessage(`Opening a ${target.type.replace("-", " ")} from a link is not supported yet.`); return; }
-      if (target.kind === "note") {
-        const { open, deleted } = await refreshNoteLists();
-        setNoteQuery("");
-        const live = open.find((note) => note.frontmatter.id === target.id);
-        const gone = deleted.find((note) => note.frontmatter.id === target.id);
-        if (!live && !gone) { setMessage("That linked note no longer exists."); return; }
-        followRoute({ view: "Notes", noteTab: live ? "open" : "deleted", id: target.id });
-      } else if (target.kind === "meeting") {
-        const meeting = objects.find((object) => object.frontmatter.id === target.id);
-        const date = meeting?.frontmatter.starts_at ? dateInTimeZone(new Date(String(meeting.frontmatter.starts_at)), displayTimeZone) : selectedDate;
-        followRoute({ view: "Calendar", date, id: target.id });
-      } else if (target.kind === "inbox") {
-        followRoute({ view: "Inbox", id: target.id });
-      } else {
-        followRoute({ view: target.view, id: target.id });
-        // The same card again (no URL change) still flashes.
-        setHighlightId(target.id);
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not open the link");
-    }
-  };
-  // The click listener is attached once; it calls whichever handler the latest render created.
-  const linkHandler = useRef(openLifeosLink);
-  linkHandler.current = openLifeosLink;
-  useEffect(() => {
-    function onClick(event: MouseEvent) {
-      const anchor = (event.target as Element | null)?.closest?.("a[href], a[data-lifeos-href]");
-      if (!anchor) return;
-      // The editor's link bubble shows the raw address as its text, with an emptied href (PB-007).
-      const href = anchor.getAttribute("data-lifeos-href") ?? (anchor.closest(".milkdown-link-preview") ? anchor.textContent : anchor.getAttribute("href"));
-      if (!lifeosLinkId(href)) return;
-      // The browser cannot open lifeos:// itself, so it must never follow the link (an emptied href
-      // would open this page again in a new tab). One click opens the object, in every mode.
-      event.preventDefault();
-      event.stopPropagation();
-      void linkHandler.current(href!.trim());
-    }
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, []);
+  // PB-007: `lifeos://` links, from both editors, the copy-link feature and the Decisions/Open Points pages.
+  const { openLifeosLink } = useLifeosLinks({
+    leaveEditors, refreshObjectLinks, refreshNoteLists, followRoute, onMessage: setMessage, selectedDate, displayTimeZone,
+    onNoteOpened: () => setNoteQuery(""), onHighlight: setHighlightId
+  });
   /** #76: opens Settings and moves focus to the given card once it has rendered. */
   const openSettingsCard = async (cardId: string) => {
     if (!(await go({ view: "Settings" }))) return;
