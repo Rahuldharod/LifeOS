@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -130,5 +130,66 @@ describe("every synced setting keeps its own conflict wording (#117)", () => {
     await rm(path.join(root, "settings", `${name}.md`));
     const gone = await save(app, "gone").catch((error: unknown) => error);
     expect(gone).toMatchObject({ name: "ObjectConflictError", message: removed });
+  });
+});
+
+describe("a hand-edited settings file round-trips through a save (#117)", () => {
+  // Only the saved field, `revision` and the `updated_*` lines may differ; the order of the setting's own keys, unknown
+  // front matter and the body stay byte for byte. (The envelope keys are always written in the schema's order, so the
+  // file starts with them.)
+  const updatedAt = /^updated_at: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
+  const envelope = (title: string) => [
+    "---",
+    "id: 01995d3e-912b-7357-8aa6-9816c1ad90a5",
+    "type: app-setting",
+    "schema_version: 1",
+    "revision: 4",
+    `title: ${title}`,
+    "created_at: 2026-09-01T08:00:00.000Z",
+    "updated_at: 2026-09-02T08:00:00.000Z",
+    "updated_by_device: desk-mac",
+    "my_note: kept by hand"
+  ];
+  const body = (key: string) => [`setting_key: ${key}`, "---", "# Hand-written heading", "", "A paragraph I wrote myself.", ""];
+  const expectLines = (actual: string, expected: Array<string | RegExp>) => {
+    const lines = actual.split("\n");
+    expect(lines).toHaveLength(expected.length);
+    expected.forEach((line, index) => typeof line === "string" ? expect(lines[index]).toBe(line) : expect(lines[index]).toMatch(line));
+  };
+
+  async function app() {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-synced-settings-"));
+    roots.push(root);
+    const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), new MockCalendarConnector(), undefined, "laptop");
+    return { root, application };
+  }
+
+  it("calendar preferences", async () => {
+    const { root, application } = await app();
+    const before = [...envelope("Calendar preferences"), "unknown_flag: true", "default_calendar_id: work", "disabled_calendar_ids:", "  - personal", ...body("calendar-preferences")];
+    await mkdir(path.join(root, "settings"), { recursive: true });
+    await writeFile(path.join(root, "settings", "calendar-preferences.md"), before.join("\n"));
+    await application.rebuildIndex();
+    const { contentHash } = await application.getCalendarPreferences();
+
+    await application.saveCalendarPreferences({ disabledCalendarIds: ["personal"], defaultCalendarId: "home" }, contentHash);
+
+    const after = await readFile(path.join(root, "settings", "calendar-preferences.md"), "utf8");
+    expectLines(after, before.map((line) => line === "revision: 4" ? "revision: 5" : line.startsWith("updated_at:") ? updatedAt : line === "updated_by_device: desk-mac" ? "updated_by_device: laptop" : line === "default_calendar_id: work" ? "default_calendar_id: home" : line));
+  });
+
+  it("backups", async () => {
+    const { root, application } = await app();
+    const folder = path.join(root, "off-drive");
+    const before = [...envelope("Backups"), "off_drive_folders:", "  desk-mac: /Volumes/Backup/LifeOS", "unknown_flag: true", ...body("backups")];
+    await mkdir(path.join(root, "settings"), { recursive: true });
+    await writeFile(path.join(root, "settings", "backups.md"), before.join("\n"));
+    await application.rebuildIndex();
+    const { contentHash } = await application.getBackupSettings();
+
+    await application.saveBackupSettings({ offDriveFolder: folder }, contentHash);
+
+    const after = await readFile(path.join(root, "settings", "backups.md"), "utf8");
+    expectLines(after, before.flatMap((line) => line === "revision: 4" ? ["revision: 5"] : line.startsWith("updated_at:") ? [updatedAt] : line === "updated_by_device: desk-mac" ? ["updated_by_device: laptop"] : line === "  desk-mac: /Volumes/Backup/LifeOS" ? [line, `  laptop: ${folder}`] : [line]));
   });
 });
