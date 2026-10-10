@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -48,5 +48,19 @@ describe("calendar preferences (synced settings file)", () => {
     expect(httpError(stale).statusCode).toBe(409);
     const missingHash = await application.saveCalendarPreferences({ disabledCalendarIds: ["x"] }).catch((error) => error);
     expect(httpError(missingHash).statusCode).toBe(409);
+  });
+
+  it("keeps a paragraph the user added to the file when the preferences are saved again (#117)", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-settings-"));
+    roots.push(root);
+    const application = await open(root, "laptop");
+    await application.saveCalendarPreferences({ disabledCalendarIds: ["gym"] });
+    const target = path.join(root, "settings", "calendar-preferences.md");
+    await writeFile(target, `${await readFile(target, "utf8")}\nMy own note about these calendars.\n`);
+    const { contentHash } = await application.getCalendarPreferences();
+
+    await application.saveCalendarPreferences({ disabledCalendarIds: [] }, contentHash);
+
+    expect(await readFile(target, "utf8")).toContain("My own note about these calendars.");
   });
 });

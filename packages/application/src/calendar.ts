@@ -1,8 +1,9 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
-import { markdownFileName, ObjectConflictError as SettingsConflictError, type AppContext } from "./context.js";
+import { markdownFileName, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, CalendarPreferences } from "./ports.js";
 import { isLive, liveMeetingNote } from "./support.js";
+import { SyncedSetting } from "./synced-settings.js";
 
 /** An identical failed sync within this window does not write another Sync Run file (PB-022a). */
 const FAILED_SYNC_RUN_THROTTLE_MS = 60 * 60 * 1000;
@@ -22,8 +23,6 @@ export function calendarOfflineReason(error: unknown): CalendarOfflineReason {
   return name === "GoogleAuthError" ? "auth" : name === "KeychainAccessDeniedError" ? "keychain-denied" : "network";
 }
 
-const calendarPreferencesPath = "settings/calendar-preferences.md";
-
 function preferencesFrom(frontmatter: ObjectEnvelope): Omit<CalendarPreferences, "contentHash"> {
   const disabled = frontmatter.disabled_calendar_ids;
   const defaultId = frontmatter.default_calendar_id;
@@ -35,7 +34,16 @@ function preferencesFrom(frontmatter: ObjectEnvelope): Omit<CalendarPreferences,
 
 /** Calendar connector access, synced calendar preferences, sync runs and the Google connection record. */
 export class CalendarModule {
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule) {}
+  private readonly preferences: SyncedSetting;
+
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule) {
+    this.preferences = new SyncedSetting(ctx, {
+      key: "calendar-preferences", title: "Calendar preferences",
+      body: "# Calendar preferences\n\nWhich calendars the Calendar view offers, and which one opens by default.\n",
+      changedMessage: "Calendar preferences changed on another device; reload and try again",
+      removedMessage: "Calendar preferences were removed; reload and try again"
+    });
+  }
 
   async listCalendarEvents(from = new Date(), to = new Date(Date.now() + 7 * 86_400_000)) {
     if (!this.ctx.calendar) throw new Error("Calendar connector is not configured");
@@ -49,34 +57,14 @@ export class CalendarModule {
 
   /** Synced calendar preferences (ADR 0005). One fixed file, read from disk so another device's edit is seen at once. */
   async getCalendarPreferences(): Promise<CalendarPreferences> {
-    const current = await this.readSetting(calendarPreferencesPath);
+    const current = await this.preferences.read();
     return current ? { ...preferencesFrom(current.frontmatter), contentHash: current.contentHash } : { disabledCalendarIds: [] };
   }
 
   async saveCalendarPreferences(input: { disabledCalendarIds: string[]; defaultCalendarId?: string }, expectedHash?: string): Promise<CalendarPreferences> {
-    const { ctx } = this;
     const disabled = [...new Set(input.disabledCalendarIds.filter((id) => typeof id === "string" && id))];
     const defaultId = input.defaultCalendarId || undefined;
-    const current = await this.readSetting(calendarPreferencesPath);
-    const now = new Date().toISOString();
-    if (current && current.contentHash !== expectedHash) throw new SettingsConflictError("Calendar preferences changed on another device; reload and try again");
-    if (!current && expectedHash) throw new SettingsConflictError("Calendar preferences were removed; reload and try again");
-    const kept: Record<string, unknown> = { ...current?.frontmatter };
-    delete kept.default_calendar_id;
-    const id = current?.frontmatter.id ?? uuidV7();
-    const written = await ctx.objects.write({
-      relativePath: calendarPreferencesPath,
-      expectedHash: current?.contentHash,
-      frontmatter: {
-        ...kept,
-        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: ctx.deviceId } : ctx.envelope(id, "app-setting", "Calendar preferences", now)),
-        setting_key: "calendar-preferences",
-        disabled_calendar_ids: disabled,
-        ...(defaultId ? { default_calendar_id: defaultId } : {})
-      } as ObjectEnvelope,
-      body: "# Calendar preferences\n\nWhich calendars the Calendar view offers, and which one opens by default.\n"
-    });
-    await ctx.rebuildIndex();
+    const written = await this.preferences.save(() => ({ disabled_calendar_ids: disabled, default_calendar_id: defaultId }), expectedHash);
     return { ...preferencesFrom(written.frontmatter), contentHash: written.contentHash };
   }
 
@@ -163,11 +151,6 @@ export class CalendarModule {
     const account = await ctx.objects.write({ relativePath: `connectors/${markdownFileName("Google Calendar", id, now)}`, frontmatter: { ...ctx.envelope(id, "connector-account", "Google Calendar", now), provider: "google", account_label: "Primary calendar", external_account_id: "primary", status: "active", secret_ref: "google:default:tokens", scopes: ["https://www.googleapis.com/auth/calendar.readonly"] }, body: "# Google Calendar\n\nRead-only calendar connection. Credentials are stored in macOS Keychain.\n" });
     await ctx.rebuildIndex();
     return account;
-  }
-
-  private async readSetting(relativePath: string) {
-    try { return await this.ctx.objects.read(relativePath); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   }
 
   private async writeSyncRun(status: "succeeded" | "failed", startedAt: string, recordCount: number, error?: string) {

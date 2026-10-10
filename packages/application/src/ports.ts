@@ -4,6 +4,8 @@ export interface ObjectStore {
   list(): Promise<LifeOSObject[]>;
   scan?(): Promise<{ objects: LifeOSObject[]; diagnostics: string[] }>;
   read(relativePath: string): Promise<LifeOSObject>;
+  /** #117: as `read`, but undefined when no file is at `relativePath`; any other failure still throws. */
+  readIfPresent(relativePath: string): Promise<LifeOSObject | undefined>;
   write(input: { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string }): Promise<LifeOSObject>;
   /**
    * PB-030: removes the object file at `relativePath` only while its content hash is still `expectedHash`
