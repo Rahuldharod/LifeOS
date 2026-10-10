@@ -11,6 +11,7 @@ import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api, ApiError, useServerConnection } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
 import { useCalendar } from "./useCalendar.js";
+import { useWorkspaceData } from "./useWorkspaceData.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
 import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
@@ -20,7 +21,7 @@ import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions, isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
-import { dayRange } from "./zonedTime.js";
+import { dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
@@ -44,7 +45,6 @@ import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
-import { loadConnections, type ConnectionsState } from "./connections.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
 import { KnowledgeSourceForm, sourcePreservedToast } from "./KnowledgeSourceForm.js";
@@ -61,7 +61,7 @@ import { parseRoute, routePath, routeTarget, type Route, type View } from "./rou
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { buildTrail } from "./trail.js";
-import type { AppliedPatch, BackupSummary, BackupVerification, CalendarEvent, EnrichmentStatus, EntityRollup, EntityType, FocusChange, GoogleConnection, InboxStatus, LifeObject, ObjectLink, PersonLabel, ProjectRollup, ReviewEdits, ReviewEvidence, SystemHealth, Today, TodayPanels, Workspace } from "@lifeos/contracts";
+import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -75,12 +75,6 @@ type CrepeConstructor = new (config: { root: Node; defaultValue: string; feature
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
-
-function dateInTimeZone(value: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
 
 function formatEventTime(value: string, timeZone: string) {
   return new Date(value).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" });
@@ -307,21 +301,8 @@ function App() {
   const route = parseRoute(location.pathname);
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
-  const [today, setToday] = useState<Today>({ tasks: [], overdue: [], dueToday: [], upcoming: [], waiting: [], topThree: [], reviewCount: 0 });
-  const [todayPanels, setTodayPanels] = useState<TodayPanels>();
-  const [tasks, setTasks] = useState<LifeObject[]>([]);
-  const [projects, setProjects] = useState<ProjectRollup[]>([]);
-  const [clients, setClients] = useState<EntityRollup[]>([]);
-  const [products, setProducts] = useState<EntityRollup[]>([]);
-  const [people, setPeople] = useState<EntityRollup[]>([]);
-  // #39: short, unambiguous names; recomputed by the server on every load.
-  const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
-  const [reviews, setReviews] = useState<Array<LifeObject & { evidence?: Record<string, ReviewEvidence[]> }>>([]);
-  const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
-  const [notes, setNotes] = useState<LifeObject[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   // PB-025: Open/Deleted tabs and keyword search over the notes list.
-  const [deletedNotes, setDeletedNotes] = useState<LifeObject[]>([]);
   const noteTab: "open" | "deleted" = route?.view === "Notes" && route.noteTab === "deleted" ? "deleted" : "open";
   const [noteQuery, setNoteQuery] = useState("");
   // #105: filters survive Open/Deleted and Back from a note; they reset only when leaving the Notes view.
@@ -335,16 +316,10 @@ function App() {
   const [capture, setCapture] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceText, setSourceText] = useState("");
-  const [health, setHealth] = useState<SystemHealth>();
-  const [inboxDrafts, setInboxDrafts] = useState<InboxStatus>({ awaiting: 0, drafts: 0, patches: 0, failed: [] });
-  const [enrichment, setEnrichment] = useState<EnrichmentStatus>({ proposedGaveUp: [], staleWorkOrders: [] });
-  const [appliedPatches, setAppliedPatches] = useState<AppliedPatch[]>([]);
-  const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
-  const [connections, setConnections] = useState<ConnectionsState>();
-  const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
+  const { today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, objectLinks, notes, deletedNotes, inboxDrafts, appliedPatches, personLabels, enrichment, connections, refresh, refreshTodayPanels, refreshConnections, refreshNotes, refreshNoteLists, refreshObjectLinks, updateNotes, updateToday, updateHealth } = useWorkspaceData({ displayTimeZone });
   const [selectedDate, setSelectedDate] = useState(() => (route?.view === "Calendar" && route.date) || dateInTimeZone(new Date(), storedDisplayTimeZone()));
   // PB-027: open items in the URL are resolved only once the lists they live in have loaded.
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
@@ -366,7 +341,7 @@ function App() {
   // ADR 0015: real input in this tab keeps (or, when free, claims) the write lease; the answer refreshes read-only state.
   useActivityHeartbeat(async () => {
     const session = await api("POST /api/v1/session/activity");
-    setHealth((current) => current ? { ...current, session } : current);
+    updateHealth((current) => current ? { ...current, session } : current);
   });
 
   // Shared by notesController's `fetchLatest` option and the tab-refocus listener below: a "soft"
@@ -375,8 +350,7 @@ function App() {
   // Deliberately does NOT call notesController.open() — that would hard-reset the draft and skip
   // conflict detection entirely.
   const fetchLatestNote = useCallback(async () => {
-    const refreshed = await api("GET /api/v1/notes");
-    setNotes(refreshed);
+    const refreshed = await refreshNotes();
     return refreshed.find((candidate) => candidate.frontmatter.id === selectedNoteId);
   }, [selectedNoteId]);
 
@@ -409,7 +383,7 @@ function App() {
     readOnly,
     busy,
     onMessage: setMessage,
-    onSaved: (updated) => setNotes((current) => current.map((note) => note.frontmatter.id === updated.frontmatter.id ? updated as LifeObject : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at))),
+    onSaved: (updated) => updateNotes((current) => current.map((note) => note.frontmatter.id === updated.frontmatter.id ? updated as LifeObject : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at))),
     fetchLatest: fetchLatestNote
   });
   const meetingController = useNoteDraftController({
@@ -450,7 +424,7 @@ function App() {
         ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
         : event));
       createdWorkspace.current = next;
-      void loadCollections();
+      void refresh();
       return next.note;
     }
   });
@@ -488,26 +462,6 @@ function App() {
     : { view: target };
   const calendarRoute = (date: string): Route => ({ view: "Calendar", date, id: route?.view === "Calendar" ? route.id : undefined });
 
-  const loadCollections = async () => {
-    // Without labels, badges fall back to full titles rather than failing the whole load.
-    const labelsRequest = api("GET /api/v1/people/labels").catch(() => [] as PersonLabel[]);
-    const [nextToday, nextTasks, nextProjects, nextReviews, nextHealth, nextBackups, nextKnowledge, nextClients, nextProducts, nextPeople, nextObjectLinks, nextNotes, nextDeletedNotes, nextInboxDrafts] = await Promise.all([
-      api("GET /api/v1/today", { query: { date: dateInTimeZone(new Date(), displayTimeZone) } }), api("GET /api/v1/tasks"),
-      api("GET /api/v1/projects"), api("GET /api/v1/review-items"), api("GET /api/v1/health"), api("GET /api/v1/backups"), api("GET /api/v1/knowledge"), api("GET /api/v1/rollups/:type", { params: { type: "client" } }), api("GET /api/v1/rollups/:type", { params: { type: "product" } }), api("GET /api/v1/rollups/:type", { params: { type: "person" } }), api("GET /api/v1/objects"), api("GET /api/v1/notes"), api("GET /api/v1/notes", { query: { state: "deleted" } }), api("GET /api/v1/inbox/drafts")
-    ]);
-    setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
-    setAppliedPatches(await api("GET /api/v1/inbox/patches"));
-    // #77: loaded on its own; a Keychain problem only shows on the Connections card, never fails a load or a save.
-    void loadConnections(() => api("GET /api/v1/settings/connections"), connections?.settings).then(setConnections);
-    // #44: loaded on its own so a failure here never blanks the other panels.
-    void api("GET /api/v1/enrichment").then(setEnrichment).catch(() => undefined);
-    // #48: likewise; it may wait on the calendar, so it never holds up the rest of the page.
-    void loadTodayPanels();
-    setPersonLabels(await labelsRequest);
-  };
-
-  const loadTodayPanels = () => api("GET /api/v1/today/panels", { query: { date: dateInTimeZone(new Date(), displayTimeZone), timeZone: displayTimeZone } }).then(setTodayPanels).catch(() => undefined);
-
   const refreshWorkspace = async (meetingId: string) => {
     const next = await api("GET /api/v1/meetings/:id/workspace", { params: { id: meetingId } });
     setWorkspace(next);
@@ -517,7 +471,7 @@ function App() {
   useEffect(() => {
     // PB-027: the URL replaced these; drop what older versions left behind.
     try { for (const key of ["lifeos.activeView", "lifeos.activeNoteId", "lifeos.activeMeetingId"]) localStorage.removeItem(key); } catch { /* storage unavailable */ }
-    Promise.all([api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), loadCollections()])
+    Promise.all([api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined), refresh()])
       .then(() => setMessage("Local workspace ready"))
       .catch((error: Error) => setMessage(error.message))
       .finally(() => setCollectionsLoaded(true));
@@ -609,7 +563,7 @@ function App() {
     void (async () => {
       // A meeting created a moment ago may not be in the object list yet; ask the server once more.
       let objects = objectLinks;
-      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { objects = await api("GET /api/v1/objects").catch(() => objects); setObjectLinks(objects); }
+      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { objects = await refreshObjectLinks().catch(() => objects); }
       if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { close(); return; }
       previewTarget.current = undefined;
       setEditorMode("visual"); setEditorSession((session) => session + 1);
@@ -693,7 +647,7 @@ function App() {
     await api("POST /api/v1/review-items/:id/accept", { params: { id: review.frontmatter.id } });
     leaveFinishedItem(review.frontmatter.id);
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
-    await loadCollections();
+    await refresh();
   }, acceptToast(review.frontmatter)));
 
   /** #57: like `run`, but rethrows so the link card shows the server's error itself (role=alert). */
@@ -703,7 +657,7 @@ function App() {
       await action();
       leaveFinishedItem(reviewId);
       if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
-      await loadCollections();
+      await refresh();
       setMessage(success);
     } finally { setBusy(false); }
   }).then(() => undefined);
@@ -717,25 +671,25 @@ function App() {
     await api("POST /api/v1/review-items/:id/reject", { params: { id: reviewId } });
     leaveFinishedItem(reviewId);
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
-    await loadCollections();
+    await refresh();
   }, "Proposal rejected"));
 
   const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
     await api("PATCH /api/v1/review-items/:id", { params: { id: reviewId }, body: changes });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
-    await loadCollections();
+    await refresh();
   }, "Proposal updated");
 
   const takeOverSession = () => run(async () => {
     await api("POST /api/v1/session/take-over");
-    await loadCollections();
+    await refresh();
   }, "This device now holds the advisory write lease");
 
   const createBackup = () => run(async () => {
     const created = await api("POST /api/v1/backups");
     const verification = await api("POST /api/v1/backups/:id/verify", { params: { id: created.backupId } });
     setLastVerification(verification);
-    await loadCollections();
+    await refresh();
   }, "Snapshot created and restoration drill passed");
 
   const verifyBackup = (backupId: string) => run(async () => {
@@ -744,7 +698,7 @@ function App() {
 
   const submitCapture = () => run(async () => {
     await api("POST /api/v1/capture", { body: { text: capture } });
-    setCapture(""); await loadCollections();
+    setCapture(""); await refresh();
   }, "Captured as an Inbox task");
 
   const adoptDrafts = async () => {
@@ -752,7 +706,7 @@ function App() {
     try {
       const batch = await api("POST /api/v1/inbox/adopt");
       const count = (outcome: string) => batch.drafts.filter((draft) => draft.outcome === outcome).length;
-      await loadCollections();
+      await refresh();
       setMessage(batch.drafts.length ? `Drafts: ${count("adopted")} adopted, ${count("applied")} patches applied, ${count("review")} sent to review, ${count("duplicate")} already adopted, ${count("failed")} failed, ${count("skipped")} still being written` : "No drafts awaiting adoption");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Adoption failed"); }
     finally { setBusy(false); }
@@ -763,7 +717,7 @@ function App() {
     setBusy(true);
     try {
       const result = await api("POST /api/v1/enrichment/work-orders");
-      await loadCollections();
+      await refresh();
       setMessage(result.message);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Enrichment request failed"); }
     finally { setBusy(false); }
@@ -774,7 +728,7 @@ function App() {
     setBusy(true);
     try {
       const result = await api("POST /api/v1/focus/replan", { body: { date: dateInTimeZone(new Date(), displayTimeZone) } });
-      await loadCollections();
+      await refresh();
       setMessage(result.message);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Re-plan request failed"); }
     finally { setBusy(false); }
@@ -787,10 +741,10 @@ function App() {
     setBusy(true);
     try {
       const next = await api("POST /api/v1/focus/overrides", { body: { date: focus.date, ...change, expectedHash: focus.override?.contentHash } });
-      setToday((current) => ({ ...current, focus: next }));
+      updateToday((current) => ({ ...current, focus: next }));
       setMessage({ pin: "Pinned to today's Top 3", unpin: "Unpinned", replace: "Replaced in today's Top 3", dismiss: "Dismissed for today", restore: "Restored to today's Top 3", reset: "Your Top 3 changes for today were cleared" }[change.action]);
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadCollections(); setMessage("Today's Top 3 was changed on another device. The latest is loaded; make your change again."); }
+      if (error instanceof ApiError && error.status === 409) { await refresh(); setMessage("Today's Top 3 was changed on another device. The latest is loaded; make your change again."); }
       else setMessage(error instanceof Error ? error.message : "Could not change the Top 3");
     } finally { setBusy(false); }
   };
@@ -799,17 +753,17 @@ function App() {
     const meeting = objectLinks.find((object) => object.frontmatter.id === meetingId);
     if (!meeting) throw new Error("Meeting not found; refresh and try again");
     await api("POST /api/v1/meetings/:id/enrichment/gave-up", { params: { id: meetingId }, body: { expectedHash: meeting.contentHash } });
-    await loadCollections();
+    await refresh();
   }, "Stopped waiting for material for this meeting");
 
   const undoPatch = (patch: AppliedPatch) => run(async () => {
     await api("POST /api/v1/inbox/patches/:id/undo", { params: { id: patch.auditEventId } });
-    await loadCollections();
+    await refresh();
   }, `Undid the change to ${patch.title}`);
 
   const ingestSource = () => run(async () => {
     await api("POST /api/v1/sources/text", { body: { title: sourceTitle, text: sourceText } });
-    setSourceTitle(""); setSourceText(""); await loadCollections();
+    setSourceTitle(""); setSourceText(""); await refresh();
   }, sourcePreservedToast);
 
   const connectGoogle = () => run(async () => {
@@ -819,7 +773,7 @@ function App() {
 
   const syncGoogle = () => run(async () => {
     const day = await calendar.syncDay();
-    await loadCollections();
+    await refresh();
     if (day.offline) throw new Error(`Google Calendar could not be synchronized: ${day.offline.error}`);
   }, "Google Calendar synchronized");
 
@@ -829,54 +783,54 @@ function App() {
     try {
       await calendar.retry({ reprobeKeychain: () => retryConnections() });
     } catch (error) {
-      await loadTodayPanels().catch(() => undefined);
+      await refreshTodayPanels().catch(() => undefined);
       throw error;
     }
-    await loadTodayPanels();
+    await refreshTodayPanels();
   }, "Calendar reloaded");
 
   const createEntity = (type: EntityType, fields: Record<string, unknown>) => run(async () => {
     await api("POST /api/v1/entities/:type", { params: { type }, body: { fields } });
-    await loadCollections();
+    await refresh();
   }, `${type} created`);
 
   const updateEntity = (object: LifeObject, fields: Record<string, unknown>) => run(async () => {
     await api("PATCH /api/v1/entities/by-id/:id", { params: { id: object.frontmatter.id }, body: { fields, expectedHash: object.contentHash } });
-    await loadCollections();
+    await refresh();
   }, `${object.frontmatter.type} updated`);
 
   const setPersonExternal = (object: LifeObject, choice: ExternalChoice) => run(async () => {
     await api("PUT /api/v1/people/:id/external", { params: { id: object.frontmatter.id }, body: { isExternal: externalChoiceValue(choice), expectedHash: object.contentHash } });
-    await loadCollections();
+    await refresh();
   }, choice === "auto" ? "External flag follows the email domain again" : `Marked ${choice}`);
 
   // #87: confirming an automatically created person clears its "unreviewed" marker (guarded by the content hash).
   const confirmPersonReviewed = (object: LifeObject) => run(async () => {
     await api("POST /api/v1/people/:id/reviewed", { params: { id: object.frontmatter.id }, body: { expectedHash: object.contentHash } });
-    await loadCollections();
+    await refresh();
   }, `${object.frontmatter.title} confirmed`);
 
   // #87: Give up from the meeting page, guarded by the meeting's own content hash.
   const giveUpMeetingEnrichment = (meeting: LifeObject) => run(async () => {
     await api("POST /api/v1/meetings/:id/enrichment/gave-up", { params: { id: meeting.frontmatter.id }, body: { expectedHash: meeting.contentHash } });
-    await Promise.all([refreshWorkspace(meeting.frontmatter.id), loadCollections()]);
+    await Promise.all([refreshWorkspace(meeting.frontmatter.id), refresh()]);
   }, "Stopped waiting for material for this meeting");
 
   const deleteEntity = (object: LifeObject) => run(async () => {
     await api("DELETE /api/v1/entities/by-id/:id", { params: { id: object.frontmatter.id }, body: { expectedHash: object.contentHash } });
     leaveFinishedItem(object.frontmatter.id);
-    await loadCollections();
+    await refresh();
   }, `${object.frontmatter.type} moved to deleted state`);
 
   const saveGoogleSecrets = (provider: "calendar" | "drive", clientId: string, clientSecret: string) => run(async () => {
     await api("POST /api/v1/settings/connections/google/:provider", { params: { provider }, body: { clientId, clientSecret } });
-    setConnections(await loadConnections(() => api("GET /api/v1/settings/connections"), connections?.settings));
+    await refreshConnections();
     if (provider === "calendar") setGoogleConnection(await api("GET /api/v1/connections/google"));
   }, `Google ${provider} credentials saved to Keychain`);
 
   /** #77: after a denied Keychain prompt; reads the secrets again, so macOS may ask once more. */
   const retryConnections = async () => {
-    setConnections(await loadConnections(() => api("POST /api/v1/settings/connections/retry"), connections?.settings));
+    await refreshConnections({ retry: true });
     void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
   };
 
@@ -961,7 +915,7 @@ function App() {
       meetingController.setDraft(`${draft.slice(0, insertionStart)}${markdown}${draft.slice(insertionEnd)}`);
       requestAnimationFrame(() => { editor.current?.focus(); editor.current?.setSelectionRange(insertionStart + markdown.length, insertionStart + markdown.length); });
       setMessage(stored.deduplicated ? "Existing image reused; Markdown link inserted" : "Image stored locally; Markdown link inserted");
-      await loadCollections();
+      await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Image upload failed");
     } finally { setBusy(false); }
@@ -989,7 +943,7 @@ function App() {
 
   const restoreNote = (note: LifeObject) => run(async () => {
     const restored = await api("POST /api/v1/notes/:id/restore", { params: { id: note.frontmatter.id }, body: { expectedHash: note.contentHash } });
-    await loadCollections();
+    await refresh();
     setSelectedDeletedId(undefined); setNoteQuery("");
     // Replaced: Back should not return to the deleted copy that no longer exists.
     followRoute({ view: "Notes", noteTab: "open", id: restored.frontmatter.id }, { replace: true });
@@ -1005,7 +959,7 @@ function App() {
       clearCachedDraft(note.frontmatter.id);
       controller.reset();
       afterDelete();
-      await loadCollections();
+      await refresh();
     }, "Note deleted");
   };
 
@@ -1026,7 +980,7 @@ function App() {
     setBusy(true);
     try {
       if (!(await notesController.saveNow())) return false;
-      await loadCollections();
+      await refresh();
       setMessage("Note saved to Markdown");
       return true;
     } catch (error) {
@@ -1041,15 +995,14 @@ function App() {
   const openLifeosLink = async (href: string) => {
     try {
       if (!(await leaveEditors())) return;
-      const objects = await api("GET /api/v1/objects");
-      setObjectLinks(objects);
+      const objects = await refreshObjectLinks();
       const target = resolveLifeosLink(href, objects);
       if (target.kind === "invalid") return;
       if (target.kind === "missing") { setMessage("That linked object no longer exists."); return; }
       if (target.kind === "unsupported") { setMessage(`Opening a ${target.type.replace("-", " ")} from a link is not supported yet.`); return; }
       if (target.kind === "note") {
-        const [open, deleted] = await Promise.all([api("GET /api/v1/notes"), api("GET /api/v1/notes", { query: { state: "deleted" } })]);
-        setNotes(open); setDeletedNotes(deleted); setNoteQuery("");
+        const { open, deleted } = await refreshNoteLists();
+        setNoteQuery("");
         const live = open.find((note) => note.frontmatter.id === target.id);
         const gone = deleted.find((note) => note.frontmatter.id === target.id);
         if (!live && !gone) { setMessage("That linked note no longer exists."); return; }
@@ -1110,7 +1063,7 @@ function App() {
       if (!latest) throw new Error("This note no longer exists");
       await api("PATCH /api/v1/notes/:id", { params: { id: latest.frontmatter.id }, body: { changes, expectedHash: latest.contentHash } });
       await fetchLatest();
-      await loadCollections();
+      await refresh();
     }, "Note details saved");
   };
   const saveNotesDetails = (changes: Record<string, unknown>) => saveDetails(notesController, fetchLatestNote, changes);
@@ -1338,12 +1291,12 @@ function App() {
             {noteTab === "deleted" ? (!selectedDeleted ? <article className="empty-state"><h3>Select a deleted note</h3><p>Deleted notes are kept on disk. Choose one to read it or restore it.</p></article> : <article className="editor-card">
               <div className="editor-heading"><div><span>DELETED {selectedDeleted.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedDeleted.frontmatter.title}</h3></div></div>
               <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{selectedDeleted.body || "_Empty note._"}</ReactMarkdown></div>
-              <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><PermanentDeleteButton key={selectedDeleted.frontmatter.id} note={selectedDeleted} disabled={busy || readOnly} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onDeleted={async (deleted) => { if (deleted) setSelectedDeletedId(undefined); await loadCollections(); }} /><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
+              <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><PermanentDeleteButton key={selectedDeleted.frontmatter.id} note={selectedDeleted} disabled={busy || readOnly} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onDeleted={async (deleted) => { if (deleted) setSelectedDeletedId(undefined); await refresh(); }} /><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedDeleted.frontmatter.created_at)} /><Meta label="Deleted" value={formatDate(String(selectedDeleted.frontmatter.deleted_at))} /><Meta label="Revision" value={String(selectedDeleted.frontmatter.revision)} /><Meta label="File" value={selectedDeleted.relativePath} /></div>
             </article>) :
             selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :
             !selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <EditorFrame>
-              <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={loadCollections} /></NoteHeader>
+              <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
               {notesMode === "write" ? <>
                 <div className="toolbar">
                   <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { if (event.target.value) transformNoteLines((line) => `${"#".repeat(Number(event.target.value))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading"); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
@@ -1363,20 +1316,20 @@ function App() {
         </div>
       </>}
 
-      {view === "Tasks" && <EntityCrudPage labels={labels} highlightId={highlightId} type="task" title="Tasks" objects={tasks} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={loadCollections} />}
+      {view === "Tasks" && <EntityCrudPage labels={labels} highlightId={highlightId} type="task" title="Tasks" objects={tasks} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
 
       {view === "Projects" && <><PageHeader eyebrow="PROJECTS" title="Project roll-ups" description="Meetings and tasks are computed from stable relationships, not copied lists." />
-        <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={loadCollections} />
+        <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />
         <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.filter((point) => point.frontmatter.status === "open").length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.length ? <PeopleList people={projectPeople} labels={labels} /> : "None linked"}</p></article>)}</div>
         {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
       </>}
 
-      {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
-      {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={loadCollections} formatDate={formatDate} />}
+      {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
+      {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
 
-      {view === "Clients" && <EntityCrudPage labels={labels} highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={loadCollections} />}
-      {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={loadCollections} />}
-      {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} onConfirmReviewed={confirmPersonReviewed} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={loadCollections} />}
+      {view === "Clients" && <EntityCrudPage labels={labels} highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
+      {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
+      {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} onConfirmReviewed={confirmPersonReviewed} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
 
       {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p>{awaitingAdoptionLabel(inboxDrafts)}</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
@@ -1409,7 +1362,7 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendar.catalog} calendarCatalogLoaded={calendar.catalogLoaded} calendarPrefs={calendar.prefs} onLoadCalendars={calendar.loadCatalog} onSaveCalendarPrefs={calendar.savePrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={loadCollections} />}
+      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendar.catalog} calendarCatalogLoaded={calendar.catalogLoaded} calendarPrefs={calendar.prefs} onLoadCalendars={calendar.loadCatalog} onSaveCalendarPrefs={calendar.savePrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={refresh} />}
     </section>
   </main>;
 }
