@@ -104,6 +104,32 @@ describe("the Live rule (#118)", () => {
     expect(noNotes((await application.todayPanels(today)).nextMeetings)).toEqual(expected);
   });
 
+  it("an archived duplicate meeting is not offered for Enrichment and never receives meeting material", async () => {
+    const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+    const { root, store, application } = await vault([event("evt-e", "Pilot review", ago(5), ago(4))]);
+    const kept = await meeting(store, "Pilot review", ago(5), ago(4), "evt-e");
+    const duplicate = await seed(store, "meeting", "Pilot review", { starts_at: ago(5), ends_at: ago(4), external_refs: [{ provider: "fake", external_id: "evt-e" }], enrichment_state: "requested", enrichment_requested_at: ago(24 * 6) });
+    await application.rebuildIndex();
+    await archive(application, duplicate.frontmatter.id);
+
+    // Enrichment: the Work Order names the kept meeting only, and the archived copy is not proposed for "gave up".
+    const request = await application.requestEnrichment();
+    expect(request.meetings.map((entry) => entry.meetingId)).toEqual([kept.frontmatter.id]);
+    expect((await application.enrichmentStatus()).proposedGaveUp).toEqual([]);
+
+    // Meeting material for the calendar event lands on the kept meeting, not on the archived copy.
+    const target = path.join(root, "_inbox", "drafts", "material.md");
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, `---\nlifeos_draft: 1\nkind: meeting-material\ndraft_key: material-evt-e\norigin: agent-extracted\ntitle: Material for Pilot review\ncaptured_at: ${ago(1)}\nmeeting: evt-e\nsources:\n  - source_type: meet-transcript\n    url: https://example.com/transcripts/pilot\n    external_id: transcript-pilot\n    occurred_at: ${ago(5)}\nproposals: []\n---\n`);
+    const past = new Date(Date.now() - 60_000);
+    await utimes(target, past, past);
+    const [adopted] = (await application.adoptDrafts()).drafts;
+    expect(adopted!.outcome).toBe("adopted");
+    const sources = (await application.listObjects()).filter((object) => object.frontmatter.type === "source");
+    expect(sources.map((source) => source.frontmatter.meeting_id)).toEqual([kept.frontmatter.id]);
+    expect((await application.object(duplicate.frontmatter.id)).frontmatter.enrichment_state).toBe("requested");
+  });
+
   it("an archived Person or Project leaves lists and name matching but still resolves by ID", async () => {
     const { root, store, application } = await vault();
     const person = await seed(store, "person", "Alex Archived");
