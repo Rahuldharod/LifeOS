@@ -28,6 +28,17 @@ export function isMeetingRestricted(meeting: WithFrontmatter | undefined, object
 export const isLive = (object: WithFrontmatter) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
 
 /**
+ * The meeting's one live note (#118): the first `meeting-note` in `objects` (usually the whole index) whose
+ * `meeting_id` is `meetingId` and that is live. A deleted or archived note never counts; none gives `undefined`.
+ */
+export function liveMeetingNote<T extends WithFrontmatter>(meetingId: string, objects: Iterable<T>): T | undefined {
+  for (const object of objects) {
+    if (object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && isLive(object)) return object;
+  }
+  return undefined;
+}
+
+/**
  * Equality for frontmatter values. **Null rule:** `null` and `undefined` both mean "field absent" and are equal
  * to each other (YAML cannot hold `undefined`, so audit and plan records write absent as `null`). Absent is never
  * equal to a falsy value such as `""`, `0`, `false` or `[]`. Other values compare structurally (JSON form).

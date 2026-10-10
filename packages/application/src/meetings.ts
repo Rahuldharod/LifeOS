@@ -2,7 +2,7 @@ import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
 import { operationKinds, type CalendarEvent } from "./ports.js";
-import { isLive, OneAtATime } from "./support.js";
+import { isLive, liveMeetingNote, OneAtATime } from "./support.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
 
@@ -171,7 +171,7 @@ export class MeetingsModule {
     const meeting = this.ctx.required(meetingId, "meeting");
     const note = this.noteFor(meetingId);
     const reviews = index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === meetingId);
-    const tasks = index.all().filter((object) => object.frontmatter.type === "task" && object.frontmatter.source_meeting_id === meetingId);
+    const tasks = index.all().filter((object) => object.frontmatter.type === "task" && isLive(object) && object.frontmatter.source_meeting_id === meetingId);
     const resolve = (value: unknown) => typeof value === "string" ? index.get(value) : undefined;
     const attendeeIds = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids : [];
     return {
@@ -270,7 +270,7 @@ export class MeetingsModule {
   }
 
   private noteFor(meetingId: string) {
-    return this.ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && !object.frontmatter.deleted_at);
+    return liveMeetingNote(meetingId, this.ctx.index.all());
   }
 
   private async findEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) {
@@ -295,7 +295,7 @@ export class MeetingsModule {
   }
 
   private async ensureNamedObject(type: "client" | "product" | "project" | "person", title: string, timestamp: string, fields: Record<string, unknown>) {
-    const existing = this.ctx.index.all().find((object) => object.frontmatter.type === type && object.frontmatter.title === title);
+    const existing = this.ctx.index.all().find((object) => object.frontmatter.type === type && isLive(object) && object.frontmatter.title === title);
     if (existing) return existing;
     const id = uuidV7();
     const folders = { client: "clients", product: "products", project: "projects", person: "people" } as const;

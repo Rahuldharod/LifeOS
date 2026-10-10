@@ -2,7 +2,7 @@ import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { internalDomainsOf, personEmails } from "./people.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { OneAtATime, replayRoles, sameValue, type ReplayRole } from "./support.js";
+import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./support.js";
 
 /**
  * Person merges (#40, PRD "People → Merge"). Likely duplicates become `person-merge` Review Items;
@@ -28,7 +28,7 @@ const fillFields = ["family_name", "organization_name", "job_title", "timezone"]
 
 const valueOf = (object: LifeOSObject, key: string) => key === bodyKey ? object.body : object.frontmatter[key] ?? null;
 const isAt = (object: LifeOSObject, side: Record<string, unknown>) => Object.entries(side).every(([key, value]) => sameValue(valueOf(object, key), value));
-const live = (object: LifeOSObject | undefined): object is LifeOSObject => Boolean(object && object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
+const live = (object: LifeOSObject | undefined): object is LifeOSObject => Boolean(object && object.frontmatter.type === "person" && isLive(object));
 const pairKey = (a: string, b: string) => [a, b].sort().join("|");
 const nameKey = (value: unknown) => typeof value === "string" ? foldForSearch(value.normalize("NFC")).trim().replace(/\s+/g, " ") : "";
 const localPart = (email: string) => email.split("@")[0]!.replace(/\+.*$/, "");

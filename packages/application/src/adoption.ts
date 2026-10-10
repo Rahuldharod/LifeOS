@@ -8,7 +8,7 @@ import { operationKinds, type InboxDocument, type InboxFile, type InboxFolder, t
 import { internalDomainsOf, isExternalDomain, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver, type ReferenceField } from "./resolution.js";
-import { contextLinkFields, inheritContextLinks, isStringList, replayableId, replayRoles, replayScope, type ReplayRole } from "./support.js";
+import { contextLinkFields, inheritContextLinks, isLive, isStringList, replayableId, replayRoles, replayScope, type ReplayRole } from "./support.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -724,7 +724,7 @@ export class AdoptionModule {
     const byId = this.ctx.index.get(reference);
     if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id;
     const folded = foldForSearch(reference);
-    const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
+    const matches = this.ctx.index.all().filter((object) => isLive(object) && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
       && (foldForSearch(object.frontmatter.title) === folded || object.frontmatter.url === reference || (!!webUrl(reference) && webUrl(object.frontmatter.url) === webUrl(reference))) || (object.frontmatter.type === "source" && object.frontmatter.external_id === reference));
     return matches.length === 1 ? matches[0]!.frontmatter.id : undefined;
   }
@@ -795,9 +795,10 @@ export class AdoptionModule {
         if (existing) ids.push(existing.frontmatter.id); else if (!urls.includes(url)) urls.push(url);
         return;
       }
-      const live = (object: LifeOSObject) => object.frontmatter.type === "source" && !object.frontmatter.deleted_at;
+      // #118: an explicit ID still reaches an archived source; a title matches live ones only.
+      const usable = (object: LifeOSObject) => object.frontmatter.type === "source" && !object.frontmatter.deleted_at;
       const byId = this.ctx.index.get(reference);
-      const matches = byId ? [byId].filter(live) : this.ctx.index.all().filter((object) => live(object) && foldForSearch(object.frontmatter.title) === foldForSearch(reference));
+      const matches = byId ? [byId].filter(usable) : this.ctx.index.all().filter((object) => object.frontmatter.type === "source" && isLive(object) && foldForSearch(object.frontmatter.title) === foldForSearch(reference));
       if (matches.length === 1) ids.push(matches[0]!.frontmatter.id);
       else if (byId) issues.push(`${at}: ${reference} is a ${byId.frontmatter.deleted_at ? "deleted " : ""}${byId.frontmatter.type}, not a live source`);
       else if (matches.length) issues.push(`${at}: "${reference}" matches ${matches.length} sources; use the source ID`);
@@ -832,7 +833,7 @@ export class AdoptionModule {
 
   /** The live Source stored under this URL (compared in canonical form), if any. */
   private sourceByUrl(url: string) {
-    return this.ctx.index.all().find((object) => object.frontmatter.type === "source" && !object.frontmatter.deleted_at && webUrl(object.frontmatter.url) === url);
+    return this.ctx.index.all().find((object) => object.frontmatter.type === "source" && isLive(object) && webUrl(object.frontmatter.url) === url);
   }
 
   /**
@@ -869,7 +870,7 @@ export class AdoptionModule {
     // People by email first (PRD): a known address means this person already exists, unless it is the person
     // this draft's own interrupted first attempt wrote (#59): then the replay goes on to the merge suggestions.
     const id = run.newId(replayRoles.main);
-    const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at && personEmails(object).some((email) => emails.includes(email)));
+    const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && isLive(object) && personEmails(object).some((email) => emails.includes(email)));
     if (known && known.frontmatter.id !== id) return [known.frontmatter.id];
     const narrative = draft.body.trim();
     if (!known) await this.ctx.objects.write({

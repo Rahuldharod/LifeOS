@@ -200,7 +200,7 @@ export class AgentIndexModule {
     // Overview: map of the data root, counts, freshness and what each file holds.
     const inbox = await this.adoption.inboxStatus();
     const counts = new Map<string, { count: number; folders: Set<string> }>();
-    for (const object of objects) {
+    for (const object of live) {
       const type = object.frontmatter.type;
       const current = counts.get(type) ?? { count: 0, folders: new Set<string>() };
       if (!isRestricted(object)) current.count += 1;

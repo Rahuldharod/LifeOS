@@ -2,7 +2,7 @@ import { openPointStatuses, uuidV7, type LifeOSObject, type ObjectEnvelope, type
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { decisionPeopleIds, reviewEvidence, type DecisionFilters, type DecisionsModule, type PreparedDecision } from "./decisions.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { contextLinkFields, parseInstantRange, stringsIn } from "./support.js";
+import { contextLinkFields, isLive, parseInstantRange, stringsIn } from "./support.js";
 
 /** Same filters as Decisions (#41); `from`/`to` apply to `raised_at` (falling back to `created_at` for older files). */
 export type OpenPointFilters = DecisionFilters;
@@ -181,7 +181,7 @@ export class OpenPointsModule {
   }
 
   private all() {
-    return this.ctx.index.all().filter((object) => object.frontmatter.type === "open-point" && !object.frontmatter.deleted_at);
+    return this.ctx.index.all().filter((object) => object.frontmatter.type === "open-point" && isLive(object));
   }
 
   private pick(input: Record<string, unknown>, allowed: string[]) {

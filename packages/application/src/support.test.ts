@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LifeOSObject } from "@lifeos/domain";
-import { contextLinkFields, dueDate, inheritContextLinks, isLive, isMeetingRestricted, isRestricted, isStringList, objectIdPattern, OneAtATime, parseInstantRange, replayableId, replayRoles, replayScope, sameValue, stringsIn, validTimeZone } from "./support.js";
+import { contextLinkFields, dueDate, inheritContextLinks, isLive, isMeetingRestricted, liveMeetingNote, isRestricted, isStringList, objectIdPattern, OneAtATime, parseInstantRange, replayableId, replayRoles, replayScope, sameValue, stringsIn, validTimeZone } from "./support.js";
 
 const object = (frontmatter: Record<string, unknown>) => ({ frontmatter, body: "" }) as unknown as LifeOSObject;
 
@@ -35,6 +35,24 @@ describe("isLive", () => {
     expect(isLive(object({}))).toBe(true);
     expect(isLive(object({ deleted_at: "2026-10-01T00:00:00.000Z" }))).toBe(false);
     expect(isLive(object({ archived_at: "2026-10-01T00:00:00.000Z" }))).toBe(false);
+    expect(isLive(object({ deleted_at: "2026-10-01T00:00:00.000Z", archived_at: "2026-10-01T00:00:00.000Z" }))).toBe(false);
+  });
+});
+
+describe("liveMeetingNote (#118)", () => {
+  const at = "2026-10-01T00:00:00.000Z";
+  const note = (id: string, extra: Record<string, unknown> = {}) => object({ id, type: "meeting-note", meeting_id: "m1", ...extra });
+  it("finds the meeting's note when it is neither deleted nor archived", () => {
+    expect(liveMeetingNote("m1", [note("n1")])?.frontmatter.id).toBe("n1");
+  });
+  it("skips a deleted, an archived, and a deleted-and-archived note", () => {
+    expect(liveMeetingNote("m1", [note("n1", { deleted_at: at })])).toBeUndefined();
+    expect(liveMeetingNote("m1", [note("n1", { archived_at: at })])).toBeUndefined();
+    expect(liveMeetingNote("m1", [note("n1", { deleted_at: at, archived_at: at })])).toBeUndefined();
+    expect(liveMeetingNote("m1", [note("n1", { deleted_at: at }), note("n2", { archived_at: at }), note("n3")])?.frontmatter.id).toBe("n3");
+  });
+  it("ignores notes of other meetings and objects that are not meeting notes", () => {
+    expect(liveMeetingNote("m1", [note("n1", { meeting_id: "m2" }), object({ id: "t1", type: "task", meeting_id: "m1" })])).toBeUndefined();
   });
 });
 

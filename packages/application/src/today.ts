@@ -7,7 +7,7 @@ import type { EntitiesModule } from "./entities.js";
 import type { MeetingsModule } from "./meetings.js";
 import { openPointPeopleIds } from "./open-points.js";
 import type { PeopleModule, PeopleSetupWarning } from "./people.js";
-import { dueDate, isLive, isMeetingRestricted } from "./support.js";
+import { dueDate, isLive, isMeetingRestricted, liveMeetingNote } from "./support.js";
 
 /**
  * Today's live panels (#48, PRD "Daily Focus and Today"). Every panel is computed on request from the
@@ -236,7 +236,7 @@ export class TodayModule {
       if (fromCalendar && Array.isArray(meeting.frontmatter.external_refs) && meeting.frontmatter.external_refs.length) continue;
       const startsAt = String(meeting.frontmatter.starts_at), endsAt = String(meeting.frontmatter.ends_at);
       if (!(Date.parse(endsAt) > dayStart && Date.parse(startsAt) < dayEnd)) continue;
-      const note = ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
+      const note = liveMeetingNote(meeting.frontmatter.id, ctx.index.all());
       result.push({ title: meeting.frontmatter.title, startsAt, endsAt, meetingId: meeting.frontmatter.id, ...(note ? { noteId: note.frontmatter.id } : {}), restricted: isMeetingRestricted(meeting, ctx.index.all()) });
     }
     return { meetings: result.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), calendarOffline };

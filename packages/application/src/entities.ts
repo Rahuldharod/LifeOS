@@ -3,7 +3,7 @@ import { markdownFileName, type AppContext } from "./context.js";
 import { decisionPeopleIds } from "./decisions.js";
 import { checkEntityLinks } from "./entity-links.js";
 import { openPointPeopleIds } from "./open-points.js";
-import { dueDate, isRestricted } from "./support.js";
+import { dueDate, isLive, isRestricted } from "./support.js";
 
 import type { EntityType } from "@lifeos/shared";
 export type { EntityType };
@@ -17,7 +17,7 @@ export class EntitiesModule {
   constructor(private readonly ctx: AppContext) {}
 
   entities(type: EntityType) {
-    return this.ctx.index.all().filter((object) => object.frontmatter.type === type && !object.frontmatter.deleted_at);
+    return this.ctx.index.all().filter((object) => object.frontmatter.type === type && isLive(object));
   }
 
   async createEntity(type: EntityType, fields: Record<string, unknown>) {
@@ -140,7 +140,7 @@ export class EntitiesModule {
     const field = type === "client" ? "primary_client_id" : type === "product" ? "primary_product_id" : "owner_person_id";
     return this.entities(type).map((entity) => ({
       entity,
-      related: this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && (object.frontmatter[field] === entity.frontmatter.id || (Array.isArray(object.frontmatter.attendee_ids) && object.frontmatter.attendee_ids.includes(entity.frontmatter.id))
+      related: this.ctx.index.all().filter((object) => isLive(object) && (object.frontmatter[field] === entity.frontmatter.id || (Array.isArray(object.frontmatter.attendee_ids) && object.frontmatter.attendee_ids.includes(entity.frontmatter.id))
         // #41: a decision concerns its linked people and its source meeting's attendees, as in the Decisions person filter.
         || (type === "person" && object.frontmatter.type === "decision" && decisionPeopleIds(this.ctx, object).includes(entity.frontmatter.id))
         // #42: likewise for open points, plus their owner; resolved and closed ones stay listed.
@@ -149,13 +149,13 @@ export class EntitiesModule {
   }
 
   projects() {
-    const meetings = this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting");
+    const meetings = this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting" && isLive(object));
     return this.entities("project").map((project) => {
       const meetingIds = meetings.filter((meeting) => meeting.frontmatter.primary_project_id === project.frontmatter.id).map((meeting) => meeting.frontmatter.id);
       const tasks = this.tasks().filter((task) => task.frontmatter.primary_project_id === project.frontmatter.id || meetingIds.includes(String(task.frontmatter.source_meeting_id)));
-      const decisions = this.ctx.index.all().filter((object) => object.frontmatter.type === "decision" && object.frontmatter.primary_project_id === project.frontmatter.id);
+      const decisions = this.ctx.index.all().filter((object) => object.frontmatter.type === "decision" && object.frontmatter.primary_project_id === project.frontmatter.id && isLive(object));
       // #42: every open point of the project, resolved and closed included; the UI counts the open ones.
-      const openPoints = this.ctx.index.all().filter((object) => object.frontmatter.type === "open-point" && object.frontmatter.primary_project_id === project.frontmatter.id && !object.frontmatter.deleted_at);
+      const openPoints = this.ctx.index.all().filter((object) => object.frontmatter.type === "open-point" && object.frontmatter.primary_project_id === project.frontmatter.id && isLive(object));
       const projectMeetings = meetings.filter((meeting) => meetingIds.includes(meeting.frontmatter.id));
       const peopleIds = new Set(projectMeetings.flatMap((meeting) => Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids.filter((id): id is string => typeof id === "string") : []));
       return { project, tasks, meetings: projectMeetings, decisions, openPoints, people: [...peopleIds].map((id) => this.ctx.index.get(id)).filter((person): person is LifeOSObject => Boolean(person)) };
