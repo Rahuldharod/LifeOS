@@ -13,6 +13,22 @@ describe("imagePreviewSource", () => {
   });
 });
 
+describe("imagePreviewSource encodes a name exactly once (#141)", () => {
+  it.each([
+    ["../assets/a%20b.png", "/api/v1/assets/a%20b.png"],
+    ["../assets/a b.png", "/api/v1/assets/a%20b.png"],
+    ["../assets/caf%C3%A9.png", "/api/v1/assets/caf%C3%A9.png"],
+    ["../assets/café.png", "/api/v1/assets/caf%C3%A9.png"],
+    ["../assets/a&b.png", "/api/v1/assets/a%26b.png"],
+    ["../assets/a#b.png", "/api/v1/assets/a%23b.png"],
+    ["../assets/a%23b.png", "/api/v1/assets/a%23b.png"],
+    ["../assets/a+b.png", "/api/v1/assets/a%2Bb.png"],
+    ["../assets/50%.png", "/api/v1/assets/50%25.png"]
+  ])("%s -> %s", (stored, expected) => {
+    expect(imagePreviewSource(stored)).toBe(expected);
+  });
+});
+
 describe("suggestedImageAlt", () => {
   it("turns a file name into words", () => {
     expect(suggestedImageAlt({ name: "team-photo_2026.png" } as File)).toBe("team photo 2026");

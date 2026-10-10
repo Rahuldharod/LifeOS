@@ -11,7 +11,13 @@ export function imagePreviewSource(source?: string) {
   if (!source || /^(?:https?:|data:|blob:)/i.test(source)) return source;
   const marker = source.lastIndexOf("assets/");
   if (marker === -1) return source;
-  return `/api/v1/assets/${encodeURIComponent(source.slice(marker + "assets/".length))}`;
+  return `/api/v1/assets/${encodeURIComponent(plainName(source.slice(marker + "assets/".length)))}`;
+}
+
+/** A stored link may already be percent-encoded (`a%20b.png`, as Markdown editors write it) or hold the raw name
+ * (`a b.png`, `50%.png`). Decode once when it is valid encoding so the name is encoded exactly once afterwards (#141). */
+function plainName(name: string) {
+  try { return decodeURIComponent(name); } catch { return name; }
 }
 
 export function fileContentBase64(file: File) {
