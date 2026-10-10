@@ -93,6 +93,7 @@ export class AgentIndexModule {
 
   /** Builds every file from the in-memory index (and the raw `_inbox/` listing for pending drafts). */
   async build(now: Date): Promise<AgentIndexFile[]> {
+    // Not isLive on purpose: archived notes still hide a restricted meeting (fails closed, ADR 0010); the listed files use `live` below.
     const objects = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at);
     /** ADR 0010: restricted objects, and meetings whose note is restricted (#63), are never named. */
     const meetingNotes = objects.filter((object) => object.frontmatter.type === "meeting-note");

@@ -722,7 +722,7 @@ export class AdoptionModule {
   /** An exact match only (ID, folded title, URL, or a source's external ID); none or several matches stay unresolved rather than guessed. */
   private resolveSource(reference: string) {
     const byId = this.ctx.index.get(reference);
-    if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id;
+    if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id; // an explicit ID reaches an archived object (#118)
     const folded = foldForSearch(reference);
     // A title matches live objects only; a URL is an identifier, so like an ID it also reaches archived ones (decision 2026-10-10).
     const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)

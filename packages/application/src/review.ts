@@ -152,6 +152,7 @@ export class ReviewModule {
     const chosenId = picked && proposed.candidate_type === "person" ? survivingPersonId(ctx.index, picked) : picked;
     if (!chosenId) throw new Error(`Choose the ${proposed.candidate_type} to link`);
     const chosen = ctx.index.get(chosenId);
+    // Not isLive on purpose: the user picks the object by ID, and an explicit ID reaches an archived object (#118).
     if (!chosen || chosen.frontmatter.type !== proposed.candidate_type || chosen.frontmatter.deleted_at) throw new Error(`Choose an existing ${proposed.candidate_type} to link`);
     const target = ctx.required(targetId);
     if (target.frontmatter.deleted_at) throw new Error("The object to link was deleted");
@@ -179,6 +180,7 @@ export class ReviewModule {
     if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
     const proposal = review.frontmatter.proposed_fields as unknown as UpdateProposal;
     const target = ctx.required(targetId);
+    // Not isLive on purpose: the change targets its object by ID, which reaches an archived object (#118).
     if (target.frontmatter.deleted_at) throw new Error("The object to change was deleted");
     const note = proposal.append_note;
     // #67: superseding goes through the Decisions workspace path, which sets both links.
@@ -229,14 +231,15 @@ export class ReviewModule {
     const proposed = { ...review.frontmatter.proposed_fields as Record<string, unknown> };
     const links: Record<string, unknown> = {};
     const issues: string[] = [];
-    const live = (id: string, type: string) => { const object = ctx.index.get(id); return object && object.frontmatter.type === type && !object.frontmatter.deleted_at; };
+    // Not isLive on purpose: the owner is given by ID, and an explicit ID reaches an archived person (#118).
+    const reachable = (id: string, type: string) => { const object = ctx.index.get(id); return object && object.frontmatter.type === type && !object.frontmatter.deleted_at; };
     for (const [key, value] of Object.entries(changes)) {
       if (!allEditable.has(key)) { issues.push(`${key}: cannot be edited`); continue; }
       if (!allowed.includes(key)) { issues.push(`${key}: cannot be edited on a ${target}`); continue; }
       if (value !== null && typeof value !== "string") { issues.push(`${key}: must be text or null`); continue; }
       const clean = value?.trim();
       if (key === "title") { if (clean) proposed.title = clean; else issues.push("title: Proposal title is required"); }
-      else if (key === "owner_person_id") { if (!clean) delete proposed.owner_person_id; else if (live(clean, "person")) proposed.owner_person_id = clean; else issues.push(`owner_person_id: ${clean} is not a person`); }
+      else if (key === "owner_person_id") { if (!clean) delete proposed.owner_person_id; else if (reachable(clean, "person")) proposed.owner_person_id = clean; else issues.push(`owner_person_id: ${clean} is not a person`); }
       else if (key === "priority") {
         const match = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === clean?.toLowerCase());
         if (!clean) delete proposed.priority; else if (match) proposed.priority = match; else issues.push(`priority: unknown priority "${clean}" (expected High, Medium or Low)`);
@@ -252,7 +255,7 @@ export class ReviewModule {
         else if (clean) proposed.due_timezone = clean;
       } else {
         const type = key.replace(/^primary_|_id$/g, "");
-        if (!clean) links[key] = undefined; else if (live(clean, type)) links[key] = clean; else issues.push(`${key}: ${clean} is not a ${type}`);
+        if (!clean) links[key] = undefined; else if (reachable(clean, type)) links[key] = clean; else issues.push(`${key}: ${clean} is not a ${type}`);
       }
     }
     if (proposed.due_timezone !== undefined && proposed.due_at === undefined) delete proposed.due_timezone;

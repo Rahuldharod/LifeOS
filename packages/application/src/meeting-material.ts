@@ -343,6 +343,7 @@ export async function acceptSummary(ctx: AppContext, review: LifeOSObject) {
   if (review.frontmatter.status === "accepted") return ctx.required(meetingId, "meeting");
   if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
   const meeting = ctx.required(meetingId, "meeting");
+  // Not isLive on purpose: the summary names its meeting by ID, and an explicit ID reaches an archived meeting (#118).
   if (meeting.frontmatter.deleted_at) throw new Error("The meeting for this summary was deleted");
   // ADR 0010, #63: restricted since the summary was raised (the meeting or its note); nothing is written.
   if (isMeetingRestricted(meeting, ctx.index.all())) throw new Error("This meeting is now restricted, so its summary cannot be accepted");

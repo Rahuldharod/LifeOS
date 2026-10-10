@@ -197,6 +197,7 @@ export class MeetingsModule {
    */
   async reconcileDuplicateMeetings(options: { apply: boolean }) {
     const all = this.ctx.index.all();
+    // Not isLive on purpose: a duplicate's deleted note is archived with it, and its text still counts, so a copy with written notes is never archived silently.
     const notesOf = (meeting: LifeOSObject) => all.filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.archived_at);
     const realText = (note: LifeOSObject) => note.body.trim() !== "" && note.body !== DEFAULT_NOTE_BODY && note.body.trim() !== DEFAULT_NOTE_BODY.trim() ? note.body.trim().length : 0;
     const groups = new Map<string, LifeOSObject[]>();

@@ -105,6 +105,7 @@ export class OpenPointsModule {
     if (!summary && !decisionId) throw new Error("Resolving needs a resolution_summary or resolution_decision_id");
     if (decisionId) {
       const decision = this.ctx.index.get(decisionId);
+      // Not isLive on purpose: the decision is chosen by ID, and an explicit ID reaches an archived decision (#118).
       if (!decision || decision.frontmatter.type !== "decision" || decision.frontmatter.deleted_at) throw new Error("Choose an existing decision to link");
     }
     const now = new Date().toISOString();
