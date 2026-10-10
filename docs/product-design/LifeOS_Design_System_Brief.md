@@ -25,6 +25,32 @@ Option A from `apps/web/palette-prototype-blue-accents.html?variant=A` is the ap
 
 The first four colours are the selected palette. The final two are supporting neutrals from the comparison. Colour roles still need production contrast checks across all states. Do not rely on colour alone to communicate state.
 
+### Production token contract (#129)
+
+The production UI defines these roles in `apps/web/src/design-tokens.css`. Components use role names rather than palette values.
+
+| Token family | Named roles |
+| --- | --- |
+| Colour | canvas, surface, quiet surface, text, muted text, primary, primary hover/active, accent, border/strong border, focus, error, success, warning, sidebar/hover/active/text/muted |
+| Typography | sans family; xs, sm, md, lg, xl and 2xl sizes; tight and body line heights |
+| Layout | seven spacing steps; small, medium, large and pill radii; thin and strong borders |
+| Elevation and focus | surface and overlay shadows; a two-colour focus ring that remains visible on light and dark surfaces |
+
+The light roles use the approved palette. Supporting state colours are chosen for readable text and visible controls. Checked contrast ratios include body text on canvas **14.67:1**, muted text on canvas **6.03:1**, primary/link text on white **9.26:1**, white text on the primary action **9.26:1**, white text on selected navigation **4.83:1**, sidebar text **15.81:1**, sidebar muted text **9.73:1**, and the focus accent against white **4.83:1** and canvas **4.48:1**. Hover has an accent edge as well as a background change; selected state uses text plus `aria-current`, so colour is not the only signal. Disabled controls retain their native disabled state and are not communicated through colour alone.
+
+Dark theme is deliberately not shipped. Its approved future mapping is:
+
+| Role | Dark mapping |
+| --- | --- |
+| canvas / surface / quiet surface | `#121225` / `#1C1A36` / `#292743` |
+| text / muted text | `#F7F5FA` / `#C8C5D3` |
+| primary / accent / focus | `#8FC7EC` / `#9CB7DE` / `#ADC8F0` |
+| border / strong border | `#57536F` / `#8D88A3` |
+| error / success / warning | `#FFB4AB` / `#8ED4AD` / `#F1C27D` |
+| sidebar / hover / active / text / muted | `#0B0A18` / `#29264F` / `#445E8A` / `#F7F5FA` / `#C8C5D3` |
+
+The dark foreground roles all exceed 10:1 against the dark canvas. A later dark-theme ticket must re-check every component state before exposing a theme preference.
+
 ## Navigation and workflows
 
 - Use a dark, **text-only** sidebar. First section: Today, Calendar, Tasks, Notes and Inbox. Add a visible divider. Second section: Decisions, Open Points and Knowledge. Keep Settings at the bottom.

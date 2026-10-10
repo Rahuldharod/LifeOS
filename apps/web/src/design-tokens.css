@@ -1,0 +1,52 @@
+:root {
+  /* Semantic colour roles. The unshipped dark-theme mappings are documented in the design-system brief. */
+  --color-canvas: #f8f6f4;
+  --color-surface: #ffffff;
+  --color-surface-quiet: #eeeeee;
+  --color-text: #201e43;
+  --color-text-muted: #5f5b73;
+  --color-primary: #134b70;
+  --color-primary-hover: #0f3e5d;
+  --color-primary-active: #0b3048;
+  --color-accent: #5473a1;
+  --color-border: #d5d2dd;
+  --color-border-strong: #918ca4;
+  --color-focus: #5473a1;
+  --color-error: #9e2f2f;
+  --color-success: #2f6b4f;
+  --color-warning: #76552f;
+  --color-sidebar: #201e43;
+  --color-sidebar-hover: #302d5d;
+  --color-sidebar-active: #5473a1;
+  --color-sidebar-text: #ffffff;
+  --color-sidebar-muted: #cbc9dc;
+
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2.5rem;
+  --line-height-tight: 1.2;
+  --line-height-body: 1.5;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.875rem;
+  --radius-pill: 999px;
+  --border-thin: 1px;
+  --border-strong: 2px;
+  --shadow-surface: 0 0.25rem 1rem rgb(32 30 67 / 0.07);
+  --shadow-overlay: 0 1rem 3rem rgb(32 30 67 / 0.22);
+  --focus-ring: 0 0 0 3px var(--color-canvas), 0 0 0 6px var(--color-focus);
+  --motion-fast: 120ms;
+}

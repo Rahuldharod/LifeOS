@@ -5,6 +5,7 @@ import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
+import "./design-tokens.css";
 import "./styles.css";
 import { isConflictedDraft } from "./noteDraft.js";
 import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
@@ -60,6 +61,7 @@ import { CalendarOfflineBanner } from "./CalendarOffline.js";
 import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
+import { ApplicationShell } from "./ApplicationShell.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
@@ -1145,27 +1147,19 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
-  const prototypeMode = (import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV && new URLSearchParams(window.location.search).has("variant");
-  const navigation: View[] = prototypeMode
-    ? ["Today", "Calendar", "Tasks", "Notes", "Inbox", "Decisions", "Open Points", "Knowledge", "System"]
-    : ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
+  const contentClassName = [(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined;
 
-  return <main>
-    <aside>
-      <h1>LifeOS</h1>
-      <nav className="nav-main">
-        {navigation.map((item) => <button className={item === view ? "active" : ""} key={item} onClick={() => void go(tabRoute(item))}>{item}{item === "Inbox" && pendingReviews.length > 0 ? <em>{pendingReviews.length}</em> : null}</button>)}
-      </nav>
-      <div className="nav-footer">
-        <div className="nav-actions">
-          <button className={`settings-link ${view === "Settings" ? "active" : ""}`} onClick={() => void go({ view: "Settings" })}>Settings</button>
-        </div>
-        <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}</p>
-      </div>
-    </aside>
-
-    <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
+  return <ApplicationShell
+    activeView={view}
+    pendingReviewCount={pendingReviews.length}
+    status={readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}
+    readOnly={readOnly}
+    contentClassName={contentClassName}
+    onNavigate={(item) => void go(tabRoute(item))}
+    onSearch={() => undefined}
+    onCapture={() => undefined}
+  >
       <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
@@ -1366,8 +1360,7 @@ function App() {
       </>}
 
       {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendar.catalog} calendarCatalogLoaded={calendar.catalogLoaded} calendarPrefs={calendar.prefs} onLoadCalendars={calendar.loadCatalog} onSaveCalendarPrefs={calendar.savePrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={refresh} />}
-    </section>
-  </main>;
+  </ApplicationShell>;
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
