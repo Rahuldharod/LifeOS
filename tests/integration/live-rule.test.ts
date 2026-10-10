@@ -156,6 +156,31 @@ describe("identifiers reach archived objects (#118)", () => {
     expect((await application.object(person.frontmatter.id)).frontmatter.archived_at).toEqual(expect.any(String));
   });
 
+  it("a calendar attendee or a draft reference by email reaches an archived person; a live one with the same email wins", async () => {
+    const soon = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+    const attendeeEvent = { ...event("e2", "Catch-up", soon(60), soon(90)), attendeeDetails: [{ email: "sam@example.com", displayName: "Sam Archived" }] } as CalendarEvent;
+    const { root, store, application } = await vault([attendeeEvent]);
+    const person = await seed(store, "person", "Sam Archived", { identifiers: [{ kind: "email", value: "sam@example.com" }] });
+    await application.rebuildIndex();
+    await archive(application, person.frontmatter.id);
+
+    const workspace = await application.createMeetingFromEvent("e2");
+    expect(workspace.meeting.frontmatter.attendee_ids).toContain(person.frontmatter.id);
+    expect((await ofType(application, "person")).filter((object) => object.frontmatter.is_self !== true).map((object) => object.frontmatter.title)).toEqual(["Sam Archived"]);
+
+    await dropDraft(root, "task.md", { kind: "task", title: "Send the deck", owner: "sam@example.com" });
+    await application.adoptDrafts();
+    const task = (await ofType(application, "task"))[0]!;
+    expect(task.frontmatter.owner_person_id).toBe(person.frontmatter.id);
+
+    const live = await seed(store, "person", "Sam Live", { identifiers: [{ kind: "email", value: "sam@example.com" }] });
+    await application.rebuildIndex();
+    await dropDraft(root, "task-2.md", { kind: "task", title: "Book the room", owner: "sam@example.com" });
+    await application.adoptDrafts();
+    const second = (await ofType(application, "task")).find((object) => object.frontmatter.title === "Book the room")!;
+    expect(second.frontmatter.owner_person_id).toBe(live.frontmatter.id);
+  });
+
   it("a source draft whose URL belongs to an archived source reuses it; a deleted one is not reused", async () => {
     const { root, store, application } = await vault();
     const archived = await seed(store, "source", "Loyalty article", { source_type: "web-link", url: "https://example.com/loyalty", captured_at: at("06:00"), ingestion_status: "captured" });

@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
-import { isLive, OneAtATime } from "./support.js";
+import { byIdentifier, isLive, OneAtATime } from "./support.js";
 import { SyncedSetting } from "./synced-settings.js";
 
 /** The synced internal-domains setting (ADR 0005): one fixed file. Unset means nobody is External by email (#54). */
@@ -333,11 +333,13 @@ export class PeopleModule {
     return this.ctx.index.all().find((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true && isLive(object));
   }
 
-  /** Live people by lowercased email. The self person's addresses always point to it. */
+  /**
+   * People by lowercased email. The self person's addresses always point to it. An email is an identifier, so it
+   * reaches an archived person too (decision 2026-10-10); a live person with the same email wins.
+   */
   private peopleByEmail() {
     const byEmail = new Map<string, LifeOSObject>();
-    for (const person of this.ctx.index.all()) {
-      if (person.frontmatter.type !== "person" || !isLive(person)) continue;
+    for (const person of byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "person"))) {
       for (const email of personEmails(person)) if (!byEmail.has(email) || person.frontmatter.is_self === true) byEmail.set(email, person);
     }
     return byEmail;

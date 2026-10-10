@@ -28,6 +28,15 @@ export function isMeetingRestricted(meeting: WithFrontmatter | undefined, object
 export const isLive = (object: WithFrontmatter) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
 
 /**
+ * Decision 2026-10-10 (#118): an identifier (object ID, email, URL) reaches an archived object too, so it is reused
+ * rather than duplicated; only deleted objects are gone. When several match, live ones come first.
+ */
+export const byIdentifier = <T extends WithFrontmatter>(matches: T[]) => {
+  const reachable = matches.filter((object) => !object.frontmatter.deleted_at);
+  return [...reachable.filter(isLive), ...reachable.filter((object) => !isLive(object))];
+};
+
+/**
  * The meeting's one live note (#118): the first `meeting-note` in `objects` (usually the whole index) whose
  * `meeting_id` is `meetingId` and that is live. A deleted or archived note never counts; none gives `undefined`.
  */

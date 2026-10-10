@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { personEmails } from "./people.js";
-import { isLive, isRestricted, objectIdPattern, replayRoles, type ReplayRole } from "./support.js";
+import { byIdentifier, isLive, isRestricted, objectIdPattern, replayRoles, type ReplayRole } from "./support.js";
 
 /**
  * Name resolution (#33, PRD "Object Contract"): turns draft references (a name, alias, email, object ID
@@ -49,10 +49,15 @@ export class ReferenceResolver {
     return undefined;
   }
 
-  /** People by email address, case-insensitively. The self person's addresses all lead to self. */
+  /**
+   * People by email address, case-insensitively. The self person's addresses all lead to self. An email is an
+   * identifier, so it reaches an archived person when no live one has it (decision 2026-10-10).
+   */
   personByEmail(address: string): Resolution {
     const wanted = address.trim().toLowerCase();
-    return this.outcome(this.live("person").filter((person) => personEmails(person).includes(wanted))) ?? { status: "unknown", candidates: [] };
+    const matches = byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && personEmails(object).includes(wanted)));
+    const live = matches.filter(isLive);
+    return this.outcome(live.length ? live : matches) ?? { status: "unknown", candidates: [] };
   }
 
   resolve(type: ObjectType, reference: string): Resolution {

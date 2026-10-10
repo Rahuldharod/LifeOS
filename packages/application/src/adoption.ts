@@ -8,7 +8,7 @@ import { operationKinds, type InboxDocument, type InboxFile, type InboxFolder, t
 import { internalDomainsOf, isExternalDomain, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver, type ReferenceField } from "./resolution.js";
-import { contextLinkFields, inheritContextLinks, isLive, isStringList, replayableId, replayRoles, replayScope, type ReplayRole } from "./support.js";
+import { byIdentifier, contextLinkFields, inheritContextLinks, isLive, isStringList, replayableId, replayRoles, replayScope, type ReplayRole } from "./support.js";
 
 /**
  * Adoption (ADR 0007): turns Agent-written Inbox Drafts in `_inbox/drafts/` into objects.
@@ -832,9 +832,9 @@ export class AdoptionModule {
     return id;
   }
 
-  /** The Source stored under this URL (compared in canonical form), if any. Like an ID, a URL reaches an archived Source (not a deleted one). */
+  /** The Source stored under this URL (compared in canonical form), if any. Like an ID, a URL reaches an archived Source (live first). */
   private sourceByUrl(url: string) {
-    return this.ctx.index.all().find((object) => object.frontmatter.type === "source" && !object.frontmatter.deleted_at && webUrl(object.frontmatter.url) === url);
+    return byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "source" && webUrl(object.frontmatter.url) === url))[0];
   }
 
   /**
@@ -871,8 +871,8 @@ export class AdoptionModule {
     // People by email first (PRD): a known address means this person already exists, unless it is the person
     // this draft's own interrupted first attempt wrote (#59): then the replay goes on to the merge suggestions.
     const id = run.newId(replayRoles.main);
-    // An email is an identifier: like an ID it reaches an archived person (not a deleted one), so no duplicate is created.
-    const known = this.ctx.index.all().find((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at && personEmails(object).some((email) => emails.includes(email)));
+    // An email is an identifier: like an ID it reaches an archived person (live first), so no duplicate is created.
+    const known = byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && personEmails(object).some((email) => emails.includes(email))))[0];
     if (known && known.frontmatter.id !== id) return [known.frontmatter.id];
     const narrative = draft.body.trim();
     if (!known) await this.ctx.objects.write({
