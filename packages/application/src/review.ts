@@ -7,7 +7,7 @@ import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
 import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeReviewType, survivingPersonId } from "./person-merge.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { proposeReviewItem, seededRun } from "./review-items.js";
+import { proposeReviewItem, recordAgentRun, seededRun } from "./review-items.js";
 import { contextLinkFields, inheritContextLinks, isLive, isRestricted, OneAtATime, replayRoles, sameValue, validTimeZone } from "./support.js";
 
 
@@ -42,22 +42,25 @@ export class ReviewModule {
     const workspace = await this.meetings.meetingWorkspace(meetingId);
     if (!workspace.note) throw new Error("Meeting has no canonical note");
     const note = workspace.note;
-    // #122: IDs come from this version of the note (ADR 0013), so a retry after a crash finds what the first attempt wrote.
-    const run = seededRun(ctx, `meeting-outputs:${note.frontmatter.id}:${note.contentHash}`, note.frontmatter.updated_at);
+    // #122: IDs (and file names) come from this version of the note (ADR 0013), so a retry after a crash finds what
+    // the first attempt wrote; what is written records when it actually ran.
+    const seeded = seededRun(ctx, `meeting-outputs:${note.frontmatter.id}:${note.contentHash}`, note.frontmatter.updated_at);
     const pending = workspace.reviews.filter((review) => review.frontmatter.status === "pending");
     // Proposals still waiting from an earlier version of the note (or from adoption) are returned, not added to.
-    if (pending.some((review) => !run.owns(review.frontmatter.id))) return pending;
+    if (pending.some((review) => !seeded.owns(review.frontmatter.id))) return pending;
     const proposals = await ctx.ai.proposeMeetingOutputs(note.body);
-    const agentRunId = run.newId(replayRoles.agentRun);
-    await run.replay(() => ctx.objects.write({
-      relativePath: `agent-runs/${markdownFileName("Process meeting", agentRunId, run.now)}`,
-      frontmatter: { ...ctx.envelope(agentRunId, "agent-run", "Process meeting", run.now), operation: "meeting-extraction", provider: "mock", model: "deterministic-mock", prompt_version: "1", status: "succeeded", started_at: run.now, completed_at: run.now, input_summary: note.frontmatter.title, output_summary: `${proposals.length} proposals`, related_object_ids: [meetingId, note.frontmatter.id] },
-      body: `# Agent run\n\nProcessed ${note.frontmatter.title}.\n`
-    }));
-    const created: LifeOSObject[] = [];
-    for (const [position, proposal] of proposals.entries()) {
-      created.push(await proposeReviewItem(ctx, { ...run, agentRunId }, {
-        role: replayRoles.meetingOutput(position), reviewType: "create", title: proposal.title, target: { type: proposal.type },
+    const run = await recordAgentRun(ctx, seeded, {
+      operation: "meeting-extraction", title: "Process meeting", inputSummary: note.frontmatter.title, outputSummary: `${proposals.length} proposals`,
+      relatedObjectIds: [meetingId, note.frontmatter.id], body: `# Agent run\n\nProcessed ${note.frontmatter.title}.\n`
+    });
+    const created = new Map<string, LifeOSObject>();
+    for (const proposal of proposals) {
+      // The role comes from what is proposed, not where it sits in the answer: a retry whose answer is reordered
+      // finds each item the first attempt wrote. The same proposal twice in one answer is one item.
+      const role = replayRoles.meetingOutput(proposal.type, proposal.title);
+      if (created.has(role)) continue;
+      created.set(role, await proposeReviewItem(ctx, run, {
+        role, reviewType: "create", title: proposal.title, target: { type: proposal.type },
         proposed: { title: proposal.title, status: "Inbox" }, confidence: proposal.confidence, sourceIds: [note.frontmatter.id],
         fields: { source_meeting_id: meetingId, ...inheritContextLinks(workspace.meeting) },
         body: `# Proposal\n\n${proposal.title}\n`
@@ -65,7 +68,7 @@ export class ReviewModule {
     }
     await ctx.rebuildIndex();
     // A retry returns only what still waits: an item accepted or rejected since is not proposed again.
-    return created.filter((review) => review.frontmatter.status === "pending");
+    return [...created.values()].filter((review) => review.frontmatter.status === "pending");
   }
 
   /** `linkTo` is the object chosen for a `link-resolution` item; other review types ignore it. */

@@ -144,8 +144,8 @@ export const replayRoles = {
   agentRun: role("agent-run"),
   /** The Knowledge Note proposed from a pasted Source. */
   knowledge: role("knowledge"),
-  /** The meeting output Review Item at `position` in the AI's answer for one version of the note. */
-  meetingOutput: (position: number) => role(`output:${position}`),
+  /** A meeting output Review Item for one version of the note, by what it proposes: its type and normalised title. */
+  meetingOutput: (type: string, title: string) => role(`output:${createHash("sha256").update(`${type}\n${title.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase()}`).digest("hex").slice(0, 16)}`),
   /** `child` raised inside `parent`'s handler, e.g. a merge suggestion raised for the main object. */
   within: (parent: ReplayRole, child: ReplayRole) => role(`${parent}/${child}`),
   /** The operation ID of the Review Item with role `of`. */

@@ -1,4 +1,4 @@
-import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { confidenceLabels, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { adoptDailyFocus } from "./focus.js";
 import type { MeetingsModule } from "./meetings.js";
@@ -652,7 +652,7 @@ export class AdoptionModule {
   private async proposeExtracted(draft: ParsedDraft, run: AdoptionRun, options: ProposeOptions = {}) {
     const { fields: raw } = draft;
     const { issues, fields, links, unresolved } = this.kindFields(draft);
-    const confidence = ["High", "Medium", "Low"].find((candidate) => candidate.toLowerCase() === text(raw.confidence).toLowerCase());
+    const confidence = confidenceLabels.find((candidate) => candidate.toLowerCase() === text(raw.confidence).toLowerCase());
     if (raw.confidence === undefined) issues.push("confidence: missing; an extracted draft must say how sure the Agent is (High, Medium or Low)");
     else if (!confidence) issues.push(`confidence: unknown confidence "${text(raw.confidence)}" (expected High, Medium or Low)`);
     const narrative = draft.body.trim();
@@ -672,8 +672,8 @@ export class AdoptionModule {
     const role = options.role ?? replayRoles.main;
     const created = named ? await this.linkSources(named.urls, draft, run, fields, role) : [];
     const sourceIds = [...new Set([...named?.ids ?? [], ...created, ...evidenceIds])];
-    const review = await proposeReviewItem(this.ctx, { now: run.now, agentRunId: run.id, newId: run.newId }, {
-      role, reviewType: "create", title: draft.title, target: { type: draft.kind }, proposed, confidence: confidence as "High" | "Medium" | "Low",
+    const review = await proposeReviewItem(this.ctx, run, {
+      role, reviewType: "create", title: draft.title, target: { type: draft.kind }, proposed, confidence: confidence!,
       body: proposalBody(draft.title, narrative), sourceIds, evidence, origin: "agent-extracted",
       ...(fields.sensitivity !== undefined ? { sensitivity: fields.sensitivity as ObjectEnvelope["sensitivity"] } : {}),
       fields: {

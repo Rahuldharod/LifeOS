@@ -151,7 +151,7 @@ export class ReferenceResolver {
       const role = replayRoles.link(item.field, item.reference);
       const title = `Link ${item.field.replace("_", " ")} "${item.reference}" on ${target.title}`;
       const why = item.problem === "ambiguous" ? `matches ${item.candidates.length} ${spec.type}s:\n\n${item.candidates.map((candidate) => `- ${candidate.title} (${candidate.id})`).join("\n")}` : `matches no ${spec.type}.`;
-      const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now: context.now, agentRunId: context.agentRunId, newId }, {
+      const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now: context.now, id: context.agentRunId, newId }, {
         role, reviewType: "link-resolution", title, target: { type: target.type, id: target.id }, origin: context.origin, confidence: "Low", sourceIds: context.sourceIds,
         // The target may not be in the index yet (adoption creates it just before), so its own sensitivity is passed too.
         ...(target.sensitivity === "restricted" ? { sensitivity: target.sensitivity } : {}),

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { stringify } from "yaml";
 import { MockAiProvider } from "@lifeos/ai";
 import { LifeOSApplication, type CalendarAttendee, type CalendarConnector, type CalendarEvent } from "@lifeos/application";
@@ -32,11 +32,27 @@ class CrashingStore extends MarkdownObjectStore {
   }
 }
 
-async function vault(calendar: CalendarConnector = new MockCalendarConnector()) {
+/** The mock AI, whose answer can come back reversed (as a real model's may on a retry) or repeat an item. */
+class ReorderingAi extends MockAiProvider {
+  reversed = false;
+  repeatFirst = false;
+  readonly knowledgeInputs: string[] = [];
+  override async proposeKnowledgeNote(source: string) {
+    this.knowledgeInputs.push(source);
+    return super.proposeKnowledgeNote(source);
+  }
+  override async proposeMeetingOutputs(note: string) {
+    const outputs = await super.proposeMeetingOutputs(note);
+    const ordered = this.reversed ? outputs.reverse() : outputs;
+    return this.repeatFirst ? [...ordered, { ...ordered[0]!, title: ` ${ordered[0]!.title.toUpperCase()} ` }] : ordered;
+  }
+}
+
+async function vault(calendar: CalendarConnector = new MockCalendarConnector(), ai = new MockAiProvider()) {
   const root = await mkdtemp(path.join(tmpdir(), "lifeos-review-factory-"));
   roots.push(root);
   const store = new CrashingStore(root);
-  const application = new LifeOSApplication(store, new MemoryIndex(), calendar, new MockAiProvider(), "test", new FilesystemInboxStore(root));
+  const application = new LifeOSApplication(store, new MemoryIndex(), calendar, ai, "test", new FilesystemInboxStore(root));
   await application.rebuildIndex();
   return { root, store, application };
 }
@@ -155,6 +171,51 @@ describe("retrying a proposing step after a crash writes no second Review Item (
     expect(runs.map((run) => run.frontmatter.id)).toEqual([proposals[0]!.frontmatter.agent_run_id]);
   });
 
+  it("capture: a deliberate re-paste after the proposal was accepted makes a new Source and a new proposal", async () => {
+    const { application } = await vault();
+    await application.ingestTextSource("Research", "Local-first keeps files authoritative.");
+    const [first] = reviewsOf(application, "create");
+    await application.acceptReviewItem(first!.frontmatter.id);
+
+    await application.ingestTextSource("Research", "Local-first keeps files authoritative.");
+
+    expect(await ofType(application, "source")).toHaveLength(2);
+    const pending = reviewsOf(application, "create").filter((review) => review.frontmatter.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.frontmatter.id).not.toBe(first!.frontmatter.id);
+  });
+
+  it("capture: a deliberate re-paste after the proposal was rejected makes a new Source and a new proposal", async () => {
+    const { application } = await vault();
+    await application.ingestTextSource("Research", "Local-first keeps files authoritative.");
+    const [first] = reviewsOf(application, "create");
+    await application.rejectReviewItem(first!.frontmatter.id);
+
+    await application.ingestTextSource("Research", "Local-first keeps files authoritative.");
+
+    expect(await ofType(application, "source")).toHaveLength(2);
+    expect(reviewsOf(application, "create").filter((review) => review.frontmatter.status === "pending")).toHaveLength(1);
+  });
+
+  it("capture: the AI reads the pasted text as the Source keeps it, trimmed", async () => {
+    const ai = new ReorderingAi();
+    const { application } = await vault(new MockCalendarConnector(), ai);
+
+    await application.ingestTextSource("Research", "\n  Local-first keeps files authoritative.  \n");
+
+    expect(ai.knowledgeInputs).toEqual(["Local-first keeps files authoritative."]);
+  });
+
+  it("capture: pasting again while the proposal is still pending reuses the Source and its proposal", async () => {
+    const { application } = await vault();
+    await application.ingestTextSource("Research", "Local-first keeps files authoritative.");
+
+    await application.ingestTextSource("Research", "Local-first keeps files authoritative.");
+
+    expect(await ofType(application, "source")).toHaveLength(1);
+    expect(reviewsOf(application, "create")).toHaveLength(1);
+  });
+
   it("meeting proposals: the retry finishes the set without repeating the items already written", async () => {
     const { root, store, application: crashed } = await vault();
     const { meeting } = await meetingWithNote(crashed);
@@ -168,6 +229,66 @@ describe("retrying a proposing step after a crash writes no second Review Item (
     expect(reviewsOf(application, "create")).toHaveLength(3);
     expect(new Set(reviewsOf(application, "create").map((review) => review.frontmatter.operation_id)).size).toBe(3);
     expect(await ofType(application, "agent-run")).toHaveLength(1);
+  });
+
+  it("meeting proposals: a retry whose answer comes back reordered finds each item the first attempt wrote", async () => {
+    const ai = new ReorderingAi();
+    const { store, application } = await vault(new MockCalendarConnector(), ai);
+    const { meeting } = await meetingWithNote(application);
+    store.crashAfter = 1;
+    await expect(application.processMeeting(meeting.frontmatter.id)).rejects.toThrow("power cut");
+    ai.reversed = true;
+
+    const retried = await application.processMeeting(meeting.frontmatter.id);
+
+    expect(retried).toHaveLength(3);
+    const titles = reviewsOf(application, "create").map((review) => review.frontmatter.title).sort();
+    expect(titles).toEqual(["Confirm the meeting outcome", "Resolve unanswered meeting questions", "Review the captured meeting note"]);
+  });
+
+  it("meeting proposals: the same proposal twice in one answer is one item", async () => {
+    const ai = new ReorderingAi();
+    ai.repeatFirst = true;
+    const { application } = await vault(new MockCalendarConnector(), ai);
+    const { meeting } = await meetingWithNote(application);
+
+    expect(await application.processMeeting(meeting.frontmatter.id)).toHaveLength(3);
+    expect(reviewsOf(application, "create")).toHaveLength(3);
+  });
+
+  it("meeting proposals: processing an unchanged note again proposes nothing already decided; editing it proposes again", async () => {
+    const { application } = await vault();
+    const { meeting, note } = await meetingWithNote(application);
+    const [first, second, third] = await application.processMeeting(meeting.frontmatter.id);
+    await application.acceptReviewItem(first!.frontmatter.id);
+    await application.rejectReviewItem(second!.frontmatter.id);
+    await application.rejectReviewItem(third!.frontmatter.id);
+
+    expect(await application.processMeeting(meeting.frontmatter.id)).toEqual([]);
+    expect(reviewsOf(application, "create")).toHaveLength(3);
+
+    await application.updateBody(note.frontmatter.id, "# Notes\n\nShip the pilot, then the rollout.\n", (await application.object(note.frontmatter.id)).contentHash);
+    const again = await application.processMeeting(meeting.frontmatter.id);
+
+    expect(again).toHaveLength(3);
+    expect(reviewsOf(application, "create")).toHaveLength(6);
+  });
+
+  it("meeting proposals record when they were processed, not when the note was written, and keep their IDs", async () => {
+    const { application } = await vault();
+    const { meeting, note } = await meetingWithNote(application);
+    const later = new Date(Date.parse(note.frontmatter.updated_at) + 2 * 3_600_000);
+    vi.useFakeTimers({ toFake: ["Date"], now: later });
+    try {
+      const proposed = await application.processMeeting(meeting.frontmatter.id);
+
+      for (const review of proposed) expect(review.frontmatter.created_at).toBe(later.toISOString());
+      const [run] = await ofType(application, "agent-run");
+      expect(run!.frontmatter.started_at).toBe(later.toISOString());
+      expect(run!.frontmatter.completed_at).toBe(later.toISOString());
+      vi.setSystemTime(new Date(later.getTime() + 3_600_000));
+      expect((await application.processMeeting(meeting.frontmatter.id)).map((review) => review.frontmatter.id)).toEqual(proposed.map((review) => review.frontmatter.id));
+    } finally { vi.useRealTimers(); }
   });
 
   it("meeting proposals: retried without a restart, the same items come back", async () => {

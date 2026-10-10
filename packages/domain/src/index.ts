@@ -14,9 +14,12 @@ export const origins = ["app", "user-dictated", "agent-extracted", "calendar", "
 export const sensitivities = ["normal", "restricted"] as const;
 /** The agreed Area vocabulary. New writes must use one; older files with other values still load, with a System Health warning. */
 export const areas = ["work", "maintenance", "household", "learning", "personal-projects", "personal-growth"] as const;
+/** How sure the proposer is of a Review Item. */
+export const confidenceLabels = ["High", "Medium", "Low"] as const;
 export type Origin = typeof origins[number];
 export type Sensitivity = typeof sensitivities[number];
 export type Area = typeof areas[number];
+export type Confidence = typeof confidenceLabels[number];
 
 export const envelopeSchema = z.object({
   id: z.uuid(),
@@ -107,7 +110,7 @@ const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
     if (value.status !== "resolved" && (value.resolution_summary !== undefined || value.resolution_decision_id !== undefined)) problem("resolution_summary and resolution_decision_id are allowed only for resolved open points");
     if (value.status !== "closed" && value.close_reason !== undefined) problem("close_reason is allowed only for closed open points");
   }),
-  "review-item": envelopeSchema.extend({ type: z.literal("review-item"), review_type: z.string().min(1), target_object_type: z.enum(objectTypes), proposed_fields: z.record(z.string(), z.unknown()), field_evidence: z.record(z.string(), z.array(evidenceSchema)).optional(), confidence_label: z.enum(["High", "Medium", "Low"]), status: z.enum(["pending", "accepted", "rejected"]), operation_id: id }),
+  "review-item": envelopeSchema.extend({ type: z.literal("review-item"), review_type: z.string().min(1), target_object_type: z.enum(objectTypes), proposed_fields: z.record(z.string(), z.unknown()), field_evidence: z.record(z.string(), z.array(evidenceSchema)).optional(), confidence_label: z.enum(confidenceLabels), status: z.enum(["pending", "accepted", "rejected"]), operation_id: id }),
   "agent-run": envelopeSchema.extend({ type: z.literal("agent-run"), operation: z.string().min(1), provider: z.string().min(1), model: z.string().min(1), prompt_version: z.string().min(1), status: z.enum(["running", "succeeded", "failed"]), started_at: z.iso.datetime(), completed_at: z.iso.datetime().optional(), related_object_ids: ids.optional() }),
   "audit-event": envelopeSchema.extend({ type: z.literal("audit-event"), occurred_at: z.iso.datetime(), actor_type: z.enum(["person", "agent", "system", "external"]), action: z.string().min(1), object_id: id.optional() }),
   "connector-account": envelopeSchema.extend({ type: z.literal("connector-account"), provider: z.string().min(1), account_label: z.string().min(1), external_account_id: z.string().min(1), status: z.enum(["active", "disconnected", "error"]), secret_ref: z.string().min(1), scopes: z.array(z.string()) }),

@@ -341,7 +341,7 @@ export class PatchModule {
     const cell = (value: unknown) => value === null ? "(none)" : (typeof value === "string" ? value : JSON.stringify(value)).replace(/\|/g, "\\|").replace(/\n/g, " ");
     const table = changes.length ? `\n\n| Field | Current | Proposed |\n| --- | --- | --- |\n${changes.map((change) => `| ${change.field} | ${cell(change.current)} | ${cell(change.proposed)} |`).join("\n")}` : "";
     const note = patch.appendNote ? `\n\nNote to append:\n\n${patch.appendNote.split("\n").map((line) => `> ${line}`).join("\n")}` : "";
-    const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now: run.now, agentRunId: run.id, newId: run.newId }, {
+    const { frontmatter: { id } } = await proposeReviewItem(this.ctx, run, {
       role: replayRoles.review, reviewType: "update", title, target: { type: target.frontmatter.type, id: target.frontmatter.id }, proposed: { ...proposal },
       confidence: patch.origin === "agent-extracted" ? "Medium" : "High", origin: patch.origin,
       body: `# ${title}\n\n${reasons.map((reason) => `- ${reason}`).join("\n")}${table}${note}\n`
