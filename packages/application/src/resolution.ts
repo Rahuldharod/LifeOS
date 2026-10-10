@@ -1,5 +1,5 @@
 import { uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
-import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
+import { foldForSearch, type AppContext } from "./context.js";
 import { personEmails } from "./people.js";
 import { proposeReviewItem } from "./review-items.js";
 import { byIdentifier, isLive, isRestricted, objectIdPattern, replayRoles, type ReplayRole } from "./support.js";

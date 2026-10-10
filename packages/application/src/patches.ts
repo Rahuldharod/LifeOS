@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { envelopeWriteProblem, lifecycleWriteProblem, objectTypes, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DraftError, draftOrigins, isCalendarDate, text, toUtc, validationIssues, type AdoptionRun, type DraftOrigin, type DraftResult, type FileDocument } from "./adoption.js";
-import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
+import { foldForSearch, ObjectConflictError, type AppContext } from "./context.js";
 import { decisionFields } from "./decisions.js";
 import { operationKinds, type InboxDocument, type Operation } from "./ports.js";
 import { ReferenceResolver, referenceFields, type ReferenceField } from "./resolution.js";
