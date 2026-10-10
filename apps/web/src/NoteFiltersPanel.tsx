@@ -30,4 +30,3 @@ export function NoteFiltersPanel({ filters, onChange, tab, projects, clients, pr
 }
 
 /** Picker options for a list of project, client, product or person objects. */
-export const entityOptions = (objects: Array<{ frontmatter: { id: string; title: string } }>): Option[] => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));

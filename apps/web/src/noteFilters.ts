@@ -1,6 +1,6 @@
 // Notes list filters (#105) as state, as the API query string, and as text for the empty state.
 // Dates are whole local days in the display timezone, both ends inclusive, as in the Decisions filters (#41).
-import { addCalendarDays, zonedMidnight } from "./zonedTime.js";
+import { dayRangeQuery } from "./zonedTime.js";
 
 export type NoteFilterState = { types: string[]; projectId: string; clientId: string; productId: string; personId: string; fromDay: string; toDay: string };
 export const noNoteFilters: NoteFilterState = { types: [], projectId: "", clientId: "", productId: "", personId: "", fromDay: "", toDay: "" };
@@ -13,8 +13,7 @@ export function noteListQuery(state: "open" | "deleted", keyword: string, filter
   if (keyword.trim()) query.set("q", keyword.trim());
   for (const type of filters.types) query.append("type", type);
   for (const key of contextKeys) if (filters[key]) query.set(key, filters[key]);
-  if (filters.fromDay) query.set("from", zonedMidnight(filters.fromDay, timeZone).toISOString());
-  if (filters.toDay) query.set("to", new Date(zonedMidnight(addCalendarDays(filters.toDay, 1), timeZone).getTime() - 1).toISOString());
+  dayRangeQuery(query, filters.fromDay, filters.toDay, timeZone);
   return query.toString();
 }
 

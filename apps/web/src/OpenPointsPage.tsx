@@ -8,6 +8,7 @@ import { CopyLink } from "./CopyLink.js";
 import { decisionQuery, noDecisionFilters, type DecisionFilterState } from "./decisionFilters.js";
 import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { SearchSelect } from "./SearchSelect.js";
+import { entityOptions } from "./searchOptions.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 
 type LifeObject = { frontmatter: Record<string, unknown> & { id: string; type: string; title: string; revision: number }; body: string; relativePath: string; contentHash: string };
@@ -24,7 +25,6 @@ type Action = { kind: "resolve"; summary: string; decisionId: string } | { kind:
 
 const statusLabels: Record<string, string> = { open: "Open", resolved: "Resolved", closed: "Closed" };
 const statusLabel = (value: unknown) => statusLabels[String(value)] ?? String(value);
-const options = (objects: LifeObject[]) => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const locatorText = (locator: unknown) => locator && typeof locator === "object" ? Object.entries(locator).map(([key, value]) => `${key} ${String(value)}`).join(", ") : "";
 
@@ -74,10 +74,10 @@ export function OpenPointsPage({ projects, clients, products, people, busy, read
     <article className="decision-filters" aria-label="Filter open points">
       <span>FILTERS</span>
       <div className="decision-filter-grid">
-        <SearchSelect label="Project" options={options(projects)} value={filters.projectId} onChange={(value) => setFilter("projectId", value)} placeholder="Any project" />
-        <SearchSelect label="Client" options={options(clients)} value={filters.clientId} onChange={(value) => setFilter("clientId", value)} placeholder="Any client" />
-        <SearchSelect label="Product" options={options(products)} value={filters.productId} onChange={(value) => setFilter("productId", value)} placeholder="Any product" />
-        <SearchSelect label="Person" options={options(people)} value={filters.personId} onChange={(value) => setFilter("personId", value)} placeholder="Anyone" />
+        <SearchSelect label="Project" options={entityOptions(projects)} value={filters.projectId} onChange={(value) => setFilter("projectId", value)} placeholder="Any project" />
+        <SearchSelect label="Client" options={entityOptions(clients)} value={filters.clientId} onChange={(value) => setFilter("clientId", value)} placeholder="Any client" />
+        <SearchSelect label="Product" options={entityOptions(products)} value={filters.productId} onChange={(value) => setFilter("productId", value)} placeholder="Any product" />
+        <SearchSelect label="Person" options={entityOptions(people)} value={filters.personId} onChange={(value) => setFilter("personId", value)} placeholder="Anyone" />
         <label><small>Status</small><select value={filters.status} onChange={(event) => setFilter("status", event.target.value)}><option value="">Any status</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label><small>Raised from</small><input type="date" value={filters.fromDay} max={filters.toDay || undefined} onChange={(event) => setFilter("fromDay", event.target.value)} /></label>
         <label><small>Raised to</small><input type="date" value={filters.toDay} min={filters.fromDay || undefined} onChange={(event) => setFilter("toDay", event.target.value)} /></label>
@@ -150,11 +150,11 @@ function OpenPointPanel({ detail, projects, clients, products, people, busy, rea
       {value.status === "closed" && <label className="wide"><small>Reason for closing</small><input value={draft.close_reason} disabled={locked} onChange={(event) => set("close_reason", event.target.value)} /></label>}
       <label><small>Importance</small><select value={draft.importance} disabled={locked} onChange={(event) => set("importance", event.target.value)}><option value="">None</option><option>High</option><option>Medium</option><option>Low</option></select></label>
       <label><small>Due</small><input type="date" value={draft.due_on} disabled={locked} onChange={(event) => set("due_on", event.target.value)} /></label>
-      <SearchSelect label="Owner" options={options(people)} value={draft.owner_person_id} disabled={locked} onChange={(next) => set("owner_person_id", next)} />
-      <SearchSelect label="Project" options={options(projects)} value={draft.primary_project_id} disabled={locked} onChange={(next) => set("primary_project_id", next)} />
-      <SearchSelect label="Client" options={options(clients)} value={draft.primary_client_id} disabled={locked} onChange={(next) => set("primary_client_id", next)} />
-      <SearchSelect label="Product" options={options(products)} value={draft.primary_product_id} disabled={locked} onChange={(next) => set("primary_product_id", next)} />
-      <SearchSelect multi label="People" options={options(people)} value={draft.people_ids} disabled={locked} onChange={(next) => set("people_ids", next)} />
+      <SearchSelect label="Owner" options={entityOptions(people)} value={draft.owner_person_id} disabled={locked} onChange={(next) => set("owner_person_id", next)} />
+      <SearchSelect label="Project" options={entityOptions(projects)} value={draft.primary_project_id} disabled={locked} onChange={(next) => set("primary_project_id", next)} />
+      <SearchSelect label="Client" options={entityOptions(clients)} value={draft.primary_client_id} disabled={locked} onChange={(next) => set("primary_client_id", next)} />
+      <SearchSelect label="Product" options={entityOptions(products)} value={draft.primary_product_id} disabled={locked} onChange={(next) => set("primary_product_id", next)} />
+      <SearchSelect multi label="People" options={entityOptions(people)} value={draft.people_ids} disabled={locked} onChange={(next) => set("people_ids", next)} />
     </div>
     <SensitivityToggle object={openPoint} noun="open point" disabled={locked} run={run} onChanged={() => refresh(value.id)} />
     <div className="crud-actions">
@@ -170,7 +170,7 @@ function OpenPointPanel({ detail, projects, clients, products, people, busy, rea
       {action.kind === "resolve" && <>
         <small>RESOLVE · give a summary, link an existing decision, or both</small>
         <textarea aria-label="Resolution summary" autoFocus rows={2} placeholder="What was the answer?" value={action.summary} onChange={(event) => setAction({ ...action, summary: event.target.value })} />
-        <SearchSelect label="Decision" options={options(decisions)} value={action.decisionId} onChange={(next) => setAction({ ...action, decisionId: next })} placeholder="No decision" />
+        <SearchSelect label="Decision" options={entityOptions(decisions)} value={action.decisionId} onChange={(next) => setAction({ ...action, decisionId: next })} placeholder="No decision" />
       </>}
       {action.kind === "decide" && <>
         <small>NEW DECISION · keeps this open point's project, client, product and people</small>

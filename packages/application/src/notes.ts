@@ -1,7 +1,7 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, ObjectConflictError, type AppContext } from "./context.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { isLive, OneAtATime, sameValue } from "./support.js";
+import { isLive, OneAtATime, parseInstantRange, sameValue } from "./support.js";
 
 const noteTypes = ["meeting-note", "knowledge-note"];
 
@@ -63,9 +63,7 @@ export class NotesModule {
   searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) {
     const types = filters.types ?? [];
     if (types.some((type) => !noteTypes.includes(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
-    const from = filters.from ? Date.parse(filters.from) : -Infinity;
-    const to = filters.to ? Date.parse(filters.to) : Infinity;
-    if (Number.isNaN(from) || Number.isNaN(to) || from > to) throw new Error("Enter a valid date range");
+    const { from, to } = parseInstantRange(filters.from, filters.to);
     const dateField = state === "deleted" ? "deleted_at" : "updated_at";
     const needsMeetingNote = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
     const notes = (state === "deleted" ? this.deletedNotes() : this.notes()).filter(({ frontmatter }) => {

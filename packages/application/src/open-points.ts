@@ -2,7 +2,7 @@ import { openPointStatuses, uuidV7, type LifeOSObject, type ObjectEnvelope, type
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { decisionPeopleIds, reviewEvidence, type DecisionFilters, type DecisionsModule, type PreparedDecision } from "./decisions.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { contextLinkFields, stringsIn } from "./support.js";
+import { contextLinkFields, parseInstantRange, stringsIn } from "./support.js";
 
 /** Same filters as Decisions (#41); `from`/`to` apply to `raised_at` (falling back to `created_at` for older files). */
 export type OpenPointFilters = DecisionFilters;
@@ -32,9 +32,7 @@ export class OpenPointsModule {
 
   openPoints(filters: OpenPointFilters = {}) {
     if (filters.status && !openPointStatuses.includes(filters.status as OpenPointStatus)) throw new Error(`Open point status must be one of ${openPointStatuses.join(", ")}`);
-    const from = filters.from ? Date.parse(filters.from) : -Infinity;
-    const to = filters.to ? Date.parse(filters.to) : Infinity;
-    if (Number.isNaN(from) || Number.isNaN(to) || from > to) throw new Error("Enter a valid date range");
+    const { from, to } = parseInstantRange(filters.from, filters.to);
     const matches = (object: LifeOSObject) => {
       const value = object.frontmatter;
       const raised = Date.parse(raisedAt(object));

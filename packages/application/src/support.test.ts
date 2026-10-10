@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LifeOSObject } from "@lifeos/domain";
-import { contextLinkFields, dueDate, inheritContextLinks, isLive, isMeetingRestricted, isRestricted, isStringList, objectIdPattern, OneAtATime, replayableId, replayRoles, replayScope, sameValue, stringsIn, validTimeZone } from "./support.js";
+import { contextLinkFields, dueDate, inheritContextLinks, isLive, isMeetingRestricted, isRestricted, isStringList, objectIdPattern, OneAtATime, parseInstantRange, replayableId, replayRoles, replayScope, sameValue, stringsIn, validTimeZone } from "./support.js";
 
 const object = (frontmatter: Record<string, unknown>) => ({ frontmatter, body: "" }) as unknown as LifeOSObject;
 
@@ -138,4 +138,24 @@ describe("OneAtATime (#74)", () => {
     expect(await second).toBe(2);
     expect(log).toEqual(["a1 start", "b1", "a1 end", "a2"]);
   });
+});
+
+describe("parseInstantRange (#116)", () => {
+  const july1 = "2026-07-01T00:00:00.000Z";
+  const july31 = "2026-07-31T23:59:59.999Z";
+  it("is unbounded on both sides when no bounds are given", () => {
+    expect(parseInstantRange()).toEqual({ from: -Infinity, to: Infinity });
+    expect(parseInstantRange("", "")).toEqual({ from: -Infinity, to: Infinity });
+  });
+  it("bounds only the start when only from is given", () => { expect(parseInstantRange(july1)).toEqual({ from: 1782864000000, to: Infinity }); });
+  it("bounds only the end when only to is given", () => { expect(parseInstantRange(undefined, july31)).toEqual({ from: -Infinity, to: 1785542399999 }); });
+  it("keeps both ends as given, and allows from equal to to (both ends inclusive)", () => {
+    expect(parseInstantRange(july1, july31)).toEqual({ from: 1782864000000, to: 1785542399999 });
+    expect(parseInstantRange(july1, july1)).toEqual({ from: 1782864000000, to: 1782864000000 });
+  });
+  it("rejects an unparseable value", () => {
+    expect(() => parseInstantRange("not a date")).toThrow("Enter a valid date range");
+    expect(() => parseInstantRange(undefined, "2026-13-45")).toThrow("Enter a valid date range");
+  });
+  it("rejects from after to", () => { expect(() => parseInstantRange(july31, july1)).toThrow("Enter a valid date range"); });
 });
