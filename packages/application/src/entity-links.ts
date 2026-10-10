@@ -1,5 +1,6 @@
 import { entityLinkFields, type EntityType } from "@lifeos/shared";
 import type { AppContext } from "./context.js";
+import { isLive } from "./support.js";
 
 /**
  * Checks and normalises the relationship fields of an entity write (PB-010), in place on `selected`.
@@ -10,7 +11,7 @@ import type { AppContext } from "./context.js";
 export function checkEntityLinks(ctx: AppContext, type: EntityType, selected: Record<string, unknown>, previous?: Record<string, unknown>) {
   const live = (id: unknown, target: EntityType, label: string) => {
     const object = typeof id === "string" ? ctx.index.get(id) : undefined;
-    if (!object || object.frontmatter.type !== target || object.frontmatter.deleted_at || object.frontmatter.archived_at) throw new Error(`${label} not found`);
+    if (!object || object.frontmatter.type !== target || !isLive(object)) throw new Error(`${label} not found`);
   };
   for (const field of entityLinkFields[type]) {
     if (!(field.key in selected)) continue;

@@ -28,9 +28,21 @@ export function resolveLifeosLink(href: string, objects: LinkedObject[]): LinkTa
   if (!object) return { kind: "missing", id };
   const { type } = object.frontmatter;
   if (type === "meeting-note" || type === "knowledge-note") return { kind: "note", id, deleted: Boolean(object.frontmatter.deleted_at) };
-  if (object.frontmatter.deleted_at || object.frontmatter.archived_at) return { kind: "missing", id };
+  // #118: an explicit ID still opens an archived object, so old links keep working; only a deleted one is gone.
+  if (object.frontmatter.deleted_at) return { kind: "missing", id };
   if (type === "meeting") return { kind: "meeting", id };
   if (type === "review-item") return { kind: "inbox", id };
   const view = entityViews[type];
   return view ? { kind: "entity", id, view } : { kind: "unsupported", id, type };
+}
+
+/**
+ * #118: tab lists hold live objects only, but a link still opens an archived one. Returns `list` plus the
+ * archived (not deleted) object `id` of `type` from `all` when the list lacks it; otherwise `list` unchanged.
+ */
+export function withOpenedArchived<T extends LinkedObject>(list: T[], all: LinkedObject[], type: string, id?: string): T[] {
+  if (!id || list.some((object) => object.frontmatter.id === id)) return list;
+  const opened = all.find((object) => object.frontmatter.id === id);
+  if (!opened || opened.frontmatter.type !== type || opened.frontmatter.deleted_at || !opened.frontmatter.archived_at) return list;
+  return [...list, opened as T];
 }

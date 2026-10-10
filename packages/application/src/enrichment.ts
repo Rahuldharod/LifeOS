@@ -4,7 +4,7 @@ import { markdownFileName, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, InboxStore } from "./ports.js";
 import { personEmails } from "./people.js";
-import { isLive, isMeetingRestricted, isRestricted } from "./support.js";
+import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote } from "./support.js";
 
 /**
  * Enrichment Work Orders (PRD "Enrichment Work Orders", ADR 0008): "Enrich last 48h" lists every ended
@@ -200,7 +200,7 @@ export class EnrichmentModule {
   }
 
   private noteFor(meeting: LifeOSObject) {
-    return this.ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
+    return liveMeetingNote(meeting.frontmatter.id, this.ctx.index.all());
   }
 }
 

@@ -2,7 +2,7 @@ import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError as SettingsConflictError, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, CalendarPreferences } from "./ports.js";
-import { isLive } from "./support.js";
+import { isLive, liveMeetingNote } from "./support.js";
 
 /** An identical failed sync within this window does not write another Sync Run file (PB-022a). */
 const FAILED_SYNC_RUN_THROTTLE_MS = 60 * 60 * 1000;
@@ -123,7 +123,7 @@ export class CalendarModule {
       .map((meeting) => {
         const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<{ external_id?: unknown; calendar_id?: unknown }> : [];
         const ref = refs.find((candidate) => typeof candidate === "object" && candidate !== null && typeof candidate.external_id === "string");
-        const note = objects.find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && isLive(object));
+        const note = liveMeetingNote(meeting.frontmatter.id, objects);
         const attendees = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids.map((id) => index.get(String(id))?.frontmatter.title).filter((title): title is string => Boolean(title)) : [];
         return {
           externalId: ref ? String(ref.external_id) : meeting.frontmatter.id,

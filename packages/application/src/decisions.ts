@@ -1,7 +1,7 @@
 import { decisionStatuses, uuidV7, validateFrontmatter, type DecisionStatus, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { contextLinkFields, stringsIn } from "./support.js";
+import { contextLinkFields, isLive, stringsIn } from "./support.js";
 
 /** List filters (#41). `from`/`to` are ISO instants, inclusive, on `decided_at`; the UI turns local days into instants. */
 export type DecisionFilters = { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string };
@@ -94,7 +94,7 @@ export class DecisionsModule {
       review,
       evidence,
       // #42: open points this decision resolved.
-      resolvesOpenPoints: index.all().filter((object) => object.frontmatter.type === "open-point" && object.frontmatter.resolution_decision_id === id && !object.frontmatter.deleted_at)
+      resolvesOpenPoints: index.all().filter((object) => object.frontmatter.type === "open-point" && object.frontmatter.resolution_decision_id === id && isLive(object))
     };
   }
 
@@ -234,7 +234,7 @@ export class DecisionsModule {
   }
 
   private all() {
-    return this.ctx.index.all().filter((object) => object.frontmatter.type === "decision" && !object.frontmatter.deleted_at);
+    return this.ctx.index.all().filter((object) => object.frontmatter.type === "decision" && isLive(object));
   }
 
   private pick(input: Record<string, unknown>, allowed: string[]) {

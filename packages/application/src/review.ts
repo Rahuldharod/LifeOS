@@ -7,7 +7,7 @@ import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
 import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeReviewType, survivingPersonId } from "./person-merge.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { contextLinkFields, inheritContextLinks, OneAtATime, sameValue, validTimeZone } from "./support.js";
+import { contextLinkFields, inheritContextLinks, isLive, OneAtATime, sameValue, validTimeZone } from "./support.js";
 
 
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
@@ -284,7 +284,7 @@ export class ReviewModule {
       result[field] = (Array.isArray(entries) ? entries : []).filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object").map((entry) => {
         const sourceId = textOf(entry.source_id);
         const source = sourceId ? this.ctx.index.get(sourceId) : undefined;
-        const resolved = !!source && !source.frontmatter.deleted_at;
+        const resolved = !!source && isLive(source);
         const view: ReviewEvidence = { field, resolved };
         if (sourceId) view.source_id = sourceId;
         for (const key of ["source_ref", "fragment_id", "locator", "quote"] as const) { const value = textOf(entry[key]); if (value !== undefined) view[key] = value; }

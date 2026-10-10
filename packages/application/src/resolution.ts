@@ -58,6 +58,7 @@ export class ReferenceResolver {
   resolve(type: ObjectType, reference: string): Resolution {
     const value = reference.trim();
     if (objectIdPattern.test(value)) {
+      // #118: an explicit ID still reaches an archived object (old links keep working); only deleted is gone.
       const object = this.ctx.index.get(value);
       return object && object.frontmatter.type === type && !object.frontmatter.deleted_at ? { status: "resolved", id: value } : { status: "unknown", candidates: [] };
     }
@@ -119,7 +120,7 @@ export class ReferenceResolver {
   normaliseSubjects(subjects: string[]) {
     const known = new Map<string, string>();
     for (const object of this.ctx.index.all()) {
-      if (object.frontmatter.deleted_at) continue;
+      if (!isLive(object)) continue;
       for (const subject of object.frontmatter.subjects ?? []) if (!known.has(foldSubject(subject))) known.set(foldSubject(subject), subject);
     }
     const result: string[] = [];

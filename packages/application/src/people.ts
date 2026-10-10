@@ -338,14 +338,14 @@ export class PeopleModule {
   }
 
   private selfPerson() {
-    return this.ctx.index.all().find((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true && !object.frontmatter.deleted_at);
+    return this.ctx.index.all().find((object) => object.frontmatter.type === "person" && object.frontmatter.is_self === true && isLive(object));
   }
 
   /** Live people by lowercased email. The self person's addresses always point to it. */
   private peopleByEmail() {
     const byEmail = new Map<string, LifeOSObject>();
     for (const person of this.ctx.index.all()) {
-      if (person.frontmatter.type !== "person" || person.frontmatter.deleted_at) continue;
+      if (person.frontmatter.type !== "person" || !isLive(person)) continue;
       for (const email of personEmails(person)) if (!byEmail.has(email) || person.frontmatter.is_self === true) byEmail.set(email, person);
     }
     return byEmail;
