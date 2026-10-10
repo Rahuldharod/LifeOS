@@ -6,6 +6,7 @@ export const invalidCalendarRange = "Enter a valid calendar date range";
  * The optional `from`/`to` instants of a calendar request; undefined when either is not a date or `from` is not
  * before `to`. Route-level rule only: the use-case and browser copies are #116's.
  */
+// Deliberately stricter than the filters' `parseInstantRange` (packages/application/src/support.ts): a calendar window is half-open, so from == to is empty and rejected; filter ranges are inclusive.
 export function calendarRange(query: { from?: string; to?: string }): { from?: Date; to?: Date } | undefined {
   const from = query.from ? new Date(query.from) : undefined;
   const to = query.to ? new Date(query.to) : undefined;

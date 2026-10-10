@@ -76,6 +76,7 @@ export function validTimeZone(zone: string) {
  * A filter's instant range (#116) as epoch milliseconds, both ends inclusive; a missing or blank bound is
  * open (-Infinity / Infinity). Throws "Enter a valid date range" for an unparseable bound or `from` after `to`.
  */
+// Deliberately looser than the calendar's `calendarRange` (apps/server/src/request-checks.ts): filters are inclusive, so from == to is valid; a half-open calendar window rejects it.
 export function parseInstantRange(from?: string, to?: string) {
   const range = { from: from ? Date.parse(from) : -Infinity, to: to ? Date.parse(to) : Infinity };
   if (Number.isNaN(range.from) || Number.isNaN(range.to) || range.from > range.to) throw new Error("Enter a valid date range");
