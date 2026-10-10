@@ -4,7 +4,7 @@ import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
 import type { MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
-import { inheritContextLinks, isLive, isMeetingRestricted, objectIdPattern, replayRoles } from "./support.js";
+import { inheritContextLinks, isLive, isMeetingRestricted, liveMeetingNote, objectIdPattern, replayRoles } from "./support.js";
 
 /**
  * Adoption of meeting material (#45, PRD "Enrichment Work Orders"). One `meeting-material` draft per meeting,
@@ -287,7 +287,7 @@ export class MeetingMaterialModule {
 
   /** Live Sources for a meeting: linked by `meeting_id`, or listed in the meeting's or its note's `source_ids` (as #44 counts them). */
   private sourcesFor(meeting: LifeOSObject, listed: string[]) {
-    const note = this.ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
+    const note = liveMeetingNote(meeting.frontmatter.id, this.ctx.index.all());
     const ids = new Set([...listed, ...idList(note?.frontmatter.source_ids)]);
     return this.ctx.index.all().filter((object) => object.frontmatter.type === "source" && isLive(object) && (object.frontmatter.meeting_id === meeting.frontmatter.id || ids.has(object.frontmatter.id)));
   }
@@ -343,6 +343,7 @@ export async function acceptSummary(ctx: AppContext, review: LifeOSObject) {
   if (review.frontmatter.status === "accepted") return ctx.required(meetingId, "meeting");
   if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");
   const meeting = ctx.required(meetingId, "meeting");
+  // Not isLive on purpose: the summary names its meeting by ID, and an explicit ID reaches an archived meeting (#118).
   if (meeting.frontmatter.deleted_at) throw new Error("The meeting for this summary was deleted");
   // ADR 0010, #63: restricted since the summary was raised (the meeting or its note); nothing is written.
   if (isMeetingRestricted(meeting, ctx.index.all())) throw new Error("This meeting is now restricted, so its summary cannot be accepted");

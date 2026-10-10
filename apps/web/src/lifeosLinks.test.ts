@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { lifeosLinkId, resolveLifeosLink, type LinkedObject } from "./lifeosLinks.js";
+import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
 
 const id = (n: number) => `01a10000-0000-7000-8000-${String(n).padStart(12, "0")}`;
 const object = (n: number, type: string, extra: Record<string, unknown> = {}): LinkedObject => ({ frontmatter: { id: id(n), type, title: `Object ${n}`, ...extra } });
-const objects = [object(1, "meeting-note"), object(2, "knowledge-note", { deleted_at: "2026-10-01T00:00:00Z" }), object(3, "task"), object(4, "person"), object(5, "meeting"), object(6, "decision"), object(7, "project", { archived_at: "2026-10-01T00:00:00Z" }), object(8, "review-item"), object(9, "source"), object(10, "open-point")];
+const objects = [object(1, "meeting-note"), object(2, "knowledge-note", { deleted_at: "2026-10-01T00:00:00Z" }), object(3, "task"), object(4, "person"), object(5, "meeting"), object(6, "decision"), object(7, "project", { archived_at: "2026-10-01T00:00:00Z" }), object(8, "review-item"), object(9, "source"), object(10, "open-point"), object(11, "task", { deleted_at: "2026-10-01T00:00:00Z" })];
 const link = (n: number) => `lifeos://object/${id(n)}`;
 
 describe("lifeos links", () => {
@@ -29,9 +29,27 @@ describe("lifeos links", () => {
     expect(resolveLifeosLink(link(6), objects)).toEqual({ kind: "entity", id: id(6), view: "Decisions" });
     expect(resolveLifeosLink(link(10), objects)).toEqual({ kind: "entity", id: id(10), view: "Open Points" });
   });
+  it("still opens an archived object by its ID (#118): old links keep working", () => {
+    expect(resolveLifeosLink(link(7), objects)).toEqual({ kind: "entity", id: id(7), view: "Projects" });
+  });
   it("explains what cannot be opened", () => {
     expect(resolveLifeosLink(link(9), objects)).toEqual({ kind: "unsupported", id: id(9), type: "source" });
-    expect(resolveLifeosLink(link(7), objects)).toEqual({ kind: "missing", id: id(7) });
+    expect(resolveLifeosLink(link(11), objects)).toEqual({ kind: "missing", id: id(11) });
     expect(resolveLifeosLink(link(99), objects)).toEqual({ kind: "missing", id: id(99) });
+  });
+});
+
+describe("withOpenedArchived (#118)", () => {
+  const live = object(3, "task");
+  it("adds the archived object a link opened, so its tab can show it", () => {
+    expect(withOpenedArchived([object(4, "person")], objects, "project", id(7)).map((entry) => entry.frontmatter.id)).toEqual([id(4), id(7)]);
+  });
+  it("adds nothing for a live, deleted, wrong-type or absent target, or without one", () => {
+    const list = [live];
+    expect(withOpenedArchived(list, objects, "task", id(3))).toBe(list);
+    expect(withOpenedArchived(list, objects, "task", id(11))).toBe(list);
+    expect(withOpenedArchived(list, objects, "task", id(7))).toBe(list);
+    expect(withOpenedArchived(list, objects, "task", id(99))).toBe(list);
+    expect(withOpenedArchived(list, objects, "task")).toBe(list);
   });
 });

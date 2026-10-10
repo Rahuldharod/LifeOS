@@ -4,6 +4,8 @@ LifeOS is a modular monolith. The browser calls application use cases through th
 
 The stable app is a single localhost process on port 4310 that serves the API and the production web build; development runs separately on 5174/4311 against synthetic `.dev-data/` (ADR 0006). The Markdown data root is authoritative. It lives in Google Drive and is found only through `LIFEOS_DATA_ROOT`; the code lives outside Drive in `~/Developer/lifeos_app` (ADR 0014). The server and maintenance scripts refuse to start unless the root holds `.lifeos/schema.md`. The in-memory index is rebuilt at process start and may always be discarded. Google Calendar and (in tests only) mock AI adapters implement application-owned ports, keeping external services out of the domain and persistence layers.
 
+The server has two parts (#120). `apps/server/src/api.ts` builds the API for a given data root and adapters: every route, the lease hooks, and `start(listen)`: the startup work, then `listen`, and only once the server is listening the background triggers (watcher, heartbeat, backups). If startup fails, `start` releases the lease it claimed and rethrows. Tests build it on a temporary root and call it through Fastify's `inject` (`tests/integration/test-api.ts`). `main.ts` only reads the environment, refuses a root without `.lifeos/schema.md`, picks the real adapters, passes `start` the call that opens the port, and handles stop signals. Shared request checks live once in `request-checks.ts`.
+
 The first complete flow now works without bypassing these boundaries:
 
 1. Select a Google or mock calendar event from the timezone-aware day timeline.

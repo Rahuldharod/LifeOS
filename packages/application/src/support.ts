@@ -19,6 +19,7 @@ export function isMeetingRestricted(meeting: WithFrontmatter | undefined, object
   if (!meeting) return false;
   if (isRestricted(meeting)) return true;
   for (const object of objects) {
+    // Not isLive on purpose: an archived restricted note still restricts its meeting (fails closed for privacy, ADR 0010).
     if (object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at && isRestricted(object)) return true;
   }
   return false;
@@ -26,6 +27,26 @@ export function isMeetingRestricted(meeting: WithFrontmatter | undefined, object
 
 /** Live = neither tombstoned (`deleted_at`) nor archived (`archived_at`). */
 export const isLive = (object: WithFrontmatter) => !object.frontmatter.deleted_at && !object.frontmatter.archived_at;
+
+/**
+ * Decision 2026-10-10 (#118): an identifier (object ID, email, URL) reaches an archived object too, so it is reused
+ * rather than duplicated; only deleted objects are gone. When several match, live ones come first.
+ */
+export const byIdentifier = <T extends WithFrontmatter>(matches: T[]) => {
+  const reachable = matches.filter((object) => !object.frontmatter.deleted_at);
+  return [...reachable.filter(isLive), ...reachable.filter((object) => !isLive(object))];
+};
+
+/**
+ * The meeting's one live note (#118): the first `meeting-note` in `objects` (usually the whole index) whose
+ * `meeting_id` is `meetingId` and that is live. A deleted or archived note never counts; none gives `undefined`.
+ */
+export function liveMeetingNote<T extends WithFrontmatter>(meetingId: string, objects: Iterable<T>): T | undefined {
+  for (const object of objects) {
+    if (object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && isLive(object)) return object;
+  }
+  return undefined;
+}
 
 /**
  * Equality for frontmatter values. **Null rule:** `null` and `undefined` both mean "field absent" and are equal
@@ -49,6 +70,17 @@ export const objectIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
 /** True when `zone` is a time zone this runtime knows (an IANA name such as Europe/Paris). */
 export function validTimeZone(zone: string) {
   try { new Intl.DateTimeFormat("en", { timeZone: zone }); return true; } catch { return false; }
+}
+
+/**
+ * A filter's instant range (#116) as epoch milliseconds, both ends inclusive; a missing or blank bound is
+ * open (-Infinity / Infinity). Throws "Enter a valid date range" for an unparseable bound or `from` after `to`.
+ */
+// Deliberately looser than the calendar's `calendarRange` (apps/server/src/request-checks.ts): filters are inclusive, so from == to is valid; a half-open calendar window rejects it.
+export function parseInstantRange(from?: string, to?: string) {
+  const range = { from: from ? Date.parse(from) : -Infinity, to: to ? Date.parse(to) : Infinity };
+  if (Number.isNaN(range.from) || Number.isNaN(range.to) || range.from > range.to) throw new Error("Enter a valid date range");
+  return range;
 }
 
 /** A task's due date as `YYYY-MM-DD`: `due_on`, else the date part of `due_at`, else undefined. */

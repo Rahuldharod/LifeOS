@@ -5,6 +5,9 @@
 /** `suffix` is extra text shown after the title (the red " - ext" marker, #39); it is not searched. */
 export type SearchOption = { id: string; title: string; suffix?: string; tag?: string };
 
+/** Dropdown options (id and title) for a list of objects, shared by the Notes, Decisions and Open Points filters (#116). */
+export const entityOptions = (objects: Array<{ frontmatter: { id: string; title: string } }>): SearchOption[] => objects.map((object) => ({ id: object.frontmatter.id, title: object.frontmatter.title }));
+
 export const foldText = (value: string) => value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 export function searchOptions(options: SearchOption[], query: string, exclude: string[] = []): SearchOption[] {

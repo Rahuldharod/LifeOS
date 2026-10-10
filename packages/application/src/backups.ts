@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
-import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
-import { ObjectConflictError, type AppContext } from "./context.js";
+import type { AppContext } from "./context.js";
+import { SyncedSetting } from "./synced-settings.js";
 
 /**
  * #84 (PRD stories 81–83, ADR 0004): automatic backups at app start, at a clean stop and daily while running; a weekly
@@ -72,7 +72,6 @@ export interface BackupSettings { offDriveFolder?: string; contentHash?: string 
  */
 export const stopBackupTimeoutMs = 35_000;
 
-const backupSettingsPath = "settings/backups.md";
 const day = 24 * 60 * 60 * 1000;
 /** A daily backup, plus two hours' grace for a sleeping laptop, before the warning shows (acceptance criterion). */
 const overdueAfterMs = 26 * 60 * 60 * 1000;
@@ -116,14 +115,22 @@ const legacyFolders = (frontmatter: Record<string, unknown> | undefined): Folder
 };
 
 export class BackupModule {
-  constructor(private readonly ctx: AppContext) {}
+  private readonly setting: SyncedSetting;
+
+  constructor(private readonly ctx: AppContext) {
+    this.setting = new SyncedSetting(ctx, {
+      key: "backups", title: "Backups",
+      body: "# Backups\n\nEach device's weekly copy of the latest backup goes to its own folder outside Google Drive (four generations are kept).\n",
+      name: "Backup settings"
+    });
+  }
 
   /**
    * Read from disk so another device's edit is seen at once (ADR 0005). The folder is a local path, so it is stored
    * per device (keyed by device ID, #95): each device sees and uses only its own.
    */
   async settings(): Promise<BackupSettings> {
-    const current = await this.readSetting();
+    const current = await this.setting.read();
     const frontmatter = current?.frontmatter as Record<string, unknown> | undefined;
     const folder = { ...legacyFolders(frontmatter), ...foldersOf(frontmatter) }[this.ctx.deviceId];
     return { ...(folder ? { offDriveFolder: folder } : {}), ...(current ? { contentHash: current.contentHash } : {}) };
@@ -140,27 +147,13 @@ export class BackupModule {
     const folder = typeof raw === "string" ? raw.trim() : "";
     if (folder && !path.isAbsolute(folder)) throw new Error("Enter the folder's full path, starting with /");
     if (folder) await assertOffDrive(folder);
-    const current = await this.readSetting();
-    if (current && current.contentHash !== expectedHash) throw new ObjectConflictError("Backup settings changed on another device; reload and try again");
-    if (!current && expectedHash) throw new ObjectConflictError("Backup settings were removed; reload and try again");
-    const now = new Date().toISOString();
-    const previous = current?.frontmatter as Record<string, unknown> | undefined;
-    const { off_drive_folder: _legacy, off_drive_folders: _folders, ...rest } = (previous ?? {}) as ObjectEnvelope & { off_drive_folder?: unknown; off_drive_folders?: unknown };
-    const folders = { ...legacyFolders(previous), ...foldersOf(previous) };
-    if (folder) folders[ctx.deviceId] = path.normalize(folder);
-    else delete folders[ctx.deviceId];
-    const written = await ctx.objects.write({
-      relativePath: backupSettingsPath,
-      expectedHash: current?.contentHash,
-      frontmatter: {
-        ...rest,
-        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: ctx.deviceId } : ctx.envelope(uuidV7(), "app-setting", "Backups", now)),
-        setting_key: "backups",
-        ...(Object.keys(folders).length ? { off_drive_folders: folders } : {})
-      } as ObjectEnvelope,
-      body: current?.body ?? "# Backups\n\nEach device's weekly copy of the latest backup goes to its own folder outside Google Drive (four generations are kept).\n"
-    });
-    await ctx.rebuildIndex();
+    const written = await this.setting.save((previous) => {
+      // The legacy single folder moves into the per-device map on this save.
+      const folders = { ...legacyFolders(previous), ...foldersOf(previous) };
+      if (folder) folders[ctx.deviceId] = path.normalize(folder);
+      else delete folders[ctx.deviceId];
+      return { off_drive_folder: undefined, off_drive_folders: Object.keys(folders).length ? folders : undefined };
+    }, expectedHash);
     return { ...(folder ? { offDriveFolder: path.normalize(folder) } : {}), contentHash: written.contentHash };
   }
 
@@ -292,10 +285,5 @@ export class BackupModule {
     const newest = (await service.list().catch(() => []))[0];
     const { offDriveFolder } = await this.settings().catch(() => ({ offDriveFolder: undefined }));
     return { running: false, ...(newest ? { latestBackupAt: newest.createdAt } : {}), ...(offDriveFolder ? { offDriveFolder } : {}) };
-  }
-
-  private async readSetting() {
-    try { return await this.ctx.objects.read(backupSettingsPath); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   }
 }

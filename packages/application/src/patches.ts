@@ -372,6 +372,7 @@ export class PatchModule {
     }
     const paths = index.duplicatePaths?.(target.frontmatter.id);
     if (paths) throw new DraftError([`id: ${target.frontmatter.id} is a duplicate object ID (${paths.join(" and ")}); resolve the duplicate before patching it`]);
+    // Not isLive on purpose: a patch names its target by ID, and an explicit ID reaches an archived object (#118).
     if (target.frontmatter.deleted_at) throw new DraftError([`id: object ${target.frontmatter.id} is deleted`]);
     return target;
   }

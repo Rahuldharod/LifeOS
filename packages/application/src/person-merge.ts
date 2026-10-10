@@ -2,7 +2,7 @@ import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { internalDomainsOf, personEmails } from "./people.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { OneAtATime, replayRoles, sameValue, type ReplayRole } from "./support.js";
+import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./support.js";
 
 /**
  * Person merges (#40, PRD "People → Merge"). Likely duplicates become `person-merge` Review Items;
@@ -28,7 +28,8 @@ const fillFields = ["family_name", "organization_name", "job_title", "timezone"]
 
 const valueOf = (object: LifeOSObject, key: string) => key === bodyKey ? object.body : object.frontmatter[key] ?? null;
 const isAt = (object: LifeOSObject, side: Record<string, unknown>) => Object.entries(side).every(([key, value]) => sameValue(valueOf(object, key), value));
-const live = (object: LifeOSObject | undefined): object is LifeOSObject => Boolean(object && object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
+// A merge names both people by ID, so like any explicit ID it reaches an archived person; only a deleted (or already merged) one is refused.
+const mergeable = (object: LifeOSObject | undefined): object is LifeOSObject => Boolean(object && object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
 const pairKey = (a: string, b: string) => [a, b].sort().join("|");
 const nameKey = (value: unknown) => typeof value === "string" ? foldForSearch(value.normalize("NFC")).trim().replace(/\s+/g, " ") : "";
 const localPart = (email: string) => email.split("@")[0]!.replace(/\+.*$/, "");
@@ -89,7 +90,8 @@ export class PersonMergeModule {
   private async suggestSerialized(now: string, only: string[] | undefined, newId: (role: ReplayRole) => string) {
     const { ctx } = this;
     await ctx.rebuildIndex();
-    const people = ctx.index.all().filter(live);
+    // Suggestions match by name, so they consider live people only.
+    const people = ctx.index.all().filter((object) => mergeable(object) && isLive(object));
     const suggestions = new Map(ctx.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.review_type === personMergeReviewType).map((review) => {
       const fields = review.frontmatter.proposed_fields as Partial<PersonMergeProposal>;
       return [pairKey(String(fields.keep_person_id), String(fields.merge_person_id)), review] as const;
@@ -204,7 +206,7 @@ export class PersonMergeModule {
     const { ctx } = this;
     const keep = ctx.index.get(proposal.keep_person_id), merge = ctx.index.get(proposal.merge_person_id);
     if (proposal.keep_person_id === proposal.merge_person_id) throw new Error("A person cannot be merged into itself");
-    if (!live(keep) || !live(merge)) throw new Error(`${live(keep) ? proposal.merge_title : proposal.keep_title} no longer exists or was already merged; reject this suggestion`);
+    if (!mergeable(keep) || !mergeable(merge)) throw new Error(`${mergeable(keep) ? proposal.merge_title : proposal.keep_title} no longer exists or was already merged; reject this suggestion`);
     if (merge.frontmatter.is_self === true) throw new Error("The self person cannot be merged into someone else");
     const from = merge.frontmatter.id, to = keep.frontmatter.id;
     const link = new RegExp(`(lifeos://object/)${from}`, "gi");

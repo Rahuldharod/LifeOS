@@ -1,5 +1,6 @@
 import { uuidV7 } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
+import { isLive } from "./support.js";
 
 /** Quick capture, pasted-text sources and the knowledge notes proposed from them. */
 export class CaptureModule {
@@ -19,7 +20,7 @@ export class CaptureModule {
   }
 
   knowledge(query = "") {
-    const notes = this.ctx.index.all().filter((object) => object.frontmatter.type === "knowledge-note");
+    const notes = this.ctx.index.all().filter((object) => object.frontmatter.type === "knowledge-note" && isLive(object));
     const needle = query.trim().toLowerCase();
     return needle ? notes.filter((note) => `${note.frontmatter.title}\n${note.body}`.toLowerCase().includes(needle)) : notes;
   }

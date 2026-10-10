@@ -31,7 +31,7 @@ describe("calendar offline banner (#88)", () => {
     const panels = {
       date: "2026-10-05", overdue: [], dueToday: [], upcomingHighPriority: [], waitingByPerson: [],
       nextMeetings: [{ title: "Client review", startsAt: "2026-10-05T11:00:00.000Z", endsAt: "2026-10-05T12:00:00.000Z", inProgress: false, meetingId: "m1", restricted: false }],
-      meetingHours: 1, meetingHeavy: false, calendarError: "fetch failed", calendarOffline: offline,
+      meetingHours: 1, meetingHeavy: false, calendarOffline: offline,
       openPointsForMeetings: [], reviewCount: 0, inbox: { awaiting: 0, drafts: 0, patches: 0 }, failedDrafts: [], staleWorkOrders: [],
       settings: { meetingHoursThreshold: 5, briefTime: "06:00", briefTimeZone: "Europe/Paris", briefDays: ["mon"] }
     } as TodayPanels;

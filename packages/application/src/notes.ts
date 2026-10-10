@@ -1,7 +1,7 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
 import { foldForSearch, ObjectConflictError, type AppContext } from "./context.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { isLive, OneAtATime, sameValue } from "./support.js";
+import { isLive, liveMeetingNote, OneAtATime, parseInstantRange, sameValue } from "./support.js";
 
 const noteTypes = ["meeting-note", "knowledge-note"];
 
@@ -63,9 +63,7 @@ export class NotesModule {
   searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) {
     const types = filters.types ?? [];
     if (types.some((type) => !noteTypes.includes(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
-    const from = filters.from ? Date.parse(filters.from) : -Infinity;
-    const to = filters.to ? Date.parse(filters.to) : Infinity;
-    if (Number.isNaN(from) || Number.isNaN(to) || from > to) throw new Error("Enter a valid date range");
+    const { from, to } = parseInstantRange(filters.from, filters.to);
     const dateField = state === "deleted" ? "deleted_at" : "updated_at";
     const needsMeetingNote = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
     const notes = (state === "deleted" ? this.deletedNotes() : this.notes()).filter(({ frontmatter }) => {
@@ -114,7 +112,7 @@ export class NotesModule {
     }
     const live = (linkId: string, type: ObjectEnvelope["type"], label: string) => {
       const target = this.ctx.index.get(linkId);
-      if (!target || target.frontmatter.type !== type || target.frontmatter.deleted_at || target.frontmatter.archived_at) throw new Error(`${label} not found`);
+      if (!target || target.frontmatter.type !== type || !isLive(target)) throw new Error(`${label} not found`);
     };
     for (const [field, type, label] of [["primary_project_id", "project", "Project"], ["primary_client_id", "client", "Client"], ["primary_product_id", "product", "Product"]] as const) {
       if (!(field in changes)) continue;
@@ -170,7 +168,7 @@ export class NotesModule {
     if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be restored here");
     if (!current.frontmatter.deleted_at) return current;
     const meetingId = current.frontmatter.meeting_id;
-    if (meetingId && this.ctx.index.all().some((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && !object.frontmatter.deleted_at)) {
+    if (typeof meetingId === "string" && liveMeetingNote(meetingId, this.ctx.index.all())) {
       throw new Error("This meeting already has a newer note. Delete that note first, then restore this one.");
     }
     const now = new Date().toISOString();

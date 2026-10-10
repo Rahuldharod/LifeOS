@@ -78,6 +78,7 @@ export class AppContext {
       list: () => store.list(),
       scan: store.scan?.bind(store),
       read: (relativePath) => store.read(relativePath),
+      readIfPresent: (relativePath) => store.readIfPresent(relativePath),
       write: async (input) => {
         const id = input.frontmatter.id;
         this.assertWritable(id);

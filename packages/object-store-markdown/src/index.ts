@@ -193,6 +193,11 @@ export class MarkdownObjectStore implements ObjectStore {
     return decode(content, relativePath);
   }
 
+  async readIfPresent(relativePath: string) {
+    const content = await readFile(this.safePath(relativePath), "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+    return content === undefined ? undefined : decode(content, relativePath);
+  }
+
   async write(input: { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string }) {
     validateFrontmatter(input.frontmatter);
     const target = this.safePath(input.relativePath);

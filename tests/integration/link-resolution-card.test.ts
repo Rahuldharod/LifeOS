@@ -1,33 +1,27 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { LifeOSApplication } from "@lifeos/application";
-import { uuidV7, type LifeOSObject } from "@lifeos/domain";
-import { MemoryIndex } from "@lifeos/index-memory";
-import { FilesystemInboxStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import { describe, expect, it } from "vitest";
+import { uuidV7 } from "@lifeos/domain";
 import { acceptLink, createLinkTarget, linkResolutionView, type ApiCall } from "../../apps/web/src/linkResolution.js";
-import { labelMap } from "../../apps/web/src/personLabels.js";
+import { labelMap, type PersonLabel } from "../../apps/web/src/personLabels.js";
+import { testApi } from "./test-api.js";
 
-// #57: the web card's requests, routed to the application the way apps/server/src/main.ts routes them,
-// link the chosen (or newly created) person on the task.
+// #57: the web card's requests, sent to the real API routes (#120), link the chosen (or newly created) person on the task.
 
-const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
+type Item = { frontmatter: { id: string; type: string; title: string } & Record<string, unknown> };
 
-async function vault() {
-  const root = await mkdtemp(path.join(tmpdir(), "lifeos-link-card-"));
-  roots.push(root);
-  const store = new MarkdownObjectStore(root);
-  const application = new LifeOSApplication(store, new MemoryIndex(), undefined, undefined, "test", new FilesystemInboxStore(root));
-  await application.rebuildIndex();
-  return { root, store, application };
-}
-
-async function seedPerson(store: MarkdownObjectStore, title: string, email: string) {
+function person(title: string, email: string) {
   const id = uuidV7();
   const now = "2026-09-01T08:00:00.000Z";
-  return store.write({ relativePath: `people/${id}.md`, frontmatter: { id, type: "person", schema_version: 1, revision: 1, title, created_at: now, updated_at: now, updated_by_device: "test", given_name: title.split(" ")[0], identifiers: [{ kind: "email", value: email }] } as unknown as LifeOSObject["frontmatter"], body: `# ${title}\n` });
+  const content = `---\nid: ${id}\ntype: person\nschema_version: 1\nrevision: 1\ntitle: ${title}\ncreated_at: ${now}\nupdated_at: ${now}\nupdated_by_device: test\ngiven_name: ${title.split(" ")[0]}\nidentifiers:\n  - kind: email\n    value: ${email}\n---\n# ${title}\n`;
+  return { id, file: { [`people/${id}.md`]: content } };
+}
+
+/** The API with these people, started; background adoption waits an hour, so the test adopts when it chooses. */
+async function vault(...people: Array<ReturnType<typeof person>>) {
+  const built = await testApi({ files: Object.assign({}, ...people.map((entry) => entry.file)), timing: { adoptionDebounceMs: 3_600_000, adoptionSweepMs: 3_600_000 } });
+  await built.start();
+  return built;
 }
 
 async function dropDraft(root: string, fields: Record<string, unknown>) {
@@ -40,68 +34,53 @@ async function dropDraft(root: string, fields: Record<string, unknown>) {
   await utimes(target, past, past);
 }
 
-/** The two server routes the card calls, with the same body handling as apps/server/src/main.ts. */
-const serverFor = (application: LifeOSApplication): ApiCall => async <T>(url: string, init?: RequestInit) => {
-  const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
-  const accept = url.match(/^\/api\/v1\/review-items\/([^/]+)\/accept$/);
-  if (accept && init?.method === "POST") return await application.acceptReviewItem(accept[1]!, { linkTo: typeof body?.linkTo === "string" ? body.linkTo : undefined }) as T;
-  const create = url.match(/^\/api\/v1\/entities\/(person|project|client|product)$/);
-  if (create && init?.method === "POST") return await application.createEntity(create[1] as "person", (body as { fields: Record<string, unknown> }).fields) as T;
-  throw new Error(`Unexpected request ${init?.method} ${url}`);
-};
-
-async function adoptWithLinkReview(application: LifeOSApplication) {
-  await application.adoptDrafts();
-  const task = (await application.listObjects()).find((object) => object.frontmatter.type === "task")!;
-  const review = (await application.reviews()).find((item) => item.frontmatter.review_type === "link-resolution")!;
+async function adoptWithLinkReview(call: ApiCall) {
+  await call("/api/v1/inbox/adopt", { method: "POST" });
+  const task = (await call<Item[]>("/api/v1/objects")).find((object) => object.frontmatter.type === "task")!;
+  const review = (await call<Item[]>("/api/v1/review-items")).find((item) => item.frontmatter.review_type === "link-resolution")!;
   return { task, review };
 }
 
+const object = async (call: ApiCall, id: string) => (await call<Item[]>("/api/v1/objects")).find((entry) => entry.frontmatter.id === id)!;
+
 describe("link-resolution card → accept with linkTo", () => {
   it("GIVEN two matching people WHEN the user picks the external one and accepts THEN the task links to them", async () => {
-    const { root, store, application } = await vault();
-    await application.saveInternalDomains(["example.com"]);
-    const martin = await seedPerson(store, "Joel Martin", "joel.martin@example.com");
-    const durand = await seedPerson(store, "Joël Durand", "joel@example.org");
-    await application.rebuildIndex();
+    const martin = person("Joel Martin", "joel.martin@example.com");
+    const durand = person("Joël Durand", "joel@example.org");
+    const { root, call } = await vault(martin, durand);
+    await call("/api/v1/settings/internal-domains", { method: "PUT", body: JSON.stringify({ domains: ["example.com"] }) });
     await dropDraft(root, { waiting_for: "Joel" });
-    const { task, review } = await adoptWithLinkReview(application);
+    const { task, review } = await adoptWithLinkReview(call);
 
-    const view = linkResolutionView(review, labelMap(await application.personLabels()));
+    const view = linkResolutionView(review, labelMap(await call<PersonLabel[]>("/api/v1/people/labels")));
     expect(view.reference).toBe("Joel");
     // Each candidate by display label; only the external person carries the " - ext" marker.
-    const picked = view.options.find((option) => option.id === durand.frontmatter.id)!;
+    const picked = view.options.find((option) => option.id === durand.id)!;
     expect(picked.suffix).toBe(" - ext");
-    expect(view.options.find((option) => option.id === martin.frontmatter.id)).toEqual({ id: martin.frontmatter.id, name: "Joel Martin" });
+    expect(view.options.find((option) => option.id === martin.id)).toEqual({ id: martin.id, name: "Joel Martin" });
 
-    await acceptLink(serverFor(application), review.frontmatter.id, picked.id);
-    const linked = (await application.listObjects()).find((object) => object.frontmatter.id === task.frontmatter.id)!;
-    expect(linked.frontmatter.waiting_for_person_id).toBe(durand.frontmatter.id);
-    expect((await application.reviews()).find((item) => item.frontmatter.id === review.frontmatter.id)!.frontmatter).toMatchObject({ status: "accepted", chosen_object_id: durand.frontmatter.id });
+    await acceptLink(call, review.frontmatter.id, picked.id);
+    expect((await object(call, task.frontmatter.id)).frontmatter.waiting_for_person_id).toBe(durand.id);
+    expect((await call<Item[]>("/api/v1/review-items")).find((item) => item.frontmatter.id === review.frontmatter.id)!.frontmatter).toMatchObject({ status: "accepted", chosen_object_id: durand.id });
   });
 
   it("GIVEN no match WHEN the user creates the person THEN the new person is linked", async () => {
-    const { root, application } = await vault();
+    const { root, call } = await vault();
     await dropDraft(root, { waiting_for: "Priya" });
-    const { task, review } = await adoptWithLinkReview(application);
+    const { task, review } = await adoptWithLinkReview(call);
     const view = linkResolutionView(review, labelMap([]));
     expect(view).toMatchObject({ options: [], canCreate: true, candidateType: "person" });
 
-    const call = serverFor(application);
     const created = await createLinkTarget(call, view.candidateType, view.reference);
     await acceptLink(call, review.frontmatter.id, created.id);
-    const linked = (await application.listObjects()).find((object) => object.frontmatter.id === task.frontmatter.id)!;
-    expect(linked.frontmatter.waiting_for_person_id).toBe(created.id);
+    expect((await object(call, task.frontmatter.id)).frontmatter.waiting_for_person_id).toBe(created.id);
     expect(created.name).toBe("Priya");
   });
 
   it("surfaces the server's error when nothing is chosen", async () => {
-    const { root, store, application } = await vault();
-    await seedPerson(store, "Joel Martin", "joel.martin@example.com");
-    await seedPerson(store, "Joel Durand", "joel.durand@example.com");
-    await application.rebuildIndex();
+    const { root, call } = await vault(person("Joel Martin", "joel.martin@example.com"), person("Joel Durand", "joel.durand@example.com"));
     await dropDraft(root, { waiting_for: "Joel" });
-    const { review } = await adoptWithLinkReview(application);
-    await expect(serverFor(application)(`/api/v1/review-items/${review.frontmatter.id}/accept`, { method: "POST" })).rejects.toThrow(/Choose the person to link/);
+    const { review } = await adoptWithLinkReview(call);
+    await expect(call(`/api/v1/review-items/${review.frontmatter.id}/accept`, { method: "POST" })).rejects.toThrow(/Choose the person to link/);
   });
 });

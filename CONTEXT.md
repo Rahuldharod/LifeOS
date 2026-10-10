@@ -144,7 +144,7 @@ The accepted meeting summary, kept in the meeting body between `lifeos:summary:s
 ### Safety and recovery
 
 **Live**:
-Neither deleted (`deleted_at`) nor archived (`archived_at`).
+Neither deleted (`deleted_at`) nor archived (`archived_at`). Lists, rollups and name matching show live objects only. An identifier (object ID, email, URL) also reaches an archived object, so it is reused rather than duplicated; only deleted objects are gone.
 
 **Version copy**:
 A copy of an object kept in `.lifeos/versions/` on each save; the last 10 per object are kept (ADR 0012). The newest is the **baseline** for spotting edits made outside the app.

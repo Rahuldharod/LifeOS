@@ -1,13 +1,14 @@
-import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import type { LifeOSObject, ObjectEnvelope } from "@lifeos/domain";
 import type { AdoptionModule, InboxStatus } from "./adoption.js";
 import type { CalendarModule, CalendarOffline } from "./calendar.js";
-import { ObjectConflictError, type AppContext } from "./context.js";
+import type { AppContext } from "./context.js";
 import type { EnrichmentModule, EnrichmentStatus } from "./enrichment.js";
 import type { EntitiesModule } from "./entities.js";
 import type { MeetingsModule } from "./meetings.js";
 import { openPointPeopleIds } from "./open-points.js";
 import type { PeopleModule, PeopleSetupWarning } from "./people.js";
-import { dueDate, isLive, isMeetingRestricted } from "./support.js";
+import { dueDate, isLive, isMeetingRestricted, liveMeetingNote } from "./support.js";
+import { SyncedSetting } from "./synced-settings.js";
 
 /**
  * Today's live panels (#48, PRD "Daily Focus and Today"). Every panel is computed on request from the
@@ -57,9 +58,7 @@ export interface TodayPanels {
   /** Hours of timed, accepted meetings within the local day, to one decimal. */
   meetingHours: number;
   meetingHeavy: boolean;
-  /** Set when the calendar could not be read; meetings then come from the index only. */
-  calendarError?: string;
-  /** #88: set with `calendarError`: why the calendar could not be read and when it last synced, for the offline banner. */
+  /** #88: set when the calendar could not be read (meetings then come from the index only): why, the error message and when it last synced, for the offline banner. */
   calendarOffline?: CalendarOffline;
   openPointsForMeetings: MeetingOpenPoint[];
   reviewCount: number;
@@ -71,7 +70,6 @@ export interface TodayPanels {
   setupWarning?: PeopleSetupWarning;
 }
 
-const todaySettingsPath = "settings/today.md";
 const timeOfDay = /^([01]\d|2[0-3]):[0-5]\d$/;
 const importanceRank = (value: unknown) => value === "High" ? 0 : value === "Medium" ? 1 : value === "Low" ? 2 : 3;
 const linkRank: Record<OpenPointLink, number> = { "raised-in": 0, project: 1, client: 2, people: 3 };
@@ -120,7 +118,15 @@ export class TodayModule {
     private readonly meetings: MeetingsModule,
     private readonly calendarModule: CalendarModule,
     private readonly people: PeopleModule
-  ) {}
+  ) {
+    this.setting = new SyncedSetting(ctx, {
+      key: "today", title: "Today",
+      body: "# Today\n\nMeeting-hours threshold for flagging a meeting-heavy day (information only), and when the morning routine writes the Daily Focus brief.\n",
+      name: "Today settings"
+    });
+  }
+
+  private readonly setting: SyncedSetting;
 
   /** `date` is the user's local date; `timeZone` sets that day's boundaries for meetings (default: the brief's zone). */
   async panels(options: { date?: string; now?: Date; timeZone?: string } = {}): Promise<TodayPanels> {
@@ -149,7 +155,7 @@ export class TodayModule {
     // Most-waited-on people first; the unknown-person group always last.
     const waitingByPerson = [...groups.values()].sort((a, b) => Number(!a.personId) - Number(!b.personId) || b.tasks.length - a.tasks.length || a.label.localeCompare(b.label));
 
-    const { meetings, calendarError, calendarOffline } = await this.dayMeetings(dayStart, dayEnd);
+    const { meetings, calendarOffline } = await this.dayMeetings(dayStart, dayEnd);
     const meetingHours = Math.round(meetings.reduce((sum, meeting) => sum + Math.max(0, Math.min(Date.parse(meeting.endsAt), dayEnd) - Math.max(Date.parse(meeting.startsAt), dayStart)), 0) / 360_000) / 10;
     const nextMeetings = meetings.filter((meeting) => Date.parse(meeting.endsAt) > now.getTime()).map((meeting) => ({ ...meeting, inProgress: Date.parse(meeting.startsAt) <= now.getTime() }));
 
@@ -158,7 +164,7 @@ export class TodayModule {
     return {
       date, timeZone,
       overdue: tasks.overdue, dueToday: tasks.dueToday, upcomingHighPriority, waitingByPerson,
-      nextMeetings, meetingHours, meetingHeavy: meetingHours >= settings.meetingHoursThreshold, ...(calendarError ? { calendarError } : {}), ...(calendarOffline ? { calendarOffline } : {}),
+      nextMeetings, meetingHours, meetingHeavy: meetingHours >= settings.meetingHoursThreshold, ...(calendarOffline ? { calendarOffline } : {}),
       openPointsForMeetings: this.openPointsFor(meetings),
       reviewCount: tasks.reviewCount,
       inbox: { awaiting: inbox.awaiting, drafts: inbox.drafts, patches: inbox.patches },
@@ -171,14 +177,18 @@ export class TodayModule {
 
   /** Read from disk so another device's edit is seen at once (as for the other synced settings, ADR 0005). */
   async settings(): Promise<TodaySettings> {
-    const current = await this.readSetting();
+    const current = await this.setting.read();
     return { ...settingsFrom(current?.frontmatter), ...(current ? { contentHash: current.contentHash } : {}) };
   }
 
   async saveSettings(input: Partial<Omit<TodaySettings, "contentHash">>, expectedHash?: string): Promise<TodaySettings> {
-    const { ctx } = this;
-    const current = await this.readSetting();
-    const merged = { ...settingsFrom(current?.frontmatter), ...input };
+    const written = await this.setting.save((current) => this.settingFields(current, input), expectedHash);
+    return { ...settingsFrom(written.frontmatter), contentHash: written.contentHash };
+  }
+
+  /** Validates the merged settings (all problems at once) and maps them to front matter. */
+  private settingFields(current: ObjectEnvelope | undefined, input: Partial<Omit<TodaySettings, "contentHash">>) {
+    const merged = { ...settingsFrom(current), ...input };
     const problems: string[] = [];
     if (typeof merged.meetingHoursThreshold !== "number" || !Number.isFinite(merged.meetingHoursThreshold) || merged.meetingHoursThreshold < 0 || merged.meetingHoursThreshold > 24) problems.push("Meeting-hours threshold must be a number of hours from 0 to 24");
     if (typeof merged.briefTime !== "string" || !timeOfDay.test(merged.briefTime)) problems.push("Brief time must be HH:MM (24-hour)");
@@ -186,25 +196,12 @@ export class TodayModule {
     const days = Array.isArray(merged.briefDays) ? merged.briefDays : [];
     if (!days.length || days.some((day) => !weekdays.includes(day))) problems.push(`Brief days must be one or more of ${weekdays.join(", ")}`);
     if (problems.length) throw new Error(problems.join("; "));
-    if (current && current.contentHash !== expectedHash) throw new ObjectConflictError("Today settings changed on another device; reload and try again");
-    if (!current && expectedHash) throw new ObjectConflictError("Today settings were removed; reload and try again");
-    const now = new Date().toISOString();
-    const written = await ctx.objects.write({
-      relativePath: todaySettingsPath,
-      expectedHash: current?.contentHash,
-      frontmatter: {
-        ...current?.frontmatter,
-        ...(current ? { revision: current.frontmatter.revision + 1, updated_at: now, updated_by_device: ctx.deviceId } : ctx.envelope(uuidV7(), "app-setting", "Today", now)),
-        setting_key: "today",
-        meeting_hours_threshold: merged.meetingHoursThreshold,
-        brief_time: merged.briefTime,
-        brief_time_zone: merged.briefTimeZone,
-        brief_days: weekdays.filter((day) => days.includes(day))
-      } as ObjectEnvelope,
-      body: current?.body ?? "# Today\n\nMeeting-hours threshold for flagging a meeting-heavy day (information only), and when the morning routine writes the Daily Focus brief.\n"
-    });
-    await ctx.rebuildIndex();
-    return { ...settingsFrom(written.frontmatter), contentHash: written.contentHash };
+    return {
+      meeting_hours_threshold: merged.meetingHoursThreshold,
+      brief_time: merged.briefTime,
+      brief_time_zone: merged.briefTimeZone,
+      brief_days: weekdays.filter((day) => days.includes(day))
+    };
   }
 
   /**
@@ -215,7 +212,6 @@ export class TodayModule {
   private async dayMeetings(dayStart: number, dayEnd: number) {
     const { ctx } = this;
     const result: Array<Omit<NextMeeting, "inProgress">> = [];
-    let calendarError: string | undefined;
     let calendarOffline: CalendarOffline | undefined;
     let fromCalendar = false;
     if (ctx.calendar) {
@@ -230,7 +226,6 @@ export class TodayModule {
           result.push({ title: event.title, startsAt: event.startsAt, endsAt: event.endsAt, calendarEventId: event.externalId, ...(event.calendarName ? { calendarName: event.calendarName } : {}), ...(event.meetingId ? { meetingId: event.meetingId } : {}), ...(event.noteId ? { noteId: event.noteId } : {}), restricted: isMeetingRestricted(meeting, ctx.index.all()) });
         }
       } catch (error) {
-        calendarError = error instanceof Error ? error.message : String(error);
         calendarOffline = this.calendarModule.offline(error);
       }
     }
@@ -240,10 +235,10 @@ export class TodayModule {
       if (fromCalendar && Array.isArray(meeting.frontmatter.external_refs) && meeting.frontmatter.external_refs.length) continue;
       const startsAt = String(meeting.frontmatter.starts_at), endsAt = String(meeting.frontmatter.ends_at);
       if (!(Date.parse(endsAt) > dayStart && Date.parse(startsAt) < dayEnd)) continue;
-      const note = ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at);
+      const note = liveMeetingNote(meeting.frontmatter.id, ctx.index.all());
       result.push({ title: meeting.frontmatter.title, startsAt, endsAt, meetingId: meeting.frontmatter.id, ...(note ? { noteId: note.frontmatter.id } : {}), restricted: isMeetingRestricted(meeting, ctx.index.all()) });
     }
-    return { meetings: result.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), calendarError, calendarOffline };
+    return { meetings: result.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), calendarOffline };
   }
 
   /**
@@ -273,10 +268,5 @@ export class TodayModule {
       if (best) rows.push(best);
     }
     return rows.sort((a, b) => linkRank[a.link] - linkRank[b.link] || importanceRank(a.openPoint.frontmatter.importance) - importanceRank(b.openPoint.frontmatter.importance) || String(b.openPoint.frontmatter.raised_at ?? b.openPoint.frontmatter.created_at).localeCompare(String(a.openPoint.frontmatter.raised_at ?? a.openPoint.frontmatter.created_at)));
-  }
-
-  private async readSetting() {
-    try { return await this.ctx.objects.read(todaySettingsPath); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   }
 }

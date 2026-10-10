@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectType, type Origin } from "@lifeos/domain";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { personEmails } from "./people.js";
-import { isLive, isRestricted, objectIdPattern, replayRoles, type ReplayRole } from "./support.js";
+import { byIdentifier, isLive, isRestricted, objectIdPattern, replayRoles, type ReplayRole } from "./support.js";
 
 /**
  * Name resolution (#33, PRD "Object Contract"): turns draft references (a name, alias, email, object ID
@@ -49,15 +49,21 @@ export class ReferenceResolver {
     return undefined;
   }
 
-  /** People by email address, case-insensitively. The self person's addresses all lead to self. */
+  /**
+   * People by email address, case-insensitively. The self person's addresses all lead to self. An email is an
+   * identifier, so it reaches an archived person when no live one has it (decision 2026-10-10).
+   */
   personByEmail(address: string): Resolution {
     const wanted = address.trim().toLowerCase();
-    return this.outcome(this.live("person").filter((person) => personEmails(person).includes(wanted))) ?? { status: "unknown", candidates: [] };
+    const matches = byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && personEmails(object).includes(wanted)));
+    const live = matches.filter(isLive);
+    return this.outcome(live.length ? live : matches) ?? { status: "unknown", candidates: [] };
   }
 
   resolve(type: ObjectType, reference: string): Resolution {
     const value = reference.trim();
     if (objectIdPattern.test(value)) {
+      // #118: an explicit ID still reaches an archived object (old links keep working); only deleted is gone.
       const object = this.ctx.index.get(value);
       return object && object.frontmatter.type === type && !object.frontmatter.deleted_at ? { status: "resolved", id: value } : { status: "unknown", candidates: [] };
     }
@@ -119,7 +125,7 @@ export class ReferenceResolver {
   normaliseSubjects(subjects: string[]) {
     const known = new Map<string, string>();
     for (const object of this.ctx.index.all()) {
-      if (object.frontmatter.deleted_at) continue;
+      if (!isLive(object)) continue;
       for (const subject of object.frontmatter.subjects ?? []) if (!known.has(foldSubject(subject))) known.set(foldSubject(subject), subject);
     }
     const result: string[] = [];

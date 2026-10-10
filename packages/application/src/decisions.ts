@@ -1,7 +1,7 @@
 import { decisionStatuses, uuidV7, validateFrontmatter, type DecisionStatus, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { contextLinkFields, stringsIn } from "./support.js";
+import { contextLinkFields, isLive, parseInstantRange, stringsIn } from "./support.js";
 
 /** List filters (#41). `from`/`to` are ISO instants, inclusive, on `decided_at`; the UI turns local days into instants. */
 export type DecisionFilters = { projectId?: string; clientId?: string; productId?: string; personId?: string; status?: string; from?: string; to?: string };
@@ -56,9 +56,7 @@ export class DecisionsModule {
 
   decisions(filters: DecisionFilters = {}) {
     if (filters.status && !decisionStatuses.includes(filters.status as DecisionStatus)) throw new Error(`Decision status must be one of ${decisionStatuses.join(", ")}`);
-    const from = filters.from ? Date.parse(filters.from) : -Infinity;
-    const to = filters.to ? Date.parse(filters.to) : Infinity;
-    if (Number.isNaN(from) || Number.isNaN(to) || from > to) throw new Error("Enter a valid date range");
+    const { from, to } = parseInstantRange(filters.from, filters.to);
     const matches = (object: LifeOSObject) => {
       const value = object.frontmatter;
       const decidedAt = Date.parse(String(value.decided_at));
@@ -94,7 +92,7 @@ export class DecisionsModule {
       review,
       evidence,
       // #42: open points this decision resolved.
-      resolvesOpenPoints: index.all().filter((object) => object.frontmatter.type === "open-point" && object.frontmatter.resolution_decision_id === id && !object.frontmatter.deleted_at)
+      resolvesOpenPoints: index.all().filter((object) => object.frontmatter.type === "open-point" && object.frontmatter.resolution_decision_id === id && isLive(object))
     };
   }
 
@@ -234,7 +232,7 @@ export class DecisionsModule {
   }
 
   private all() {
-    return this.ctx.index.all().filter((object) => object.frontmatter.type === "decision" && !object.frontmatter.deleted_at);
+    return this.ctx.index.all().filter((object) => object.frontmatter.type === "decision" && isLive(object));
   }
 
   private pick(input: Record<string, unknown>, allowed: string[]) {

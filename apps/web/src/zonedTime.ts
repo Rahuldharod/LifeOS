@@ -26,6 +26,16 @@ export function zonedMidnight(date: string, timeZone: string) {
   return zonedDateTime(date, "00:00", timeZone);
 }
 
+/**
+ * Sets a filter's `from` / `to` query params (#116) from whole local days (YYYY-MM-DD, blank = open) in `timeZone`,
+ * both ends inclusive: `from` is that day's midnight, `to` is 1 ms before the next day's midnight. The server
+ * validates the range (an unparseable day throws here).
+ */
+export function dayRangeQuery(query: URLSearchParams, fromDay: string, toDay: string, timeZone: string) {
+  if (fromDay) query.set("from", zonedMidnight(fromDay, timeZone).toISOString());
+  if (toDay) query.set("to", new Date(zonedMidnight(addCalendarDays(toDay, 1), timeZone).getTime() - 1).toISOString());
+}
+
 /** `YYYY-MM-DDTHH:MM` for a `datetime-local` input showing `instant` in `timeZone`. */
 export function zonedInputValue(instant: string, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(instant));
