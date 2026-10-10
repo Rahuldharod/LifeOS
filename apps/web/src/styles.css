@@ -184,8 +184,8 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .project-stats b { font: 27px Georgia, serif; color: #245646; }
 .project-stats small { display: block; margin-top: 3px; color: #7c8780; font: 11px Inter, sans-serif; text-transform: uppercase; }
 .empty-state { padding: 58px 24px; text-align: center; }
-.lease-warning { margin-bottom: 18px; border-color: #dfb978; background: #fff4df; }
-.lease-warning p { color: #76552f; }
+.lease-warning, .warning-card { margin-bottom: 18px; border-color: #dfb978; background: #fff4df; }
+.lease-warning p, .warning-card p { color: #76552f; }
 .takeover { padding: 10px 14px; border: 1px solid #9a5e25; border-radius: 8px; background: #9a5e25; color: white; font-weight: 750; }
 .system-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
 .system-details { display: grid; gap: 18px; margin-top: 20px; }

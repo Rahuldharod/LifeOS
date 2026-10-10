@@ -3,7 +3,7 @@
 import React from "react";
 
 export function WarningCard({ label, title, role, children }: { label: string; title?: React.ReactNode; role?: "alert" | "status"; children?: React.ReactNode }) {
-  return <article className="lease-warning" role={role}><span>{label}</span>
+  return <article className="warning-card" role={role}><span>{label}</span>
     {title !== undefined && <h3>{title}</h3>}
     {children}
   </article>;
