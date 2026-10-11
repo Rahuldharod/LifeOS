@@ -2,9 +2,9 @@ import { confidenceLabels, type Confidence, type LifeOSObject } from "@lifeos/do
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
-import type { MeetingsModule } from "./meetings.js";
+import type { EnrichmentOccurrenceTarget, MeetingsModule } from "./meetings.js";
 import { foldName, type ReferenceResolver } from "./resolution.js";
-import { proposeReviewItem, reviseReviewItem } from "./review-items.js";
+import { proposeReviewItem, reviseReviewItem, type EvidenceEntry } from "./review-items.js";
 import { inheritContextLinks, isLive, isMeetingRestricted, liveMeetingNote, objectIdPattern, replayRoles } from "./support.js";
 
 /**
@@ -59,8 +59,9 @@ const roles = {
 };
 
 type Propose = (draft: ParsedDraft, run: AdoptionRun, options: ProposeOptions) => Promise<string[]>;
-interface MaterialSource { at: string; sourceType: string; provider: string; externalId: string; url: string; occurredAt: string; title?: string }
+interface MaterialSource { at: string; sourceType: string; provider: string; externalId: string; url: string; occurredAt: string; retrievedAt: string; providerRevision?: string; title?: string }
 interface MaterialProposal { at: string; key: string; missedInNotes: boolean; draft: ParsedDraft }
+interface MaterialEvidence { source: string; locator: string; quote?: string }
 
 const idList = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -77,8 +78,16 @@ export class MeetingMaterialModule {
     let meeting = this.existingMeeting(reference);
     if (meeting && isMeetingRestricted(meeting, ctx.index.all())) throw new DraftError([`meeting: ${meeting.frontmatter.id} is restricted; LifeOS does not enrich restricted meetings`]);
 
+    const lookup = { from: new Date(Date.parse(run.now) - eventLookbackMs), to: new Date(Date.parse(run.now) + 86_400_000), calendarId: text(fields.calendar_id) || undefined };
+    let occurrence = meeting ? this.meetings?.enrichmentOccurrenceForMeeting(meeting) : undefined;
+    if (!meeting && this.meetings) {
+      try { occurrence = await this.meetings.enrichmentOccurrenceForEvent(reference, lookup.from, lookup.to, lookup.calendarId); }
+      catch (error) { if (!(error instanceof Error) || !error.message.startsWith("Calendar event not found:")) throw error; }
+    }
+
     // 2. Every check up front, so a bad draft writes nothing (not even the meeting).
     const issues: string[] = [];
+    this.validateOccurrence(fields, occurrence, issues);
     const sources = this.parseSources(fields.sources, issues);
     const unavailable = parseUnavailable(fields.unavailable, sources, issues);
     const summary = draft.body.trim();
@@ -89,13 +98,20 @@ export class MeetingMaterialModule {
       try { await this.propose(proposal.draft, run, { dryRun: true }); }
       catch (error) { if (error instanceof DraftError) issues.push(...error.issues.map((issue) => `${proposal.at}.${issue}`)); else throw error; }
     }
+    const summaryEvidence = this.parseMaterialEvidence(fields.summary_evidence, "summary_evidence", issues);
+    if (occurrence && summary && !summaryEvidence.length) issues.push("summary_evidence: a recurring occurrence summary needs at least one Source and locator");
+    const allowedSourceRefs = this.allowedSourceReferences(meeting, sources);
+    if (occurrence) {
+      this.validateEvidenceSources(summaryEvidence, "summary_evidence", allowedSourceRefs, issues);
+      for (const proposal of proposals) this.validateEvidenceSources(this.parseMaterialEvidence(proposal.draft.fields.evidence, `${proposal.at}.evidence`, issues), `${proposal.at}.evidence`, allowedSourceRefs, issues);
+    }
     if (issues.length) throw new DraftError(issues);
 
     // 3. The meeting from the calendar event if missing; the note is still only created on the first edit.
     const objectIds: string[] = [];
     if (!meeting) {
       if (objectIdPattern.test(reference) || !this.meetings) throw new DraftError([`meeting: no LifeOS meeting "${reference}"`]);
-      const ensured = await this.meetings.ensureMeetingForEvent(reference, { from: new Date(Date.parse(run.now) - eventLookbackMs), to: new Date(Date.parse(run.now) + 86_400_000), calendarId: text(fields.calendar_id) || undefined, meetingId: run.newId(roles.meeting), draftKey: draft.draftKey });
+      const ensured = await this.meetings.ensureMeetingForEvent(reference, { ...lookup, meetingId: run.newId(roles.meeting), draftKey: draft.draftKey });
       if (!ensured) throw new DraftError([`meeting: no LifeOS meeting or calendar event "${reference}" in the last 30 days`]);
       meeting = ensured.meeting;
       if (ensured.created) objectIds.push(meeting.frontmatter.id);
@@ -118,9 +134,17 @@ export class MeetingMaterialModule {
     objectIds.push(...sourceIds);
     await ctx.rebuildIndex();
 
+    if (occurrence && (sourceIds.length || summary || proposals.length)) {
+      const materialized = await this.meetings?.ensureOccurrenceSectionForEnrichment(ctx.required(meetingId, "meeting"), lookup.from, lookup.to, lookup.calendarId);
+      if (!materialized?.note) throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} could not be materialized`]);
+      await ctx.rebuildIndex();
+      await this.updateMaterialsBlock(ctx.required(meetingId, "meeting"), occurrence, run.now);
+      await ctx.rebuildIndex();
+    }
+
     // 5. Summary and proposals, inheriting the meeting's context.
     meeting = ctx.required(meetingId, "meeting");
-    if (summary) objectIds.push(await this.upsertSummary(summary, summaryConfidence!, meeting, sourceIds, draft, run));
+    if (summary) objectIds.push(await this.upsertSummary(summary, summaryConfidence!, meeting, sourceIds, summaryEvidence, occurrence, draft, run));
     // Proposals already raised for this meeting (any status: a rejected one is never proposed again), by key.
     const raised = new Map(this.reviewsFor(meetingId).filter((review) => review.frontmatter.review_type === "create" && typeof review.frontmatter.proposal_key === "string").map((review) => [String(review.frontmatter.proposal_key), review.frontmatter.id]));
     const attendees = idList(meeting.frontmatter.attendee_ids);
@@ -129,7 +153,10 @@ export class MeetingMaterialModule {
       if (found) { objectIds.push(found); continue; }
       // `meeting` makes kindFields inherit the meeting's project, client and product; people default to its attendees.
       const inherited = { ...proposal.draft, fields: { ...proposal.draft.fields, meeting: meetingId, ...(proposal.draft.fields.people === undefined && attendees.length ? { people: attendees } : {}) } };
-      const [reviewId] = await this.propose(inherited, run, { role: roles.proposal(proposal.key), extra: { missed_in_notes: proposal.missedInNotes, proposal_key: proposal.key } });
+      const [reviewId] = await this.propose(inherited, run, { role: roles.proposal(proposal.key), extra: {
+        missed_in_notes: proposal.missedInNotes, proposal_key: proposal.key,
+        ...(occurrence ? { occurrence_section_id: occurrence.sectionId, recurrence_occurrence_id: occurrence.occurrenceId } : {})
+      } });
       raised.set(proposal.key, reviewId!);
       objectIds.push(reviewId!);
     }
@@ -157,6 +184,46 @@ export class MeetingMaterialModule {
     return result.status === "resolved" ? this.ctx.required(result.id, "meeting") : undefined;
   }
 
+  private validateOccurrence(fields: Record<string, unknown>, occurrence: EnrichmentOccurrenceTarget | undefined, issues: string[]) {
+    const sectionId = text(fields.occurrence_section_id);
+    const occurrenceId = text(fields.recurrence_occurrence_id);
+    if (!occurrence) {
+      if (sectionId || occurrenceId) issues.push("occurrence_section_id: this is not a recurring occurrence");
+      return;
+    }
+    if (!sectionId) issues.push("occurrence_section_id: missing; copy it from the Work Order");
+    else if (sectionId !== occurrence.sectionId) issues.push(`occurrence_section_id: ${sectionId} does not belong to the resolved occurrence (expected ${occurrence.sectionId})`);
+    if (!occurrenceId) issues.push("recurrence_occurrence_id: missing; copy it from the Work Order");
+    else if (occurrenceId !== occurrence.occurrenceId) issues.push(`recurrence_occurrence_id: ${occurrenceId} does not belong to the resolved occurrence`);
+  }
+
+  private parseMaterialEvidence(value: unknown, at: string, issues: string[]) {
+    if (value === undefined) return [] as MaterialEvidence[];
+    if (!Array.isArray(value)) { issues.push(`${at}: must be a list of { source, locator, quote? } entries`); return []; }
+    return value.flatMap((item, index) => {
+      const field = `${at}[${index}]`;
+      if (!isRecord(item)) { issues.push(`${field}: must be a { source, locator, quote? } entry`); return []; }
+      const source = text(item.source);
+      const locator = text(item.locator);
+      if (!source) issues.push(`${field}.source: missing`);
+      if (!locator) issues.push(`${field}.locator: missing; locate the evidence inside the targeted occurrence material`);
+      if (item.quote !== undefined && !text(item.quote)) issues.push(`${field}.quote: must be text`);
+      return source && locator ? [{ source, locator, ...(text(item.quote) ? { quote: text(item.quote) } : {}) }] : [];
+    });
+  }
+
+  private allowedSourceReferences(meeting: LifeOSObject | undefined, sources: MaterialSource[]) {
+    const linked = meeting ? this.sourcesFor(meeting, idList(meeting.frontmatter.source_ids)) : [];
+    return new Set([
+      ...sources.flatMap((source) => [source.url, source.externalId]),
+      ...linked.flatMap((source) => [source.frontmatter.id, source.frontmatter.title, source.frontmatter.url, source.frontmatter.external_id].filter((value): value is string => typeof value === "string"))
+    ]);
+  }
+
+  private validateEvidenceSources(evidence: MaterialEvidence[], at: string, allowed: Set<string>, issues: string[]) {
+    for (const [index, item] of evidence.entries()) if (!allowed.has(item.source)) issues.push(`${at}[${index}].source: must name a Source linked to this occurrence`);
+  }
+
   private parseSources(value: unknown, issues: string[]) {
     const sources: MaterialSource[] = [];
     if (value === undefined) return sources;
@@ -177,13 +244,20 @@ export class MeetingMaterialModule {
       if (item.occurred_at === undefined) issues.push(`${at}.occurred_at: missing`);
       else if (!occurredAt) issues.push(`${at}.occurred_at: not an ISO 8601 date-time with Z or an offset ("${String(item.occurred_at)}")`);
       if (item.provider !== undefined && !text(item.provider)) issues.push(`${at}.provider: must be text`);
+      const retrievedAt = item.retrieved_at === undefined ? undefined : toUtc(item.retrieved_at);
+      if (item.retrieved_at !== undefined && !retrievedAt) issues.push(`${at}.retrieved_at: not an ISO 8601 date-time with Z or an offset ("${String(item.retrieved_at)}")`);
+      if (item.provider_revision !== undefined && !text(item.provider_revision)) issues.push(`${at}.provider_revision: must be text`);
       if (item.title !== undefined && !text(item.title)) issues.push(`${at}.title: must be text`);
       if (issues.length > before) return;
       const provider = text(item.provider) || defaultProvider[sourceType]!;
       // The same material listed twice in one draft is one source.
       if (seen.has(`${provider}\n${externalId}`)) return;
       seen.add(`${provider}\n${externalId}`);
-      sources.push({ at, sourceType, provider, externalId, url, occurredAt: occurredAt!, ...(text(item.title) ? { title: text(item.title) } : {}) });
+      sources.push({
+        at, sourceType, provider, externalId, url, occurredAt: occurredAt!, retrievedAt: retrievedAt ?? "",
+        ...(text(item.provider_revision) ? { providerRevision: text(item.provider_revision) } : {}),
+        ...(text(item.title) ? { title: text(item.title) } : {})
+      });
     });
     return sources;
   }
@@ -224,9 +298,13 @@ export class MeetingMaterialModule {
    */
   private async upsertSource(source: MaterialSource, meeting: LifeOSObject, draft: ParsedDraft, run: AdoptionRun) {
     const { ctx } = this;
-    const found = ctx.index.all().find((object) => object.frontmatter.type === "source" && object.frontmatter.provider === source.provider && object.frontmatter.external_id === source.externalId);
+    let found = ctx.index.all().find((object) => object.frontmatter.type === "source" && object.frontmatter.provider === source.provider && object.frontmatter.external_id === source.externalId);
     if (found) {
       if (!isLive(found)) return undefined;
+      const metadata = { retrieved_at: source.retrievedAt || draft.capturedAt, ...(source.providerRevision ? { provider_revision: source.providerRevision } : {}) };
+      if (found.frontmatter.retrieved_at !== metadata.retrieved_at || (metadata.provider_revision && found.frontmatter.provider_revision !== metadata.provider_revision)) {
+        found = await ctx.update(found, metadata, { expectedHash: found.contentHash, now: run.now });
+      }
       const linkedTo = found.frontmatter.meeting_id;
       if (linkedTo === meeting.frontmatter.id) return { id: found.frontmatter.id, otherMeeting: false };
       if (typeof linkedTo === "string" && ctx.index.get(linkedTo)) return { id: found.frontmatter.id, otherMeeting: true };
@@ -240,7 +318,9 @@ export class MeetingMaterialModule {
       frontmatter: {
         ...ctx.envelope(id, "source", title, run.now, "agent-extracted"),
         source_type: source.sourceType, provider: source.provider, external_id: source.externalId, url: source.url,
-        occurred_at: source.occurredAt, captured_at: draft.capturedAt, ingestion_status: "captured", meeting_id: meeting.frontmatter.id,
+        occurred_at: source.occurredAt, captured_at: draft.capturedAt, retrieved_at: source.retrievedAt || draft.capturedAt,
+        ...(source.providerRevision ? { provider_revision: source.providerRevision } : {}),
+        ingestion_status: "captured", meeting_id: meeting.frontmatter.id,
         ...inheritContextLinks(meeting)
       },
       body: `# ${title}\n\n${source.url}\n`
@@ -252,25 +332,47 @@ export class MeetingMaterialModule {
    * One summary per meeting at a time: the same text is never proposed twice, and a newer text replaces a
    * still-pending proposal rather than adding a second one. After accept or reject, a different text is new.
    */
-  private async upsertSummary(summary: string, confidence: Confidence, meeting: LifeOSObject, sourceIds: string[], draft: ParsedDraft, run: AdoptionRun) {
+  private async upsertSummary(summary: string, confidence: Confidence, meeting: LifeOSObject, sourceIds: string[], materialEvidence: MaterialEvidence[], occurrence: EnrichmentOccurrenceTarget | undefined, draft: ParsedDraft, run: AdoptionRun) {
     const { ctx } = this;
     const summaries = this.reviewsFor(meeting.frontmatter.id).filter((review) => review.frontmatter.review_type === summaryReviewType);
     const same = summaries.find((review) => foldName(text((review.frontmatter.proposed_fields as Record<string, unknown>)?.summary)) === foldName(summary));
     if (same) return same.frontmatter.id;
     const title = `Summary: ${meeting.frontmatter.title}`;
     const body = `# ${title}\n\n${summary}\n`;
+    const evidence: Record<string, EvidenceEntry[]> = materialEvidence.length ? { summary: this.resolveMaterialEvidence(materialEvidence, meeting) } : {};
+    const occurrenceFields = occurrence ? { occurrence_section_id: occurrence.sectionId, recurrence_occurrence_id: occurrence.occurrenceId } : {};
     const pending = summaries.find((review) => review.frontmatter.status === "pending");
     if (pending) {
       const merged = [...new Set([...idList(pending.frontmatter.source_ids), ...sourceIds])];
-      await reviseReviewItem(ctx, run, pending, { proposed: { summary }, confidence, body, sourceIds: merged, fields: { draft_key: draft.draftKey, captured_at: draft.capturedAt } });
+      await reviseReviewItem(ctx, run, pending, { proposed: { summary }, confidence, body, sourceIds: merged, evidence, fields: { draft_key: draft.draftKey, captured_at: draft.capturedAt, ...occurrenceFields } });
       return pending.frontmatter.id;
     }
     const review = await proposeReviewItem(ctx, run, {
       role: roles.summary, reviewType: summaryReviewType, title, target: { type: "meeting", id: meeting.frontmatter.id },
-      proposed: { summary }, confidence, body, sourceIds, origin: "agent-extracted",
-      fields: { source_meeting_id: meeting.frontmatter.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, ...inheritContextLinks(meeting) }
+      proposed: { summary }, confidence, body, sourceIds, evidence, origin: "agent-extracted",
+      fields: { source_meeting_id: meeting.frontmatter.id, draft_key: draft.draftKey, captured_at: draft.capturedAt, ...occurrenceFields, ...inheritContextLinks(meeting) }
     });
     return review.frontmatter.id;
+  }
+
+  private resolveMaterialEvidence(evidence: MaterialEvidence[], meeting: LifeOSObject): EvidenceEntry[] {
+    const sources = this.sourcesFor(meeting, idList(meeting.frontmatter.source_ids));
+    return evidence.map((entry) => {
+      const source = sources.find((candidate) => [candidate.frontmatter.id, candidate.frontmatter.title, candidate.frontmatter.url, candidate.frontmatter.external_id].includes(entry.source));
+      return { source_ref: entry.source, ...(source ? { source_id: source.frontmatter.id } : {}), locator: entry.locator, ...(entry.quote ? { quote: entry.quote } : {}) };
+    });
+  }
+
+  private async updateMaterialsBlock(meeting: LifeOSObject, occurrence: EnrichmentOccurrenceTarget, now: string) {
+    const note = liveMeetingNote(meeting.frontmatter.id, this.ctx.index.all());
+    if (!note) throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} has no Recurring Meeting Note`]);
+    const sections = Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    if (!sections.some((section) => section.section_id === occurrence.sectionId && section.meeting_id === meeting.frontmatter.id)) {
+      throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} does not resolve to meeting ${meeting.frontmatter.id}`]);
+    }
+    const sources = this.sourcesFor(meeting, idList(meeting.frontmatter.source_ids));
+    const body = withOccurrenceMaterials(note.body, sections, occurrence.sectionId, sources);
+    if (body !== note.body) await this.ctx.update(note, {}, { expectedHash: note.contentHash, now, body });
   }
 
   private reviewsFor(meetingId: string) {
@@ -283,6 +385,42 @@ export class MeetingMaterialModule {
     const ids = new Set([...listed, ...idList(note?.frontmatter.source_ids)]);
     return this.ctx.index.all().filter((object) => object.frontmatter.type === "source" && isLive(object) && (object.frontmatter.meeting_id === meeting.frontmatter.id || ids.has(object.frontmatter.id)));
   }
+}
+
+const materialsStart = (sectionId: string) => `<!-- lifeos:materials:start ${sectionId} -->`;
+const materialsEnd = (sectionId: string) => `<!-- lifeos:materials:end ${sectionId} -->`;
+
+/** Replaces only one occurrence's app-managed Materials block; all user prose and neighbouring sections survive byte-for-byte. */
+export function withOccurrenceMaterials(body: string, sections: Array<Record<string, unknown>>, sectionId: string, sources: LifeOSObject[]) {
+  const startMarker = materialsStart(sectionId);
+  const endMarker = materialsEnd(sectionId);
+  const rows = sources.map((source) => {
+    const title = String(source.frontmatter.title).replace(/[\[\]]/g, "");
+    const url = typeof source.frontmatter.url === "string" ? source.frontmatter.url : undefined;
+    const details = [
+      typeof source.frontmatter.retrieved_at === "string" ? `retrieved ${source.frontmatter.retrieved_at}` : undefined,
+      typeof source.frontmatter.provider_revision === "string" ? `provider revision ${source.frontmatter.provider_revision}` : undefined
+    ].filter(Boolean);
+    return `- ${url ? `[${title}](${url})` : title}${details.length ? ` — ${details.join(", ")}` : ""}`;
+  });
+  const block = [startMarker, "", "### Materials", "", ...(rows.length ? rows : ["- No linked materials." ]), "", endMarker].join("\n");
+  const existingStart = body.indexOf(startMarker);
+  const existingEnd = existingStart < 0 ? -1 : body.indexOf(endMarker, existingStart + startMarker.length);
+  if (existingStart >= 0 && existingEnd >= 0) return `${body.slice(0, existingStart)}${block}${body.slice(existingEnd + endMarker.length)}`;
+
+  const anchor = `<a id="${sectionId}"></a>`;
+  const anchorAt = body.indexOf(anchor);
+  if (anchorAt < 0) throw new Error(`Occurrence section anchor is missing: ${sectionId}`);
+  const laterAnchors = sections
+    .map((section) => String(section.section_id))
+    .filter((candidate) => candidate !== sectionId)
+    .map((candidate) => body.indexOf(`<a id="${candidate}"></a>`, anchorAt + anchor.length))
+    .filter((offset) => offset >= 0);
+  const nextAnchor = laterAnchors.length ? Math.min(...laterAnchors) : -1;
+  const nextHeading = nextAnchor < 0 ? body.length : Math.max(0, body.lastIndexOf("\n## ", nextAnchor) + 1);
+  const section = body.slice(0, nextHeading).trimEnd();
+  const after = body.slice(nextHeading);
+  return `${section}\n\n${block}${after ? `\n\n${after}` : ""}`;
 }
 
 /**
@@ -339,6 +477,14 @@ export async function acceptSummary(ctx: AppContext, review: LifeOSObject) {
   if (meeting.frontmatter.deleted_at) throw new Error("The meeting for this summary was deleted");
   // ADR 0010, #63: restricted since the summary was raised (the meeting or its note); nothing is written.
   if (isMeetingRestricted(meeting, ctx.index.all())) throw new Error("This meeting is now restricted, so its summary cannot be accepted");
+  const sectionId = typeof review.frontmatter.occurrence_section_id === "string" ? review.frontmatter.occurrence_section_id : undefined;
+  const occurrenceId = typeof review.frontmatter.recurrence_occurrence_id === "string" ? review.frontmatter.recurrence_occurrence_id : undefined;
+  if (sectionId || occurrenceId) {
+    const note = liveMeetingNote(meetingId, ctx.index.all());
+    const sections = Array.isArray(note?.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    const section = sections.find((candidate) => candidate.meeting_id === meetingId);
+    if (!section || section.section_id !== sectionId || section.occurrence_id !== occurrenceId) throw new Error("This summary no longer belongs to the resolved occurrence section");
+  }
   const summary = text((review.frontmatter.proposed_fields as Record<string, unknown> | undefined)?.summary);
   if (!summary) throw new Error("This summary Review Item has no summary text");
   const now = new Date().toISOString();

@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import type { CalendarModule } from "./calendar.js";
 import { markdownFileName, type AppContext } from "./context.js";
-import type { MeetingsModule } from "./meetings.js";
+import { occurrenceSectionId, recurrenceOccurrenceId, type MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, InboxStore } from "./ports.js";
 import { personEmails } from "./people.js";
 import { isLive, isRestricted, liveMeetingNote } from "./support.js";
@@ -123,6 +123,12 @@ export class EnrichmentModule {
         ...(event.calendarId ? { calendar_id: event.calendarId } : {}),
         title: event.title, starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone,
         attendee_emails: attendeeEmails([...(event.attendeeDetails ?? []), ...event.attendees]).filter((email) => !hiddenEmails.has(email.toLowerCase())),
+        ...(event.seriesId && event.originalOccurrenceStartsAt ? {
+          recurrence_occurrence_id: recurrenceOccurrenceId(ctx.calendar.provider ?? "calendar", event),
+          occurrence_section_id: occurrenceSectionId(event.originalOccurrenceStartsAt),
+          occurrence_section_exists: Boolean(note && Array.isArray(note.frontmatter.occurrence_sections) && note.frontmatter.occurrence_sections.some((section: unknown) => typeof section === "object" && section !== null && (section as Record<string, unknown>).meeting_id === meeting?.frontmatter.id)),
+          optional_material: ["drive-doc"]
+        } : {}),
         ...(note ? { note_path: note.relativePath } : {}),
         existing_sources: sources.map((source) => ({
           id: source.frontmatter.id, source_type: String(source.frontmatter.source_type), path: source.relativePath,
@@ -206,7 +212,8 @@ export class EnrichmentModule {
 function workOrderBody(count: number) {
   return `# Enrich last 48h\n\n${count} ${count === 1 ? "meeting" : "meetings"} to enrich. For each entry in \`meetings\`:\n\n` +
     "- Fetch only what `missing_material` lists: Meet transcripts and recordings from the calendar event and Drive, Gong calls from the Gong connector, Gong summary emails from Gmail.\n" +
-    "- Write one `meeting-material` Inbox Draft per meeting to `_inbox/drafts/`, keyed by `calendar_event_id`.\n" +
+    "- For recurring meetings, read only the exact `occurrence_section_id`; never read another section in the shared Note.\n" +
+    "- Write one occurrence-specific `meeting-material` Inbox Draft per meeting to `_inbox/drafts/`, copying its occurrence identifiers exactly.\n" +
     "- Never read files marked `sensitivity: restricted`.\n" +
     "- When done, move this file to `_inbox/processed/`.\n";
 }
