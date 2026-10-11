@@ -76,6 +76,35 @@ describe("recurring meeting notes (#147)", () => {
     expect(copy.note?.body).toBe("plain body\n");
   });
 
+  it("replays an interrupted predecessor link repair without duplicating work", async () => {
+    const before = event({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const after = event({ externalId: "occurrence-after-split", seriesId: "series-b", previousSeriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const { app, store } = await setup([before, after]);
+    const oldSeries = await app.createMeetingFromEvent(before.externalId);
+    const newSeries = await app.createMeetingFromEvent(after.externalId);
+    const successor = app.object(newSeries.note!.frontmatter.id);
+    await store.write({
+      relativePath: successor.relativePath,
+      expectedHash: successor.contentHash,
+      frontmatter: { ...successor.frontmatter, revision: successor.frontmatter.revision + 1, previous_series_note_id: undefined },
+      body: successor.body
+    });
+    const operationId = uuidV7();
+    await store.prepareOperation("link-recurring-series", {
+      seriesId: oldSeries.note!.frontmatter.recurrence_series_id,
+      noteId: oldSeries.note!.frontmatter.id,
+      now: "2026-10-11T10:00:00.000Z"
+    }, operationId);
+    await app.rebuildIndex();
+
+    await app.recoverOperations();
+    await app.recoverOperations();
+    await app.rebuildIndex();
+
+    expect(app.object(newSeries.note!.frontmatter.id).frontmatter.previous_series_note_id).toBe(oldSeries.note!.frontmatter.id);
+    expect((await store.incompleteOperations()).find((operation) => operation.id === operationId)).toBeUndefined();
+  });
+
   it("recovers from the captured occurrence and resolves additive legacy redirects", async () => {
     const recurring = event({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
     const { app, store } = await setup([]);

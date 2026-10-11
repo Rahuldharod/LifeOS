@@ -141,6 +141,7 @@ export class GoogleCalendarConnector implements CalendarConnector {
           timezone: String(start.timeZone ?? end.timeZone ?? calendar.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
           isAllDay: allDay,
           ...(typeof event.recurringEventId === "string" ? { seriesId: event.recurringEventId } : {}),
+          ...(typeof event.recurringEventId === "string" && event.privateCopy !== true && typeof event.iCalUID === "string" ? { seriesUid: event.iCalUID } : {}),
           ...(originalRaw ? { originalOccurrenceStartsAt: new Date(originalRaw).toISOString() } : {}),
           ...(typeof previousSeriesId === "string" ? { previousSeriesId } : {}),
           status: event.status === "cancelled" ? "cancelled" as const : "confirmed" as const,
@@ -155,7 +156,16 @@ export class GoogleCalendarConnector implements CalendarConnector {
         };
       });
     }));
-    return eventGroups.flat().sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
+    const events = eventGroups.flat().sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
+    // Google implements "this and following" by trimming one recurring event and inserting another.
+    // The new recurringEventId changes, while a retained iCalUID gives a provider-native continuity signal.
+    const lastSeriesByUid = new Map<string, string>();
+    return events.map((event) => {
+      if (!event.seriesId || !event.seriesUid) return event;
+      const prior = lastSeriesByUid.get(event.seriesUid);
+      lastSeriesByUid.set(event.seriesUid, event.seriesId);
+      return prior && prior !== event.seriesId && !event.previousSeriesId ? { ...event, previousSeriesId: prior } : event;
+    });
   }
 
   private ref(suffix: string) { return `google:${this.accountKey}:${suffix}`; }
