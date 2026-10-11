@@ -4,7 +4,7 @@ import { markdownFileName, type AppContext } from "./context.js";
 import type { MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, InboxStore } from "./ports.js";
 import { personEmails } from "./people.js";
-import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote } from "./support.js";
+import { isLive, isRestricted, liveMeetingNote } from "./support.js";
 
 /**
  * Enrichment Work Orders (PRD "Enrichment Work Orders", ADR 0008): "Enrich last 48h" lists every ended
@@ -103,13 +103,12 @@ export class EnrichmentModule {
 
     // Emails of restricted People never appear in a Work Order (ADR 0010, #63).
     const objects = ctx.index.all();
-    const meetingNotes = objects.filter((object) => object.frontmatter.type === "meeting-note");
     const hiddenEmails = new Set(objects.filter((object) => object.frontmatter.type === "person" && isRestricted(object)).flatMap((person) => personEmails(person)));
     let restrictedExcluded = 0;
     const selected: Array<{ event: CalendarEvent; meeting?: LifeOSObject; entry: Record<string, unknown>; summary: EnrichmentEntry }> = [];
     for (const event of this.meetings.withNoteLinks(ended)) {
       const meeting = event.meetingId ? ctx.index.get(event.meetingId) : undefined;
-      if (isMeetingRestricted(meeting, meetingNotes)) { restrictedExcluded += 1; continue; }
+      if (this.meetings.isEventRestricted(event)) { restrictedExcluded += 1; continue; }
       if (meeting && ["enriched", "gave_up"].includes(enrichmentStateOf(meeting))) continue;
       const note = event.noteId ? ctx.index.get(event.noteId) : undefined;
       // A restricted Source still covers its material (so it is not fetched again); it is just never named.

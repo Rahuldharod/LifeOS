@@ -21,7 +21,8 @@ export function isMeetingRestricted(meeting: WithFrontmatter | undefined, object
   for (const object of objects) {
     // Not isLive on purpose: an archived restricted note still restricts its meeting (fails closed for privacy, ADR 0010).
     const meetingIds = Array.isArray(object.frontmatter.meeting_ids) ? object.frontmatter.meeting_ids : [];
-    if (object.frontmatter.type === "meeting-note" && (object.frontmatter.meeting_id === meeting.frontmatter.id || meetingIds.includes(meeting.frontmatter.id)) && !object.frontmatter.deleted_at && isRestricted(object)) return true;
+    const sameSeries = typeof meeting.frontmatter.recurrence_series_id === "string" && meeting.frontmatter.recurrence_series_id === object.frontmatter.recurrence_series_id;
+    if (object.frontmatter.type === "meeting-note" && (object.frontmatter.meeting_id === meeting.frontmatter.id || meetingIds.includes(meeting.frontmatter.id) || sameSeries) && !object.frontmatter.deleted_at && isRestricted(object)) return true;
   }
   return false;
 }

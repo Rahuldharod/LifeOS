@@ -164,9 +164,7 @@ describe("Enrich last 48h Work Order", () => {
     const secondEvent = event("series-second", 3, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(3) });
     const { root, application } = await vault([firstEvent, secondEvent]);
     const first = await application.createMeetingFromEvent(firstEvent.externalId, range.from, range.to, "work", "First occurrence\n");
-    const second = await application.createMeetingFromEvent(secondEvent.externalId, range.from, range.to, "work", "Second occurrence\n");
-    expect(first.note?.frontmatter.id).toBe(second.note?.frontmatter.id);
-    await application.setSensitivity(first.note!.frontmatter.id, "restricted", second.note!.contentHash);
+    await application.setSensitivity(first.note!.frontmatter.id, "restricted", first.note!.contentHash);
 
     const result = await application.requestEnrichment({ now });
 
@@ -175,7 +173,7 @@ describe("Enrich last 48h Work Order", () => {
     expect(result.workOrder).toBeUndefined();
     expect(await requestFiles(root)).toEqual([]);
     expect(application.object(first.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
-    expect(application.object(second.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
+    expect((await application.listObjects()).filter((object) => object.frontmatter.type === "meeting")).toHaveLength(1);
   });
 
   it("never lists the email of a restricted person (#63)", async () => {

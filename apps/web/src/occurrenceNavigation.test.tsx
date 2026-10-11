@@ -17,6 +17,19 @@ describe("recurring occurrence navigation", () => {
     expect(document.getElementById("occurrence-5")?.getAttribute("aria-label")).toBe("Linked occurrence");
   });
 
+  it("renders distinct shared-note anchors in stored newest-first order", () => {
+    const host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    const markdown = '## Weekly — 2026-10-12\n<a id="occurrence-12"></a>\n\nNewer user notes\n\n## Weekly — 2026-10-05\n<a id="occurrence-5"></a>\n\nOlder user notes';
+    act(() => root!.render(<OccurrenceAnchoredMarkdown markdown={markdown} render={(chunk, key) => <p key={key}>{chunk}</p>} />));
+
+    const newer = document.getElementById("occurrence-12")!;
+    const older = document.getElementById("occurrence-5")!;
+    expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.body.textContent).toContain("Newer user notes");
+    expect(document.body.textContent).toContain("Older user notes");
+  });
+
   it("binds and scrolls the matching Visual-mode heading", () => {
     const host = document.body.appendChild(document.createElement("div"));
     const heading = host.appendChild(document.createElement("h2"));
