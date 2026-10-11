@@ -1,15 +1,22 @@
 // Settings (#68): connections and preferences, moved out of the App component. The synced settings only
 // this page uses are loaded and saved here; App passes in what other pages share (timezone, calendars, connections).
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api.js";
 import type { CalendarOption, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, TodaySettings, Weekday } from "@lifeos/contracts";
 import { ConnectionsNotice, type ConnectionsState } from "./connections.js";
-import { PageHeader } from "./pageParts.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
 import { BackupFolderCard } from "./BackupFolderCard.js";
 import { internalDomainsCardId, selfEmailsCardId } from "./SelfEmailWarning.js";
 import { SettingsDesignPrototype } from "./SettingsDesignPrototype.js";
+import { createSettingsEditorGuard, SettingsWorkspace, useSettingsCardGuard, type SettingsEditorGuard, type SettingsSection } from "./SettingsWorkspace.js";
+
+export type SettingsReferenceData = {
+  projects?: string[];
+  clients?: string[];
+  products?: string[];
+  people?: string[];
+};
 
 type Props = {
   displayTimeZone: string; onDisplayTimeZoneChange: (zone: string) => void;
@@ -18,6 +25,10 @@ type Props = {
   onSaveGoogleSecrets: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean>;
   /** Reloads App's shared data after a save that changes other pages (labels, Today). */
   onChanged: () => Promise<void>;
+  selectedCardId?: string;
+  guard?: SettingsEditorGuard;
+  onOpenCard?: (cardId: string) => void;
+  referenceData?: SettingsReferenceData;
 };
 
 const availableTimeZones = (() => {
@@ -25,13 +36,18 @@ const availableTimeZones = (() => {
   return supportedValuesOf ? supportedValuesOf("timeZone") : ["Europe/Paris", "UTC", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
 })();
 
-export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged }: Props) {
+export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged, selectedCardId, guard, onOpenCard, referenceData = {} }: Props) {
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [internalDomains, setInternalDomains] = useState<InternalDomains>();
   const [selfEmails, setSelfEmails] = useState<SelfEmails>();
   const [focusSettings, setFocusSettings] = useState<FocusSettings>();
+  const [loadFailed, setLoadFailed] = useState(false);
+  const fallbackGuard = useRef(createSettingsEditorGuard());
 
-  const loadInternalDomains = async () => setInternalDomains(await api("GET /api/v1/settings/internal-domains").catch(() => undefined));
+  const loadInternalDomains = async () => {
+    try { setInternalDomains(await api("GET /api/v1/settings/internal-domains")); }
+    catch { setLoadFailed(true); }
+  };
 
   /** #39: saves the synced internal-domains setting; resolves to an error message, or undefined on success. */
   const saveInternalDomains = async (domains: string[]): Promise<string | undefined> => {
@@ -40,12 +56,15 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
       await onChanged();
       return undefined;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadInternalDomains(); return "The internal domains were changed on another device. The latest version is loaded; make your change again."; }
+      if (error instanceof ApiError && error.status === 409) return "The internal domains changed on another device. Your input is still here; reload Settings before trying again.";
       return error instanceof Error ? error.message : "Could not save internal domains";
     }
   };
 
-  const loadSelfEmails = async () => setSelfEmails(await api("GET /api/v1/settings/self-emails").catch(() => undefined));
+  const loadSelfEmails = async () => {
+    try { setSelfEmails(await api("GET /api/v1/settings/self-emails")); }
+    catch { setLoadFailed(true); }
+  };
 
   /** #54: saves the synced self-email setting; resolves to an error message, or undefined on success. */
   const saveSelfEmails = async (emails: string[]): Promise<string | undefined> => {
@@ -55,12 +74,15 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
       await onChanged();
       return undefined;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadSelfEmails(); return "Your email addresses were changed on another device. The latest version is loaded; make your change again."; }
+      if (error instanceof ApiError && error.status === 409) return "Your email addresses changed on another device. Your input is still here; reload Settings before trying again.";
       return error instanceof Error ? error.message : "Could not save your email addresses";
     }
   };
 
-  const loadTodaySettings = async () => setTodaySettings(await api("GET /api/v1/settings/today").catch(() => undefined));
+  const loadTodaySettings = async () => {
+    try { setTodaySettings(await api("GET /api/v1/settings/today")); }
+    catch { setLoadFailed(true); }
+  };
   /** #48: saves the synced Today settings; resolves to an error message, or undefined on success. */
   const saveTodaySettings = async (changes: Omit<TodaySettings, "contentHash">): Promise<string | undefined> => {
     try {
@@ -68,12 +90,15 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
       await onChanged();
       return undefined;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadTodaySettings(); return "The Today settings were changed on another device. The latest version is loaded; make your change again."; }
+      if (error instanceof ApiError && error.status === 409) return "The Today settings changed on another device. Your input is still here; reload Settings before trying again.";
       return error instanceof Error ? error.message : "Could not save the Today settings";
     }
   };
 
-  const loadFocusSettings = async () => setFocusSettings(await api("GET /api/v1/settings/daily-focus").catch(() => undefined));
+  const loadFocusSettings = async () => {
+    try { setFocusSettings(await api("GET /api/v1/settings/daily-focus")); }
+    catch { setLoadFailed(true); }
+  };
   /** #47: saves the synced max must-dos setting; resolves to an error message, or undefined on success. */
   const saveFocusSettings = async (maxMustDos: number): Promise<string | undefined> => {
     try {
@@ -81,17 +106,43 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
       await onChanged();
       return undefined;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) { await loadFocusSettings(); return "The setting was changed on another device. The latest version is loaded; make your change again."; }
+      if (error instanceof ApiError && error.status === 409) return "This setting changed on another device. Your input is still here; reload Settings before trying again.";
       return error instanceof Error ? error.message : "Could not save the setting";
     }
   };
 
   // Opening Settings reloads every setting it shows, since another device may have changed them.
-  useEffect(() => { void onLoadCalendars(); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); }, []);
+  useEffect(() => { void onLoadCalendars().catch(() => setLoadFailed(true)); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); }, []);
 
   if ((import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV && new URLSearchParams(window.location.search).has("variant")) return <SettingsDesignPrototype />;
 
-  return <><PageHeader eyebrow="SETTINGS / CONNECTIONS" title="Connections and preferences" description="Credentials are write-only from this screen and stored in macOS Keychain, never Markdown or Git." /><article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => onDisplayTimeZoneChange(event.target.value)}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article><CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} onSave={onSaveCalendarPrefs} /><SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /><InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /><MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /><TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /><BackupFolderCard disabled={readOnly} /><ConnectionsNotice state={connections} busy={busy} onRetry={() => void onRetryConnections()} /><div className="settings-grid"><GoogleSecretCard provider="calendar" title="Google Calendar" status={connections?.settings?.calendar} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /><GoogleSecretCard provider="drive" title="Google Drive" status={connections?.settings?.drive} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /></div><article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article></>;
+  const connectionStatus = (state?: { configured: boolean; connected: boolean }) => state?.connected ? "Connected" : state?.configured ? "Configured" : "Not connected";
+  const sections: SettingsSection[] = [
+    { id: "my-lifeos", group: "My LifeOS", label: "Preferences", cards: [
+      { id: "settings-display-timezone", label: "Display timezone", safeStatus: displayTimeZone, content: <article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => onDisplayTimeZoneChange(event.target.value)}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article> },
+      { id: "settings-max-must-dos", label: "Max must-dos", safeStatus: focusSettings ? String(focusSettings.maxMustDos) : "Loading", content: <MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /> },
+      { id: "settings-today", label: "Today", safeStatus: todaySettings ? `${todaySettings.briefTime} ${todaySettings.briefTimeZone}` : "Loading", content: <TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /> }
+    ] },
+    { id: "identity", group: "My LifeOS", label: "Identity", cards: [
+      { id: selfEmailsCardId, label: "My email addresses", content: <SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /> },
+      { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> }
+    ] },
+    { id: "calendars", group: "Connections", label: "Calendars", cards: [{ id: "settings-calendar-list", label: "Calendars in the Calendar view", safeStatus: calendarCatalogLoaded ? `${calendarCatalog.length} available` : "Loading", content: <CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} disabled={readOnly} onSave={onSaveCalendarPrefs} /> }] },
+    { id: "google", group: "Connections", label: "Google", cards: [
+      { id: "settings-connections-status", label: "Connection status", content: <ConnectionsNotice state={connections} busy={busy} onRetry={() => void onRetryConnections()} /> },
+      { id: "settings-google-calendar", label: "Google Calendar", safeStatus: connectionStatus(connections?.settings?.calendar), content: <GoogleSecretCard provider="calendar" title="Google Calendar" status={connections?.settings?.calendar} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /> },
+      { id: "settings-google-drive", label: "Google Drive", safeStatus: connectionStatus(connections?.settings?.drive), content: <GoogleSecretCard provider="drive" title="Google Drive" status={connections?.settings?.drive} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /> },
+      { id: "settings-credentials-security", label: "Credential security", content: <article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article> }
+    ] },
+    { id: "backups", group: "Data & devices", label: "Backups", cards: [{ id: "settings-backup-folder", label: "Off-Drive backup folder", content: <BackupFolderCard disabled={readOnly} /> }] },
+    ...(["projects", "clients", "products", "people"] as const).map((kind): SettingsSection => ({ id: `reference-${kind}`, group: "Reference data", label: kind[0]!.toUpperCase() + kind.slice(1), cards: [{ id: `settings-reference-${kind}`, label: kind[0]!.toUpperCase() + kind.slice(1), safeNames: referenceData[kind] ?? [], content: <ReferenceDataCard label={kind} names={referenceData[kind] ?? []} /> }] }))
+  ];
+
+  return <SettingsWorkspace sections={sections} selectedCardId={selectedCardId} loading={!loadFailed && (!todaySettings || !internalDomains || !selfEmails || !focusSettings || !calendarCatalogLoaded)} failure={loadFailed ? "Settings could not be loaded. Leave this page and try again." : undefined} readOnly={readOnly} guard={guard ?? fallbackGuard.current} onOpenCard={onOpenCard} />;
+}
+
+function ReferenceDataCard({ label, names }: { label: string; names: string[] }) {
+  return <article><span>REFERENCE DATA</span><h3>{label[0]!.toUpperCase() + label.slice(1)}</h3>{names.length ? <ul className="settings-reference-list">{names.map((name, index) => <li key={`${name}-${index}`}>{name}</li>)}</ul> : <p className="muted">No {label} yet.</p>}</article>;
 }
 
 /** #47: the synced max must-dos setting: how many items Today's Top 3 shows. */
@@ -100,15 +151,18 @@ function MaxMustDosCard({ setting, disabled, onSave }: { setting?: { maxMustDos:
   const [status, setStatus] = useState<SaveState>();
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (setting) setValue(setting.maxMustDos); }, [setting?.maxMustDos]);
-  const save = async () => {
+  const dirty = Boolean(setting) && value !== setting!.maxMustDos;
+  const save = async (): Promise<boolean> => {
     setSaving(true);
     const error = await onSave(value);
     setSaving(false);
     setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Today's Top 3 now shows at most this many must-dos." });
+    return !error;
   };
+  useSettingsCardGuard("settings-max-must-dos", { dirty, save, discard: () => { if (setting) setValue(setting.maxMustDos); setStatus(undefined); } });
   return <article className="internal-domains-setting"><span>TODAY</span><h3>Max must-dos</h3>
     <p className="muted">How many items Today's Top 3 shows, whether from the morning brief or the priority rule. Pinned tasks count towards it.</p>
-    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><select aria-label="Max must-dos" value={value} disabled={disabled} onChange={(event) => { setValue(Number(event.target.value)); setStatus(undefined); }}>{[1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select><button type="button" disabled={disabled || saving || value === setting.maxMustDos} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><select aria-label="Max must-dos" value={value} disabled={disabled} onChange={(event) => { setValue(Number(event.target.value)); setStatus(undefined); }}>{[1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div>}
     <SaveStatus status={status} />
   </article>;
 }
@@ -123,12 +177,16 @@ function TodaySettingsCard({ setting, disabled, timeZones, onSave }: { setting?:
   const [status, setStatus] = useState<SaveState>();
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (setting) { setThreshold(String(setting.meetingHoursThreshold)); setTime(setting.briefTime); setZone(setting.briefTimeZone); setDays(setting.briefDays); } }, [setting]);
-  const save = async () => {
+  const dirty = Boolean(setting) && (threshold !== String(setting!.meetingHoursThreshold) || time !== setting!.briefTime || zone !== setting!.briefTimeZone || days.join("|") !== setting!.briefDays.join("|"));
+  const save = async (): Promise<boolean> => {
+    if (!days.length || !threshold.trim() || !time) { setStatus({ kind: "error", text: "Complete the required Today settings before saving." }); return false; }
     setSaving(true);
     const error = await onSave({ meetingHoursThreshold: Number(threshold), briefTime: time, briefTimeZone: zone, briefDays: days });
     setSaving(false);
     setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved." });
+    return !error;
   };
+  useSettingsCardGuard("settings-today", { dirty, save, discard: () => { if (setting) { setThreshold(String(setting.meetingHoursThreshold)); setTime(setting.briefTime); setZone(setting.briefTimeZone); setDays(setting.briefDays); } setStatus(undefined); } });
   const edit = <T,>(set: (value: T) => void) => (value: T) => { set(value); setStatus(undefined); };
   return <article className="today-setting"><span>TODAY</span><h3>Meetings and morning brief</h3>
     {!setting ? <p className="muted">Loading…</p> : <>
@@ -137,7 +195,7 @@ function TodaySettingsCard({ setting, disabled, timeZones, onSave }: { setting?:
       <label>Brief time <input type="time" value={time} disabled={disabled} onChange={(event) => edit(setTime)(event.target.value)} /></label>
       <label>Brief time zone <select value={zone} disabled={disabled} onChange={(event) => edit(setZone)(event.target.value)}>{[...new Set([zone, ...timeZones])].map((option) => <option key={option}>{option}</option>)}</select></label>
       <fieldset disabled={disabled}><legend>Brief days</legend>{weekdayNames.map(([day, name]) => <label key={day}><input type="checkbox" checked={days.includes(day)} onChange={(event) => edit(setDays)(event.target.checked ? [...days, day] : days.filter((value) => value !== day))} /> {name}</label>)}</fieldset>
-      <button type="button" disabled={disabled || saving || !days.length || !threshold.trim() || !time} onClick={save}>{saving ? "Saving…" : "Save"}</button>
+      <button type="button" disabled={disabled || saving || !dirty || !days.length || !threshold.trim() || !time} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
       {!days.length && <p className="calendar-error" role="alert">Choose at least one day.</p>}
     </>}
     <SaveStatus status={status} />
@@ -153,16 +211,18 @@ function InternalDomainsCard({ setting, disabled, onSave }: { setting?: { domain
   useEffect(() => setText(saved), [saved]);
   const domains = parseDomains(text);
   const dirty = domains.join("|") !== (setting?.domains ?? []).join("|");
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
+    if (setting && setting.domains.length > 0 && !domains.length) { setStatus({ kind: "error", text: "Enter at least one domain." }); return false; }
     setSaving(true);
     const error = await onSave(domains);
     setSaving(false);
     setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. People labels now use these domains." });
+    return !error;
   };
-  // #76: Today and System Health link here; tabIndex lets the link move keyboard focus to the card.
-  return <article className="internal-domains-setting" id={internalDomainsCardId} tabIndex={-1}><span>PEOPLE</span><h3>Internal domains</h3>
+  useSettingsCardGuard(internalDomainsCardId, { dirty, save, discard: () => { setText(saved); setStatus(undefined); } });
+  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>Internal domains</h3>
     <p className="muted">Email domains of your own organisations, separated by commas. Anyone with addresses only on other domains is shown as "Name<span className="ext-suffix"> - ext</span>". You can override this on each person.</p>
-    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Internal domains" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="example.com, example.org" /><button type="button" disabled={disabled || saving || !dirty || !domains.length} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Internal domains" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="example.com, example.org" /><button type="button" disabled={disabled || saving || !dirty || !domains.length} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div>}
     {setting && !setting.domains.length && !text.trim() && <p className="muted" role="status">Not set yet: nobody is marked External automatically.</p>}
     {setting && setting.domains.length > 0 && !domains.length && <p className="calendar-error" role="alert">Enter at least one domain.</p>}
     <SaveStatus status={status} />
@@ -178,22 +238,23 @@ function SelfEmailsCard({ setting, disabled, onSave }: { setting?: { emails: str
   useEffect(() => setText(saved), [saved]);
   const emails = parseEmails(text);
   const dirty = emails.map((email) => email.toLowerCase()).join("|") !== (setting?.emails ?? []).join("|");
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
     setSaving(true);
     const error = await onSave(emails);
     setSaving(false);
     setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: emails.length ? "Saved. Attendees with these addresses are now you." : "Saved. No address is matched to you." });
+    return !error;
   };
-  // #76: Today and System Health link here; tabIndex lets the link move keyboard focus to the card.
-  return <article className="internal-domains-setting" id={selfEmailsCardId} tabIndex={-1}><span>PEOPLE</span><h3>My email addresses</h3>
+  useSettingsCardGuard(selfEmailsCardId, { dirty, save, discard: () => { setText(saved); setStatus(undefined); } });
+  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>My email addresses</h3>
     <p className="muted">Every address you use, separated by commas. Calendar attendees with one of these addresses are linked to you instead of creating a new person.</p>
-    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={save}>{saving ? "Saving…" : "Save"}</button></div>}
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div>}
     {setting && !setting.emails.length && !status && <p className="muted" role="status">Not set yet: no attendee is recognised as you by email.</p>}
     <SaveStatus status={status} />
   </article>;
 }
 
-function CalendarListCard({ catalog, loaded, prefs, onSave }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; onSave: (prefs: CalendarPrefs) => Promise<string | undefined> }) {
+function CalendarListCard({ catalog, loaded, prefs, disabled: readOnly, onSave }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; disabled: boolean; onSave: (prefs: CalendarPrefs) => Promise<string | undefined> }) {
   // Edits stay in this draft until Save, so a half-finished change (for example, nothing ticked) is never stored.
   const [disabled, setDisabled] = useState(prefs.disabledCalendarIds);
   const [defaultId, setDefaultId] = useState(prefs.defaultCalendarId);
@@ -208,37 +269,40 @@ function CalendarListCard({ catalog, loaded, prefs, onSave }: { catalog: Calenda
   const defaultOff = Boolean(defaultId) && disabled.includes(defaultId!);
   const edit = <T,>(setter: (value: T) => void, value: T) => { setter(value); setStatus(undefined); };
 
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
+    if (noneSelected) { setStatus({ kind: "error", text: "Select at least one calendar before saving." }); return false; }
     setSaving(true);
     const error = await onSave({ ...prefs, disabledCalendarIds: disabled, defaultCalendarId: defaultId });
     setSaving(false);
     setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Your other devices will pick this up when the data folder syncs." });
+    return !error;
   };
+  useSettingsCardGuard("settings-calendar-list", { dirty, save, discard: () => { setDisabled(prefs.disabledCalendarIds); setDefaultId(prefs.defaultCalendarId); setStatus(undefined); } });
 
   return <article className="calendar-list-setting"><span>CALENDARS</span><h3>Calendars in the Calendar view</h3>
     <p className="muted">Tick the calendars to include. Hover a calendar to make it the default; the Calendar view opens on it.</p>
     {!loaded && <p className="muted">Loading calendars…</p>}
     {loaded && !catalog.length && <p className="muted">No calendars available. Connect Google Calendar to choose from your calendars.</p>}
     {catalog.length > 0 && <div className="calendar-toolbar">
-      <button type="button" onClick={() => edit(setDisabled, allSelected ? catalog.map((calendar) => calendar.id) : [])}>{allSelected ? "Unselect all" : "Select all"}</button>
+      <button type="button" disabled={readOnly} onClick={() => edit(setDisabled, allSelected ? catalog.map((calendar) => calendar.id) : [])}>{allSelected ? "Unselect all" : "Select all"}</button>
       <small className="muted">{selectedCount} of {catalog.length} selected</small>
     </div>}
     {catalog.map((calendar) => {
       const enabled = !disabled.includes(calendar.id);
       const isDefault = defaultId === calendar.id;
       return <div className="calendar-row" key={calendar.id}>
-        <label><input type="checkbox" checked={enabled} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
+        <label><input type="checkbox" checked={enabled} disabled={readOnly} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
         {enabled && <span className="calendar-row-actions">
           {isDefault
-            ? <button type="button" onClick={() => edit(setDefaultId, undefined)}>Remove default</button>
-            : <button type="button" onClick={() => edit(setDefaultId, calendar.id)}>Set as default</button>}
+            ? <button type="button" disabled={readOnly} onClick={() => edit(setDefaultId, undefined)}>Remove default</button>
+            : <button type="button" disabled={readOnly} onClick={() => edit(setDefaultId, calendar.id)}>Set as default</button>}
         </span>}
       </div>;
     })}
     {noneSelected && <p className="calendar-error" role="alert">Select at least one calendar. You can't save with none selected.</p>}
     {defaultOff && !noneSelected && <p className="muted" role="status">The default calendar is unticked, so the Calendar view will open on All calendars.</p>}
     {catalog.length > 0 && <div className="calendar-save">
-      <button type="button" disabled={!dirty || noneSelected || saving} onClick={save}>{saving ? "Saving…" : "Save"}</button>
+      <button type="button" disabled={readOnly || !dirty || noneSelected || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
       {dirty && !status && !noneSelected && <small className="muted">Unsaved changes</small>}
       <SaveStatus status={status} />
     </div>}
@@ -249,11 +313,14 @@ function GoogleSecretCard({ provider, title, status, busy, onSave }: { provider:
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [saved, setSaved] = useState(false);
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
     setSaved(false);
     if (await onSave(provider, clientId, clientSecret)) {
       setClientId(""); setClientSecret(""); setSaved(true);
+      return true;
     }
+    return false;
   };
-  return <article className="secret-card"><span>{title.toUpperCase()}</span><h3>{status?.configured ? "Credentials configured" : "Credentials required"}</h3><p className="muted">{status?.connected ? "Connected" : provider === "calendar" ? "Configure here, then authorize from Calendar." : "Stored for the upcoming Drive source connector."}</p>{saved && <div className="inline-success">Saved securely in macOS Keychain.</div>}<div className="knowledge-form"><input value={clientId} onChange={(event) => { setSaved(false); setClientId(event.target.value); }} placeholder="OAuth client ID" autoComplete="off" /><input type="password" value={clientSecret} onChange={(event) => { setSaved(false); setClientSecret(event.target.value); }} placeholder={status?.configured ? "Enter a new secret to replace it" : "OAuth client secret"} autoComplete="new-password" /><button className="primary" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={save}>{busy ? "Saving…" : status?.configured ? "Replace credentials" : "Save to Keychain"}</button></div></article>;
+  useSettingsCardGuard(`settings-google-${provider}`, { dirty: Boolean(clientId || clientSecret), save, discard: () => { setClientId(""); setClientSecret(""); setSaved(false); } });
+  return <article className="secret-card"><span>{title.toUpperCase()}</span><h3>{status?.configured ? "Credentials configured" : "Credentials required"}</h3><p className="muted">{status?.connected ? "Connected" : provider === "calendar" ? "Configure here, then authorize from Calendar." : "Stored for the upcoming Drive source connector."}</p>{saved && <div className="inline-success">Saved securely in macOS Keychain.</div>}<div className="knowledge-form"><input value={clientId} onChange={(event) => { setSaved(false); setClientId(event.target.value); }} placeholder="OAuth client ID" autoComplete="off" /><input type="password" value={clientSecret} onChange={(event) => { setSaved(false); setClientSecret(event.target.value); }} placeholder={status?.configured ? "Enter a new secret to replace it" : "OAuth client secret"} autoComplete="new-password" /><button className="primary" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={() => void save()}>{busy ? "Saving…" : status?.configured ? "Replace credentials" : "Save to Keychain"}</button></div></article>;
 }
