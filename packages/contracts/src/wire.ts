@@ -37,6 +37,7 @@ export type Workspace = {
   reviews: LifeObject[];
   tasks: LifeObject[];
   noteSectionId?: string;
+  recurringMigration?: RecurringMigrationPreview;
   occurrences?: OccurrenceWorkspaceItem[];
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
@@ -48,6 +49,12 @@ export type OccurrenceWorkspaceItem = {
   reviews: LifeObject[];
   sources: LifeObject[];
   context: { people: LifeObject[] };
+};
+/** #153: a read-only, exact-identity migration plan. It changes no Markdown until confirmed. */
+export type RecurringMigrationPreview = {
+  seriesId?: string;
+  requiresConfirmation: boolean;
+  candidates: Array<{ noteId: string; meetingId: string; title: string; body: string; contentHash: string; occurrenceId: string; sectionId: string; originalStartsAt: string; startsAt: string }>;
 };
 export type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 export type EntityRollup = { entity: LifeObject; related: LifeObject[] };

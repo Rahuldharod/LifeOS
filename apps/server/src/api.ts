@@ -217,6 +217,12 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   });
   route(server, "GET /api/v1/meetings/from-event/:externalId", async (request) => application.meetingFromEvent(request.params.externalId));
   route(server, "GET /api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
+  route(server, "GET /api/v1/meetings/:id/recurring-migration", async (request) => application.recurringMigrationPreview(request.params.id));
+  route(server, "POST /api/v1/meetings/:id/recurring-migration", async (request, reply) => {
+    if (!request.body || typeof request.body.expectedHashes !== "object" || Array.isArray(request.body.expectedHashes)) return reply.status(400).send({ error: "expectedHashes are required to confirm a migration" });
+    if (!Object.values(request.body.expectedHashes).every((value) => typeof value === "string")) return reply.status(400).send({ error: "expectedHashes must map Note IDs to content hashes" });
+    return application.confirmRecurringMigration(request.params.id, request.body.expectedHashes);
+  });
   route(server, "PUT /api/v1/objects/:id/body", async (request) => application.updateBody(request.params.id, request.body.body, request.body.expectedHash));
   route(server, "POST /api/v1/objects/:id/assets", async (request) => {
     const object = application.object(request.params.id);
