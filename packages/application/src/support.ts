@@ -49,6 +49,27 @@ export function liveMeetingNote<T extends WithFrontmatter>(meetingId: string, ob
   return undefined;
 }
 
+/** Follows additive Meeting/Note migration redirects without mutating the legacy objects. */
+export function resolveObjectRedirect<T extends WithFrontmatter>(id: string, objects: Iterable<T>) {
+  const byId = new Map(Array.from(objects, (object) => [object.frontmatter.id, object]));
+  const first = byId.get(id);
+  if (!first) throw new Error(`Object not found: ${id}`);
+  const redirectedFrom: string[] = [];
+  const seen = new Set([id]);
+  let object = first;
+  while (true) {
+    const target = object.frontmatter.type === "meeting-note" ? object.frontmatter.redirect_to_note_id : object.frontmatter.type === "meeting" ? object.frontmatter.redirect_to_meeting_id : undefined;
+    if (typeof target !== "string") break;
+    if (seen.has(target)) throw new Error(`Object redirect cycle at ${target}`);
+    const next = byId.get(target);
+    if (!next) throw new Error(`Object not found: ${target}`);
+    redirectedFrom.push(object.frontmatter.id);
+    seen.add(target);
+    object = next;
+  }
+  return { object, redirectedFrom, ...(typeof first.frontmatter.redirect_to_section_id === "string" ? { sectionId: first.frontmatter.redirect_to_section_id } : {}) };
+}
+
 /**
  * Equality for frontmatter values. **Null rule:** `null` and `undefined` both mean "field absent" and are equal
  * to each other (YAML cannot hold `undefined`, so audit and plan records write absent as `null`). Absent is never

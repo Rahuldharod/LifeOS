@@ -9,6 +9,7 @@ import type { NotesModule } from "./notes.js";
 import type { OpenPointsModule } from "./open-points.js";
 import type { PatchModule } from "./patches.js";
 import { operationKinds, type Operation, type OperationKind } from "./ports.js";
+import { resolveObjectRedirect } from "./support.js";
 import type { ReviewModule } from "./review.js";
 
 /**
@@ -87,18 +88,7 @@ export class SystemModule {
 
   /** Resolves additive recurrence-migration redirects while keeping the old Markdown object intact. */
   resolveObjectLink(id: string) {
-    const redirectedFrom: string[] = [];
-    let object = this.ctx.required(id);
-    const seen = new Set([id]);
-    while (true) {
-      const target = object.frontmatter.type === "meeting-note" ? object.frontmatter.redirect_to_note_id : object.frontmatter.type === "meeting" ? object.frontmatter.redirect_to_meeting_id : undefined;
-      if (typeof target !== "string") break;
-      if (seen.has(target)) throw new Error(`Object redirect cycle at ${target}`);
-      redirectedFrom.push(object.frontmatter.id);
-      seen.add(target);
-      object = this.ctx.required(target);
-    }
-    return { object, redirectedFrom, ...(typeof this.ctx.required(id).frontmatter.redirect_to_section_id === "string" ? { sectionId: this.ctx.required(id).frontmatter.redirect_to_section_id } : {}) };
+    return resolveObjectRedirect(id, this.ctx.index.all());
   }
 
   /** #30: the user can mark any object restricted, or normal again. Repeating the same value writes nothing. */

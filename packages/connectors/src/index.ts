@@ -129,7 +129,7 @@ export class GoogleCalendarConnector implements CalendarConnector {
         const rawEnd = String(end.dateTime ?? `${end.date}T00:00:00.000Z`);
         const original = event.originalStartTime;
         const originalRaw = original ? String(original.dateTime ?? `${original.date}T00:00:00.000Z`) : undefined;
-        const previousSeriesId = event.extendedProperties?.private?.lifeosPreviousSeriesId;
+        const previousSeriesId = event.previousSeriesId ?? event.extendedProperties?.private?.lifeosPreviousSeriesId ?? event.extendedProperties?.shared?.lifeosPreviousSeriesId;
         return {
           externalId: String(event.id),
           calendarId: String(calendar.id),
