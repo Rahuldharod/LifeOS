@@ -316,6 +316,21 @@ export class MeetingsModule {
     return seriesId ? this.ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && isLive(object) && object.frontmatter.recurrence_series_id === seriesId) : undefined;
   }
 
+  /** A day-scoped provider query may contain only the new half of a split. Use the provider's
+   * stable series UID to reconcile it with an already materialized series in the same calendar. */
+  private findPreviousSeriesNote(event: CalendarEvent, seriesId: string) {
+    if (event.previousSeriesId) return this.findSeriesNote(this.seriesKey(event, event.previousSeriesId));
+    if (!event.seriesUid) return undefined;
+    const calendarScope = `${this.ctx.calendar?.provider ?? "calendar"}:${event.calendarId}:`;
+    return this.ctx.index.all()
+      .filter((object) => object.frontmatter.type === "meeting-note" && isLive(object)
+        && object.frontmatter.recurrence_series_uid === event.seriesUid
+        && typeof object.frontmatter.recurrence_series_id === "string"
+        && object.frontmatter.recurrence_series_id.startsWith(calendarScope)
+        && object.frontmatter.recurrence_series_id !== seriesId)
+      .sort((left, right) => String(right.frontmatter.updated_at).localeCompare(String(left.frontmatter.updated_at)))[0];
+  }
+
   private recurringSectionBody(event: CalendarEvent, sectionId: string, body: string) {
     return `## ${event.title} — ${event.startsAt}\n<a id="${sectionId}"></a>\n\n${body}`;
   }
@@ -345,7 +360,10 @@ export class MeetingsModule {
       }, { expectedHash: existing.contentHash, now, body: `${this.recurringSectionBody(event, section.section_id, body)}\n\n${existing.body}` });
     }
 
-    const previousSeries = event.previousSeriesId ? this.findSeriesNote(this.seriesKey(event, event.previousSeriesId)) : undefined;
+    const previousSeries = this.findPreviousSeriesNote(event, seriesId);
+    const previousSeriesId = event.previousSeriesId
+      ? this.seriesKey(event, event.previousSeriesId)
+      : previousSeries?.frontmatter.recurrence_series_id;
     return this.ctx.objects.write({
       relativePath: `meetings/${markdownFileName(`${event.title} notes`, noteId, event.startsAt, event.timezone)}`,
       frontmatter: {
@@ -354,7 +372,7 @@ export class MeetingsModule {
         meeting_ids: [meeting.frontmatter.id],
         recurrence_series_id: seriesId,
         ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
-        ...(event.previousSeriesId ? { previous_recurrence_series_id: this.seriesKey(event, event.previousSeriesId) } : {}),
+        ...(previousSeriesId ? { previous_recurrence_series_id: previousSeriesId } : {}),
         occurrence_sections: [section],
         ...(previousSeries ? { previous_series_note_id: previousSeries.frontmatter.id } : {}),
         ...base
