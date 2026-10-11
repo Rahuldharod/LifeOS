@@ -83,6 +83,17 @@ describe("SettingsWorkspace", () => {
     await click("Discard"); expect(result).toBe(true); expect(guard.dirty).toBe(false);
   });
 
+  it("disables guarded Save if the write lease is lost after editing", async () => {
+    const guard = await render();
+    await type("Timezone draft", "Tokyo"); await click("Google");
+    await act(async () => root!.render(<SettingsWorkspace sections={sections()} readOnly guard={guard} onOpenCard={vi.fn()} />));
+    const save = [...document.querySelectorAll("[role='dialog'] button")].find((button) => button.textContent === "Save") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("lost write access");
+    await click("Discard");
+    expect(document.body.textContent).toContain("Connection card");
+  });
+
   it("uses list then full section with Back on narrow screens and preserves a draft when staying", async () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
     await render(); expect((document.querySelector("[aria-label='Settings section']") as HTMLElement).hidden).toBe(true);

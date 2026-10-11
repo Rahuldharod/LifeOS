@@ -19,7 +19,7 @@ export type SettingsReferenceData = {
 };
 
 type Props = {
-  displayTimeZone: string; onDisplayTimeZoneChange: (zone: string) => void;
+  displayTimeZone: string; onDisplayTimeZoneChange: (zone: string) => boolean | void | Promise<boolean | void>;
   calendarCatalog: CalendarOption[]; calendarCatalogLoaded: boolean; calendarPrefs: CalendarPrefs; onLoadCalendars: () => Promise<void>; onSaveCalendarPrefs: (prefs: CalendarPrefs) => Promise<string | undefined>;
   connections?: ConnectionsState; onRetryConnections: () => Promise<void>; busy: boolean; readOnly: boolean;
   onSaveGoogleSecrets: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean>;
@@ -119,7 +119,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   const connectionStatus = (state?: { configured: boolean; connected: boolean }) => state?.connected ? "Connected" : state?.configured ? "Configured" : "Not connected";
   const sections: SettingsSection[] = [
     { id: "my-lifeos", group: "My LifeOS", label: "Preferences", cards: [
-      { id: "settings-display-timezone", label: "Display timezone", safeStatus: displayTimeZone, content: <article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><select value={displayTimeZone} onChange={(event) => onDisplayTimeZoneChange(event.target.value)}>{availableTimeZones.map((zone) => <option key={zone}>{zone}</option>)}</select></article> },
+      { id: "settings-display-timezone", label: "Display timezone", safeStatus: displayTimeZone, content: <DisplayTimeZoneCard displayTimeZone={displayTimeZone} disabled={readOnly} onSave={onDisplayTimeZoneChange} /> },
       { id: "settings-max-must-dos", label: "Max must-dos", safeStatus: focusSettings ? String(focusSettings.maxMustDos) : "Loading", content: <MaxMustDosCard setting={focusSettings} disabled={readOnly} onSave={saveFocusSettings} /> },
       { id: "settings-today", label: "Today", safeStatus: todaySettings ? `${todaySettings.briefTime} ${todaySettings.briefTimeZone}` : "Loading", content: <TodaySettingsCard setting={todaySettings} disabled={readOnly} timeZones={availableTimeZones} onSave={saveTodaySettings} /> }
     ] },
@@ -139,6 +139,30 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   ];
 
   return <SettingsWorkspace sections={sections} selectedCardId={selectedCardId} loading={!loadFailed && (!todaySettings || !internalDomains || !selfEmails || !focusSettings || !calendarCatalogLoaded)} failure={loadFailed ? "Settings could not be loaded. Leave this page and try again." : undefined} readOnly={readOnly} guard={guard ?? fallbackGuard.current} onOpenCard={onOpenCard} />;
+}
+
+export function DisplayTimeZoneCard({ displayTimeZone, disabled, onSave }: { displayTimeZone: string; disabled: boolean; onSave: (zone: string) => boolean | void | Promise<boolean | void> }) {
+  const [value, setValue] = useState(displayTimeZone);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<SaveState>();
+  useEffect(() => setValue(displayTimeZone), [displayTimeZone]);
+  const dirty = value !== displayTimeZone;
+  const save = async (): Promise<boolean> => {
+    setSaving(true);
+    try {
+      const saved = await onSave(value);
+      if (saved === false) { setStatus({ kind: "error", text: "Could not save the display timezone. Your choice is still here." }); return false; }
+      setStatus({ kind: "saved", text: "Saved on this device." });
+      return true;
+    } catch (error) {
+      setStatus({ kind: "error", text: error instanceof Error ? error.message : "Could not save the display timezone. Your choice is still here." });
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+  useSettingsCardGuard("settings-display-timezone", { dirty, save, discard: () => { setValue(displayTimeZone); setStatus(undefined); } });
+  return <article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><div className="capture-row"><select aria-label="Display timezone" value={value} disabled={disabled} onChange={(event) => { setValue(event.target.value); setStatus(undefined); }}>{[...new Set([displayTimeZone, ...availableTimeZones])].map((zone) => <option key={zone}>{zone}</option>)}</select><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div><SaveStatus status={status} /></article>;
 }
 
 function ReferenceDataCard({ label, names }: { label: string; names: string[] }) {
@@ -309,18 +333,25 @@ function CalendarListCard({ catalog, loaded, prefs, disabled: readOnly, onSave }
   </article>;
 }
 
-function GoogleSecretCard({ provider, title, status, busy, onSave }: { provider: "calendar" | "drive"; title: string; status?: { configured: boolean; connected: boolean }; busy: boolean; onSave: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean> }) {
+export function GoogleSecretCard({ provider, title, status, busy, onSave }: { provider: "calendar" | "drive"; title: string; status?: { configured: boolean; connected: boolean }; busy: boolean; onSave: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean> }) {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
   const save = async (): Promise<boolean> => {
-    setSaved(false);
-    if (await onSave(provider, clientId, clientSecret)) {
-      setClientId(""); setClientSecret(""); setSaved(true);
-      return true;
+    setSaved(false); setError("");
+    if (!clientId.trim() || !clientSecret.trim()) { setError("Enter both the OAuth client ID and client secret before saving."); return false; }
+    try {
+      if (await onSave(provider, clientId, clientSecret)) {
+        setClientId(""); setClientSecret(""); setSaved(true);
+        return true;
+      }
+    } catch {
+      // The card owns the draft, so connector failures must leave both credential fields intact.
     }
+    setError("Could not save the credentials. Your input is still here.");
     return false;
   };
-  useSettingsCardGuard(`settings-google-${provider}`, { dirty: Boolean(clientId || clientSecret), save, discard: () => { setClientId(""); setClientSecret(""); setSaved(false); } });
-  return <article className="secret-card"><span>{title.toUpperCase()}</span><h3>{status?.configured ? "Credentials configured" : "Credentials required"}</h3><p className="muted">{status?.connected ? "Connected" : provider === "calendar" ? "Configure here, then authorize from Calendar." : "Stored for the upcoming Drive source connector."}</p>{saved && <div className="inline-success">Saved securely in macOS Keychain.</div>}<div className="knowledge-form"><input value={clientId} onChange={(event) => { setSaved(false); setClientId(event.target.value); }} placeholder="OAuth client ID" autoComplete="off" /><input type="password" value={clientSecret} onChange={(event) => { setSaved(false); setClientSecret(event.target.value); }} placeholder={status?.configured ? "Enter a new secret to replace it" : "OAuth client secret"} autoComplete="new-password" /><button className="primary" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={() => void save()}>{busy ? "Saving…" : status?.configured ? "Replace credentials" : "Save to Keychain"}</button></div></article>;
+  useSettingsCardGuard(`settings-google-${provider}`, { dirty: Boolean(clientId || clientSecret), save, discard: () => { setClientId(""); setClientSecret(""); setSaved(false); setError(""); } });
+  return <article className="secret-card"><span>{title.toUpperCase()}</span><h3>{status?.configured ? "Credentials configured" : "Credentials required"}</h3><p className="muted">{status?.connected ? "Connected" : provider === "calendar" ? "Configure here, then authorize from Calendar." : "Stored for the upcoming Drive source connector."}</p>{saved && <div className="inline-success">Saved securely in macOS Keychain.</div>}{error && <p className="calendar-error" role="alert">{error}</p>}<div className="knowledge-form"><input aria-label={`${title} OAuth client ID`} value={clientId} onChange={(event) => { setSaved(false); setError(""); setClientId(event.target.value); }} placeholder="OAuth client ID" autoComplete="off" /><input aria-label={`${title} OAuth client secret`} type="password" value={clientSecret} onChange={(event) => { setSaved(false); setError(""); setClientSecret(event.target.value); }} placeholder={status?.configured ? "Enter a new secret to replace it" : "OAuth client secret"} autoComplete="new-password" /><button className="primary" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={() => void save()}>{busy ? "Saving…" : status?.configured ? "Replace credentials" : "Save to Keychain"}</button></div></article>;
 }
