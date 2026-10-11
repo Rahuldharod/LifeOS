@@ -69,6 +69,7 @@ import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { OccurrenceAnchoredMarkdown, scrollVisualOccurrence } from "./occurrenceNavigation.js";
 import { RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
+import { meetingSummary } from "./meetingSummary.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
@@ -198,12 +199,6 @@ const reviewEditable: Record<string, string[]> = {
  * The text of the Summary section of a meeting body (written by accepting a summary Review Item, #45): between
  * the #66 markers, so the summary's own headings are shown; an older unmarked one ends at the next heading.
  */
-function meetingSummary(body: string | undefined) {
-  const marked = body?.match(/^<!-- lifeos:summary:start -->\s*\n##\s+Summary[^\n]*\n([\s\S]*?)^<!-- lifeos:summary:end -->/m);
-  const match = marked ?? body?.match(/^##\s+Summary\s*\n([\s\S]*?)(?=^#{1,2}\s|(?![\s\S]))/m);
-  return match?.[1]?.trim() || undefined;
-}
-
 function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choices, labels, linkActions }: {
   review: LifeObject;
   busy: boolean;
@@ -1246,6 +1241,7 @@ function App() {
   }
 
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
+  const renderOccurrenceProposal = (review: LifeObject) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />;
   const contentClassName = [(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined;
 
   return <ApplicationShell
@@ -1321,7 +1317,8 @@ function App() {
                   currentEvent={calendar.filteredEvents.find((event) => event.meetingId === workspace.meeting.frontmatter.id || event.originalOccurrenceStartsAt === workspace.meeting.frontmatter.original_occurrence_starts_at)}
                   readOnly={busy || readOnly}
                   onBodyChange={meetingController.setDraft}
-                  renderProposal={(review) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />}
+                  renderProposal={renderOccurrenceProposal}
+                  onSelectSection={(section) => followRoute({ view: "Calendar", date: selectedDate, id: workspace.meeting.frontmatter.id, section }, { replace: true })}
                 /> : editorMode === "write" ? <>
                   <div className="toolbar">
                     <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { applyHeading(event.target.value); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
@@ -1398,7 +1395,8 @@ function App() {
                 mode="notes"
                 readOnly={busy || readOnly}
                 onBodyChange={notesController.setDraft}
-                renderProposal={(review) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />}
+                renderProposal={renderOccurrenceProposal}
+                onSelectSection={(section) => followRoute({ view: "Notes", noteTab, id: selectedNote.frontmatter.id, section }, { replace: true })}
               /> : notesMode === "write" ? <>
                 <div className="toolbar">
                   <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { if (event.target.value) transformNoteLines((line) => `${"#".repeat(Number(event.target.value))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading"); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>

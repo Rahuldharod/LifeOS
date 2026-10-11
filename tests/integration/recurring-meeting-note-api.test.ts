@@ -50,6 +50,7 @@ describe("shared recurring Note API (#148)", () => {
     const occurrenceWorkspace = await call("GET /api/v1/meetings/:id/workspace", { params: { id: older.meeting.frontmatter.id } });
     expect(occurrenceWorkspace.occurrences?.map((item) => item.sectionId)).toEqual((notes[0]!.frontmatter.occurrence_sections as Array<{ section_id: string }>).map((item) => item.section_id));
     expect(occurrenceWorkspace.occurrences?.[1]?.meeting.frontmatter).toMatchObject({ location: "Room Atlas", join_url: "https://meet.example.test/weekly" });
+    expect(occurrenceWorkspace.occurrences?.[1]?.meeting.frontmatter.attendee_snapshot).toEqual([]);
 
     await call("POST /api/v1/meetings/from-event", { body: { externalId: events[1]!.externalId, calendarId: "work", body: "duplicate retry", ...range } });
     const retried = (await call("GET /api/v1/notes", { query: {} }))[0]!;
@@ -62,5 +63,9 @@ describe("shared recurring Note API (#148)", () => {
     const conflict = await send("PUT", `/api/v1/objects/${retried.frontmatter.id}/body`, { body: "Stale edit", expectedHash: staleHash });
     expect(conflict.statusCode).toBe(409);
     expect(conflict.json()).toMatchObject({ error: expect.stringContaining("changed") });
+
+    await call("POST /api/v1/objects/:id/archive", { params: { id: older.meeting.frontmatter.id }, body: { expectedHash: older.meeting.contentHash } });
+    const afterArchive = await call("GET /api/v1/meetings/:id/workspace", { params: { id: newer.meeting.frontmatter.id } });
+    expect(afterArchive.occurrences?.map((item) => item.meeting.frontmatter.id)).toEqual([newer.meeting.frontmatter.id]);
   });
 });

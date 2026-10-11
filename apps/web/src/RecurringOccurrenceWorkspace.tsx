@@ -1,5 +1,6 @@
 import React, { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { CalendarEvent, LifeObject, OccurrenceWorkspaceItem } from "@lifeos/contracts";
+import { meetingSummary } from "./meetingSummary.js";
 import "./RecurringOccurrenceWorkspace.css";
 
 type SectionRange = { sectionId: string; notesStart: number; notesEnd: number };
@@ -44,11 +45,6 @@ export function defaultOccurrenceSection(occurrences: OccurrenceWorkspaceItem[],
     ?? chronological.at(-1)?.sectionId;
 }
 
-function summary(body: string) {
-  const marked = body.match(/^<!-- lifeos:summary:start -->\s*\n##\s+Summary[^\n]*\n([\s\S]*?)^<!-- lifeos:summary:end -->/m);
-  return (marked?.[1] ?? body.match(/^##\s+Summary\s*\n([\s\S]*?)(?=^#{1,2}\s|(?![\s\S]))/m)?.[1])?.trim();
-}
-
 function sourceLink(source: LifeObject) {
   const url = source.frontmatter.url;
   return typeof url === "string" ? url : undefined;
@@ -62,14 +58,14 @@ function eventDifferences(item: OccurrenceWorkspaceItem, current?: CalendarEvent
   if (current.startsAt !== meeting.starts_at || current.endsAt !== meeting.ends_at) changed.push(`Time: ${new Date(current.startsAt).toLocaleString()}–${new Date(current.endsAt).toLocaleTimeString()}`);
   if ((current.location ?? "") !== (meeting.location ?? "")) changed.push(`Location: ${current.location || "removed"}`);
   if ((current.joinUrl ?? "") !== (meeting.join_url ?? "")) changed.push(`Joining link: ${current.joinUrl || "removed"}`);
-  const savedAttendees = item.context.people.map((person) => person.frontmatter.title).sort();
+  const savedAttendees = (Array.isArray(meeting.attendee_snapshot) ? meeting.attendee_snapshot.filter((attendee): attendee is string => typeof attendee === "string") : item.context.people.map((person) => person.frontmatter.title)).sort();
   const currentAttendees = [...current.attendees].sort();
   if (JSON.stringify(currentAttendees) !== JSON.stringify(savedAttendees)) changed.push(`Attendees: ${currentAttendees.join(", ") || "none"}`);
   if ((current.status ?? "confirmed") !== (meeting.status === "cancelled" ? "cancelled" : "confirmed")) changed.push(`Status: ${current.status ?? "confirmed"}`);
   return changed;
 }
 
-export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectionId, timeZone, mode, currentEvent, readOnly, onBodyChange, renderProposal }: {
+export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectionId, timeZone, mode, currentEvent, readOnly, onBodyChange, renderProposal, onSelectSection }: {
   note: LifeObject;
   occurrences: OccurrenceWorkspaceItem[];
   selectedSectionId?: string;
@@ -79,10 +75,13 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectio
   readOnly: boolean;
   onBodyChange: (body: string) => void;
   renderProposal: (review: LifeObject) => ReactNode;
+  onSelectSection?: (sectionId: string) => void;
 }) {
   const ordered = useMemo(() => [...occurrences].sort((left, right) => Date.parse(String(right.meeting.frontmatter.starts_at)) - Date.parse(String(left.meeting.frontmatter.starts_at))), [occurrences]);
   const fallback = defaultOccurrenceSection(ordered, new Date(), timeZone);
-  const [selected, setSelected] = useState(selectedSectionId ?? fallback);
+  const storageKey = `lifeos.occurrence-section.${note.frontmatter.id}`;
+  const remembered = typeof localStorage === "undefined" ? undefined : localStorage.getItem(storageKey) ?? undefined;
+  const [selected, setSelected] = useState(selectedSectionId ?? remembered ?? fallback);
   useEffect(() => { if (selectedSectionId) setSelected(selectedSectionId); else if (!selected || !ordered.some((item) => item.sectionId === selected)) setSelected(fallback); }, [selectedSectionId, fallback, ordered, selected]);
 
   return <section className="recurring-occurrence-workspace" aria-label="Recurring meeting occurrences">
@@ -90,15 +89,16 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectio
       const active = item.sectionId === selected;
       const meeting = item.meeting.frontmatter;
       const pending = item.reviews.filter((review) => review.frontmatter.status === "pending");
-      const acceptedSummary = summary(item.meeting.body);
+      const acceptedSummary = meetingSummary(item.meeting.body);
       const current = currentEvent?.originalOccurrenceStartsAt === item.originalStartsAt ? currentEvent : undefined;
       const differences = eventDifferences(item, current);
-      return <details key={item.sectionId} className={active ? "occurrence-section selected" : "occurrence-section"} open={active || undefined} onToggle={(event) => { if (event.currentTarget.open) setSelected(item.sectionId); }}>
+      const select = () => { setSelected(item.sectionId); localStorage.setItem(storageKey, item.sectionId); };
+      return <details key={item.sectionId} className={active ? "occurrence-section selected" : "occurrence-section"} open={active || undefined} onToggle={(event) => { if (event.currentTarget.open) { select(); onSelectSection?.(item.sectionId); } }}>
         <summary><span>{new Date(String(meeting.starts_at)).toLocaleDateString([], { timeZone, dateStyle: "full" })}</span><b>{new Date(String(meeting.starts_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}–{new Date(String(meeting.ends_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}</b>{meeting.status === "cancelled" && <em>Cancelled</em>}</summary>
         <div className="occurrence-snapshot" aria-label="Saved event snapshot">
           <span>SAVED EVENT DETAILS</span>
           <p><b>{meeting.title}</b></p>
-          <p>{item.context.people.length ? item.context.people.map((person) => person.frontmatter.title).join(", ") : "No attendees"}</p>
+          <p>{Array.isArray(meeting.attendee_snapshot) ? meeting.attendee_snapshot.filter((attendee): attendee is string => typeof attendee === "string").join(", ") || "No attendees" : item.context.people.length ? item.context.people.map((person) => person.frontmatter.title).join(", ") : "No attendees"}</p>
           {Boolean(meeting.location || meeting.join_url) && <p>{String(meeting.location ?? "")}{meeting.location && meeting.join_url ? " · " : ""}{Boolean(meeting.join_url) && <a href={String(meeting.join_url)}>Join meeting</a>}</p>}
         </div>
         {differences.length > 0 && <aside className="occurrence-calendar-changes" aria-label="Current Calendar changes"><b>Changed in Calendar</b><ul>{differences.map((change) => <li key={change}>{change}</li>)}</ul></aside>}
