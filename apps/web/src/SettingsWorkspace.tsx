@@ -56,6 +56,7 @@ export function SettingsWorkspace({ sections, selectedCardId, loading = false, f
   const finishDecision = async (choice: "save" | "discard" | "stay") => {
     const resolve = decision; if (!resolve) return;
     if (choice === "save") {
+      if (readOnly) { setSaveFailed(true); return; }
       for (const draft of drafts()) if (!(await draft.save())) { setSaveFailed(true); return; }
     }
     if (choice === "discard") drafts().forEach((draft) => draft.discard());
@@ -87,6 +88,6 @@ export function SettingsWorkspace({ sections, selectedCardId, loading = false, f
       {readOnly && <p className="settings-read-only">Read-only on this Mac. Synced settings cannot be changed until this device holds the write lease.</p>}
       {loading ? <div className="settings-state" aria-busy="true">Loading settings…</div> : failure ? <div className="settings-state settings-failure" role="alert">{failure}</div> : selected ? <><header className="settings-section-heading"><span>{selected.group}</span><h2>{selected.label}</h2></header>{selected.cards.map((card) => <div id={card.id} tabIndex={-1} className="settings-card-slot" key={card.id}>{card.content}</div>)}</> : <div className="settings-state">Choose a Settings section.</div>}
     </main>
-    {decision && <div className="settings-dialog-backdrop"><div role="dialog" aria-modal="true" aria-labelledby="settings-leave-title" className="settings-leave-dialog"><h3 id="settings-leave-title">Unsaved Settings changes</h3><p>Save or discard each changed card before leaving.</p>{saveFailed && <p role="alert">A card could not be saved. Your input is still here.</p>}<div><button className="primary" onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></div></div>}
+    {decision && <div className="settings-dialog-backdrop"><div role="dialog" aria-modal="true" aria-labelledby="settings-leave-title" className="settings-leave-dialog"><h3 id="settings-leave-title">Unsaved Settings changes</h3><p>{readOnly ? "This device lost write access. Discard the changes or stay on this card." : "Save or discard each changed card before leaving."}</p>{saveFailed && <p role="alert">A card could not be saved. Your input is still here.</p>}<div><button className="primary" disabled={readOnly} onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></div></div>}
   </div></DraftContext.Provider>;
 }
