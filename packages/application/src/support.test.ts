@@ -19,6 +19,9 @@ describe("isMeetingRestricted (ADR 0010, #63)", () => {
   const note = (extra: Record<string, unknown> = {}) => object({ id: "n1", type: "meeting-note", meeting_id: "m1", ...extra });
   it("is true when the meeting is restricted", () => { expect(isMeetingRestricted(meeting({ sensitivity: "restricted" }), [])).toBe(true); });
   it("is true when the meeting's note is restricted", () => { expect(isMeetingRestricted(meeting(), [note({ sensitivity: "restricted" })])).toBe(true); });
+  it("is true for every occurrence linked to one restricted recurring note", () => {
+    expect(isMeetingRestricted(meeting({ id: "m2" }), [note({ meeting_id: "m1", meeting_ids: ["m1", "m2"], sensitivity: "restricted" })])).toBe(true);
+  });
   it("ignores restricted notes of other meetings, deleted notes and non-notes", () => {
     expect(isMeetingRestricted(meeting(), [note({ meeting_id: "m2", sensitivity: "restricted" })])).toBe(false);
     expect(isMeetingRestricted(meeting(), [note({ sensitivity: "restricted", deleted_at: "2026-10-01T00:00:00.000Z" })])).toBe(false);
