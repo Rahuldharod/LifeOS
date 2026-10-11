@@ -1,7 +1,7 @@
 // Open Points workspace (#42): mirrors the Decisions page. A filtered list beside a detail panel that edits
 // an open point with a guarded save and moves it through its lifecycle: resolve with a summary or an
 // existing decision, resolve with a new decision (created and linked in one step), or close.
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { CopyLink } from "./CopyLink.js";
@@ -78,7 +78,7 @@ export function OpenPointsPage({ projects, clients, products, people, busy, read
   const detailOpen = Boolean(creating || selectedId);
   const leaveThen = async (action: () => void) => { if (await editorGuard.saveNow()) action(); };
   const closeDetail = () => void leaveThen(() => { setCreating(false); setSelectedId(undefined); });
-  return <ListDetailWorkspace detailOpen={detailOpen} listLabel="Open points list" detailLabel="Open point detail" list={<>
+  return <ListDetailWorkspace workspace="openPoints" detailOpen={detailOpen} selectedKey={creating ? "new" : selectedId} listLabel="Open points list" detailLabel="Open point detail" list={<>
       <header className="workspace-heading"><div><span>OPEN POINTS · {visible.length}</span><h2>Open points</h2><p className="muted">Questions still waiting for an answer.</p></div><button className="primary" disabled={busy || readOnly} onClick={() => void leaveThen(() => { setSelectedId(undefined); setCreating(true); })}>New Open Point</button></header>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}><input type="search" aria-label="Search open points" placeholder="Search open points…" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Filter open points by status" value={filters.status} onChange={(event) => setFilter("status", event.target.value)}><option value="">Any status</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></WorkspaceFilterBar>
       {advanced && <div className="task-advanced-filters decision-advanced-filters" aria-label="Advanced open point filters">
@@ -105,7 +105,7 @@ export function OpenPointsPage({ projects, clients, products, people, busy, read
     </>} detail={<>
       <button className="narrow-back" onClick={closeDetail}>Back to open points</button>
       {creating ? <NewOpenPointPanel guard={editorGuard} projects={projects} clients={clients} products={products} people={people} busy={busy} readOnly={readOnly} onCancel={() => setCreating(false)} onCreate={create} />
-        : detail ? <OpenPointPanel key={`${detail.openPoint.frontmatter.id}:${detail.openPoint.contentHash}`} guard={editorGuard} detail={detail} projects={projects} clients={clients} products={products} people={people} busy={busy} readOnly={readOnly} timeZone={timeZone} run={run} onOpen={onOpen} refresh={refresh} formatDate={formatDate} />
+        : detail ? <OpenPointPanel guard={editorGuard} detail={detail} projects={projects} clients={clients} products={products} people={people} busy={busy} readOnly={readOnly} timeZone={timeZone} run={run} onOpen={onOpen} refresh={refresh} formatDate={formatDate} />
         : <article className="empty-state"><h3>No open point selected</h3><p>Pick an open point to see its source, meeting and evidence, edit it, resolve it or close it.</p></article>}
     </>} />;
 }
@@ -139,14 +139,21 @@ function NewOpenPointPanel({ guard, projects, clients, products, people, busy, r
 function OpenPointPanel({ guard, detail, projects, clients, products, people, busy, readOnly, run, onOpen, refresh, formatDate }: Omit<Props, "highlightId" | "onChanged" | "guard"> & { guard: StructuredEditorGuard; detail: OpenPointDetail; refresh: (id?: string) => Promise<void> }) {
   const { openPoint } = detail;
   const value = openPoint.frontmatter;
-  const baseline = { title: value.title, importance: text(value.importance), owner_person_id: text(value.owner_person_id), due_on: text(value.due_on), resolution_summary: text(value.resolution_summary), close_reason: text(value.close_reason), primary_project_id: text(value.primary_project_id), primary_client_id: text(value.primary_client_id), primary_product_id: text(value.primary_product_id), people_ids: Array.isArray(value.people_ids) ? value.people_ids.map(String) : [] };
+  const baseline = useMemo(() => ({ title: value.title, importance: text(value.importance), owner_person_id: text(value.owner_person_id), due_on: text(value.due_on), resolution_summary: text(value.resolution_summary), close_reason: text(value.close_reason), primary_project_id: text(value.primary_project_id), primary_client_id: text(value.primary_client_id), primary_product_id: text(value.primary_product_id), people_ids: Array.isArray(value.people_ids) ? value.people_ids.map(String) : [] }), [value.close_reason, value.due_on, value.importance, value.owner_person_id, value.people_ids, value.primary_client_id, value.primary_product_id, value.primary_project_id, value.resolution_summary, value.title]);
   const [draft, setDraft] = useState(baseline);
+  const [saveStatus, setSaveStatus] = useState("");
+  const previousId = useRef(value.id);
   const [action, setAction] = useState<Action>();
   const [decisions, setDecisions] = useState<LifeObject[]>([]);
-  const set = (key: keyof typeof draft, next: unknown) => setDraft((current) => ({ ...current, [key]: next }));
+  const set = (key: keyof typeof draft, next: unknown) => { setSaveStatus("Unsaved changes"); setDraft((current) => ({ ...current, [key]: next })); };
   const isOpen = value.status === "open";
   const locked = busy || readOnly;
   const writable = useRef(!locked); writable.current = !locked;
+  useEffect(() => {
+    setDraft(baseline);
+    if (previousId.current !== value.id) setSaveStatus("");
+    previousId.current = value.id;
+  }, [baseline, value.id]);
   // Decisions to link are loaded only when the user starts resolving.
   useEffect(() => { if (action?.kind === "resolve" && !decisions.length) void api("GET /api/v1/decisions").then(setDecisions).catch(() => setDecisions([])); }, [action?.kind, decisions.length]);
 
@@ -157,10 +164,12 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
     if (done) { setAction(undefined); await refresh(value.id); }
     return done;
   };
-  const save = () => {
+  const save = async () => {
     const { resolution_summary, close_reason, ...fields } = draft;
     // The outcome wording is only sent for the status that owns it.
-    return write("PATCH /api/v1/open-points/:id", { ...fields, ...(value.status === "resolved" ? { resolution_summary } : {}), ...(value.status === "closed" ? { close_reason } : {}) }, "Open point saved");
+    const done = await write("PATCH /api/v1/open-points/:id", { ...fields, ...(value.status === "resolved" ? { resolution_summary } : {}), ...(value.status === "closed" ? { close_reason } : {}) }, "Open point saved");
+    if (done) setSaveStatus("Saved");
+    return done;
   };
   const submitAction = async () => {
     if (!action) return true;
@@ -195,7 +204,7 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
     </div>
     <SensitivityToggle object={openPoint} noun="open point" disabled={locked} run={run} onChanged={() => refresh(value.id)} />
     <div className="crud-actions">
-      <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
+      <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small><small role="status">{saveStatus}</small>
       <button disabled={locked || !draft.title.trim() || (value.status === "resolved" && !draft.resolution_summary.trim() && !value.resolution_decision_id)} onClick={() => void save()}>Save changes</button>
       {isOpen && <>
         <button disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => { if (writable.current) setAction({ kind: "resolve", summary: "", decisionId: "" }); })}>Resolve…</button>

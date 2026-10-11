@@ -65,7 +65,7 @@ describe("NotesWorkspace", () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, media: "(max-width: 760px)", onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() })));
     const back = vi.fn();
     await render({ onBack: back });
-    expect(document.querySelector("[role='separator'][aria-label*='Resize']")).toBeTruthy();
+    expect(document.querySelector("[role='separator'][aria-label*='Resize']")).toBeNull();
     expect(document.querySelector(".notes-workspace.detail-open")).toBeTruthy();
     expect((document.querySelector("[aria-label='Notes list']") as HTMLElement).hidden).toBe(true);
     expect((document.querySelector("[aria-label='Note detail']") as HTMLElement).hidden).toBe(false);

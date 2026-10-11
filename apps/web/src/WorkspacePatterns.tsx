@@ -1,5 +1,9 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useSplitPane } from "./splitPane.js";
+import { useListDetailReturn } from "./useListDetailReturn.js";
+import { useNarrowWorkspace, usePublishedShellLayout } from "./useNarrowWorkspace.js";
+import { OverlayDialog } from "./OverlayDialog.js";
+import { detailMinWidth, listClamps, type ListWorkspace } from "./workspaceLayout.js";
 
 export type StructuredEditorGuard = { dirty: boolean; conflict: boolean; saveNow: () => Promise<boolean> };
 export const createStructuredEditorGuard = (): StructuredEditorGuard => ({ dirty: false, conflict: false, saveNow: async () => true });
@@ -26,17 +30,27 @@ export function useStructuredEditorGuard({ guard, dirty, canSave, save, discard,
   };
   return {
     leaveThen: async (action: () => void | Promise<unknown>) => { if (await requestLeave()) await action(); },
-    dialog: decision ? <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="leave-structured-title" className="leave-dialog"><h3 id="leave-structured-title">Save changes before leaving?</h3><p>Your {noun} has unsaved changes.</p><div><button className="primary" disabled={!canSave} onClick={() => void finish("save")}>Save</button><button onClick={() => void finish("discard")}>Discard</button><button onClick={() => void finish("stay")}>Stay</button></div></section></div> : null
+    dialog: <OverlayDialog open={Boolean(decision)} label="Save changes before leaving" onClose={() => void finish("stay")}><section className="leave-dialog"><h3>Save changes before leaving?</h3><p>Your {noun} has unsaved changes.</p><div><button className="primary" disabled={!canSave} onClick={() => void finish("save")}>Save</button><button onClick={() => void finish("discard")}>Discard</button><button onClick={() => void finish("stay")}>Stay</button></div></section></OverlayDialog>
   };
 }
 
-/** Shared desktop split that becomes explicit list/detail states at narrow widths. */
-export function ListDetailWorkspace({ detailOpen, children, list, detail, listLabel, detailLabel }: { detailOpen: boolean; children?: ReactNode; list?: ReactNode; detail?: ReactNode; listLabel?: string; detailLabel?: string }) {
+/**
+ * Shared list/detail workspace: a bounded, resizable list beside the detail on wider bands, and explicit
+ * list-then-detail states with Back in the narrow band. `children` render after both panes (dialogs).
+ */
+export function ListDetailWorkspace({ workspace, detailOpen, selectedKey, list, detail, listLabel, detailLabel, listRef, children }: { workspace: ListWorkspace; detailOpen: boolean; selectedKey?: string; list: ReactNode; detail: ReactNode; listLabel: string; detailLabel: string; listRef?: Ref<HTMLElement>; children?: ReactNode }) {
   const narrow = useNarrowWorkspace();
-  return <div className={`task-workspace${detailOpen ? " detail-open" : ""}`}>{children ?? <>
-    <section className="task-list-pane" aria-label={listLabel} hidden={narrow && detailOpen}>{list}</section>
-    <section className="task-detail-pane" aria-label={detailLabel} hidden={narrow && !detailOpen}>{detail}</section>
-  </>}</div>;
+  const shellLayout = usePublishedShellLayout();
+  const paneWidth = shellLayout ? shellLayout.workspaceWidth - 2 * (shellLayout.band === "compact" ? 24 : shellLayout.band === "narrow" ? 16 : 32) : Infinity;
+  const stacked = narrow || paneWidth < listClamps[workspace].min + detailMinWidth + 12;
+  const split = useSplitPane(workspace);
+  const ref = useListDetailReturn(selectedKey ?? (detailOpen ? "open" : undefined));
+  return <div ref={ref} className={`task-workspace pane-workspace${detailOpen ? " detail-open" : ""}`} data-workspace={workspace} data-stacked={stacked} style={split.style}>
+    <section ref={listRef} className="task-list-pane" data-pane="list" aria-label={listLabel} hidden={stacked && detailOpen}>{list}</section>
+    {!stacked && <div {...split.dividerProps} />}
+    <section className="task-detail-pane" data-pane="detail" aria-label={detailLabel} hidden={stacked && !detailOpen}>{detail}</section>
+    {children}
+  </div>;
 }
 
 /** The always-visible search/sort row and consistent advanced-filter disclosure. */
@@ -45,11 +59,22 @@ export function WorkspaceFilterBar({ advanced, onToggleAdvanced, children }: { a
 }
 
 /** Consistent record identity and narrow-screen return action. */
-export function RecordHeader({ eyebrow, title, description, onBack }: { eyebrow: string; title: string; description: string; onBack: () => void }) {
-  return <header className="record-header"><div><span>{eyebrow}</span><h2>{title}</h2><p className="muted">{description}</p></div><button className="narrow-back" onClick={onBack}>Back to tasks</button></header>;
+export function RecordHeader({ eyebrow, title, description, backLabel = "Back to tasks", onBack }: { eyebrow: string; title: string; description: string; backLabel?: string; onBack: () => void }) {
+  return <header className="record-header"><button className="narrow-back" onClick={onBack}>{backLabel}</button><div><span>{eyebrow}</span><h2 data-detail-heading tabIndex={-1}>{title}</h2><p className="muted">{description}</p></div></header>;
 }
 
 /** Persistent structured-record feedback and explicit Save/Cancel actions. */
 export function StickyRecordActions({ status, busy, saveDisabled, onCancel, onSave }: { status: string; busy: boolean; saveDisabled: boolean; onCancel: () => void; onSave: () => void }) {
-  return <footer className="sticky-record-actions"><span role="status">{status}</span><div><button disabled={busy} onClick={onCancel}>Cancel</button><button className="primary" disabled={saveDisabled} onClick={onSave}>Save</button></div></footer>;
+  return <footer className="sticky-record-actions"><span role="status">{busy ? "Saving…" : status}</span><div><button disabled={busy} onClick={onCancel}>Cancel</button><LoadingButton className="primary" loading={busy} loadingLabel="Saving…" disabled={saveDisabled} onClick={onSave}>Save</LoadingButton></div></footer>;
+}
+
+/**
+ * An action that keeps its width and context while it works. The label not on show is reserved by a hidden
+ * pseudo-element in the same grid cell, so "Save" → "Saving…" never moves the layout; `aria-busy` tells
+ * assistive technology what is happening and focus stays on the button.
+ */
+export function LoadingButton({ loading, loadingLabel, children, className, disabled, onClick }: { loading: boolean; loadingLabel: string; children: string; className?: string; disabled?: boolean; onClick: () => void }) {
+  return <button type="button" className={className} aria-busy={loading || undefined} aria-disabled={loading || undefined} disabled={disabled && !loading} onClick={() => { if (!loading) onClick(); }}>
+    <span className="button-labels" data-reserve={loading ? children : loadingLabel}>{loading ? loadingLabel : children}</span>
+  </button>;
 }

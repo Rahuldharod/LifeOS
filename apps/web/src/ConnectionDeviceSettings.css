@@ -10,8 +10,8 @@
 .connection-actions { margin-top: var(--space-4); justify-content: flex-start; }
 .connection-local-error { margin: var(--space-3) 0; padding: var(--space-3); border: var(--border-thin) solid var(--color-error); border-radius: var(--radius-md); color: var(--color-error); }
 .connection-verification { display: grid; gap: var(--space-1); margin: var(--space-4) 0; padding: var(--space-3); border-radius: var(--radius-md); }
-.connection-verification.valid { background: #e9f4e9; color: var(--color-success); }
-.connection-verification.invalid { background: #fae9e9; color: var(--color-error); }
+.connection-verification.valid { border: var(--border-thin) solid var(--color-success-border); background: var(--color-success-surface); color: var(--color-success); }
+.connection-verification.invalid { border: var(--border-thin) solid var(--color-error-border); background: var(--color-error-surface); color: var(--color-error); }
 .connection-backup-list { display: grid; gap: var(--space-2); }
 .connection-backup-list > div { padding: var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); }
 .connection-backup-list span { display: grid; gap: var(--space-1); }

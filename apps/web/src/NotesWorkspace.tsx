@@ -6,7 +6,8 @@ import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import type { NoteFilterState } from "./noteFilters.js";
 import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
-import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
+import { useListDetailReturn } from "./useListDetailReturn.js";
+import { useStackedWorkspace } from "./useNarrowWorkspace.js";
 
 type Option = { id: string; title: string };
 export type NoteEditorMode = "visual" | "write" | "preview";
@@ -57,16 +58,17 @@ const timeIn = (value: unknown, timeZone: string) => {
 export function NotesWorkspace(props: NotesWorkspaceProps) {
   const [advanced, setAdvanced] = useState(false);
   const [mode, setMode] = useState<NoteEditorMode>("visual");
-  const split = useSplitPane("lifeos.notesSplitWidth");
-  const narrow = useNarrowWorkspace();
+  const split = useSplitPane("notes");
+  const narrow = useStackedWorkspace("notes");
   const detailOpen = Boolean(props.selectedId) || props.loading;
+  const ref = useListDetailReturn(detailOpen ? props.selectedId ?? "loading" : undefined);
   const state = props.detailState ?? (props.selectedId ? (props.tab === "deleted" ? "deleted" : "open") : "empty");
 
   // A note never inherits the previous note's raw or preview mode.
   useEffect(() => { setMode("visual"); }, [props.selectedId]);
 
-  return <div className={`notes-workspace split-layout${detailOpen ? " detail-open" : ""}`} style={split.style}>
-    <article className="notes-workspace-list" aria-label="Notes list" hidden={narrow && detailOpen}>
+  return <div ref={ref} className={`notes-workspace split-layout pane-workspace${detailOpen ? " detail-open" : ""}`} data-workspace="notes" data-stacked={narrow} style={split.style}>
+    <article className="notes-workspace-list" data-pane="list" aria-label="Notes list" hidden={narrow && detailOpen}>
       <div className="workspace-heading"><div><span>NOTES</span><h2>Notes</h2><p className="muted">Meeting and knowledge notes</p></div></div>
       <div className="workspace-tabs" role="tablist" aria-label="Notes">
         <button role="tab" aria-selected={props.tab === "open"} className={props.tab === "open" ? "selected" : ""} onClick={() => props.onTabChange("open")}>Open <small>{props.openCount}</small></button>
@@ -91,8 +93,8 @@ export function NotesWorkspace(props: NotesWorkspaceProps) {
         </div>
       </>}
     </article>
-    <div {...split.dividerProps} />
-    <section className="notes-workspace-detail" aria-label="Note detail" hidden={narrow && !detailOpen}>
+    {!narrow && <div {...split.dividerProps} />}
+    <section className="notes-workspace-detail" data-pane="detail" aria-label="Note detail" hidden={narrow && !detailOpen}>
       <div className="notes-detail-tools">
         <button className="narrow-back" onClick={props.onBack}>Back to notes</button>
         {props.readOnly && <span className="notes-read-only" role="status">Read-only on this Mac</span>}

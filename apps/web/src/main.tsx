@@ -1310,6 +1310,7 @@ function App() {
           busy={busy}
           readOnly={readOnly}
           detailOpen={Boolean(workspace)}
+          detailKey={workspace?.meeting.frontmatter.id}
           onPreviousDay={() => void go(calendarRoute(addCalendarDays(selectedDate, -1)))}
           onToday={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}
           onNextDay={() => void go(calendarRoute(addCalendarDays(selectedDate, 1)))}
@@ -1317,11 +1318,11 @@ function App() {
           onFilterChange={calendar.setFilter}
           onRetry={() => void retryCalendar()}
           onSelectEvent={(event) => void openEvent(event)}
-          onBack={() => void go({ view: "Calendar", date: selectedDate })}
+          onBack={() => { void go({ view: "Calendar", date: selectedDate }).then((left) => { if (left) { setWorkspace(undefined); previewTarget.current = undefined; meetingController.reset(); } }); }}
         >
             {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
-                <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3><CopyLink object={workspace.persisted !== false ? workspace.meeting : undefined} />{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
+                <div><span>MEETING</span><h3 data-detail-heading tabIndex={-1}>{workspace.meeting.frontmatter.title}</h3><CopyLink object={workspace.persisted !== false ? workspace.meeting : undefined} />{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
                 <div className="context-grid">
                   <Meta label="When" value={workspace.meeting.frontmatter.is_all_day === true ? `${String(workspace.meeting.frontmatter.starts_at).slice(0, 10)} · All day` : formatDate(workspace.meeting.frontmatter.starts_at)} />
                   <Meta label="Project" value={workspace.context.project?.frontmatter.title ?? "Not linked"} />
@@ -1487,7 +1488,7 @@ function App() {
         sources={objectLinks.filter((object): object is LifeObject => object.frontmatter.type === "source" && "body" in object)}
         projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))}
         people={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: personLabel(labels, entity).label }))}
-        selectedId={route?.view === "Knowledge" ? route.id : undefined}
+        selectedId={route?.view === "Knowledge" && routeProblem?.kind !== "missing" ? route.id : undefined}
         loading={!collectionsLoaded}
         readOnly={readOnly}
         displayTimeZone={displayTimeZone}

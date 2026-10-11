@@ -16,7 +16,7 @@ export type Route = { view: View; id?: string; date?: string; noteTab?: "open" |
 const slugs = Object.fromEntries(views.map((view) => [view, view.toLowerCase().replace(/ /g, "-")])) as Record<View, string>;
 const viewsBySlug = new Map(views.map((view) => [slugs[view], view]));
 /** Tabs whose path may name one open item. */
-const itemViews = new Set<View>(["Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Inbox", "Settings"]);
+const itemViews = new Set<View>(["Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "Settings"]);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The route a path names, or undefined for `/` and paths that are not a LifeOS tab. */
@@ -81,6 +81,12 @@ export function routeTarget(route: Route, data: RouteData): RouteTarget {
     return { kind: "missing", message: "That note no longer exists." };
   }
   if (route.view === "Inbox") return data.pendingReviewIds.includes(id) ? { kind: "ok" } : { kind: "missing", message: "That proposal is no longer waiting in the Inbox." };
+  if (route.view === "Knowledge") {
+    const note = data.objects.find((object) => object.frontmatter.id === id);
+    return note?.frontmatter.type === "knowledge-note" && !note.frontmatter.deleted_at && !note.frontmatter.archived_at
+      ? { kind: "ok" }
+      : { kind: "missing", message: "That Knowledge Note no longer exists." };
+  }
   const target = resolveLifeosLink(`lifeos://object/${id}`, data.objects);
   if (route.view === "Calendar") {
     if (target.kind !== "meeting") return { kind: "missing", message: "That meeting no longer exists." };

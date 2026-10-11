@@ -10,9 +10,12 @@ import { HistoryLink } from "./HistoryPanel.js";
 import { withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
 import { PersonName } from "./PersonName.js";
 import { PersonReviewControl } from "./PersonReview.js";
+import { OverlayDialog } from "./OverlayDialog.js";
 import { externalChoiceOf, personLabel, type ExternalChoice } from "./personLabels.js";
 import { foldText } from "./searchOptions.js";
 import { useSettingsCardGuard } from "./SettingsWorkspace.js";
+import { useListDetailReturn } from "./useListDetailReturn.js";
+import { useStackedReferenceInSettings } from "./useNarrowWorkspace.js";
 import { StickyRecordActions } from "./WorkspacePatterns.js";
 import { referenceSettingsCardId, type ReferenceEntityType } from "./referenceSettingsRoutes.js";
 import "./ReferenceDataSettings.css";
@@ -62,6 +65,8 @@ export type ReferenceDataSettingsProps = {
 };
 
 export function ReferenceDataSettings({ type, objects: listed, linkables, personLabels, selectedId, busy, readOnly, onOpen, onCreate, onSave, onDelete, onSetExternal, onConfirmReviewed, run, onRestored }: ReferenceDataSettingsProps) {
+  const stacked = useStackedReferenceInSettings();
+  const returnRef = useListDetailReturn(selectedId);
   const objects = useMemo(() => withOpenedArchived(listed, linkables as LinkedObject[], type, selectedId) as LifeObject[], [listed, linkables, type, selectedId]);
   const selected = selectedId && selectedId !== "new" ? objects.find((object) => object.frontmatter.id === selectedId) : undefined;
   const creating = selectedId === "new";
@@ -107,8 +112,8 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
   }).sort((left, right) => String(left.frontmatter.title).localeCompare(String(right.frontmatter.title)));
   const choose = (id?: string) => leave(() => onOpen(id));
 
-  return <div className={`reference-settings${selected || creating ? " detail-open" : ""}`}>
-    <aside className="reference-list" aria-label={`${labels[type]} list`}>
+  return <div ref={returnRef} className={`reference-settings${selected || creating ? " detail-open" : ""}`} data-stacked={stacked}>
+    <aside className="reference-list" data-pane="list" aria-label={`${labels[type]} list`} hidden={stacked && Boolean(selected || creating)}>
       <header><div><span>REFERENCE DATA</span><h3>{labels[type]}</h3></div><button className="primary" disabled={busy || readOnly} onClick={() => choose("new")}>New {singular[type]}</button></header>
       <input type="search" aria-label={`Search ${labels[type]}`} placeholder={`Search ${labels[type].toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.target.value)} />
       {!visible.length && <p className="reference-empty">{query ? `No ${labels[type].toLowerCase()} match.` : `No ${labels[type].toLowerCase()} yet.`}</p>}
@@ -117,9 +122,9 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
         return <button key={object.frontmatter.id} className={selected?.frontmatter.id === object.frontmatter.id ? "selected" : ""} aria-label={`Open ${singular[type]}: ${display.label}`} onClick={() => choose(object.frontmatter.id)}><strong>{type === "person" ? <PersonName {...display} /> : display.label}</strong><small>{object.frontmatter.archived_at ? "Archived" : text(object.frontmatter.status) || "Ready"}</small></button>;
       })}</div>
     </aside>
-    <section className="reference-detail" aria-label={`${singular[type]} details`}>
+    <section className="reference-detail" data-pane="detail" aria-label={`${singular[type]} details`} hidden={stacked && !selected && !creating}>
       {!selected && !creating ? <div className="reference-empty-detail">Choose a {singular[type]} or create a new one.</div> : <>
-        <header className="reference-record-header"><button className="reference-back" onClick={() => choose(undefined)}>Back to {labels[type].toLowerCase()}</button><div><span>{creating ? `NEW ${singular[type].toUpperCase()}` : singular[type].toUpperCase()}</span><h3>{creating ? `New ${singular[type]}` : String(selected!.frontmatter.title)}</h3></div></header>
+        <header className="reference-record-header"><button className="reference-back" onClick={() => choose(undefined)}>Back to {labels[type].toLowerCase()}</button><div><span>{creating ? `NEW ${singular[type].toUpperCase()}` : singular[type].toUpperCase()}</span><h3 data-detail-heading tabIndex={-1}>{creating ? `New ${singular[type]}` : String(selected!.frontmatter.title)}</h3></div></header>
         {selected?.frontmatter.archived_at && <p className="archived-tag">Archived record opened from a direct link</p>}
         <div className="reference-fields">
           <label><small>Title</small><input aria-label={`${singular[type]} title`} value={draft.title} disabled={busy || readOnly} onChange={(event) => set("title", event.target.value)} /></label>
@@ -135,7 +140,7 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
         <StickyRecordActions status={creating && !dirty ? "Not saved yet" : dirty ? "Unsaved changes" : saved ? "Saved" : "No changes"} busy={busy} saveDisabled={busy || readOnly || !dirty || !draft.title.trim()} onCancel={() => { discard(); if (creating) onOpen(undefined); }} onSave={() => void save()} />
       </>}
     </section>
-    {pending && <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="leave-reference-title" className="leave-dialog"><h3 id="leave-reference-title">Save changes before leaving?</h3><p>This {singular[type]} has unsaved changes.</p><div><button className="primary" disabled={readOnly} onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></section></div>}
+    <OverlayDialog open={Boolean(pending)} label="Save changes before leaving" onClose={() => void finishDecision("stay")}><section className="leave-dialog"><h3>Save changes before leaving?</h3><p>This {singular[type]} has unsaved changes.</p><div><button className="primary" disabled={readOnly} onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></section></OverlayDialog>
   </div>;
 }
 
