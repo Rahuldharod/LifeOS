@@ -21,7 +21,7 @@ export type LifeObject = { frontmatter: Frontmatter; body: string; relativePath:
 export type ObjectLink = Pick<LifeObject, "frontmatter" | "relativePath" | "contentHash">;
 
 /** A calendar event, with the LifeOS meeting and note it has, if any. */
-export type CalendarEvent = { externalId: string; calendarId?: string; calendarName?: string; calendarColor?: string; title: string; startsAt: string; endsAt: string; timezone: string; isAllDay?: boolean; seriesId?: string; seriesUid?: string; originalOccurrenceStartsAt?: string; previousSeriesId?: string; status?: "confirmed" | "cancelled"; attendees: string[]; projectName?: string; hasNote?: boolean; meetingId?: string; noteId?: string; stored?: true };
+export type CalendarEvent = { externalId: string; calendarId?: string; calendarName?: string; calendarColor?: string; title: string; startsAt: string; endsAt: string; timezone: string; isAllDay?: boolean; seriesId?: string; seriesUid?: string; originalOccurrenceStartsAt?: string; previousSeriesId?: string; status?: "confirmed" | "cancelled"; attendees: string[]; location?: string; joinUrl?: string; projectName?: string; hasNote?: boolean; meetingId?: string; noteId?: string; stored?: true };
 export type CalendarOfflineReason = "network" | "auth" | "keychain-denied";
 export type CalendarOffline = { reason: CalendarOfflineReason; error: string; lastSuccessfulSyncAt?: string };
 /** #88: a calendar range; `offline` when the calendar could not be read and `events` are the meetings already in LifeOS. */
@@ -37,7 +37,17 @@ export type Workspace = {
   reviews: LifeObject[];
   tasks: LifeObject[];
   noteSectionId?: string;
+  occurrences?: OccurrenceWorkspaceItem[];
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
+};
+export type OccurrenceWorkspaceItem = {
+  sectionId: string;
+  occurrenceId: string;
+  originalStartsAt: string;
+  meeting: LifeObject;
+  reviews: LifeObject[];
+  sources: LifeObject[];
+  context: { people: LifeObject[] };
 };
 export type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 export type EntityRollup = { entity: LifeObject; related: LifeObject[] };

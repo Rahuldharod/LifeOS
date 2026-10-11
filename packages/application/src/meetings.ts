@@ -90,6 +90,8 @@ export class MeetingsModule {
         primary_product_id: context.product?.frontmatter.id,
         primary_project_id: context.project?.frontmatter.id,
         is_all_day: event.isAllDay ?? false,
+        ...(event.location ? { location: event.location } : {}),
+        ...(event.joinUrl ? { join_url: event.joinUrl } : {}),
         ...(event.seriesId && event.originalOccurrenceStartsAt ? {
           recurrence_series_id: this.seriesKey(event),
           ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
@@ -194,6 +196,22 @@ export class MeetingsModule {
     const tasks = index.all().filter((object) => object.frontmatter.type === "task" && isLive(object) && object.frontmatter.source_meeting_id === resolvedMeetingId);
     const resolve = (value: unknown) => typeof value === "string" ? index.get(value) : undefined;
     const attendeeIds = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids : [];
+    const sections = note && Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    const occurrenceItems = sections.flatMap((section) => {
+      const sectionMeeting = typeof section.meeting_id === "string" ? index.get(section.meeting_id) : undefined;
+      if (!sectionMeeting || sectionMeeting.frontmatter.type !== "meeting") return [];
+      const sectionMeetingId = sectionMeeting.frontmatter.id;
+      const sectionAttendeeIds = Array.isArray(sectionMeeting.frontmatter.attendee_ids) ? sectionMeeting.frontmatter.attendee_ids : [];
+      const sourceIds = new Set(Array.isArray(sectionMeeting.frontmatter.source_ids) ? sectionMeeting.frontmatter.source_ids.filter((id): id is string => typeof id === "string") : []);
+      const sources = index.all().filter((object) => object.frontmatter.type === "source" && isLive(object) && (object.frontmatter.meeting_id === sectionMeetingId || sourceIds.has(object.frontmatter.id)));
+      return [{
+        sectionId: String(section.section_id), occurrenceId: String(section.occurrence_id),
+        originalStartsAt: String(section.original_starts_at), meeting: sectionMeeting,
+        reviews: index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === sectionMeetingId),
+        sources,
+        context: { people: sectionAttendeeIds.map(resolve).filter((person): person is LifeOSObject => Boolean(person)) }
+      }];
+    });
     return {
       persisted: true as const,
       meeting,
@@ -201,6 +219,7 @@ export class MeetingsModule {
       reviews,
       tasks,
       ...(redirect.sectionId ? { noteSectionId: redirect.sectionId } : {}),
+      ...(occurrenceItems.length ? { occurrences: occurrenceItems } : {}),
       context: {
         project: resolve(meeting.frontmatter.primary_project_id),
         client: resolve(meeting.frontmatter.primary_client_id),
