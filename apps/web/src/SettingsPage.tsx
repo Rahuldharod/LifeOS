@@ -30,6 +30,7 @@ type Props = {
   guard?: SettingsEditorGuard;
   onOpenCard?: (cardId: string) => void;
   referenceData?: SettingsReferenceData;
+  referenceSections?: SettingsSection[];
   health?: SystemHealth;
   backups?: BackupSummary[];
   lastVerification?: BackupVerification;
@@ -43,7 +44,7 @@ const availableTimeZones = (() => {
   return supportedValuesOf ? supportedValuesOf("timeZone") : ["Europe/Paris", "UTC", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
 })();
 
-export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged, selectedCardId, guard, onOpenCard, referenceData = {}, health, backups = [], lastVerification, onCreateAndVerifyBackup, onVerifyBackup, onTakeOverSession }: Props) {
+export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged, selectedCardId, guard, onOpenCard, referenceData = {}, referenceSections, health, backups = [], lastVerification, onCreateAndVerifyBackup, onVerifyBackup, onTakeOverSession }: Props) {
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [internalDomains, setInternalDomains] = useState<InternalDomains>();
   const [selfEmails, setSelfEmails] = useState<SelfEmails>();
@@ -135,7 +136,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
       { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> }
     ] },
     ...(onCreateAndVerifyBackup && onVerifyBackup && onTakeOverSession ? connectionDeviceSettingsSections({ calendarCatalog, calendarCatalogLoaded, calendarPrefs, connections, health, backups, lastVerification, busy, readOnly, displayTimeZone, onRetryConnections, onSaveGoogleSecrets, onSaveCalendarPrefs, onCreateAndVerifyBackup, onVerifyBackup, onTakeOverSession }) : []),
-    ...(["projects", "clients", "products", "people"] as const).map((kind): SettingsSection => ({ id: `reference-${kind}`, group: "Reference data", label: kind[0]!.toUpperCase() + kind.slice(1), cards: [{ id: `settings-reference-${kind}`, label: kind[0]!.toUpperCase() + kind.slice(1), safeNames: referenceData[kind] ?? [], content: <ReferenceDataCard label={kind} names={referenceData[kind] ?? []} /> }] }))
+    ...(referenceSections ?? (["projects", "clients", "products", "people"] as const).map((kind): SettingsSection => ({ id: `reference-${kind}`, group: "Reference data", label: kind[0]!.toUpperCase() + kind.slice(1), cards: [{ id: `settings-reference-${kind}`, label: kind[0]!.toUpperCase() + kind.slice(1), safeNames: referenceData[kind] ?? [], content: <ReferenceDataCard label={kind} names={referenceData[kind] ?? []} /> }] })))
   ];
 
   return <SettingsWorkspace sections={sections} selectedCardId={selectedCardId} loading={!loadFailed && (!todaySettings || !internalDomains || !selfEmails || !focusSettings || !calendarCatalogLoaded)} failure={loadFailed ? "Settings could not be loaded. Leave this page and try again." : undefined} readOnly={readOnly} guard={guard ?? fallbackGuard.current} onOpenCard={onOpenCard} />;

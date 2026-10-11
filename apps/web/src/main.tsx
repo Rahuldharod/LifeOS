@@ -43,7 +43,9 @@ import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
-import { createSettingsEditorGuard } from "./SettingsWorkspace.js";
+import { createSettingsEditorGuard, type SettingsSection } from "./SettingsWorkspace.js";
+import { ReferenceDataSettings } from "./ReferenceDataSettings.js";
+import { parseReferenceSettingsId, referenceCardIdFromRoute, referenceRouteInSettings, referenceSettingsCardId, referenceSettingsId, type ReferenceEntityType } from "./referenceSettingsRoutes.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
 import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
@@ -295,7 +297,8 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
 function App() {
   // PB-027: the URL says which tab and which item are open.
   const location = useLocation();
-  const route = parseRoute(location.pathname);
+  const parsedRoute = parseRoute(location.pathname);
+  const route = parsedRoute ? referenceRouteInSettings(parsedRoute) : undefined;
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
@@ -479,6 +482,11 @@ function App() {
   useEffect(() => {
     let remembered: string | null = null;
     try {
+      if (route && parsedRoute && routePath(route) !== routePath(parsedRoute)) {
+        localStorage.setItem(lastPathKey, routePath(route));
+        followRoute(route, { replace: true });
+        return;
+      }
       if (route) { localStorage.setItem(lastPathKey, location.pathname); return; }
       remembered = localStorage.getItem(lastPathKey);
     } catch { /* storage unavailable: fall back to Today */ }
@@ -838,6 +846,15 @@ function App() {
     await refresh();
   }, `${type} created`);
 
+  const createReferenceEntity = async (type: ReferenceEntityType, fields: Record<string, unknown>) => {
+    let created: LifeObject | undefined;
+    const ok = await run(async () => {
+      created = await api("POST /api/v1/entities/:type", { params: { type }, body: { fields } });
+      await refresh();
+    }, `${type} created`);
+    return ok ? created : undefined;
+  };
+
   const createTask = async (fields: Record<string, unknown>) => {
     let created: LifeObject | undefined;
     const ok = await run(async () => {
@@ -1068,7 +1085,7 @@ function App() {
       } else if (target.kind === "inbox") {
         followRoute({ view: "Inbox", id: target.id });
       } else {
-        followRoute({ view: target.view, id: target.id });
+        followRoute(referenceRouteInSettings({ view: target.view, id: target.id }));
         // The same card again (no URL change) still flashes.
         setHighlightId(target.id);
       }
@@ -1352,18 +1369,8 @@ function App() {
 
       {view === "Tasks" && <TaskWorkspace tasks={withOpenedArchived(tasks, objectLinks as LinkedObject[], "task", route?.view === "Tasks" ? route.id : undefined) as LifeObject[]} linkables={objectLinks} labels={labels} projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: String(project.frontmatter.title) }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} selectedId={route?.view === "Tasks" ? route.id : undefined} today={dateInTimeZone(new Date(), displayTimeZone)} timeZone={displayTimeZone} guard={taskEditorGuard} busy={busy} readOnly={readOnly} run={run} onOpen={(id) => followRoute({ view: "Tasks", id })} onCloseDetail={() => followRoute({ view: "Tasks" })} onCreate={createTask} onSave={updateEntity} onDelete={deleteEntity} onComplete={(task, complete) => updateEntity(task, { status: complete ? "Done" : "Next" })} onRestored={refresh} />}
 
-      {view === "Projects" && <><PageHeader eyebrow="PROJECTS" title="Project roll-ups" description="Meetings and tasks are computed from stable relationships, not copied lists." />
-        <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />
-        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.filter((point) => point.frontmatter.status === "open").length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.length ? <PeopleList people={projectPeople} labels={labels} /> : "None linked"}</p></article>)}</div>
-        {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
-      </>}
-
       {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} guard={decisionEditorGuard} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
       {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} guard={openPointEditorGuard} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
-
-      {view === "Clients" && <EntityCrudPage labels={labels} highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
-      {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
-      {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} onConfirmReviewed={confirmPersonReviewed} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
 
       {view === "Inbox" && <>
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p>{awaitingAdoptionLabel(inboxDrafts)}</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
@@ -1444,14 +1451,14 @@ function App() {
         onVerifyBackup={verifyBackupForSettings}
         onTakeOverSession={takeOverSessionForSettings}
         guard={settingsEditorGuard}
-        selectedCardId={route?.view === "Settings" ? route.id : undefined}
+        selectedCardId={referenceCardIdFromRoute(route?.view === "Settings" ? route.id : undefined)}
         onOpenCard={(id) => followRoute({ view: "Settings", id })}
-        referenceData={{
-          projects: projects.map(({ project }) => project.frontmatter.title),
-          clients: clients.map(({ entity }) => entity.frontmatter.title),
-          products: products.map(({ entity }) => entity.frontmatter.title),
-          people: people.map(({ entity }) => entity.frontmatter.title)
-        }}
+        referenceSections={(Object.entries({ project: projects.map(({ project }) => project), client: clients.map(({ entity }) => entity), product: products.map(({ entity }) => entity), person: people.map(({ entity }) => entity) }) as Array<[ReferenceEntityType, LifeObject[]]>).map(([type, objects]): SettingsSection => {
+          const plural = type === "person" ? "people" : `${type}s`;
+          const label = plural[0]!.toUpperCase() + plural.slice(1);
+          const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} run={run} onRestored={refresh} /> }] };
+        })}
       />}
   </ApplicationShell>;
 }
