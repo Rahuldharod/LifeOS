@@ -86,6 +86,8 @@ export class MeetingsModule {
         ends_at: event.endsAt,
         timezone: event.timezone,
         attendee_ids: context.people.map((person) => person.frontmatter.id),
+        // Immutable display snapshot: Person records may be renamed or deleted later.
+        attendee_snapshot: [...event.attendees],
         primary_client_id: context.client?.frontmatter.id,
         primary_product_id: context.product?.frontmatter.id,
         primary_project_id: context.project?.frontmatter.id,
@@ -161,7 +163,7 @@ export class MeetingsModule {
     const now = new Date().toISOString();
     const synthetic = (type: ObjectEnvelope["type"], title: string): LifeOSObject => ({ frontmatter: { ...this.ctx.envelope(`preview:${type}:${externalId}:${title}`, type, title, now, "calendar") }, body: "", relativePath: "", contentHash: "" });
     const meeting: LifeOSObject = {
-      frontmatter: { ...this.ctx.envelope(`preview:${externalId}`, "meeting", event.title, now, "calendar"), status: "scheduled", starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone, is_all_day: event.isAllDay ?? false },
+      frontmatter: { ...this.ctx.envelope(`preview:${externalId}`, "meeting", event.title, now, "calendar"), status: "scheduled", starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone, is_all_day: event.isAllDay ?? false, attendee_snapshot: [...event.attendees], ...(event.location ? { location: event.location } : {}), ...(event.joinUrl ? { join_url: event.joinUrl } : {}) },
       body: "", relativePath: "", contentHash: ""
     };
     return {
@@ -199,7 +201,7 @@ export class MeetingsModule {
     const sections = note && Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
     const occurrenceItems = sections.flatMap((section) => {
       const sectionMeeting = typeof section.meeting_id === "string" ? index.get(section.meeting_id) : undefined;
-      if (!sectionMeeting || sectionMeeting.frontmatter.type !== "meeting") return [];
+      if (!sectionMeeting || sectionMeeting.frontmatter.type !== "meeting" || !isLive(sectionMeeting)) return [];
       const sectionMeetingId = sectionMeeting.frontmatter.id;
       const sectionAttendeeIds = Array.isArray(sectionMeeting.frontmatter.attendee_ids) ? sectionMeeting.frontmatter.attendee_ids : [];
       const sourceIds = new Set(Array.isArray(sectionMeeting.frontmatter.source_ids) ? sectionMeeting.frontmatter.source_ids.filter((id): id is string => typeof id === "string") : []);
@@ -207,7 +209,7 @@ export class MeetingsModule {
       return [{
         sectionId: String(section.section_id), occurrenceId: String(section.occurrence_id),
         originalStartsAt: String(section.original_starts_at), meeting: sectionMeeting,
-        reviews: index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === sectionMeetingId),
+        reviews: index.all().filter((object) => object.frontmatter.type === "review-item" && isLive(object) && object.frontmatter.source_meeting_id === sectionMeetingId),
         sources,
         context: { people: sectionAttendeeIds.map(resolve).filter((person): person is LifeOSObject => Boolean(person)) }
       }];
