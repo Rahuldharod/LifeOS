@@ -55,6 +55,11 @@ export const taskSchema = envelopeSchema.extend({
   due_timezone: z.string().optional(),
   completed_at: z.iso.datetime().optional(),
   cancelled_at: z.iso.datetime().optional(),
+  /** Status restored when a completed task is reopened. Missing legacy values fall back to Next. */
+  reopen_status: z.enum(["Inbox", "Next", "Waiting"]).optional(),
+  reopen_waiting_for_person_id: z.uuid().optional(),
+  /** First instant of the current Waiting period. Legacy tasks fall back to updated_at for ordering. */
+  waiting_since: z.iso.datetime().optional(),
   dependency_ids: z.array(z.uuid()).optional(),
   // PB-010: tasks carry the same context links as notes.
   ...contextFields
@@ -66,6 +71,9 @@ export const taskSchema = envelopeSchema.extend({
   if (task.status !== "Done" && task.completed_at) context.addIssue({ code: "custom", message: "completed_at is allowed only for Done tasks" });
   if (task.status === "Cancelled" && !task.cancelled_at) context.addIssue({ code: "custom", message: "cancelled_at is required for Cancelled tasks" });
   if (task.status !== "Cancelled" && task.cancelled_at) context.addIssue({ code: "custom", message: "cancelled_at is allowed only for Cancelled tasks" });
+  if (task.reopen_status && task.status !== "Done") context.addIssue({ code: "custom", message: "reopen_status is allowed only for Done tasks" });
+  if (task.reopen_waiting_for_person_id && (task.status !== "Done" || task.reopen_status !== "Waiting")) context.addIssue({ code: "custom", message: "reopen_waiting_for_person_id requires a Done task that reopens as Waiting" });
+  if (task.waiting_since && task.status !== "Waiting") context.addIssue({ code: "custom", message: "waiting_since is allowed only for Waiting tasks" });
   if (task.dependency_ids?.includes(task.id)) context.addIssue({ code: "custom", message: "A task cannot depend on itself" });
 });
 

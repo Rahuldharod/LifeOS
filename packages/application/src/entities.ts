@@ -12,6 +12,33 @@ const entityTypes: EntityType[] = ["task", "project", "client", "product", "pers
 /** Envelope fields the user may set on any entity (#30). `origin` is deliberately absent: it is fixed at creation. */
 const envelopeFields = ["area", "sensitivity"];
 
+function applyTaskLifecycle(current: LifeOSObject, selected: Record<string, unknown>, now: string) {
+  if (typeof selected.status !== "string") return selected;
+  const currentStatus = String(current.frontmatter.status);
+  if (currentStatus === "Done" && selected.status === "Next") {
+    const reopenStatus = current.frontmatter.reopen_status;
+    selected.status = reopenStatus === "Inbox" || reopenStatus === "Waiting" ? reopenStatus : "Next";
+    if (selected.status === "Waiting") selected.waiting_for_person_id = current.frontmatter.reopen_waiting_for_person_id;
+  }
+  if (selected.status === "Done") {
+    selected.completed_at = now;
+    if (currentStatus !== "Done" && currentStatus !== "Cancelled") {
+      selected.reopen_status = currentStatus;
+      if (currentStatus === "Waiting") selected.reopen_waiting_for_person_id = current.frontmatter.waiting_for_person_id;
+    }
+    selected.waiting_for_person_id = undefined;
+  } else {
+    selected.completed_at = undefined;
+    selected.reopen_status = undefined;
+    selected.reopen_waiting_for_person_id = undefined;
+  }
+  if (selected.status === "Cancelled") selected.cancelled_at = now; else selected.cancelled_at = undefined;
+  if (selected.status === "Waiting" && currentStatus !== "Waiting") selected.waiting_since = now;
+  else if (selected.status !== "Waiting") selected.waiting_since = undefined;
+  if (selected.status !== "Waiting") selected.waiting_for_person_id = undefined;
+  return selected;
+}
+
 /** Tasks, projects, clients, products and people: CRUD, the Today view and rollups. */
 export class EntitiesModule {
   constructor(private readonly ctx: AppContext) {}
@@ -38,6 +65,9 @@ export class EntitiesModule {
     if (type === "task") {
       selected.status ??= "Inbox";
       selected.owner_person_id ??= (await this.ctx.ensureSelfPerson(now)).frontmatter.id;
+      if (selected.status === "Waiting") selected.waiting_since = now;
+      if (selected.status === "Done") { selected.completed_at = now; selected.reopen_status = "Next"; }
+      if (selected.status === "Cancelled") selected.cancelled_at = now;
     } else if (type === "person") {
       selected.given_name ??= title.split(/\s+/)[0];
     } else {
@@ -70,9 +100,7 @@ export class EntitiesModule {
       // sentinel for optional scalar fields, just as it is for optional relationship fields.
       for (const key of ["priority", "due_on", "due_at", "due_timezone", "expected_output"])
         if (selected[key] === null || selected[key] === "") selected[key] = undefined;
-      if (selected.status === "Done") selected.completed_at = now; else if (selected.status) selected.completed_at = undefined;
-      if (selected.status === "Cancelled") selected.cancelled_at = now; else if (selected.status) selected.cancelled_at = undefined;
-      if (selected.status && selected.status !== "Waiting") selected.waiting_for_person_id = undefined;
+      applyTaskLifecycle(current, selected, now);
     }
     // #87: saving an automatically created person counts as reviewing it.
     if (type === "person" && current.frontmatter.review_state === "unreviewed") selected.review_state = "reviewed";
@@ -103,8 +131,7 @@ export class EntitiesModule {
     const allowed = ["title", "status", "priority", "owner_person_id", "waiting_for_person_id", "due_on", "due_at", "due_timezone", "expected_output", "primary_project_id", "primary_client_id", "primary_product_id", "dependency_ids"];
     const safe = Object.fromEntries(Object.entries(changes).filter(([key]) => allowed.includes(key)));
     checkEntityLinks(this.ctx, "task", safe, task.frontmatter);
-    if (safe.status === "Done") safe.completed_at = now; else safe.completed_at = undefined;
-    if (safe.status === "Cancelled") safe.cancelled_at = now; else safe.cancelled_at = undefined;
+    applyTaskLifecycle(task, safe, now);
     const updated = await this.ctx.update(task, safe, { expectedHash, now });
     await this.ctx.writeAudit("task.updated", id, now, { changes: safe });
     await this.ctx.rebuildIndex();
