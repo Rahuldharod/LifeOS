@@ -134,6 +134,7 @@ export interface ReviewRevision {
   body: string;
   /** All the Sources the revised proposal draws on (not only the new ones). */
   sourceIds: string[];
+  evidence?: Record<string, EvidenceEntry[]>;
   fields?: Record<string, unknown>;
 }
 
@@ -152,6 +153,7 @@ export async function reviseReviewItem(ctx: AppContext, run: ProposingRun, revie
   });
   return ctx.update(review, {
     proposed_fields: revision.proposed, confidence_label: revision.confidence, source_ids: revision.sourceIds,
+    ...(revision.evidence ? { field_evidence: revision.evidence } : {}),
     ...(sensitivity !== undefined ? { sensitivity } : {}), ...(run.id ? { agent_run_id: run.id } : {}), ...revision.fields
   }, { expectedHash: review.contentHash, now: run.now, body: revision.body });
 }

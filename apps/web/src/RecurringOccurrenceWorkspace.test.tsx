@@ -31,6 +31,15 @@ describe("RecurringOccurrenceWorkspace", () => {
     expect(changed).not.toContain("Older notes");
   });
 
+  it("keeps the app-managed Materials block out of editable notes and preserves it on edit (#151)", () => {
+    const withMaterials = markdown.replace("Newer notes", `Newer notes\n\n<!-- lifeos:materials:start occurrence-new -->\n\n### Materials\n\n- [Transcript](https://example.test/transcript)\n\n<!-- lifeos:materials:end occurrence-new -->`);
+    expect(occurrenceNotes(withMaterials, [newer, older], newer.sectionId)).toBe("Newer notes");
+    const changed = replaceOccurrenceNotes(withMaterials, [newer, older], newer.sectionId, "Revised notes");
+    expect(changed).toContain("Revised notes");
+    expect(changed).toContain("[Transcript](https://example.test/transcript)");
+    expect(changed.match(/lifeos:materials:start/g)).toHaveLength(1);
+  });
+
   it("focuses the requested section and shows snapshots, current changes, materials, summary and selected Calendar proposals", async () => {
     const onBodyChange = vi.fn();
     const current: CalendarEvent = { externalId: "event", title: "Weekly review moved", startsAt: "2026-10-12T09:00:00.000Z", endsAt: "2026-10-12T10:00:00.000Z", timezone: "Europe/Paris", originalOccurrenceStartsAt: newer.originalStartsAt, attendees: ["Alex Example", "Jamie Example"], location: "Room Beacon" };

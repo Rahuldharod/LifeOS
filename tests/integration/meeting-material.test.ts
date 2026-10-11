@@ -93,6 +93,94 @@ const frontmatterOf = async (file: string) => parse((await readFile(file, "utf8"
 const range = { from: new Date(Date.now() - 86_400_000), to: new Date(Date.now() + 86_400_000) };
 
 describe("meeting-material adoption", () => {
+  it("creates a materials-only recurring section without inventing user notes (#151)", async () => {
+    const occurrence = event("recurring-new", { seriesId: "weekly-series", originalOccurrenceStartsAt: startedAt });
+    const { root, application } = await vault([occurrence]);
+    const sectionId = `occurrence-${startedAt.replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}`;
+    await dropDraft(root, "material.md", material({
+      key: "materials-only", meeting: occurrence.externalId, sources: ["drive-doc"], proposals: "proposals: []", summary: "",
+      extra: `occurrence_section_id: ${sectionId}\nrecurrence_occurrence_id: google:work:weekly-series:${startedAt}`
+    }));
+
+    expect((await application.adoptDrafts()).drafts[0]!.outcome).toBe("adopted");
+    const [listedNote] = await ofType(application, "meeting-note");
+    const note = await application.object(listedNote!.frontmatter.id);
+    expect(note.frontmatter.occurrence_sections).toEqual([expect.objectContaining({ section_id: sectionId })]);
+    expect(note.body).toContain(`<!-- lifeos:materials:start ${sectionId} -->`);
+    expect(note.body).not.toContain("Start writing");
+  });
+
+  it("verifies a recurring draft's occurrence before writing and updates only its generated Materials block (#151)", async () => {
+    const occurrence = event("recurring-1", { seriesId: "weekly-series", originalOccurrenceStartsAt: startedAt });
+    const { root, application } = await vault([occurrence]);
+    const workspace = await application.createMeetingFromEvent(occurrence.externalId, range.from, range.to, "work", "User-authored occurrence notes.\n");
+    const section = (workspace.note!.frontmatter.occurrence_sections as Array<{ section_id: string; occurrence_id: string }>)[0]!;
+    const before = workspace.note!.body;
+
+    await dropDraft(root, "wrong.md", material({
+      key: "wrong-occurrence", meeting: workspace.meeting.frontmatter.id, proposals: "proposals: []", summary: "",
+      extra: `occurrence_section_id: occurrence-wrong\nrecurrence_occurrence_id: ${section.occurrence_id}`
+    }));
+    const refused = await application.adoptDrafts();
+    expect(refused.drafts[0]).toMatchObject({ outcome: "failed", reason: expect.stringContaining("occurrence_section_id") });
+    expect(await ofType(application, "source")).toHaveLength(0);
+    expect((await application.object(workspace.note!.frontmatter.id)).body).toBe(before);
+
+    const correct = material({
+      key: "right-occurrence", meeting: workspace.meeting.frontmatter.id, proposals: proposalsYaml, summary: "Occurrence-specific summary.\n",
+      extra: `occurrence_section_id: ${section.section_id}\nrecurrence_occurrence_id: ${section.occurrence_id}\nsummary_evidence:\n  - source: https://example.test/meet-transcript/1\n    locator: "${section.section_id}#00:12:30"`
+    }).replace(`occurred_at: ${startedAt}`, `occurred_at: ${startedAt}\n    retrieved_at: 2026-10-04T09:10:00+02:00\n    provider_revision: drive-revision-7`);
+    await dropDraft(root, "right.md", correct);
+    expect((await application.adoptDrafts()).drafts[0]!.outcome).toBe("adopted");
+
+    const [source] = (await ofType(application, "source")).filter((candidate) => candidate.frontmatter.source_type === "meet-transcript");
+    expect(source!.frontmatter).toMatchObject({ retrieved_at: "2026-10-04T07:10:00.000Z", provider_revision: "drive-revision-7" });
+    const storedNote = await application.object(workspace.note!.frontmatter.id);
+    expect(storedNote.body).toContain("User-authored occurrence notes.");
+    expect(storedNote.body).toContain(`<!-- lifeos:materials:start ${section.section_id} -->`);
+    expect(storedNote.body).toContain("[Meet transcript:");
+    expect(storedNote.body.match(/lifeos:materials:start/g)).toHaveLength(1);
+    const summaries = application.reviews().filter((review) => review.frontmatter.review_type === "summary");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.frontmatter).toMatchObject({ occurrence_section_id: section.section_id, recurrence_occurrence_id: section.occurrence_id });
+    expect(application.reviewEvidence(summaries[0]!.frontmatter.id).summary).toEqual([
+      expect.objectContaining({ resolved: true, source_id: source!.frontmatter.id, locator: `${section.section_id}#00:12:30` })
+    ]);
+    const proposals = application.reviews().filter((review) => review.frontmatter.review_type === "create");
+    expect(proposals.every((review) => review.frontmatter.occurrence_section_id === section.section_id)).toBe(true);
+  });
+
+  it("links one external Source to several recurring occurrences without duplication (#151)", async () => {
+    const olderStart = new Date(Date.parse(startedAt) - 24 * 3_600_000).toISOString();
+    const olderEnd = new Date(Date.parse(endedAt) - 24 * 3_600_000).toISOString();
+    const occurrences = [
+      event("recurring-old", { startsAt: olderStart, endsAt: olderEnd, seriesId: "weekly-series", originalOccurrenceStartsAt: olderStart }),
+      event("recurring-new", { seriesId: "weekly-series", originalOccurrenceStartsAt: startedAt })
+    ];
+    const { root, application } = await vault(occurrences);
+    const oldWorkspace = await application.createMeetingFromEvent("recurring-old", new Date(Date.parse(olderStart) - 3_600_000), range.to, "work", "Older notes.\n");
+    const newWorkspace = await application.createMeetingFromEvent("recurring-new", new Date(Date.parse(olderStart) - 3_600_000), range.to, "work", "Newer notes.\n");
+    const sections = newWorkspace.note!.frontmatter.occurrence_sections as Array<{ section_id: string; occurrence_id: string; meeting_id: string }>;
+    const sectionFor = (meetingId: string) => sections.find((section) => section.meeting_id === meetingId)!;
+
+    for (const [name, workspace] of [["old", oldWorkspace], ["new", newWorkspace]] as const) {
+      const section = sectionFor(workspace.meeting.frontmatter.id);
+      await dropDraft(root, `${name}.md`, material({
+        key: `shared-${name}`, meeting: workspace.meeting.frontmatter.id, sources: ["drive-doc"], proposals: "proposals: []", summary: "",
+        extra: `occurrence_section_id: ${section.section_id}\nrecurrence_occurrence_id: ${section.occurrence_id}`
+      }));
+      expect((await application.adoptDrafts()).drafts[0]!.outcome).toBe("adopted");
+    }
+
+    const sources = await ofType(application, "source");
+    expect(sources).toHaveLength(1);
+    const refreshedOld = await application.object(oldWorkspace.meeting.frontmatter.id);
+    const refreshedNew = await application.object(newWorkspace.meeting.frontmatter.id);
+    expect([refreshedOld, refreshedNew].filter((meeting) => (meeting.frontmatter.source_ids as string[] | undefined)?.includes(sources[0]!.frontmatter.id))).toHaveLength(1);
+    const note = await application.object(newWorkspace.note!.frontmatter.id);
+    expect(note.body.match(/lifeos:materials:start/g)).toHaveLength(2);
+  });
+
   it("creates the meeting (not the note) from the calendar event, upserts sources and proposes summary and outputs", async () => {
     const { root, application } = await vault();
     await dropDraft(root, "material.md", material({ key: "enrich-evt-1" }));

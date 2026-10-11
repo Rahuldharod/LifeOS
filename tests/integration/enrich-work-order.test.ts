@@ -92,6 +92,33 @@ describe("Enrich last 48h Work Order", () => {
     expect(await readFile(path.join(root, result.workOrder!), "utf8")).toContain("meeting-material");
   });
 
+  it("targets one stable occurrence section and says whether that section already exists (#151)", async () => {
+    const originalStart = hoursAgo(30);
+    const recurring = event("series-occurrence", 30, { seriesId: "weekly-series", originalOccurrenceStartsAt: originalStart });
+    const { root, application } = await vault([recurring]);
+
+    const first = await application.requestEnrichment({ now });
+    const firstEntry = ((await frontmatterOf(path.join(root, first.workOrder!))).meetings as Array<Record<string, unknown>>)[0]!;
+    expect(firstEntry).toMatchObject({
+      recurrence_occurrence_id: `google:work:weekly-series:${originalStart}`,
+      occurrence_section_id: expect.stringMatching(/^occurrence-/),
+      occurrence_section_exists: false,
+      optional_material: ["drive-doc"]
+    });
+    expect(firstEntry.note_path).toBeUndefined();
+
+    const workspace = await application.createMeetingFromEvent(recurring.externalId, range.from, range.to, "work", "Occurrence notes\n");
+    const sectionId = (workspace.note!.frontmatter.occurrence_sections as Array<{ section_id: string }>)[0]!.section_id;
+    const second = await application.requestEnrichment({ now: new Date(now.getTime() + 60_000) });
+    const secondEntry = ((await frontmatterOf(path.join(root, second.workOrder!))).meetings as Array<Record<string, unknown>>)[0]!;
+    expect(secondEntry).toMatchObject({
+      meeting_id: workspace.meeting.frontmatter.id,
+      occurrence_section_id: sectionId,
+      occurrence_section_exists: true,
+      note_path: workspace.note!.relativePath
+    });
+  });
+
   it("marks selected meetings requested and keeps enriched and gave_up meetings out", async () => {
     const { root, store, application } = await vault([event("a", 3), event("b", 4), event("c", 5)]);
     const a = await createMeeting(application, "a");

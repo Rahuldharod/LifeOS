@@ -1,6 +1,6 @@
 ---
 name: lifeos-enrichment
-description: Runs LifeOS enrichment after meetings. Reads the enrichment Work Order in _inbox/requests/, fetches Meet transcripts and recordings (calendar attachments and Drive), Gong calls (Gong connector) and Gong summary emails (Gmail), compares them with Rahul's meeting note, and writes one meeting-material Inbox Draft per meeting with sources, a summary and proposals flagged missed_in_notes. Skips restricted meetings, and refuses client meetings while the IT/legal policy gate is blocked. Use when Rahul says "run LifeOS enrichment", "enrich my meetings" or "process the Work Order".
+description: Runs LifeOS enrichment after meetings. Reads one occurrence target from each enrichment Work Order entry, fetches only its Meet, Drive, Gong and Gmail material, compares only its marked note section, and writes an occurrence-specific meeting-material Inbox Draft. Never edits LifeOS objects. Skips restricted meetings and refuses client meetings while the IT/legal policy gate is blocked. Use when Rahul says "run LifeOS enrichment", "enrich my meetings" or "process the Work Order".
 metadata:
   version: "1.0.0"
   draft_contract: 1
@@ -93,8 +93,8 @@ You never write objects, never edit Rahul's note and never edit the meeting. The
 3. **Find the Work Order** in `_inbox/requests/`: a file whose front matter has `lifeos_work_order: 1` and `kind: enrichment`. If there are several, do the oldest `requested_at` first. If there is none, tell Rahul to press **Enrich last 48h** in LifeOS, and stop.
 4. **Read `_agent/overview.md` (for the internal domains) and `_agent/meetings.md`.** If their `generated_at` is more than 24 hours old, warn Rahul that LifeOS may not be running.
 5. **For each entry in `meetings`**, decide whether to skip it (see "Skip these meetings"). Then:
-   1. Fetch only the kinds listed in `missing_material` (see "Where the material is").
-   2. Read Rahul's note at `note_path`, if there is one (see "Compare with the note").
+   1. Fetch the kinds listed in `missing_material`, plus any linked material named in `optional_material` (see "Where the material is"). Missing optional material is not `unavailable` and never keeps the occurrence Partial.
+      2. If `occurrence_section_exists` is `true`, read only the section named by `occurrence_section_id` at `note_path` (see "Compare with the note"). Never read a neighbouring occurrence section.
    3. Write the draft (see "The draft").
 6. **Self-check each draft.** Read its `.result.md` in `_inbox/processed/` or `_inbox/failed/`. If it failed, read `errors`, fix the draft, and send it again under a new file name.
 7. **File the Work Order** once every entry is done or skipped. When you have finished a Work Order, move that Work Order file from `_inbox/requests/` to `_inbox/processed/`. Move nothing else there.
@@ -125,6 +125,10 @@ Each entry in `meetings`:
 | `note_path` | Rahul's meeting note, relative to the data root; absent when he wrote none |
 | `existing_sources` | material already linked: `id`, `source_type`, `path`, `url`, `external_id` |
 | `missing_material` | what is still missing; fetch only these |
+| `recurrence_occurrence_id` | immutable provider occurrence identity; present for a recurring occurrence |
+| `occurrence_section_id` | stable section marker for this one recurring occurrence |
+| `occurrence_section_exists` | whether the target section already exists in the shared Note |
+| `optional_material` | optional material such as `drive-doc`; its absence never leaves Enrichment Partial |
 
 Restricted meetings are never in a Work Order.
 
@@ -152,7 +156,7 @@ Fetch only what `missing_material` lists. Match material to the meeting by calen
 | `meet-recording` | The calendar event's attachments, else the "Meet Recordings" folder in Google Drive | Drive file ID | the video link |
 | `gong-call` | The **Gong connector**: the call at the meeting's time with the same attendees. Use its transcript and brief | Gong call ID | the Gong call link |
 | `gong-summary-email` | **Gmail**: the Gong summary email for that call, sent after the meeting | Gmail message ID | the message link |
-| `drive-doc` | Optional extra: a Drive doc attached to the event, such as Gemini notes or slides | Drive file ID | the Doc link |
+| `drive-doc` | Optional extra listed in `optional_material`: a Drive doc attached to the event, such as Gemini notes or slides | Drive file ID | the Doc link |
 
 When a kind does not exist, say so with `unavailable`:
 
@@ -162,11 +166,11 @@ When a kind does not exist, say so with `unavailable`:
 
 ## Compare with the note
 
-Every proposal needs `missed_in_notes`: did Rahul's note already capture it?
+Every proposal needs `missed_in_notes`: did Rahul's notes for **this occurrence only** already capture it?
 
-1. Read the note at `note_path` (after the restricted check above).
+1. Read front matter first. If it is restricted, stop. For a recurring entry, then find the exact anchor `<a id="<occurrence_section_id>"></a>` and read from that anchor only until the next occurrence heading and anchor. Do not read text before the target anchor or any later section. When `occurrence_section_exists` is `false`, read no Note content and treat the occurrence as having no user notes.
 2. For each task, decision or open point you found in the material:
-   - `missed_in_notes: false` when the note already says the same thing, even in other words or another language.
+   - `missed_in_notes: false` when the targeted occurrence section already says the same thing, even in other words or another language.
    - `missed_in_notes: true` when the note does not mention it, or only part of it (for example the task but not its owner or date).
    - `missed_in_notes: true` when there is no `note_path`.
    - When unsure, use `true`. Rahul would rather check one extra item than miss one.
@@ -186,9 +190,12 @@ One `meeting-material` Inbox Draft per meeting, in `_inbox/drafts/`. File name `
 | `captured_at` | when you fetched the material, with an offset |
 | `meeting` | the entry's `calendar_event_id` (or `meeting_id`) |
 | `calendar_id` | the entry's `calendar_id`, when there is one |
-| `sources` | the material you found: `source_type`, `url`, `external_id`, `occurred_at`, and optional `title` and `provider` |
+| `recurrence_occurrence_id` | copy exactly from the Work Order for a recurring occurrence |
+| `occurrence_section_id` | copy exactly from the Work Order for a recurring occurrence |
+| `sources` | the material you found: `source_type`, `url`, `external_id`, `occurred_at`, and optional `title`, `provider`, `retrieved_at` and `provider_revision`; LifeOS defaults `retrieved_at` to the draft's `captured_at` |
 | `unavailable` | kinds you checked and found do not exist |
 | `summary_confidence` | `High`, `Medium` or `Low` |
+| `summary_evidence` | for a recurring summary, at least one `{ source, locator, quote? }`; `source` must be linked to this occurrence and `locator` must identify evidence inside this occurrence's material |
 | `proposals` | tasks, decisions and open points, below |
 | body | the proposed meeting summary, in the meeting's language |
 
@@ -200,12 +207,12 @@ Each proposal:
 | `title` | in the meeting's language |
 | `confidence` | `High`, `Medium` or `Low` |
 | `missed_in_notes` | `true` or `false` (see above) |
-| `evidence` | at least one `{ field, source, locator, quote }`. `source` is the material's `url` exactly as in `sources`. `locator` is the timestamp or page. `quote` is the exact words |
+| `evidence` | at least one `{ field, source, locator, quote }`. `source` is material linked to this occurrence. `locator` includes the occurrence section ID plus the timestamp or page. `quote` is the exact words |
 | optional | `key` (a stable name, so a re-run is recognised), `body`, and task fields such as `due_on`, `owner`, `people`, `status`, `waiting_for` |
 
 Do not put `meeting`, `origin`, `draft_key` or `operation_id` on a proposal. People default to the meeting's attendees.
 
-Re-runs are safe. LifeOS recognises sources by provider and external ID and proposals by `key`, so nothing is added twice.
+Re-runs are safe. LifeOS verifies the occurrence identity before writing, recognises Sources by provider and external ID, and recognises proposals by `key`, so nothing is added twice. One Source may be linked to several occurrences without being copied. LifeOS—not you—updates the generated Materials block in the target section.
 
 ## Examples
 
