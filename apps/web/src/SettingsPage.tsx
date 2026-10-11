@@ -2,7 +2,7 @@
 // this page uses are loaded and saved here; App passes in what other pages share (timezone, calendars, connections).
 import React, { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api.js";
-import type { CalendarOption, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, TodaySettings, Weekday } from "@lifeos/contracts";
+import type { BackupSummary, BackupVerification, CalendarOption, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, SystemHealth, TodaySettings, Weekday } from "@lifeos/contracts";
 import { ConnectionsNotice, type ConnectionsState } from "./connections.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
@@ -10,6 +10,7 @@ import { BackupFolderCard } from "./BackupFolderCard.js";
 import { internalDomainsCardId, selfEmailsCardId } from "./SelfEmailWarning.js";
 import { SettingsDesignPrototype } from "./SettingsDesignPrototype.js";
 import { createSettingsEditorGuard, SettingsWorkspace, useSettingsCardGuard, type SettingsEditorGuard, type SettingsSection } from "./SettingsWorkspace.js";
+import { connectionDeviceSettingsSections } from "./ConnectionDeviceSettings.js";
 
 export type SettingsReferenceData = {
   projects?: string[];
@@ -29,6 +30,12 @@ type Props = {
   guard?: SettingsEditorGuard;
   onOpenCard?: (cardId: string) => void;
   referenceData?: SettingsReferenceData;
+  health?: SystemHealth;
+  backups?: BackupSummary[];
+  lastVerification?: BackupVerification;
+  onCreateAndVerifyBackup?: () => Promise<BackupVerification>;
+  onVerifyBackup?: (backupId: string) => Promise<BackupVerification>;
+  onTakeOverSession?: () => Promise<void>;
 };
 
 const availableTimeZones = (() => {
@@ -36,7 +43,7 @@ const availableTimeZones = (() => {
   return supportedValuesOf ? supportedValuesOf("timeZone") : ["Europe/Paris", "UTC", "America/New_York", "America/Los_Angeles", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
 })();
 
-export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged, selectedCardId, guard, onOpenCard, referenceData = {} }: Props) {
+export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calendarCatalog, calendarCatalogLoaded, calendarPrefs, onLoadCalendars, onSaveCalendarPrefs, connections, onRetryConnections, busy, readOnly, onSaveGoogleSecrets, onChanged, selectedCardId, guard, onOpenCard, referenceData = {}, health, backups = [], lastVerification, onCreateAndVerifyBackup, onVerifyBackup, onTakeOverSession }: Props) {
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [internalDomains, setInternalDomains] = useState<InternalDomains>();
   const [selfEmails, setSelfEmails] = useState<SelfEmails>();
@@ -127,14 +134,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
       { id: selfEmailsCardId, label: "My email addresses", content: <SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /> },
       { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> }
     ] },
-    { id: "calendars", group: "Connections", label: "Calendars", cards: [{ id: "settings-calendar-list", label: "Calendars in the Calendar view", safeStatus: calendarCatalogLoaded ? `${calendarCatalog.length} available` : "Loading", content: <CalendarListCard catalog={calendarCatalog} loaded={calendarCatalogLoaded} prefs={calendarPrefs} disabled={readOnly} onSave={onSaveCalendarPrefs} /> }] },
-    { id: "google", group: "Connections", label: "Google", cards: [
-      { id: "settings-connections-status", label: "Connection status", content: <ConnectionsNotice state={connections} busy={busy} onRetry={() => void onRetryConnections()} /> },
-      { id: "settings-google-calendar", label: "Google Calendar", safeStatus: connectionStatus(connections?.settings?.calendar), content: <GoogleSecretCard provider="calendar" title="Google Calendar" status={connections?.settings?.calendar} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /> },
-      { id: "settings-google-drive", label: "Google Drive", safeStatus: connectionStatus(connections?.settings?.drive), content: <GoogleSecretCard provider="drive" title="Google Drive" status={connections?.settings?.drive} busy={busy || readOnly} onSave={onSaveGoogleSecrets} /> },
-      { id: "settings-credentials-security", label: "Credential security", content: <article><span>SECURITY</span><p className="muted">LifeOS only reports whether credentials exist. Saved client secrets cannot be read back through the API or UI. Calendar authorization happens from the Calendar page after its credentials are configured.</p></article> }
-    ] },
-    { id: "backups", group: "Data & devices", label: "Backups", cards: [{ id: "settings-backup-folder", label: "Off-Drive backup folder", content: <BackupFolderCard disabled={readOnly} /> }] },
+    ...(onCreateAndVerifyBackup && onVerifyBackup && onTakeOverSession ? connectionDeviceSettingsSections({ calendarCatalog, calendarCatalogLoaded, calendarPrefs, connections, health, backups, lastVerification, busy, readOnly, displayTimeZone, onRetryConnections, onSaveGoogleSecrets, onSaveCalendarPrefs, onCreateAndVerifyBackup, onVerifyBackup, onTakeOverSession }) : []),
     ...(["projects", "clients", "products", "people"] as const).map((kind): SettingsSection => ({ id: `reference-${kind}`, group: "Reference data", label: kind[0]!.toUpperCase() + kind.slice(1), cards: [{ id: `settings-reference-${kind}`, label: kind[0]!.toUpperCase() + kind.slice(1), safeNames: referenceData[kind] ?? [], content: <ReferenceDataCard label={kind} names={referenceData[kind] ?? []} /> }] }))
   ];
 

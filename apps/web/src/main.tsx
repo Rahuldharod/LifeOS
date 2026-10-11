@@ -49,7 +49,8 @@ import { MeetingNoteActions } from "./MeetingNoteActions.js";
 import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
 import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
-import { LeaseBanner, takeoverCaution } from "./LeaseBanner.js";
+import { takeoverCaution } from "./LeaseBanner.js";
+import { AppStatusBanners } from "./ConnectionDeviceSettings.js";
 import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { BackupWarning } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
@@ -695,6 +696,37 @@ function App() {
     setLastVerification(await api("POST /api/v1/backups/:id/verify", { params: { id: backupId } }));
   }, "Backup restoration drill completed");
 
+  const createAndVerifyBackup = async (): Promise<BackupVerification> => {
+    setBusy(true);
+    try {
+      const created = await api("POST /api/v1/backups");
+      const verification = await api("POST /api/v1/backups/:id/verify", { params: { id: created.backupId } });
+      setLastVerification(verification);
+      await refresh();
+      setMessage("Snapshot created and restoration drill passed");
+      return verification;
+    } finally { setBusy(false); }
+  };
+
+  const verifyBackupForSettings = async (backupId: string): Promise<BackupVerification> => {
+    setBusy(true);
+    try {
+      const verification = await api("POST /api/v1/backups/:id/verify", { params: { id: backupId } });
+      setLastVerification(verification);
+      setMessage("Backup restoration drill completed");
+      return verification;
+    } finally { setBusy(false); }
+  };
+
+  const takeOverSessionForSettings = async () => {
+    setBusy(true);
+    try {
+      await api("POST /api/v1/session/take-over");
+      await refresh();
+      setMessage("This device now holds the advisory write lease");
+    } finally { setBusy(false); }
+  };
+
   const submitCapture = () => run(async () => {
     await api("POST /api/v1/capture", { body: { text: capture } });
     setCapture(""); await refresh();
@@ -1186,7 +1218,7 @@ function App() {
       </OverlayDialog>
       <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
-      <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
+      <AppStatusBanners session={health?.session} idleMinutes={health?.idleReleaseMinutes} offline={calendar.offline} busy={busy} timeZone={displayTimeZone} onTakeOver={takeOverSessionForSettings} onRetryCalendar={async () => { await retryCalendar(); }} />
       {missingItem && <article className="lease-warning" role="status"><span>NOT FOUND</span><p>{missingItem} Showing the {view === "Calendar" ? "day" : "list"} instead.</p></article>}
       {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={calendar.events.length} capture={capture} busy={busy} readOnly={readOnly} loading={!collectionsLoaded} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => void go({ view: "Inbox" })} onOpenSettingsCard={openSettingsCard} onCompleteTask={(task) => updateEntity(task, { status: "Done" })} onOpenTasks={() => void go({ view: "Tasks" })} onOpenCalendar={() => void go(tabRoute("Calendar"))} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
 
@@ -1405,6 +1437,12 @@ function App() {
         readOnly={readOnly}
         onSaveGoogleSecrets={saveGoogleSecrets}
         onChanged={refresh}
+        health={health}
+        backups={backups}
+        lastVerification={lastVerification}
+        onCreateAndVerifyBackup={createAndVerifyBackup}
+        onVerifyBackup={verifyBackupForSettings}
+        onTakeOverSession={takeOverSessionForSettings}
         guard={settingsEditorGuard}
         selectedCardId={route?.view === "Settings" ? route.id : undefined}
         onOpenCard={(id) => followRoute({ view: "Settings", id })}
