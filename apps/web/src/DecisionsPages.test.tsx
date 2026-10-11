@@ -131,6 +131,33 @@ describe("Decisions and Open Points workspaces (#136)", () => {
     expect(document.querySelector("[role='dialog']")).toBeNull();
   });
 
+  it("does not resume Decision reversal after the lease is lost", async () => {
+    const guard = createStructuredEditorGuard(); const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    call.mockImplementation(async (endpoint: string) => endpoint === "GET /api/v1/decisions" ? [decision] : decisionDetail);
+    await mount(<DecisionsPage {...common} guard={guard} highlightId="d1" />);
+    await input("Decision title", "Dirty before reversal"); await click("More"); await click("Mark reversed…");
+    expect(document.querySelector("[role='dialog']")).toBeTruthy();
+    await rerender(<DecisionsPage {...common} guard={guard} highlightId="d1" readOnly />);
+    await clickDialog("Discard");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(call.mock.calls.some(([endpoint]) => endpoint === "PATCH /api/v1/decisions/:id")).toBe(false);
+    expect((document.querySelector("[aria-label='Decision title']") as HTMLInputElement).value).toBe("Pilot loyalty offer");
+    expect(document.querySelector("[role='dialog']")).toBeNull();
+  });
+
+  it("does not resume an Open Point lifecycle action after the lease is lost", async () => {
+    const guard = createStructuredEditorGuard();
+    call.mockImplementation(async (endpoint: string) => endpoint === "GET /api/v1/open-points" ? [point] : endpoint === "GET /api/v1/decisions" ? [decision] : pointDetail);
+    await mount(<OpenPointsPage {...common} guard={guard} highlightId="p1" />);
+    await input("Open point title", "Dirty before close"); await click("More"); await click("Close…");
+    expect(document.querySelector("[role='dialog']")).toBeTruthy();
+    await rerender(<OpenPointsPage {...common} guard={guard} highlightId="p1" readOnly />);
+    await clickDialog("Discard");
+    expect(call.mock.calls.some(([endpoint]) => endpoint === "POST /api/v1/open-points/:id/close")).toBe(false);
+    expect(document.querySelector("[aria-label='Close this open point']")).toBeNull();
+    expect((document.querySelector("[aria-label='Open point title']") as HTMLInputElement).value).toBe("Who owns sign-off?");
+  });
+
   it("lets the shared workspace own narrow list/detail visibility", async () => {
     vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     call.mockImplementation(async (endpoint: string) => endpoint === "GET /api/v1/decisions" ? [decision] : decisionDetail);

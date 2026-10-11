@@ -146,12 +146,13 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
   const set = (key: keyof typeof draft, next: unknown) => setDraft((current) => ({ ...current, [key]: next }));
   const isOpen = value.status === "open";
   const locked = busy || readOnly;
+  const writable = useRef(!locked); writable.current = !locked;
   // Decisions to link are loaded only when the user starts resolving.
   useEffect(() => { if (action?.kind === "resolve" && !decisions.length) void api("GET /api/v1/decisions").then(setDecisions).catch(() => setDecisions([])); }, [action?.kind, decisions.length]);
 
   /** One expected-hash write; failures keep the structured draft visible for retry. */
   const write = async (endpoint: "PATCH /api/v1/open-points/:id" | `POST /api/v1/open-points/:id/${"resolve" | "resolve-with-decision" | "close"}`, fields: Record<string, unknown>, success: string) => {
-    if (locked) return false;
+    if (!writable.current) return false;
     const done = await run(async () => { await api(endpoint, { params: { id: value.id }, body: { fields, expectedHash: openPoint.contentHash } }); }, success);
     if (done) { setAction(undefined); await refresh(value.id); }
     return done;
@@ -177,7 +178,7 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
 
   return <article className="decision-detail" aria-label={`Open point: ${value.title}`}>
     <span>OPEN POINT · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
-    <details className="decision-more"><summary>More</summary><div><CopyLink object={openPoint} /><HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />{isOpen && <button className="danger" disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => setAction({ kind: "close", reason: "" }))}>Close…</button>}</div></details>
+    <details className="decision-more"><summary>More</summary><div><CopyLink object={openPoint} /><HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />{isOpen && <button className="danger" disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => { if (writable.current) setAction({ kind: "close", reason: "" }); })}>Close…</button>}</div></details>
     {value.status === "resolved" && <p className="decision-chain" role="note">Resolved {formatDate(value.resolved_at)}{detail.resolutionDecision ? <> by decision {link(detail.resolutionDecision)}</> : value.resolution_decision_id ? <span className="muted"> by a decision that is missing</span> : null}</p>}
     {value.status === "closed" && <p className="decision-chain" role="note">Closed {formatDate(value.closed_at)}{value.close_reason ? `: ${String(value.close_reason)}` : " (no reason given)"}</p>}
     <div className="crud-fields decision-fields">
@@ -197,8 +198,8 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
       <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
       <button disabled={locked || !draft.title.trim() || (value.status === "resolved" && !draft.resolution_summary.trim() && !value.resolution_decision_id)} onClick={() => void save()}>Save changes</button>
       {isOpen && <>
-        <button disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => setAction({ kind: "resolve", summary: "", decisionId: "" }))}>Resolve…</button>
-        <button disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => setAction({ kind: "decide", title: value.title, decision_text: "", rationale: "" }))}>Resolve with decision…</button>
+        <button disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => { if (writable.current) setAction({ kind: "resolve", summary: "", decisionId: "" }); })}>Resolve…</button>
+        <button disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => { if (writable.current) setAction({ kind: "decide", title: value.title, decision_text: "", rationale: "" }); })}>Resolve with decision…</button>
       </>}
     </div>
     {action && <div className="decision-successor" role="group" aria-label={action.kind === "close" ? "Close this open point" : "Resolve this open point"}>
