@@ -75,6 +75,10 @@ Approved on 11 October 2026 during the refinement interview:
 - **Tasks, Calendar and Notes reflow:** use the approved list clamps, independent pane scrolling and narrow list-to-detail navigation. Keep forms, editors and prose within their approved internal measures. Calendar proposals remain below the editor; Note conflict versions stack only in the narrow band.
 - **Inbox, Decisions, Open Points and Knowledge reflow:** preserve a focused record workflow on narrow screens. On wide screens, supporting evidence, relationships or Sources may form an internal rail inside the record detail, never a universal app-level pane.
 - **Settings reflow:** keep the outer section rail stable. Show nested Reference data list/detail only when it fits; compact and narrow layouts navigate through successive section-to-content and list-to-detail steps rather than squeezing three columns.
+- **Zoom and reflow:** at 200% and 400% zoom, move naturally through the approved responsive bands without page-level horizontal scrolling. Only inherently two-dimensional content may scroll inside its own bounded region.
+- **Keyboard movement:** provide a skip link past navigation. Opening detail moves focus to its heading; Back restores the originating list row and scroll position. Overlays trap focus and return it to their trigger.
+- **Typography and targets:** use the system sans family with no separate font preference in this phase. Use 16px/1.55 for UI body text, 17px/1.65 for the long-form editor and never less than 13px for supporting text. Interactive targets are at least 40px on desktop and 44px for coarse pointers.
+- **Assistive feedback and motion:** keep visible status and assistive announcements in the same state. Announce routine progress politely; treat errors immediately and identify their affected control. Reduced-motion removes non-essential movement without hiding state changes.
 
 ## Navigation and workflows
 
