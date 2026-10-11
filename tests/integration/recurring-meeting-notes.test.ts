@@ -76,6 +76,23 @@ describe("recurring meeting notes (#147)", () => {
     expect(copy.note?.body).toBe("plain body\n");
   });
 
+  it("reconciles a split seen in a later day query using provider series identity", async () => {
+    const before = event({ seriesId: "series-a", seriesUid: "provider-series", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const after = event({ externalId: "occurrence-after-split", seriesId: "series-b", seriesUid: "provider-series", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const calendar = new SyntheticCalendar([before]);
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-recurrence-days-"));
+    roots.push(root);
+    const app = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), calendar, undefined, "recurrence-test");
+    await app.rebuildIndex();
+    const oldSeries = await app.createMeetingFromEvent(before.externalId);
+    calendar.events.splice(0, calendar.events.length, after);
+
+    const newSeries = await app.createMeetingFromEvent(after.externalId);
+
+    expect(newSeries.note?.frontmatter.previous_recurrence_series_id).toBe("synthetic:work:series-a");
+    expect(newSeries.note?.frontmatter.previous_series_note_id).toBe(oldSeries.note?.frontmatter.id);
+  });
+
   it("replays an interrupted predecessor link repair without duplicating work", async () => {
     const before = event({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
     const after = event({ externalId: "occurrence-after-split", seriesId: "series-b", previousSeriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
