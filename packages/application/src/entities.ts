@@ -12,17 +12,18 @@ const entityTypes: EntityType[] = ["task", "project", "client", "product", "pers
 /** Envelope fields the user may set on any entity (#30). `origin` is deliberately absent: it is fixed at creation. */
 const envelopeFields = ["area", "sensitivity"];
 
-function applyTaskLifecycle(current: LifeOSObject, selected: Record<string, unknown>, now: string) {
+function applyTaskLifecycle(current: LifeOSObject | undefined, selected: Record<string, unknown>, now: string) {
   if (typeof selected.status !== "string") return selected;
-  const currentStatus = String(current.frontmatter.status);
+  const currentStatus = current ? String(current.frontmatter.status) : undefined;
   if (currentStatus === "Done" && selected.status === "Next") {
-    const reopenStatus = current.frontmatter.reopen_status;
+    const reopenStatus = current?.frontmatter.reopen_status;
     selected.status = reopenStatus === "Inbox" || reopenStatus === "Waiting" ? reopenStatus : "Next";
-    if (selected.status === "Waiting") selected.waiting_for_person_id = current.frontmatter.reopen_waiting_for_person_id;
+    if (selected.status === "Waiting") selected.waiting_for_person_id = current?.frontmatter.reopen_waiting_for_person_id;
   }
   if (selected.status === "Done") {
     selected.completed_at = now;
-    if (currentStatus !== "Done" && currentStatus !== "Cancelled") {
+    if (!current) selected.reopen_status = "Next";
+    else if (currentStatus !== "Done" && currentStatus !== "Cancelled") {
       selected.reopen_status = currentStatus;
       if (currentStatus === "Waiting") selected.reopen_waiting_for_person_id = current.frontmatter.waiting_for_person_id;
     }
@@ -65,9 +66,7 @@ export class EntitiesModule {
     if (type === "task") {
       selected.status ??= "Inbox";
       selected.owner_person_id ??= (await this.ctx.ensureSelfPerson(now)).frontmatter.id;
-      if (selected.status === "Waiting") selected.waiting_since = now;
-      if (selected.status === "Done") { selected.completed_at = now; selected.reopen_status = "Next"; }
-      if (selected.status === "Cancelled") selected.cancelled_at = now;
+      applyTaskLifecycle(undefined, selected, now);
     } else if (type === "person") {
       selected.given_name ??= title.split(/\s+/)[0];
     } else {

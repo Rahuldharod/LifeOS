@@ -40,6 +40,12 @@ describe("entity CRUD", () => {
 
     const self = await application.createEntity("person", { title: "Test User", given_name: "Test", is_self: true });
     const colleague = await application.createEntity("person", { title: "Sam Example", given_name: "Sam" });
+    const initiallyWaiting = await application.createEntity("task", { title: "Waiting from creation", status: "Waiting", owner_person_id: self.frontmatter.id, waiting_for_person_id: colleague.frontmatter.id });
+    const initiallyDone = await application.createEntity("task", { title: "Done from creation", status: "Done", owner_person_id: self.frontmatter.id });
+    const initiallyCancelled = await application.createEntity("task", { title: "Cancelled from creation", status: "Cancelled", owner_person_id: self.frontmatter.id });
+    expect(initiallyWaiting.frontmatter.waiting_since).toEqual(expect.any(String));
+    expect(initiallyDone.frontmatter).toMatchObject({ status: "Done", reopen_status: "Next", completed_at: expect.any(String) });
+    expect(initiallyCancelled.frontmatter).toMatchObject({ status: "Cancelled", cancelled_at: expect.any(String) });
     const created = await application.createEntity("task", { title: "Confirm launch", status: "Inbox", owner_person_id: self.frontmatter.id });
     const waiting = await application.updateEntity(created.frontmatter.id, { status: "Waiting", waiting_for_person_id: colleague.frontmatter.id }, created.contentHash);
 
