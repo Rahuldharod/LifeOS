@@ -55,6 +55,7 @@ describe("Google Calendar connector", () => {
         { id: "instance-normal", recurringEventId: "series-a", iCalUID: "weekly@example.com", status: "confirmed", summary: "Weekly", originalStartTime: { dateTime: "2026-10-05T10:00:00+02:00" }, start: { dateTime: "2026-10-05T10:00:00+02:00" }, end: { dateTime: "2026-10-05T11:00:00+02:00" } },
         { id: "instance-moved", recurringEventId: "series-a", iCalUID: "weekly@example.com", status: "confirmed", summary: "Weekly moved", originalStartTime: { dateTime: "2026-10-12T10:00:00+02:00" }, start: { dateTime: "2026-10-13T14:00:00+02:00" }, end: { dateTime: "2026-10-13T15:00:00+02:00" } },
         { id: "instance-cancelled", recurringEventId: "series-a", iCalUID: "weekly@example.com", status: "cancelled", originalStartTime: { dateTime: "2026-10-19T10:00:00+02:00" } },
+        { id: "instance-moved-across-split", recurringEventId: "series-a", iCalUID: "weekly@example.com", status: "confirmed", summary: "Weekly moved past split", originalStartTime: { dateTime: "2026-10-20T10:00:00+02:00" }, start: { dateTime: "2026-10-30T10:00:00+01:00" }, end: { dateTime: "2026-10-30T11:00:00+01:00" } },
         { id: "instance-split", recurringEventId: "series-b", iCalUID: "weekly@example.com", status: "confirmed", summary: "Weekly new time", originalStartTime: { dateTime: "2026-10-26T09:00:00+01:00" }, start: { dateTime: "2026-10-26T09:00:00+01:00" }, end: { dateTime: "2026-10-26T10:00:00+01:00" } },
         { id: "copied-event", iCalUID: "same-series-looking@example.com", status: "confirmed", summary: "Copied", start: { dateTime: "2026-10-27T09:00:00+01:00" }, end: { dateTime: "2026-10-27T10:00:00+01:00" } }
       ] }), { status: 200 }))
@@ -68,6 +69,7 @@ describe("Google Calendar connector", () => {
     expect(events.find((event) => event.externalId === "instance-moved")).toMatchObject({ startsAt: "2026-10-13T12:00:00.000Z", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
     expect(events.find((event) => event.externalId === "instance-cancelled")).toMatchObject({ seriesId: "series-a", status: "cancelled", originalOccurrenceStartsAt: "2026-10-19T08:00:00.000Z" });
     expect(events.find((event) => event.externalId === "instance-split")).toMatchObject({ seriesId: "series-b", previousSeriesId: "series-a" });
+    expect(events.find((event) => event.externalId === "instance-moved-across-split")).not.toHaveProperty("previousSeriesId");
     expect(events.find((event) => event.externalId === "copied-event")).not.toHaveProperty("seriesId");
     expect(events.find((event) => event.externalId === "shared-instance")).not.toHaveProperty("previousSeriesId");
   });
