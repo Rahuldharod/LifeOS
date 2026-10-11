@@ -148,7 +148,7 @@ export async function reviseReviewItem(ctx: AppContext, run: ProposingRun, revie
   if (stored.status !== "pending") throw new Error("Only a pending Review Item can be revised");
   const meetingId = revision.fields?.source_meeting_id ?? stored.source_meeting_id;
   const sensitivity = sensitivityOf(ctx, {
-    sourceIds: revision.sourceIds, evidence: (stored.field_evidence ?? {}) as Record<string, EvidenceEntry[]>, sensitivity: stored.sensitivity,
+    sourceIds: revision.sourceIds, evidence: revision.evidence ?? (stored.field_evidence ?? {}) as Record<string, EvidenceEntry[]>, sensitivity: stored.sensitivity,
     targetId: typeof stored.target_object_id === "string" ? stored.target_object_id : undefined, meetingId: typeof meetingId === "string" ? meetingId : undefined
   });
   return ctx.update(review, {
