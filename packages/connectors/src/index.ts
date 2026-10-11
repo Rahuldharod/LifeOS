@@ -162,8 +162,9 @@ export class GoogleCalendarConnector implements CalendarConnector {
     const lastSeriesByUid = new Map<string, string>();
     return events.map((event) => {
       if (!event.seriesId || !event.seriesUid) return event;
-      const prior = lastSeriesByUid.get(event.seriesUid);
-      lastSeriesByUid.set(event.seriesUid, event.seriesId);
+      const seriesScope = `${event.calendarId}:${event.seriesUid}`;
+      const prior = lastSeriesByUid.get(seriesScope);
+      lastSeriesByUid.set(seriesScope, event.seriesId);
       return prior && prior !== event.seriesId && !event.previousSeriesId ? { ...event, previousSeriesId: prior } : event;
     });
   }
