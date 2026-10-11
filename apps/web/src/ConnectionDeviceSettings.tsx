@@ -7,6 +7,7 @@ import { ConnectionsNotice, type ConnectionsState } from "./connections.js";
 import { LeaseBanner, takeoverCaution, type LeaseBannerSession } from "./LeaseBanner.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
 import { useSettingsCardGuard, type SettingsSection } from "./SettingsWorkspace.js";
+import { dateInTimeZone } from "./zonedTime.js";
 import "./ConnectionDeviceSettings.css";
 
 type SettingsProps = {
@@ -21,6 +22,7 @@ type SettingsProps = {
   systemError?: string;
   busy: boolean;
   readOnly: boolean;
+  displayTimeZone: string;
   onRetryConnections: () => Promise<void>;
   onSaveGoogleSecrets: (provider: "calendar" | "drive", clientId: string, clientSecret: string) => Promise<boolean>;
   onSaveCalendarPrefs: (prefs: CalendarPreferences) => Promise<string | undefined>;
@@ -31,7 +33,7 @@ type SettingsProps = {
 
 const connectionStatus = (state?: { configured: boolean; connected: boolean }) => state?.connected ? "Connected" : state?.configured ? "Configured" : "Not connected";
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-const formatInstant = (instant: string) => new Date(instant).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+const formatInstant = (instant: string, timeZone: string) => new Date(instant).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone });
 
 function ConnectionStatusCard({ connections, busy, onRetry }: Pick<SettingsProps, "connections" | "busy"> & { onRetry: () => void }) {
   if (!connections) return <article aria-busy="true"><span>CONNECTION STATUS</span><h3>Loading connection status…</h3></article>;
@@ -103,7 +105,7 @@ function VerificationResult({ result }: { result: BackupVerification }) {
   return <div className={`connection-verification ${result.valid ? "valid" : "invalid"}`} role={result.valid ? "status" : "alert"}><b>{result.valid ? "Restoration drill passed" : "Verification failed"}</b><span>{result.fileCount} files · {formatBytes(result.totalBytes)} · temporary restore {result.restoredToTemporaryDirectory ? "completed" : "not attempted"}</span>{result.diagnostics.map((item) => <small key={item}>{item}</small>)}</div>;
 }
 
-function BackupsCard({ backups, lastVerification, health, busy, readOnly, onCreateAndVerifyBackup, onVerifyBackup }: Pick<SettingsProps, "backups" | "lastVerification" | "health" | "busy" | "readOnly" | "onCreateAndVerifyBackup" | "onVerifyBackup">) {
+function BackupsCard({ backups, lastVerification, health, busy, readOnly, displayTimeZone, onCreateAndVerifyBackup, onVerifyBackup }: Pick<SettingsProps, "backups" | "lastVerification" | "health" | "busy" | "readOnly" | "displayTimeZone" | "onCreateAndVerifyBackup" | "onVerifyBackup">) {
   const [verification, setVerification] = useState(lastVerification);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -120,7 +122,7 @@ function BackupsCard({ backups, lastVerification, health, busy, readOnly, onCrea
     <BackupWarning warning={health?.backupWarning} disabled={busy || working || readOnly} onBackUpNow={() => void run(onCreateAndVerifyBackup)} />
     {error && <p className="connection-local-error" role="alert">{error}</p>}
     {verification && <VerificationResult result={verification} />}
-    {!backups.length ? <p className="muted">No snapshots have been created yet.</p> : <div className="connection-backup-list">{backups.map((backup) => <div key={backup.backupId}><span><b>{formatInstant(backup.createdAt)}</b><small>{backup.fileCount} files · {formatBytes(backup.totalBytes)}</small><code>{backup.backupId}</code></span><button type="button" disabled={busy || working} onClick={() => void run(() => onVerifyBackup(backup.backupId))}>Test restore</button></div>)}</div>}
+    {!backups.length ? <p className="muted">No snapshots have been created yet.</p> : <div className="connection-backup-list">{backups.map((backup) => <div key={backup.backupId}><span><b aria-label={`Created ${dateInTimeZone(new Date(backup.createdAt), displayTimeZone)}`}>{formatInstant(backup.createdAt, displayTimeZone)}</b><small>{backup.fileCount} files · {formatBytes(backup.totalBytes)}</small><code>{backup.backupId}</code></span><button type="button" disabled={busy || working || readOnly} onClick={() => void run(() => onVerifyBackup(backup.backupId))}>Test restore</button></div>)}</div>}
   </article>;
 }
 
@@ -148,7 +150,7 @@ export function connectionDeviceSettingsSections(props: SettingsProps): Settings
     ] },
     { id: "backups", group: "Data & devices", label: "Backups", cards: [
       { id: "settings-backup-folder", label: "Off-Drive backup folder", content: <BackupFolderCard disabled={props.readOnly} /> },
-      { id: "settings-backup-snapshots", label: "Snapshots and restoration drills", safeStatus: props.lastVerification?.valid ? "Verified" : `${props.backups.length} snapshots`, content: <BackupsCard backups={props.backups} lastVerification={props.lastVerification} health={props.health} busy={props.busy} readOnly={props.readOnly} onCreateAndVerifyBackup={props.onCreateAndVerifyBackup} onVerifyBackup={props.onVerifyBackup} /> }
+      { id: "settings-backup-snapshots", label: "Snapshots and restoration drills", safeStatus: props.lastVerification?.valid ? "Verified" : `${props.backups.length} snapshots`, content: <BackupsCard backups={props.backups} lastVerification={props.lastVerification} health={props.health} busy={props.busy} readOnly={props.readOnly} displayTimeZone={props.displayTimeZone} onCreateAndVerifyBackup={props.onCreateAndVerifyBackup} onVerifyBackup={props.onVerifyBackup} /> }
     ] },
     { id: "system-health", group: "Data & devices", label: "System health", cards: [
       { id: "settings-system-health", label: "System health", safeStatus: props.systemLoading ? "Loading" : props.health?.status, content: <SystemHealthCard health={props.health} loading={props.systemLoading} error={props.systemError} /> },

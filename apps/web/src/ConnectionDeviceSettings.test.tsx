@@ -30,6 +30,7 @@ const props = () => ({
   calendarCatalog: [{ id: "work", name: "Work", color: "#123456" }], calendarCatalogLoaded: true,
   calendarPrefs: { disabledCalendarIds: [] }, connections: { settings: connected, keychainDenied: false },
   health, backups: [verification], lastVerification: verification, busy: false, readOnly: false,
+  displayTimeZone: "Europe/Paris",
   onRetryConnections: vi.fn(async () => undefined), onSaveGoogleSecrets: vi.fn(async () => true),
   onSaveCalendarPrefs: vi.fn(async () => undefined), onCreateAndVerifyBackup: vi.fn(async () => verification),
   onVerifyBackup: vi.fn(async () => verification), onTakeOverSession: vi.fn(async () => undefined)
@@ -70,7 +71,7 @@ describe("Connections and Data & devices Settings (#139)", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it("keeps credential, calendar and backup writes disabled when read-only while restore tests and takeover remain available", async () => {
+  it("disables credential, calendar and backup API actions when read-only", async () => {
     const value = await renderSection("settings-google-calendar", { readOnly: true });
     expect((document.querySelector("[aria-label='Google Calendar OAuth client ID']") as HTMLInputElement).closest("fieldset")?.disabled).toBe(true);
     expect(([...document.querySelectorAll("button")].find((item) => item.textContent === "Replace credentials") as HTMLButtonElement).disabled).toBe(true);
@@ -78,9 +79,15 @@ describe("Connections and Data & devices Settings (#139)", () => {
     const create = [...document.querySelectorAll("button")].find((item) => item.textContent === "Create & verify snapshot") as HTMLButtonElement;
     const verify = [...document.querySelectorAll("button")].find((item) => item.textContent === "Test restore") as HTMLButtonElement;
     expect(create.disabled).toBe(true);
-    expect(verify.disabled).toBe(false);
+    expect(verify.disabled).toBe(true);
     await act(async () => verify.click());
-    expect(value.onVerifyBackup).toHaveBeenCalledWith("backup-1");
+    expect(value.onVerifyBackup).not.toHaveBeenCalled();
+  });
+
+  it("formats backup creation instants in the selected display timezone", async () => {
+    const nearMidnight = { ...verification, backupId: "backup-midnight", createdAt: "2026-10-11T00:30:00.000Z" };
+    await renderSection("settings-backup-snapshots", { backups: [nearMidnight], lastVerification: nearMidnight, displayTimeZone: "America/Los_Angeles" });
+    expect(document.querySelector("[aria-label='Created 2026-10-10']")).toBeTruthy();
   });
 
   it("keeps backup failures local and preserves guarded create-and-verify behavior", async () => {
