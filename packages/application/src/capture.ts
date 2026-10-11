@@ -3,18 +3,32 @@ import { markdownFileName, type AppContext } from "./context.js";
 import { proposeReviewItem, recordAgentRun, seededRun } from "./review-items.js";
 import { isLive, replayRoles } from "./support.js";
 
+export type QuickCaptureDetails = {
+  primaryProjectId?: string;
+  dueOn?: string;
+  ownerPersonId?: string;
+  sensitivity?: "normal" | "restricted";
+};
+
 /** Quick capture, pasted-text sources and the knowledge notes proposed from them. */
 export class CaptureModule {
   constructor(private readonly ctx: AppContext) {}
 
-  async quickCapture(title: string) {
+  async quickCapture(text: string, details: QuickCaptureDetails = {}) {
     const { ctx } = this;
-    const clean = title.trim();
+    const clean = text.trim();
     if (!clean) throw new Error("Capture text is required");
+    const [title = clean, ...bodyLines] = clean.split(/\r?\n/);
     const now = new Date().toISOString();
-    const owner = await ctx.ensureSelfPerson(now);
+    const ownerId = details.ownerPersonId ?? (await ctx.ensureSelfPerson(now)).frontmatter.id;
     const id = uuidV7();
-    const task = await ctx.objects.write({ relativePath: `tasks/${markdownFileName(clean, id, now)}`, frontmatter: { ...ctx.envelope(id, "task", clean, now), status: "Inbox", owner_person_id: owner.frontmatter.id, source_ids: [] }, body: `# ${clean}\n` });
+    const optional = Object.fromEntries(Object.entries({
+      primary_project_id: details.primaryProjectId,
+      due_on: details.dueOn,
+      sensitivity: details.sensitivity
+    }).filter(([, value]) => value !== undefined));
+    const body = `# ${title}\n${bodyLines.length ? `\n${bodyLines.join("\n")}\n` : ""}`;
+    const task = await ctx.objects.write({ relativePath: `tasks/${markdownFileName(title, id, now)}`, frontmatter: { ...ctx.envelope(id, "task", title, now), status: "Inbox", owner_person_id: ownerId, source_ids: [], ...optional }, body });
     await ctx.writeAudit("task.quick-captured", id, now, {});
     await ctx.rebuildIndex();
     return task;

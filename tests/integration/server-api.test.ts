@@ -28,6 +28,14 @@ describe("the API as a module", () => {
     expect((await tasks(get)).filter((object) => object.frontmatter.type === "task").map((object) => object.frontmatter.title)).toEqual(["Original"]);
   });
 
+  it("creates a detailed global capture through the typed public endpoint", async () => {
+    const { start, send } = await api();
+    await start();
+    const response = await send("POST", "/api/v1/capture", { text: "Call Marie\nConfirm the launch date.", dueOn: "2026-10-20", ownerPersonId: selfId, sensitivity: "restricted" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ frontmatter: { title: "Call Marie", status: "Inbox", owner_person_id: selfId, due_on: "2026-10-20", sensitivity: "restricted" }, body: "# Call Marie\n\nConfirm the launch date.\n" });
+  });
+
   it("keeps each request check's status and message", async () => {
     const { start, get, send } = await api();
     await start();

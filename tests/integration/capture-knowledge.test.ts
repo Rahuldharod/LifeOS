@@ -31,4 +31,25 @@ describe("capture and knowledge workflows", () => {
     expect(application.knowledge("portable")).toHaveLength(1);
     expect(await store.incompleteOperations()).toHaveLength(0);
   });
+
+  it("persists global capture details and multiline text through the application boundary", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-global-capture-"));
+    roots.push(root);
+    const store = new MarkdownObjectStore(root);
+    const application = new LifeOSApplication(store, new MemoryIndex(), undefined, undefined, "test-device");
+    await application.rebuildIndex();
+    const owner = await application.createEntity("person", { title: "Marie", full_name: "Marie", is_self: false });
+    const project = await application.createEntity("project", { title: "Launch" });
+
+    const task = await application.quickCapture("Send the deck\nInclude the revised figures.", {
+      primaryProjectId: project.frontmatter.id,
+      dueOn: "2026-10-20",
+      ownerPersonId: owner.frontmatter.id,
+      sensitivity: "restricted"
+    });
+
+    expect(task.frontmatter).toMatchObject({ title: "Send the deck", status: "Inbox", primary_project_id: project.frontmatter.id, due_on: "2026-10-20", owner_person_id: owner.frontmatter.id, sensitivity: "restricted" });
+    expect(task.body).toBe("# Send the deck\n\nInclude the revised figures.\n");
+    expect((await store.read(task.relativePath)).frontmatter).toMatchObject({ status: "Inbox", sensitivity: "restricted" });
+  });
 });
