@@ -6,6 +6,11 @@ import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote, OneAtATime,
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
 
+function userNoteText(body: string) {
+  const trimmed = body.trim();
+  return trimmed && trimmed !== DEFAULT_NOTE_BODY.trim() ? trimmed : "";
+}
+
 /** Canonical meetings for calendar events: creation, preview, workspace and duplicate reconciliation. */
 export class MeetingsModule {
   /** Meeting creation runs one call at a time per calendar event id (PB-004, ADR 0013). */
@@ -27,7 +32,7 @@ export class MeetingsModule {
   async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
     const event = await this.findEvent(externalId, from, to, calendarId);
     const existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
-    const hasUserContent = typeof initialBody === "string" && initialBody.trim() !== "" && initialBody.trim() !== DEFAULT_NOTE_BODY.trim();
+    const hasUserContent = typeof initialBody === "string" && Boolean(userNoteText(initialBody));
     if (event.status === "cancelled" && !existing && !hasUserContent) return this.previewMeetingFromEvent(externalId, from, to, calendarId);
     // Recurring occurrences share a note, so serialize the whole provider series as one write scope.
     return this.meetingCreations.run(this.seriesKey(event) ?? externalId, () => this.createMeetingFromEventSerialized(event, initialBody));
@@ -272,7 +277,7 @@ export class MeetingsModule {
     const all = this.ctx.index.all();
     // Not isLive on purpose: a duplicate's deleted note is archived with it, and its text still counts, so a copy with written notes is never archived silently.
     const notesOf = (meeting: LifeOSObject) => all.filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.archived_at);
-    const realText = (note: LifeOSObject) => note.body.trim() !== "" && note.body !== DEFAULT_NOTE_BODY && note.body.trim() !== DEFAULT_NOTE_BODY.trim() ? note.body.trim().length : 0;
+    const realText = (note: LifeOSObject) => userNoteText(note.body).length;
     const groups = new Map<string, LifeOSObject[]>();
     for (const meeting of all.filter((object) => object.frontmatter.type === "meeting" && isLive(object))) {
       const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<Record<string, unknown>> : [];
