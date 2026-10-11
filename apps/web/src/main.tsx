@@ -43,6 +43,7 @@ import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
 import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
+import { createSettingsEditorGuard } from "./SettingsWorkspace.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
 import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
@@ -327,6 +328,7 @@ function App() {
   const notesEditor = useRef<HTMLTextAreaElement>(null);
   const notesImageInput = useRef<HTMLInputElement>(null);
   const taskEditorGuard = useRef(createStructuredEditorGuard()).current;
+  const settingsEditorGuard = useRef(createSettingsEditorGuard()).current;
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
@@ -431,7 +433,7 @@ function App() {
   // until the same save succeeds (useGuardedNavigation).
   const locationRef = useRef(location);
   locationRef.current = location;
-  const guarded = useGuardedNavigation({ editors: [notesController, meetingController, taskEditorGuard], readOnly, onLeaveFailed: setMessage });
+  const guarded = useGuardedNavigation({ editors: [notesController, meetingController, taskEditorGuard, settingsEditorGuard], readOnly, onLeaveFailed: setMessage });
   const leaveEditors = guarded.leave;
   // While a held Back/Forward saves, nothing else may change the URL: a first save over a calendar
   // event would otherwise replace the URL with the new meeting's and release the held navigation.
@@ -1061,8 +1063,7 @@ function App() {
   }, []);
   /** #76: opens Settings and moves focus to the given card once it has rendered. */
   const openSettingsCard = async (cardId: string) => {
-    if (!(await go({ view: "Settings" }))) return;
-    window.setTimeout(() => { const card = document.getElementById(cardId); card?.scrollIntoView({ block: "center", behavior: "smooth" }); card?.focus({ preventScroll: true }); }, 80);
+    await go({ view: "Settings", id: cardId });
   };
   useEffect(() => {
     if (!highlightId) return;
@@ -1388,7 +1389,30 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendar.catalog} calendarCatalogLoaded={calendar.catalogLoaded} calendarPrefs={calendar.prefs} onLoadCalendars={calendar.loadCatalog} onSaveCalendarPrefs={calendar.savePrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={refresh} />}
+      {view === "Settings" && <SettingsPage
+        displayTimeZone={displayTimeZone}
+        onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); return true; }}
+        calendarCatalog={calendar.catalog}
+        calendarCatalogLoaded={calendar.catalogLoaded}
+        calendarPrefs={calendar.prefs}
+        onLoadCalendars={calendar.loadCatalog}
+        onSaveCalendarPrefs={calendar.savePrefs}
+        connections={connections}
+        onRetryConnections={retryConnections}
+        busy={busy}
+        readOnly={readOnly}
+        onSaveGoogleSecrets={saveGoogleSecrets}
+        onChanged={refresh}
+        guard={settingsEditorGuard}
+        selectedCardId={route?.view === "Settings" ? route.id : undefined}
+        onOpenCard={(id) => followRoute({ view: "Settings", id })}
+        referenceData={{
+          projects: projects.map(({ project }) => project.frontmatter.title),
+          clients: clients.map(({ entity }) => entity.frontmatter.title),
+          products: products.map(({ entity }) => entity.frontmatter.title),
+          people: people.map(({ entity }) => entity.frontmatter.title)
+        }}
+      />}
   </ApplicationShell>;
 }
 
