@@ -1,6 +1,6 @@
 # LifeOS design system: decisions from the first grilling session
 
-**Status:** Page-layout discovery and production specification are approved. Production implementation remains. Recorded 10 October 2026 on `codex/design-system-prototypes`. These are design decisions, not a production UI release.
+**Status:** The original page-layout discovery and production specification were approved on 10 October 2026. Production work is in progress. A visual-system and responsive-layout refinement interview began on 11 October 2026; the settled changes below supersede the earlier palette, while exact token roles and responsive rules remain under discovery.
 
 ## Purpose and experience
 
@@ -12,18 +12,28 @@
 
 ## Chosen colour direction
 
-Option A from `apps/web/palette-prototype-blue-accents.html?variant=A` is the approved palette comparison. The user found the earlier yellow and cream backgrounds too warm. Use a subtle warm-neutral canvas.
+The approved direction is **dark-blue ocean luxury**: warm, comfortable, calm and modern. This supersedes the earlier purple/blue Option A palette and its future dark-theme mapping.
 
-| Intended role shown in the mockup | Colour |
+| Settled palette role | Colour |
 | --- | --- |
-| Dark navigation and strongest text | `#201E43` |
-| Primary buttons and links | `#134B70` |
-| Selected navigation and focus accents | `#5473A1` |
-| Quiet secondary surface | `#EEEEEE` |
-| Supporting warm-neutral canvas | `#F8F6F4` |
-| Content surface | `#FFFFFF` |
+| Navigation / deepest blue | `#0B1F33` |
+| Primary ocean blue | `#123E5A` |
+| Supporting ocean teal | `#2E6F73` |
+| Warm accent | `#8E522F` |
+| Warm canvas | `#F6F1E8` |
 
-The first four colours are the selected palette. The final two are supporting neutrals from the comparison. Colour roles still need production contrast checks across all states. Do not rely on colour alone to communicate state.
+Exact surface, border, muted-text, focus and interaction-state roles remain to be decided. Do not rely on colour alone to communicate state.
+
+The approved semantic notification treatment is **Deep tint**:
+
+| Meaning | Text | Fill | Border |
+| --- | --- | --- | --- |
+| Success | `#163C2D` | `#C9DED2` | `#4F8069` |
+| Error | `#681F28` | `#EBCAC9` | `#A94D55` |
+| Warning | `#583316` | `#E9D0B5` | `#A66A32` |
+| Information | `#123E5A` | `#C9DDE2` | `#3E7480` |
+
+The text/fill pairs measure approximately 7.4:1–8.7:1. Every semantic notification also has an icon and visible label. Stronger solid semantic treatments, if any, remain to be decided.
 
 ### Production token contract (#129)
 
@@ -36,20 +46,20 @@ The production UI defines these roles in `apps/web/src/design-tokens.css`. Compo
 | Layout | seven spacing steps; small, medium, large and pill radii; thin and strong borders |
 | Elevation and focus | surface and overlay shadows; a two-colour focus ring that remains visible on light and dark surfaces |
 
-The light roles use the approved palette. Supporting state colours are chosen for readable text and visible controls. Checked contrast ratios include body text on canvas **14.67:1**, muted text on canvas **6.03:1**, primary/link text on white **9.26:1**, white text on the primary action **9.26:1**, white text on selected navigation **4.83:1**, sidebar text **15.81:1**, sidebar muted text **9.73:1**, and the focus accent against white **4.83:1** and canvas **4.48:1**. Hover has an accent edge as well as a background change; selected state uses text plus `aria-current`, so colour is not the only signal. Disabled controls retain their native disabled state and are not communicated through colour alone.
+The implemented light tokens still contain the superseded purple palette. They must be remapped only after the current interview settles the exact role and state contract. Existing contrast figures for those values are historical, not acceptance evidence for the ocean palette.
 
-Dark theme is deliberately not shipped. Its approved future mapping is:
+Dark theme remains deliberately unshipped. The earlier purple dark mapping is superseded; a later dark-theme ticket must derive a new ocean mapping and re-check every component state before exposing a theme preference.
 
-| Role | Dark mapping |
-| --- | --- |
-| canvas / surface / quiet surface | `#121225` / `#1C1A36` / `#292743` |
-| text / muted text | `#F7F5FA` / `#C8C5D3` |
-| primary / accent / focus | `#8FC7EC` / `#9CB7DE` / `#ADC8F0` |
-| border / strong border | `#57536F` / `#8D88A3` |
-| error / success / warning | `#FFB4AB` / `#8ED4AD` / `#F1C27D` |
-| sidebar / hover / active / text / muted | `#0B0A18` / `#29264F` / `#445E8A` / `#F7F5FA` / `#C8C5D3` |
+### Approved visual and responsive foundations
 
-The dark foreground roles all exceed 10:1 against the dark canvas. A later dark-theme ticket must re-check every component state before exposing a theme preference.
+Approved on 11 October 2026 during the refinement interview:
+
+- **Surface hierarchy:** place white primary content surfaces on the warm canvas. Use warmer quiet surfaces, thin borders and restrained shadow for secondary separation rather than flattening everything onto the canvas.
+- **Core colour responsibilities:** use the deepest blue for navigation and strongest text, ocean blue for primary actions and links, ocean teal for selection, focus and supporting emphasis, and warm brown sparingly for editorial emphasis. Warm brown is not the general action or warning colour.
+- **Semantic strength:** use the Deep tint system for banners, inline errors and status treatments. Reserve solid semantic colour for actions whose consequence has that meaning, such as the final destructive confirmation. Keep icons and visible labels alongside colour.
+- **Action hierarchy:** allow one filled primary action per action area, followed by outlined secondary actions and text-style tertiary actions. Show destructive emphasis only when the destructive choice is relevant. Loading keeps the control width and action context stable.
+- **Responsive coordinates:** respond to usable workspace width after the sidebar, not named devices. Initial bands are narrow below 760px, compact from 760–1,199px, standard from 1,200–1,799px and wide from 1,800px. Apply an independent short-height treatment below 900px.
+- **Wide-screen boundary:** cap the purposeful working canvas around 1,880px and use balanced outer margins beyond it. Add useful columns only where the content supports them; keep reading, form and editor measures roughly 900–1,200px.
 
 ## Navigation and workflows
 
