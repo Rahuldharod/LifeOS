@@ -65,6 +65,7 @@ import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
+import { InboxWorkspace } from "./InboxWorkspace.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
@@ -1331,12 +1332,27 @@ function App() {
       {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
       {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} onConfirmReviewed={confirmPersonReviewed} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
 
-      {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
+      {view === "Inbox" && <>
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p>{awaitingAdoptionLabel(inboxDrafts)}</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
         {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
-        {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
-        {pendingReviews.map((review) => <div key={review.frontmatter.id} id={`object-${review.frontmatter.id}`} className={review.frontmatter.id === highlightId ? "review-highlight highlighted" : "review-highlight"}><ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} /></div>)}
+        <InboxWorkspace
+          reviews={pendingReviews}
+          objects={objectLinks}
+          labels={labels}
+          choices={headerOptions}
+          selectedId={route?.view === "Inbox" ? route.id : undefined}
+          loading={!collectionsLoaded}
+          busy={busy}
+          readOnly={readOnly}
+          displayTimeZone={displayTimeZone}
+          onOpen={(id) => void go({ view: "Inbox", id })}
+          onBack={() => void go({ view: "Inbox" })}
+          onAccept={accept}
+          onReject={(review) => reject(review.frontmatter.id)}
+          onSave={(review, changes) => editReview(review.frontmatter.id, changes)}
+          linkActionsFor={linkActionsFor}
+        />
       </>}
 
       {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text. Claude proposes Knowledge Notes from it through the LifeOS skills; you review them in Inbox." /><KnowledgeSourceForm title={sourceTitle} text={sourceText} disabled={busy || readOnly} onTitleChange={setSourceTitle} onTextChange={setSourceText} onPreserve={ingestSource} /><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}

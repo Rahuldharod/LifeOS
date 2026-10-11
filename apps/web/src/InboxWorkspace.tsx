@@ -4,6 +4,7 @@ import { LockBadge } from "./EnvelopeBadges.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { WorkspaceFilterBar } from "./WorkspacePatterns.js";
 import { addCalendarDays, dateInTimeZone, zonedMidnight } from "./zonedTime.js";
+import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 import "./InboxWorkspace.css";
 
 export type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
@@ -30,17 +31,6 @@ const proposalCategory = (review: InboxReview): ProposalCategory => {
   return "Updates";
 };
 const isNarrowNow = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches;
-
-function useNarrowWorkspace() {
-  const [narrow, setNarrow] = useState(isNarrowNow);
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia("(max-width: 760px)"); const update = () => setNarrow(query.matches);
-    query.addEventListener("change", update); update();
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return narrow;
-}
 
 const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string) => {
   if (!period) return undefined;
