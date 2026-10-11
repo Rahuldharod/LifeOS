@@ -151,9 +151,10 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
   const set = (key: keyof typeof draft, next: unknown) => setDraft((current) => ({ ...current, [key]: next }));
   const active = value.status === "active";
   const locked = busy || readOnly;
+  const writable = useRef(!locked); writable.current = !locked;
 
   const save = async () => {
-    if (locked || !draft.title.trim() || !draft.decision_text.trim()) return false;
+    if (!writable.current || !draft.title.trim() || !draft.decision_text.trim()) return false;
     const { decidedAt, ...fields } = draft;
     const changes: Record<string, unknown> = { ...fields, ...(decidedAt && decidedAt !== originalDecidedAt ? { decided_at: zonedDateTime(decidedAt.slice(0, 10), decidedAt.slice(11, 16), timeZone).toISOString() } : {}) };
     // A failed write keeps this draft visible; the next successful refresh adopts the new disk hash.
@@ -164,7 +165,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
 
   const supersede = async () => {
     if (!successor) return true;
-    if (locked || !successor.title.trim()) return false;
+    if (!writable.current || !successor.title.trim()) return false;
     let nextId: string | undefined;
     const done = await run(async () => {
       const result = await api("POST /api/v1/decisions/:id/supersede", { params: { id: value.id }, body: { fields: successor, expectedHash: decision.contentHash } });
@@ -174,6 +175,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
     return done;
   };
   const reverse = async () => {
+    if (!writable.current) return;
     if (!window.confirm("Mark this decision reversed? This is final.")) return;
     await run(async () => { await api("PATCH /api/v1/decisions/:id", { params: { id: value.id }, body: { fields: { status: "reversed" }, expectedHash: decision.contentHash } }); }, "Decision reversed");
     await refresh(value.id);
@@ -205,7 +207,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
     <div className="crud-actions">
       <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
       <button disabled={locked || !draft.title.trim() || !draft.decision_text.trim()} onClick={() => void save()}>Save changes</button>
-      <button disabled={locked || !active || Boolean(successor)} title={active ? undefined : "Only active decisions can be superseded"} onClick={() => void navigation.leaveThen(() => setSuccessor({ title: "", decision_text: "", rationale: "" }))}>Supersede…</button>
+      <button disabled={locked || !active || Boolean(successor)} title={active ? undefined : "Only active decisions can be superseded"} onClick={() => void navigation.leaveThen(() => { if (writable.current) setSuccessor({ title: "", decision_text: "", rationale: "" }); })}>Supersede…</button>
     </div>
     {successor && <div className="decision-successor" role="group" aria-label="New decision that supersedes this one">
       <small>NEW DECISION · keeps this one's project, client, product and people</small>
