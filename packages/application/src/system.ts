@@ -66,6 +66,7 @@ export class SystemModule {
     [operationKinds.mergePerson]: async (operation) => (await this.review.recoverMerge(operation), true),
     [operationKinds.rejectReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverReject(operation), true),
     [operationKinds.createMeeting]: async (operation) => typeof operation.payload.externalId === "string" && !!this.ctx.calendar && (await this.meetings.recoverCreateMeeting(operation), true),
+    [operationKinds.linkRecurringSeries]: async (operation) => (await this.meetings.recoverSeriesLinks(operation), true),
     [operationKinds.supersedeDecision]: async (operation) => (await this.decisions.recoverSupersede(operation), true),
     [operationKinds.resolveOpenPoint]: async (operation) => !!this.openPoints && (await this.openPoints.recoverResolve(operation), true),
     [operationKinds.applyPatch]: async (operation) => !!this.patches && (await this.patches.recoverJournal(operation), true),

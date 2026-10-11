@@ -50,6 +50,7 @@ export const operationKinds = {
   mergePerson: "merge-person",
   rejectReview: "reject-review",
   createMeeting: "create-meeting",
+  linkRecurringSeries: "link-recurring-series",
   supersedeDecision: "supersede-decision",
   resolveOpenPoint: "resolve-open-point",
   applyPatch: "apply-patch",
@@ -112,6 +113,8 @@ export interface CalendarEvent {
   isAllDay?: boolean;
   /** Provider recurrence series. Absent for one-off and copied standalone events. */
   seriesId?: string;
+  /** Provider-stable recurrence UID used to relate native series splits; ignored on standalone copies. */
+  seriesUid?: string;
   /** Immutable provider occurrence identity; unlike startsAt this survives a move. */
   originalOccurrenceStartsAt?: string;
   /** Provider-declared predecessor when "this and following" creates a new series. */
