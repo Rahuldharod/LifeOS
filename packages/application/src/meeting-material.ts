@@ -1,4 +1,5 @@
 import { confidenceLabels, type Confidence, type LifeOSObject } from "@lifeos/domain";
+import { occurrenceMaterialsEnd, occurrenceMaterialsStart } from "@lifeos/shared";
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
@@ -53,6 +54,7 @@ const eventLookbackMs = 30 * 86_400_000;
  */
 const roles = {
   meeting: replayRoles.meeting,
+  meetingNote: replayRoles.meetingNote,
   source: (source: { provider: string; externalId: string }) => replayRoles.source(source.provider, source.externalId),
   summary: replayRoles.summary,
   proposal: replayRoles.proposal
@@ -102,8 +104,8 @@ export class MeetingMaterialModule {
     if (occurrence && summary && !summaryEvidence.length) issues.push("summary_evidence: a recurring occurrence summary needs at least one Source and locator");
     const allowedSourceRefs = this.allowedSourceReferences(meeting, sources);
     if (occurrence) {
-      this.validateEvidenceSources(summaryEvidence, "summary_evidence", allowedSourceRefs, issues);
-      for (const proposal of proposals) this.validateEvidenceSources(this.parseMaterialEvidence(proposal.draft.fields.evidence, `${proposal.at}.evidence`, issues), `${proposal.at}.evidence`, allowedSourceRefs, issues);
+      this.validateEvidenceSources(summaryEvidence, "summary_evidence", allowedSourceRefs, occurrence, issues);
+      for (const proposal of proposals) this.validateEvidenceSources(this.parseMaterialEvidence(proposal.draft.fields.evidence, `${proposal.at}.evidence`, issues), `${proposal.at}.evidence`, allowedSourceRefs, occurrence, issues);
     }
     if (issues.length) throw new DraftError(issues);
 
@@ -134,8 +136,16 @@ export class MeetingMaterialModule {
     objectIds.push(...sourceIds);
     await ctx.rebuildIndex();
 
+    meeting = ctx.required(meetingId, "meeting");
+    const linkedSourceIds = idList(meeting.frontmatter.source_ids);
+    const sharedSourceIds = elsewhere.filter((id) => !linkedSourceIds.includes(id));
+    if (sharedSourceIds.length) {
+      meeting = await ctx.update(meeting, { source_ids: [...linkedSourceIds, ...sharedSourceIds] }, { expectedHash: meeting.contentHash, now: run.now });
+      await ctx.rebuildIndex();
+    }
+
     if (occurrence && (sourceIds.length || summary || proposals.length)) {
-      const materialized = await this.meetings?.ensureOccurrenceSectionForEnrichment(ctx.required(meetingId, "meeting"), lookup.from, lookup.to, lookup.calendarId);
+      const materialized = await this.meetings?.ensureOccurrenceSectionForEnrichment(ctx.required(meetingId, "meeting"), lookup.from, lookup.to, lookup.calendarId, run.newId(roles.meetingNote));
       if (!materialized?.note) throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} could not be materialized`]);
       await ctx.rebuildIndex();
       await this.updateMaterialsBlock(ctx.required(meetingId, "meeting"), occurrence, run.now);
@@ -165,13 +175,12 @@ export class MeetingMaterialModule {
     // 6. State: `enriched` when every expected kind of material is now linked, else `partial` (retriable).
     meeting = ctx.required(meetingId, "meeting");
     const listed = idList(meeting.frontmatter.source_ids);
-    const extraIds = elsewhere.filter((id) => !listed.includes(id));
-    const have = new Set(this.sourcesFor(meeting, [...listed, ...extraIds]).map((source) => String(source.frontmatter.source_type)));
+    const have = new Set(this.sourcesFor(meeting, listed).map((source) => String(source.frontmatter.source_type)));
     // Material the agent reported as not existing (e.g. no Gong call) counts as done, unless it turned up after all.
     const absent = [...new Set([...unavailableOf(meeting), ...unavailable])].filter((kind) => !have.has(kind));
     const missing = expectedMaterial.filter((kind) => !have.has(kind) && !absent.includes(kind));
     const state = missing.length ? "partial" : "enriched";
-    await ctx.update(meeting, { enrichment_state: state, enrichment_missing_material: missing, enrichment_unavailable_material: absent.length ? absent : undefined, enrichment_adopted_at: run.now, ...(extraIds.length ? { source_ids: [...listed, ...extraIds] } : {}) }, { expectedHash: meeting.contentHash, now: run.now });
+    await ctx.update(meeting, { enrichment_state: state, enrichment_missing_material: missing, enrichment_unavailable_material: absent.length ? absent : undefined, enrichment_adopted_at: run.now }, { expectedHash: meeting.contentHash, now: run.now });
     await ctx.writeAuditOnce("meeting.enrichment-adopted", meetingId, run.now, { from: meeting.frontmatter.enrichment_state ?? "none", to: state, missing_material: missing, draft_key: draft.draftKey, agent_run_id: run.id }, { matchOn: ["draft_key"], actor: { type: "agent", ref: run.id } });
     await ctx.rebuildIndex();
     return [...new Set(objectIds)];
@@ -220,8 +229,11 @@ export class MeetingMaterialModule {
     ]);
   }
 
-  private validateEvidenceSources(evidence: MaterialEvidence[], at: string, allowed: Set<string>, issues: string[]) {
-    for (const [index, item] of evidence.entries()) if (!allowed.has(item.source)) issues.push(`${at}[${index}].source: must name a Source linked to this occurrence`);
+  private validateEvidenceSources(evidence: MaterialEvidence[], at: string, allowed: Set<string>, occurrence: EnrichmentOccurrenceTarget, issues: string[]) {
+    for (const [index, item] of evidence.entries()) {
+      if (!allowed.has(item.source)) issues.push(`${at}[${index}].source: must name a Source linked to this occurrence`);
+      if (!item.locator.includes(occurrence.sectionId)) issues.push(`${at}[${index}].locator: must include the resolved occurrence section ${occurrence.sectionId}`);
+    }
   }
 
   private parseSources(value: unknown, issues: string[]) {
@@ -387,13 +399,10 @@ export class MeetingMaterialModule {
   }
 }
 
-const materialsStart = (sectionId: string) => `<!-- lifeos:materials:start ${sectionId} -->`;
-const materialsEnd = (sectionId: string) => `<!-- lifeos:materials:end ${sectionId} -->`;
-
 /** Replaces only one occurrence's app-managed Materials block; all user prose and neighbouring sections survive byte-for-byte. */
 export function withOccurrenceMaterials(body: string, sections: Array<Record<string, unknown>>, sectionId: string, sources: LifeOSObject[]) {
-  const startMarker = materialsStart(sectionId);
-  const endMarker = materialsEnd(sectionId);
+  const startMarker = occurrenceMaterialsStart(sectionId);
+  const endMarker = occurrenceMaterialsEnd(sectionId);
   const rows = sources.map((source) => {
     const title = String(source.frontmatter.title).replace(/[\[\]]/g, "");
     const url = typeof source.frontmatter.url === "string" ? source.frontmatter.url : undefined;

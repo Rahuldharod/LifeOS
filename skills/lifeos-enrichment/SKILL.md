@@ -195,7 +195,7 @@ One `meeting-material` Inbox Draft per meeting, in `_inbox/drafts/`. File name `
 | `sources` | the material you found: `source_type`, `url`, `external_id`, `occurred_at`, and optional `title`, `provider`, `retrieved_at` and `provider_revision`; LifeOS defaults `retrieved_at` to the draft's `captured_at` |
 | `unavailable` | kinds you checked and found do not exist |
 | `summary_confidence` | `High`, `Medium` or `Low` |
-| `summary_evidence` | for a recurring summary, at least one `{ source, locator, quote? }`; `source` must be linked to this occurrence and `locator` must identify evidence inside this occurrence's material |
+| `summary_evidence` | for a recurring summary, at least one `{ source, locator, quote? }`; `source` must be linked to this occurrence and `locator` must contain the exact `occurrence_section_id` plus its timestamp, page or other position |
 | `proposals` | tasks, decisions and open points, below |
 | body | the proposed meeting summary, in the meeting's language |
 

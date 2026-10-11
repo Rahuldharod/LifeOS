@@ -47,13 +47,13 @@ export class MeetingsModule {
    * existing note body. `initialBody` is recorded in the operation payload so crash recovery
    * recreates the note with the user's text rather than a placeholder.
    */
-  async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
+  async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string, preferredNoteId?: string) {
     const event = await this.findEvent(externalId, from, to, calendarId);
     const existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
     const hasUserContent = typeof initialBody === "string" && Boolean(userNoteText(initialBody));
     if (event.status === "cancelled" && !existing && !hasUserContent) return this.previewMeetingFromEvent(externalId, from, to, calendarId);
     // Recurring occurrences share a note, so serialize the whole provider series as one write scope.
-    return this.meetingCreations.run(this.seriesKey(event) ?? externalId, () => this.createMeetingFromEventSerialized(event, initialBody));
+    return this.meetingCreations.run(this.seriesKey(event) ?? externalId, () => this.createMeetingFromEventSerialized(event, initialBody, preferredNoteId));
   }
 
   /** ADR 0013 recovery uses the captured provider event, not a new date-window query. */
@@ -110,13 +110,13 @@ export class MeetingsModule {
   }
 
   /** Explicit enrichment may materialize an otherwise empty occurrence section when material was found. */
-  async ensureOccurrenceSectionForEnrichment(meeting: LifeOSObject, from: Date, to: Date, calendarId?: string) {
+  async ensureOccurrenceSectionForEnrichment(meeting: LifeOSObject, from: Date, to: Date, calendarId: string | undefined, noteId: string) {
     const target = this.enrichmentOccurrenceForMeeting(meeting);
     if (!target) return undefined;
     const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<Record<string, unknown>> : [];
     const externalId = refs.find((ref) => typeof ref.external_id === "string")?.external_id;
     if (typeof externalId !== "string") throw new Error(`Recurring meeting ${meeting.frontmatter.id} has no Calendar occurrence reference`);
-    const workspace = await this.createMeetingFromEvent(externalId, from, to, calendarId, "");
+    const workspace = await this.createMeetingFromEvent(externalId, from, to, calendarId, "", noteId);
     return { note: workspace.note, target };
   }
 
@@ -157,7 +157,7 @@ export class MeetingsModule {
     });
   }
 
-  private async createMeetingFromEventSerialized(event: CalendarEvent, initialBody?: string) {
+  private async createMeetingFromEventSerialized(event: CalendarEvent, initialBody?: string, preferredNoteId?: string) {
     const { ctx } = this;
     const externalId = event.externalId;
     const now = new Date().toISOString();
@@ -169,7 +169,7 @@ export class MeetingsModule {
       if (!existingNote) {
         // Either finishing an interrupted create-meeting operation, or a meeting that has no note
         // yet (the PB-020 flow, or a meeting created before it): create the note now.
-        const recoveredNoteId = pendingOperation && typeof pendingOperation.payload.noteId === "string" ? pendingOperation.payload.noteId : uuidV7();
+        const recoveredNoteId = pendingOperation && typeof pendingOperation.payload.noteId === "string" ? pendingOperation.payload.noteId : preferredNoteId ?? uuidV7();
         const recoveredBody = initialBody ?? (typeof pendingOperation?.payload.body === "string" ? pendingOperation.payload.body : DEFAULT_NOTE_BODY);
         existingNote = await this.attachOrCreateNote(event, existing, recoveredNoteId, recoveredBody, context, now);
       } else {
@@ -185,9 +185,9 @@ export class MeetingsModule {
     }
 
     const operationId = pendingOperation?.id ?? uuidV7();
-    const operation = pendingOperation ?? await ctx.objects.prepareOperation?.(operationKinds.createMeeting, { externalId, calendarId: event.calendarId, event, meetingId: uuidV7(), noteId: uuidV7(), body: initialBody ?? DEFAULT_NOTE_BODY }, operationId);
+    const operation = pendingOperation ?? await ctx.objects.prepareOperation?.(operationKinds.createMeeting, { externalId, calendarId: event.calendarId, event, meetingId: uuidV7(), noteId: preferredNoteId ?? uuidV7(), body: initialBody ?? DEFAULT_NOTE_BODY }, operationId);
     const meetingId = typeof operation?.payload.meetingId === "string" ? operation.payload.meetingId : uuidV7();
-    const noteId = typeof operation?.payload.noteId === "string" ? operation.payload.noteId : uuidV7();
+    const noteId = typeof operation?.payload.noteId === "string" ? operation.payload.noteId : preferredNoteId ?? uuidV7();
     const noteBody = initialBody ?? (typeof operation?.payload.body === "string" ? operation.payload.body : DEFAULT_NOTE_BODY);
     const meeting = await this.writeMeeting(event, meetingId, context, now);
     const note = await this.attachOrCreateNote(event, meeting, noteId, noteBody, context, now);
