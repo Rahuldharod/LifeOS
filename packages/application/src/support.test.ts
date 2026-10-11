@@ -21,6 +21,7 @@ describe("isMeetingRestricted (ADR 0010, #63)", () => {
   it("is true when the meeting's note is restricted", () => { expect(isMeetingRestricted(meeting(), [note({ sensitivity: "restricted" })])).toBe(true); });
   it("is true for every occurrence linked to one restricted recurring note", () => {
     expect(isMeetingRestricted(meeting({ id: "m2" }), [note({ meeting_id: "m1", meeting_ids: ["m1", "m2"], sensitivity: "restricted" })])).toBe(true);
+    expect(isMeetingRestricted(meeting({ id: "m3", recurrence_series_id: "google:work:weekly" }), [note({ meeting_ids: ["m1"], recurrence_series_id: "google:work:weekly", sensitivity: "restricted" })])).toBe(true);
   });
   it("ignores restricted notes of other meetings, deleted notes and non-notes", () => {
     expect(isMeetingRestricted(meeting(), [note({ meeting_id: "m2", sensitivity: "restricted" })])).toBe(false);
