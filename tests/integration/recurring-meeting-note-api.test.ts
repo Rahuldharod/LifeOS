@@ -68,4 +68,31 @@ describe("shared recurring Note API (#148)", () => {
     const afterArchive = await call("GET /api/v1/meetings/:id/workspace", { params: { id: newer.meeting.frontmatter.id } });
     expect(afterArchive.occurrences?.map((item) => item.meeting.frontmatter.id)).toEqual([newer.meeting.frontmatter.id]);
   });
+
+  it("links a restarted series explicitly and applies cancellation to the existing occurrence", async () => {
+    const restarted: CalendarEvent = {
+      ...events[1]!, externalId: "api-restarted", seriesId: "api-series-restarted",
+      startsAt: "2026-11-02T08:00:00.000Z", endsAt: "2026-11-02T09:00:00.000Z", originalOccurrenceStartsAt: "2026-11-02T08:00:00.000Z"
+    };
+    events.push(restarted);
+    try {
+      const { call, start } = await testApi({ calendars });
+      await start();
+      const prior = await call("POST /api/v1/meetings/from-event", { body: { externalId: events[0]!.externalId, calendarId: "work", body: "Prior words\n", ...range } });
+      const next = await call("POST /api/v1/meetings/from-event", { body: { externalId: restarted.externalId, calendarId: "work", body: "Restarted words\n", from: range.from, to: "2026-11-05T00:00:00.000Z" } });
+      const linked = await call("POST /api/v1/notes/:id/previous-series", {
+        params: { id: next.note!.frontmatter.id },
+        body: { previousNoteId: prior.note!.frontmatter.id, expectedHash: next.note!.contentHash }
+      });
+      expect(linked.frontmatter.previous_series_note_id).toBe(prior.note!.frontmatter.id);
+
+      events[0] = { ...events[0]!, status: "cancelled" };
+      const cancelled = await call("POST /api/v1/meetings/from-event", { body: { externalId: events[0]!.externalId, calendarId: "work", ...range } });
+      expect(cancelled.meeting.frontmatter.status).toBe("cancelled");
+      expect(cancelled.note?.frontmatter.occurrence_sections).toHaveLength(1);
+    } finally {
+      events[0] = { ...events[0]!, status: undefined };
+      events.pop();
+    }
+  });
 });

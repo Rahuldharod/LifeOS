@@ -70,6 +70,7 @@ import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { OccurrenceAnchoredMarkdown, scrollVisualOccurrence } from "./occurrenceNavigation.js";
 import { RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
 import { meetingSummary } from "./meetingSummary.js";
+import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
@@ -1048,8 +1049,7 @@ function App() {
   // PB-021: deleting tombstones the note (the Markdown file stays on disk, marked deleted). Confirms
   // first, and says so when unsaved text would be discarded with it.
   const deleteNote = async (note: LifeObject, controller: NoteDraftController, afterDelete: () => void) => {
-    const unsaved = controller.dirty ? "\n\nUnsaved changes in this note will be lost." : "";
-    if (!window.confirm(`Delete "${note.frontmatter.title}"?\n\nIt disappears from LifeOS. The Markdown file is kept and marked as deleted.${unsaved}`)) return false;
+    if (!window.confirm(noteDeletePrompt(note, controller.dirty))) return false;
     return run(async () => {
       await api("DELETE /api/v1/notes/:id", { params: { id: note.frontmatter.id }, body: { expectedHash: note.contentHash } });
       clearCachedDraft(note.frontmatter.id);
@@ -1070,6 +1070,12 @@ function App() {
     followRoute({ view: "Calendar", date: selectedDate }, { replace: true });
     calendar.updateEvents((current) => current.map((event) => event.noteId === noteId ? { ...event, hasNote: false, noteId: undefined } : event));
   });
+
+  const linkPreviousSeries = (note: LifeObject, previousNoteId: string, meetingId?: string) => run(async () => {
+    await api("POST /api/v1/notes/:id/previous-series", { params: { id: note.frontmatter.id }, body: { previousNoteId, expectedHash: note.contentHash } });
+    await refresh();
+    if (meetingId) await refreshWorkspace(meetingId);
+  }, "Previous recurring Note linked");
 
   const saveSelectedNote = async () => {
     if (!selectedNote) return false;
@@ -1315,8 +1321,11 @@ function App() {
                   timeZone={displayTimeZone}
                   mode="calendar"
                   currentEvent={calendar.filteredEvents.find((event) => event.meetingId === workspace.meeting.frontmatter.id || event.originalOccurrenceStartsAt === workspace.meeting.frontmatter.original_occurrence_starts_at)}
+                  seriesNotes={notes}
                   readOnly={busy || readOnly}
+                  linkDisabled={meetingController.dirty || meetingController.autoSaving}
                   onBodyChange={meetingController.setDraft}
+                  onLinkPrevious={(previousNoteId) => { if (workspace.note) void linkPreviousSeries(workspace.note, previousNoteId, workspace.meeting.frontmatter.id); }}
                   renderProposal={renderOccurrenceProposal}
                   onSelectSection={(section) => followRoute({ view: "Calendar", date: selectedDate, id: workspace.meeting.frontmatter.id, section }, { replace: true })}
                 /> : editorMode === "write" ? <>
@@ -1393,8 +1402,11 @@ function App() {
                 selectedSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined}
                 timeZone={displayTimeZone}
                 mode="notes"
+                seriesNotes={notes}
                 readOnly={busy || readOnly}
+                linkDisabled={notesController.dirty || notesController.autoSaving}
                 onBodyChange={notesController.setDraft}
+                onLinkPrevious={(previousNoteId) => void linkPreviousSeries(selectedNote, previousNoteId)}
                 renderProposal={renderOccurrenceProposal}
                 onSelectSection={(section) => followRoute({ view: "Notes", noteTab, id: selectedNote.frontmatter.id, section }, { replace: true })}
               /> : notesMode === "write" ? <>

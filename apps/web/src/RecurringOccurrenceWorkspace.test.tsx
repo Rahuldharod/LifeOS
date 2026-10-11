@@ -52,6 +52,18 @@ describe("RecurringOccurrenceWorkspace", () => {
     expect(document.body.textContent).toContain("Older proposal");
   });
 
+  it("offers an explicit previous-Note link without inferring continuity", async () => {
+    const link = vi.fn();
+    const previous = object("previous", "meeting-note", "Earlier weekly notes", { recurrence_series_id: "series-before" });
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<RecurringOccurrenceWorkspace note={{ ...note, frontmatter: { ...note.frontmatter, recurrence_series_id: "series-restart" } }} occurrences={[newer]} seriesNotes={[previous]} timeZone="Europe/Paris" mode="notes" readOnly={false} onBodyChange={() => undefined} onLinkPrevious={link} renderProposal={() => null} />));
+    const select = document.querySelector("select[aria-label='Previous recurring Note']") as HTMLSelectElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, "previous"); select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const button = [...document.querySelectorAll("button")].find((candidate) => candidate.textContent === "Link previous Note") as HTMLButtonElement;
+    await act(async () => button.click());
+    expect(link).toHaveBeenCalledWith("previous");
+  });
+
   it("uses immutable attendee labels and does not report unchanged provider labels as a Calendar change", async () => {
     const snapshotted = { ...newer, meeting: object("meeting-new", "meeting", "Weekly review", { starts_at: newer.meeting.frontmatter.starts_at, ends_at: newer.meeting.frontmatter.ends_at, attendee_snapshot: ["Alex Original", "Room 4"] }), context: { people: [object("person", "person", "Alex Renamed")] } };
     const current: CalendarEvent = { externalId: "event", title: "Weekly review", startsAt: String(snapshotted.meeting.frontmatter.starts_at), endsAt: String(snapshotted.meeting.frontmatter.ends_at), timezone: "Europe/Paris", originalOccurrenceStartsAt: snapshotted.originalStartsAt, attendees: ["Alex Original", "Room 4"] };
@@ -60,6 +72,13 @@ describe("RecurringOccurrenceWorkspace", () => {
     expect(document.body.textContent).toContain("Alex Original, Room 4");
     expect(document.body.textContent).not.toContain("Alex Renamed");
     expect(document.body.textContent).not.toContain("Changed in Calendar");
+  });
+
+  it("labels an existing occurrence section when Calendar cancels it", async () => {
+    const current: CalendarEvent = { externalId: "event", title: "Weekly review", startsAt: String(newer.meeting.frontmatter.starts_at), endsAt: String(newer.meeting.frontmatter.ends_at), timezone: "Europe/Paris", originalOccurrenceStartsAt: newer.originalStartsAt, attendees: [], status: "cancelled" };
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<RecurringOccurrenceWorkspace note={note} occurrences={[newer]} timeZone="Europe/Paris" mode="calendar" currentEvent={current} readOnly={false} onBodyChange={() => undefined} renderProposal={() => null} />));
+    expect(document.querySelector("summary")?.textContent).toContain("Cancelled");
   });
 
   it("preserves the chosen section through narrow Back and remounts it when detail reopens", async () => {

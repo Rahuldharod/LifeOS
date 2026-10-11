@@ -26,9 +26,10 @@ async function setup(events: CalendarEvent[]) {
   const root = await mkdtemp(path.join(tmpdir(), "lifeos-recurrence-"));
   roots.push(root);
   const store = new MarkdownObjectStore(root);
-  const app = new LifeOSApplication(store, new MemoryIndex(), new SyntheticCalendar(events), undefined, "recurrence-test");
+  const calendar = new SyntheticCalendar(events);
+  const app = new LifeOSApplication(store, new MemoryIndex(), calendar, undefined, "recurrence-test");
   await app.rebuildIndex();
-  return { root, store, app };
+  return { root, store, app, calendar };
 }
 
 describe("recurring meeting notes (#147)", () => {
@@ -105,6 +106,41 @@ describe("recurring meeting notes (#147)", () => {
     expect(workspace.note!.body.indexOf("Moved later words")).toBeLessThan(workspace.note!.body.indexOf("Ordinary words"));
   });
 
+  it("keeps the same Meeting, Note and section when the provider reschedules an occurrence", async () => {
+    const original = event({ externalId: "before-move", seriesId: "series-move", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const { app, calendar } = await setup([original]);
+    const before = await app.createMeetingFromEvent(original.externalId, undefined, undefined, original.calendarId, "Keep these words\n");
+    const sectionId = (before.note!.frontmatter.occurrence_sections as Array<{ section_id: string }>)[0]!.section_id;
+    calendar.events.splice(0, 1, event({ externalId: "after-move", startsAt: "2026-10-06T13:00:00.000Z", endsAt: "2026-10-06T14:00:00.000Z", seriesId: "series-move", originalOccurrenceStartsAt: original.originalOccurrenceStartsAt }));
+
+    const after = await app.createMeetingFromEvent("after-move", undefined, undefined, original.calendarId, "Must not replace notes\n");
+
+    expect(after.meeting.frontmatter.id).toBe(before.meeting.frontmatter.id);
+    expect(after.note?.frontmatter.id).toBe(before.note?.frontmatter.id);
+    expect((after.note!.frontmatter.occurrence_sections as Array<{ section_id: string }>)[0]!.section_id).toBe(sectionId);
+    expect(after.note?.body).toContain("Keep these words");
+    expect(after.note?.body).not.toContain("Must not replace notes");
+    expect(after.meeting.frontmatter.starts_at).toBe(original.startsAt);
+  });
+
+  it("does not create an empty section for a cancelled occurrence and labels an existing section Cancelled", async () => {
+    const cancelled = event({ externalId: "cancelled-empty", seriesId: "series-cancel", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z", status: "cancelled" });
+    const { app, calendar } = await setup([cancelled]);
+    const preview = await app.previewMeetingFromEvent(cancelled.externalId, undefined, undefined, cancelled.calendarId);
+    expect(preview.persisted).toBe(false);
+    expect(app.notes()).toEqual([]);
+
+    const confirmed = { ...cancelled, status: "confirmed" as const };
+    calendar.events.splice(0, 1, confirmed);
+    const written = await app.createMeetingFromEvent(confirmed.externalId, undefined, undefined, confirmed.calendarId, "Agenda notes\n");
+    calendar.events.splice(0, 1, cancelled);
+    const reopened = await app.createMeetingFromEvent(cancelled.externalId, undefined, undefined, cancelled.calendarId);
+
+    expect(reopened.note?.frontmatter.id).toBe(written.note?.frontmatter.id);
+    expect(reopened.note?.frontmatter.occurrence_sections).toHaveLength(1);
+    expect(reopened.meeting.frontmatter.status).toBe("cancelled");
+  });
+
   it("follows Calendar title changes until the shared Note is manually renamed", async () => {
     const first = event({ externalId: "title-first", title: "Weekly planning", seriesId: "series-title", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
     const renamed = event({ externalId: "title-second", title: "Delivery planning", startsAt: "2026-10-12T08:00:00.000Z", endsAt: "2026-10-12T09:00:00.000Z", seriesId: "series-title", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
@@ -137,6 +173,40 @@ describe("recurring meeting notes (#147)", () => {
     expect(app.object(newSeries.note!.frontmatter.id).frontmatter.previous_series_note_id).toBe(oldSeries.note?.frontmatter.id);
     expect(copy.note?.frontmatter.recurrence_series_id).toBeUndefined();
     expect(copy.note?.body).toBe("plain body\n");
+  });
+
+  it("keeps copied, moved and restarted lookalike series separate, then links a restart only on explicit request", async () => {
+    const first = event({ externalId: "first-series", seriesId: "series-first", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z", attendees: ["same@example.com"] });
+    const moved = event({ externalId: "moved-calendar", calendarId: "other", seriesId: "series-first", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z", attendees: ["same@example.com"] });
+    const copied = event({ externalId: "copied-series", seriesId: "series-copy", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z", attendees: ["same@example.com"] });
+    const restarted = event({ externalId: "restarted-series", seriesId: "series-restart", originalOccurrenceStartsAt: "2026-11-02T08:00:00.000Z", attendees: ["same@example.com"] });
+    const { app } = await setup([first, moved, copied, restarted]);
+    const prior = await app.createMeetingFromEvent(first.externalId, undefined, undefined, first.calendarId, "First\n");
+    const movedWorkspace = await app.createMeetingFromEvent(moved.externalId, undefined, undefined, moved.calendarId, "Moved\n");
+    const copiedWorkspace = await app.createMeetingFromEvent(copied.externalId, undefined, undefined, copied.calendarId, "Copied\n");
+    const restart = await app.createMeetingFromEvent(restarted.externalId, undefined, undefined, restarted.calendarId, "Restarted\n");
+
+    expect(new Set([prior.note?.frontmatter.id, movedWorkspace.note?.frontmatter.id, copiedWorkspace.note?.frontmatter.id, restart.note?.frontmatter.id]).size).toBe(4);
+    expect(restart.note?.frontmatter.previous_series_note_id).toBeUndefined();
+    const [linked, retry] = await Promise.all([
+      app.linkPreviousSeriesNote(restart.note!.frontmatter.id, prior.note!.frontmatter.id, restart.note!.contentHash),
+      app.linkPreviousSeriesNote(restart.note!.frontmatter.id, prior.note!.frontmatter.id, restart.note!.contentHash)
+    ]);
+    expect(linked.frontmatter.previous_series_note_id).toBe(prior.note?.frontmatter.id);
+    expect(retry.frontmatter.previous_series_note_id).toBe(prior.note?.frontmatter.id);
+    expect(app.object(restart.note!.frontmatter.id).frontmatter.previous_recurrence_series_id).toBe(prior.note?.frontmatter.recurrence_series_id);
+  });
+
+  it("refuses to restore a deleted series Note when any newer live canonical Note exists for the series", async () => {
+    const first = event({ externalId: "restore-first", seriesId: "series-restore", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const later = event({ externalId: "restore-later", startsAt: "2026-10-12T08:00:00.000Z", seriesId: "series-restore", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const { app } = await setup([first, later]);
+    const canonical = await app.createMeetingFromEvent(first.externalId, undefined, undefined, first.calendarId, "Old canonical\n");
+    const deleted = await app.deleteNote(canonical.note!.frontmatter.id, canonical.note!.contentHash);
+    const replacement = await app.createMeetingFromEvent(later.externalId, undefined, undefined, later.calendarId, "New canonical\n");
+
+    expect(replacement.note?.frontmatter.id).not.toBe(canonical.note?.frontmatter.id);
+    await expect(app.restoreNote(canonical.note!.frontmatter.id, deleted.contentHash)).rejects.toThrow("newer live canonical Note");
   });
 
   it("reconciles a split seen in a later day query using provider series identity", async () => {

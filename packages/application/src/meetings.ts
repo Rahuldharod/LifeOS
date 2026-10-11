@@ -129,6 +129,7 @@ export class MeetingsModule {
       if (pendingOperation) await ctx.writeAuditOnce("meeting.created", existing.frontmatter.id, now, { operation_id: pendingOperation.id, external_id: externalId }, { matchOn: ["operation_id"] });
       if (pendingOperation) await ctx.objects.completeOperation?.(pendingOperation.id);
       await ctx.rebuildIndex();
+      await this.syncOccurrenceStatus(existing.frontmatter.id, event, now);
       return this.meetingWorkspace(existing.frontmatter.id);
     }
 
@@ -226,6 +227,36 @@ export class MeetingsModule {
         people: attendeeIds.map(resolve).filter((person): person is LifeOSObject => Boolean(person))
       }
     };
+  }
+
+  /** Explicit continuity for a restarted lookalike series. Titles and attendees never imply this link. */
+  async linkPreviousSeriesNote(noteId: string, previousNoteId: string, expectedHash: string) {
+    const requested = this.ctx.required(noteId);
+    const seriesId = requested.frontmatter.recurrence_series_id;
+    if (requested.frontmatter.type !== "meeting-note" || typeof seriesId !== "string" || !isLive(requested)) throw new Error("Only a live Recurring Meeting Note can be linked");
+    return this.meetingCreations.run(`link-previous:${seriesId}`, async () => {
+      const current = this.ctx.required(noteId);
+      const previous = this.ctx.required(previousNoteId);
+      if (current.frontmatter.previous_series_note_id === previousNoteId) return current;
+      if (previous.frontmatter.type !== "meeting-note" || typeof previous.frontmatter.recurrence_series_id !== "string" || !isLive(previous)) throw new Error("Previous Note must be a live Recurring Meeting Note");
+      if (noteId === previousNoteId) throw new Error("A Recurring Meeting Note cannot link to itself");
+      const seen = new Set([noteId]);
+      let ancestor: LifeOSObject | undefined = previous;
+      while (ancestor) {
+        if (seen.has(ancestor.frontmatter.id)) throw new Error("Previous-series links cannot form a cycle");
+        seen.add(ancestor.frontmatter.id);
+        const next: unknown = ancestor.frontmatter.previous_series_note_id;
+        ancestor = typeof next === "string" ? this.ctx.index.get(next) : undefined;
+      }
+      const now = new Date().toISOString();
+      const linked = await this.ctx.update(current, {
+        previous_series_note_id: previous.frontmatter.id,
+        previous_recurrence_series_id: previous.frontmatter.recurrence_series_id,
+        previous_recurrence_series_source: "user"
+      }, { expectedHash, now });
+      await this.ctx.rebuildIndex();
+      return linked;
+    });
   }
 
   /**
@@ -343,6 +374,16 @@ export class MeetingsModule {
       original_starts_at: event.originalOccurrenceStartsAt!,
       starts_at: event.startsAt
     };
+  }
+
+  /** Cancellation is lifecycle state, not part of the immutable saved event snapshot. */
+  private async syncOccurrenceStatus(meetingId: string, event: CalendarEvent, now: string) {
+    const current = this.ctx.index.get(meetingId);
+    if (!current || current.frontmatter.type !== "meeting") return;
+    const status = event.status === "cancelled" ? "cancelled" : "scheduled";
+    if (current.frontmatter.status === status) return;
+    await this.ctx.update(current, { status }, { expectedHash: current.contentHash, now });
+    await this.ctx.rebuildIndex();
   }
 
   private findSeriesNote(seriesId: string | undefined) {
