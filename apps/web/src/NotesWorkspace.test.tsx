@@ -20,7 +20,7 @@ const baseProps = {
   notes: [note("one", "Project brief"), note("two", "Meeting notes", { type: "meeting-note" })],
   openCount: 2, deletedCount: 1, tab: "open" as const, selectedId: "one", query: "", filters: noNoteFilters,
   projects: [{ id: "project", title: "Project Alpha" }], clients: [], products: [], people: [{ id: "person", title: "Sam Example" }],
-  timeZone: "Europe/Paris", searching: false, loading: false, readOnly: false, conflictedNoteIds: new Set<string>(),
+  timeZone: "Europe/Paris", loading: false, readOnly: false, conflictedNoteIds: new Set<string>(),
   onQueryChange: vi.fn(), onFiltersChange: vi.fn(), onTabChange: vi.fn(), onOpen: vi.fn(), onBack: vi.fn(),
   emptyMessage: "No notes have been created yet.",
   renderOpenNote: (mode: NoteEditorMode, readOnly: boolean) => <div data-editor-mode={mode}><textarea aria-label="Note body" disabled={readOnly} /></div>,
@@ -91,5 +91,11 @@ describe("NotesWorkspace", () => {
     await act(async () => root!.render(<NotesWorkspace {...baseProps} readOnly />));
     expect(document.body.textContent).toContain("Read-only on this Mac");
     expect((document.querySelector("textarea[aria-label='Note body']") as HTMLTextAreaElement).disabled).toBe(true);
+  });
+
+  it("announces a workspace loading error without hiding the existing notes", async () => {
+    await render({ error: "Notes could not be loaded. Try again." });
+    expect(document.querySelector("[role='alert']")?.textContent).toBe("Notes could not be loaded. Try again.");
+    expect(document.body.textContent).toContain("Project brief");
   });
 });
