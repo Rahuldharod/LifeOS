@@ -250,16 +250,28 @@ describe("startup recovery of an interrupted adoption batch", () => {
 });
 
 describe("adoption performance", () => {
-  it("adopts a 20-draft batch in under 5 seconds", async () => {
+  // #115: a fixed 5 s wall-clock bound failed under full-suite load on a laptop while passing alone in ~0.2 s.
+  // The batch path must stay linear, so compare a 20-draft batch with a 5-draft batch timed moments apart: load
+  // slows both alike. Measured ratios are 1.8–3.6 (fixed per-batch cost keeps them under 4); a per-draft cost that
+  // grows with the batch fails at 6 (an injected 10 ms × batch-size delay per draft scored 9.2 at only 4.4 s, which the
+  // old 5 s bound passed). The 20 s ceiling still catches a batch that becomes uniformly very slow.
+  async function timeBatch(count: number) {
     const { root, application } = await vault();
-    for (let index = 0; index < 20; index += 1) await dropDraft(root, `draft-${String(index).padStart(2, "0")}.md`, dictatedTask(`key-${index}`, `Task ${index}`));
+    for (let index = 0; index < count; index += 1) await dropDraft(root, `draft-${String(index).padStart(2, "0")}.md`, dictatedTask(`key-${index}`, `Task ${index}`));
     const started = performance.now();
     const batch = await application.adoptDrafts();
     const elapsed = performance.now() - started;
-    expect(batch.drafts.filter((draft) => draft.outcome === "adopted")).toHaveLength(20);
-    expect(await ofType(application, "task")).toHaveLength(20);
-    expect(elapsed).toBeLessThan(5000);
-  });
+    expect(batch.drafts.filter((draft) => draft.outcome === "adopted")).toHaveLength(count);
+    expect(await ofType(application, "task")).toHaveLength(count);
+    return elapsed;
+  }
+
+  it("adopts a 20-draft batch in time linear in its size", async () => {
+    const small = await timeBatch(5);
+    const large = await timeBatch(20);
+    expect(large / Math.max(small, 1)).toBeLessThan(6);
+    expect(large).toBeLessThan(20_000);
+  }, 60_000);
 });
 
 describe("crash replay for every adoption handler (merged with #33, #34, #36, #40)", () => {
