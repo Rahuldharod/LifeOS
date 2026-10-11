@@ -66,6 +66,24 @@ async function meetingFiles(root: string) {
 const liveEvent: CalendarEvent = { externalId: "standup", calendarId: "work", calendarName: "Work", title: "Standup", startsAt: at("09:00"), endsAt: at("09:30"), timezone: "Europe/Paris", attendees: ["ana@example.com"] };
 
 describe("Calendar offline fallback (#88)", () => {
+  it("keeps only the available stored Calendar events in the global-search window without writing", async () => {
+    const calendar = new FakeCalendar();
+    const { root, store, application } = await vault(calendar);
+    await storedMeeting(store, "Recent review", "2026-07-14T09:00:00.000Z", "2026-07-14T10:00:00.000Z");
+    await storedMeeting(store, "Future planning", "2027-10-10T09:00:00.000Z", "2027-10-10T10:00:00.000Z");
+    await storedMeeting(store, "Too old", "2026-07-12T09:00:00.000Z", "2026-07-12T10:00:00.000Z");
+    await storedMeeting(store, "Too far", "2027-10-12T09:00:00.000Z", "2027-10-12T10:00:00.000Z");
+    await application.rebuildIndex();
+    const before = await meetingFiles(root);
+
+    calendar.failure = new TypeError("fetch failed");
+    const search = await application.calendarDay(new Date("2026-07-13T12:00:00.000Z"), new Date("2027-10-11T12:00:00.000Z"));
+
+    expect(search.offline).toMatchObject({ reason: "network", error: "fetch failed" });
+    expect(search.events.map((event) => event.title)).toEqual(["Recent review", "Future planning"]);
+    expect(await meetingFiles(root)).toEqual(before);
+  });
+
   it("lists the stored meetings for the range, labelled offline with the last sync time, when the network fails", async () => {
     const calendar = new FakeCalendar([liveEvent]);
     const { store, application } = await vault(calendar);

@@ -57,7 +57,7 @@ import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { ApplicationShell } from "./ApplicationShell.js";
 import { GlobalSearchOverlay } from "./GlobalSearchOverlay.js";
-import { recordRecentSearchId } from "./globalSearch.js";
+import { calendarSearchRange, recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
@@ -68,7 +68,7 @@ import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
-import type { AppliedPatch, BackupVerification, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
+import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
@@ -206,6 +206,7 @@ function App() {
   const [highlightId, setHighlightId] = useState<string>();
   const [capture, setCapture] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchCalendar, setSearchCalendar] = useState<CalendarDay & { unavailable?: true }>({ events: [] });
   const [captureOpen, setCaptureOpen] = useState(false);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
@@ -353,6 +354,12 @@ function App() {
     followRoute(next, options);
     return true;
   };
+  function openSearch() {
+    setSearchOpen(true);
+    void api("GET /api/v1/calendar/day", { query: calendarSearchRange() })
+      .then(setSearchCalendar)
+      .catch(() => setSearchCalendar({ events: [], unavailable: true }));
+  }
   /** The tab's own page, keeping the note or meeting it last had open. */
   const tabRoute = (target: View): Route => target === "Notes" ? { view: "Notes", noteTab: "open", id: selectedNoteId }
     : target === "Calendar" ? { view: "Calendar", date: selectedDate, id: workspace && workspace.persisted !== false ? workspace.meeting.frontmatter.id : undefined }
@@ -947,10 +954,10 @@ function App() {
     status={readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}
     readOnly={readOnly}
     onNavigate={(item) => void go(tabRoute(item))}
-    onSearch={() => setSearchOpen(true)}
+    onSearch={openSearch}
     onCapture={() => setCaptureOpen(true)}
   >
-      <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
+      <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} calendar={searchCalendar.events} calendarOffline={searchCalendar.offline} calendarUnavailable={searchCalendar.unavailable} timeZone={displayTimeZone} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
       <OverlayDialog open={captureOpen} label="Global Capture" onClose={() => setCaptureOpen(false)}>
         <header className="global-search-header"><div><span>GLOBAL CAPTURE</span><h2>Capture a task</h2></div><button type="button" aria-label="Close Capture" onClick={() => setCaptureOpen(false)}>×</button></header>
         <CapturePanel projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))} owners={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: entity.frontmatter.title }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} busy={busy} readOnly={readOnly} onSave={saveGlobalCapture} onViewTask={(id) => { setCaptureOpen(false); void go({ view: "Tasks", id }); }} />
