@@ -5,9 +5,9 @@ export type StructuredEditorGuard = { dirty: boolean; conflict: boolean; saveNow
 export const createStructuredEditorGuard = (): StructuredEditorGuard => ({ dirty: false, conflict: false, saveNow: async () => true });
 
 /** One Save / Discard / Stay contract for local controls and shell-level navigation. */
-export function useStructuredEditorGuard({ guard, dirty, save, discard, noun }: { guard: StructuredEditorGuard; dirty: boolean; save: () => Promise<boolean>; discard: () => void; noun: string }) {
+export function useStructuredEditorGuard({ guard, dirty, canSave, save, discard, noun }: { guard: StructuredEditorGuard; dirty: boolean; canSave: boolean; save: () => Promise<boolean>; discard: () => void; noun: string }) {
   const [decision, setDecision] = useState<((value: boolean) => void) | undefined>();
-  const latest = useRef({ dirty, save, discard }); latest.current = { dirty, save, discard };
+  const latest = useRef({ dirty, canSave, save, discard }); latest.current = { dirty, canSave, save, discard };
   const requestLeave = useCallback(() => latest.current.dirty ? new Promise<boolean>((resolve) => setDecision(() => resolve)) : Promise.resolve(true), []);
   useLayoutEffect(() => {
     guard.dirty = dirty; guard.conflict = false; guard.saveNow = requestLeave;
@@ -20,13 +20,13 @@ export function useStructuredEditorGuard({ guard, dirty, save, discard, noun }: 
   }, [dirty]);
   const finish = async (choice: "save" | "discard" | "stay") => {
     const resolve = decision; if (!resolve) return;
-    if (choice === "save" && !(await latest.current.save())) return;
+    if (choice === "save" && (!latest.current.canSave || !(await latest.current.save()))) return;
     if (choice === "discard") latest.current.discard();
     setDecision(undefined); resolve(choice !== "stay");
   };
   return {
     leaveThen: async (action: () => void | Promise<unknown>) => { if (await requestLeave()) await action(); },
-    dialog: decision ? <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="leave-structured-title" className="leave-dialog"><h3 id="leave-structured-title">Save changes before leaving?</h3><p>Your {noun} has unsaved changes.</p><div><button className="primary" onClick={() => void finish("save")}>Save</button><button onClick={() => void finish("discard")}>Discard</button><button onClick={() => void finish("stay")}>Stay</button></div></section></div> : null
+    dialog: decision ? <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="leave-structured-title" className="leave-dialog"><h3 id="leave-structured-title">Save changes before leaving?</h3><p>Your {noun} has unsaved changes.</p><div><button className="primary" disabled={!canSave} onClick={() => void finish("save")}>Save</button><button onClick={() => void finish("discard")}>Discard</button><button onClick={() => void finish("stay")}>Stay</button></div></section></div> : null
   };
 }
 

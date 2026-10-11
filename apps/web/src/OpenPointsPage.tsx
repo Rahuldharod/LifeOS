@@ -115,8 +115,8 @@ function NewOpenPointPanel({ guard, projects, clients, products, people, busy, r
   const [draft, setDraft] = useState(empty); const [failed, setFailed] = useState(false);
   const set = (key: keyof typeof draft, value: string | string[]) => { setDraft((current) => ({ ...current, [key]: value })); setFailed(false); };
   const dirty = JSON.stringify(draft) !== JSON.stringify(empty); const locked = busy || readOnly;
-  const save = async () => { const ok = await onCreate(draft); setFailed(!ok); return ok; };
-  const navigation = useStructuredEditorGuard({ guard, dirty, save, discard: () => { setDraft(empty); setFailed(false); }, noun: "open point" });
+  const save = async () => { if (locked || !draft.title.trim()) return false; const ok = await onCreate(draft); setFailed(!ok); return ok; };
+  const navigation = useStructuredEditorGuard({ guard, dirty, canSave: !locked && Boolean(draft.title.trim()), save, discard: () => { setDraft(empty); setFailed(false); }, noun: "open point" });
   return <article className="decision-detail" aria-label="New open point">
     <span>NEW OPEN POINT</span>
     <div className="crud-fields decision-fields">
@@ -151,6 +151,7 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
 
   /** One expected-hash write; failures keep the structured draft visible for retry. */
   const write = async (endpoint: "PATCH /api/v1/open-points/:id" | `POST /api/v1/open-points/:id/${"resolve" | "resolve-with-decision" | "close"}`, fields: Record<string, unknown>, success: string) => {
+    if (locked) return false;
     const done = await run(async () => { await api(endpoint, { params: { id: value.id }, body: { fields, expectedHash: openPoint.contentHash } }); }, success);
     if (done) { setAction(undefined); await refresh(value.id); }
     return done;
@@ -169,7 +170,8 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
   };
   const actionReady = action?.kind === "resolve" ? Boolean(action.summary.trim() || action.decisionId) : action?.kind === "decide" ? Boolean(action.title.trim()) : Boolean(action);
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline) || Boolean(action);
-  const navigation = useStructuredEditorGuard({ guard, dirty, save: action ? submitAction : save, discard: () => { setDraft(baseline); setAction(undefined); }, noun: "open point" });
+  const canSave = !locked && (action ? actionReady : Boolean(draft.title.trim() && (value.status !== "resolved" || draft.resolution_summary.trim() || value.resolution_decision_id)));
+  const navigation = useStructuredEditorGuard({ guard, dirty, canSave, save: action ? submitAction : save, discard: () => { setDraft(baseline); setAction(undefined); }, noun: "open point" });
 
   const link = (object: LifeObject | undefined, fallback = "None") => object ? <button className="link-button" onClick={() => onOpen(object.frontmatter.id)}>{object.frontmatter.title}</button> : <span className="muted">{fallback}</span>;
 
