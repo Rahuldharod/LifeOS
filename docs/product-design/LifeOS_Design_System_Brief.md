@@ -79,6 +79,9 @@ Approved on 11 October 2026 during the refinement interview:
 - **Keyboard movement:** provide a skip link past navigation. Opening detail moves focus to its heading; Back restores the originating list row and scroll position. Overlays trap focus and return it to their trigger.
 - **Typography and targets:** use the system sans family with no separate font preference in this phase. Use 16px/1.55 for UI body text, 17px/1.65 for the long-form editor and never less than 13px for supporting text. Interactive targets are at least 40px on desktop and 44px for coarse pointers.
 - **Assistive feedback and motion:** keep visible status and assistive announcements in the same state. Announce routine progress politely; treat errors immediately and identify their affected control. Reduced-motion removes non-essential movement without hiding state changes.
+- **Surface geometry:** preserve the established 4, 8, 12, 16, 24, 32 and 48px spacing steps; 6px small, 8px control, 14px surface and pill radii; thin borders; restrained surface shadows; and stronger shadows only for overlays.
+- **Theme scope:** complete and validate the light theme in this refinement. Keep role names theme-ready, but defer a new ocean dark mapping to a separate prototype and contrast-validation task rather than preserving or guessing from the superseded purple mapping.
+- **Implementation route:** publish the completed refinement as a new `ready-for-agent` child issue under #127. Keep closed issue #129 as historical evidence, and make the new child a blocker for #142 release validation.
 
 ## Navigation and workflows
 
