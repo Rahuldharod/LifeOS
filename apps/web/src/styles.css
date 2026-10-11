@@ -417,22 +417,77 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .today-setting fieldset { display: flex; flex-wrap: wrap; gap: 10px; border: 0; padding: 0; margin: 0; }
 .today-setting fieldset label { display: inline-flex; align-items: center; gap: 4px; }
 
+/* #132 Priority-first Today: priorities own the wide column; meeting and capture stay beside them. */
+.today-priority-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, .85fr); gap: var(--space-5); align-items: stretch; margin-bottom: var(--space-5); }
+.today-side-rail { display: grid; grid-template-rows: 1fr auto; gap: var(--space-5); min-width: 0; }
+.today-priority-grid article { margin: 0; }
+.daily-focus { border: var(--border-strong) solid color-mix(in srgb, var(--color-primary) 55%, var(--color-border)); box-shadow: 0 .5rem 1.75rem rgb(19 75 112 / .1); }
+.today-focus-heading, .today-section-heading { display: flex; align-items: start; justify-content: space-between; gap: var(--space-4); }
+.today-focus-heading h3, .today-next-meeting h3, .quick-capture h3 { margin: var(--space-2) 0; }
+.today-focus-heading p, .today-next-meeting p { margin: 0; }
+.today-read-only { margin: calc(-1 * var(--space-3)) 0 var(--space-4); padding: var(--space-2) var(--space-3); border-left: 3px solid var(--color-warning); color: var(--color-warning); font-size: var(--font-size-sm); }
+.today-warning-stack { display: grid; gap: var(--space-3); }
+.today-warning-stack:empty { display: none; }
+.today-summary { grid-template-columns: repeat(4, 1fr); }
+.today-summary article { padding: var(--space-4); box-shadow: none; }
+.today-summary article strong { margin: var(--space-2) 0 var(--space-1); font-size: var(--font-size-xl); }
+.today-supporting { width: 100%; padding: 0; }
+.today-section-heading { margin: var(--space-6) 0 var(--space-4); }
+.today-section-heading span { color: var(--color-accent); font-size: var(--font-size-xs); font-weight: 800; letter-spacing: .13em; }
+.today-section-heading h3 { margin: var(--space-1) 0 0; }
+.today-section-heading > p { max-width: 360px; margin: 0; text-align: right; }
+.today-live-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
+.today-live-grid .live-panel { min-width: 0; box-shadow: none; }
+.today-next-meeting .calendar-offline { margin: var(--space-4) 0 0; }
+.today-purpose-empty { padding: var(--space-3) 0; }
+.today-purpose-empty h3, .today-purpose-empty h4 { margin: 0 0 var(--space-1); }
+.today-purpose-empty p { margin: 0 0 var(--space-3); }
+.today-skeleton-line { height: .8rem; margin-top: var(--space-4); border-radius: var(--radius-pill); background: linear-gradient(90deg, var(--color-surface-quiet), #f7f7f7, var(--color-surface-quiet)); background-size: 220% 100%; animation: today-skeleton 1.4s ease-in-out infinite; }
+.today-skeleton-line:nth-of-type(2) { width: 78%; }
+.today-skeleton-line:nth-of-type(3) { width: 62%; }
+@keyframes today-skeleton { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .today-skeleton-line { animation: none; } }
+
 /* #46 Daily Focus: finished items struck through, past meetings and missing references muted. */
-.daily-focus .capture-row { align-items: center; justify-content: space-between; }
 .focus-section { margin-top: 18px; }
-.focus-section h4 { margin: 0 0 4px; color: #245646; font-size: 14px; }
+.focus-section h4 { margin: 0 0 4px; color: var(--color-primary); font-size: 14px; }
 .focus-item.done b, .focus-item.cancelled b { text-decoration: line-through; color: #758078; }
 .focus-item.done > i, .focus-item.cancelled > i { background: #5f8b7c; }
 .focus-item.past b, .focus-item.missing b { color: #758078; }
 .focus-item.missing b { font-style: italic; }
 .focus-narrative { margin-top: 18px; white-space: pre-wrap; color: #3d4a44; }
-/* #47 Focus Overrides: controls on each Top 3 row; "Pinned" and "Replaces" are written in the row text. */
-.top-three .object-row > div:nth-child(2) { flex: 1; }
-.focus-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+/* #47/#132: Complete and More stay visible; override actions live inside the More disclosure. */
+.top-three-row { border-bottom: var(--border-thin) solid var(--color-border); }
+.top-three-row:last-of-type { border-bottom: 0; }
+.top-three-row .object-row { align-items: center; border-bottom: 0; }
+.top-three-row .object-row > div:nth-child(2) { flex: 1; min-width: 0; }
+.today-priority-number { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: var(--color-primary); color: white; font-size: var(--font-size-sm); font-weight: 800; }
+.top-three-primary-actions { display: flex; align-items: center; gap: var(--space-2); }
+.top-three-primary-actions > button, .focus-more > summary { min-height: 34px; padding: var(--space-2) var(--space-3); border: var(--border-thin) solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-primary); font-size: var(--font-size-xs); font-weight: 750; }
+.focus-more { position: relative; }
+.focus-more > summary { list-style: none; cursor: pointer; }
+.focus-more > summary::-webkit-details-marker { display: none; }
+.focus-more[open] > summary { border-color: var(--color-primary); }
+.focus-controls { position: absolute; top: calc(100% + var(--space-1)); right: 0; z-index: 5; display: grid; min-width: 150px; padding: var(--space-2); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); box-shadow: var(--shadow-overlay); }
+.focus-controls button { border: 0; background: transparent; text-align: left; }
 .focus-replace, .focus-pin { margin: 8px 0; }
+.today-brief-details, .top-three-plan-more { margin-top: var(--space-4); border-top: var(--border-thin) solid var(--color-border); }
+.today-brief-details > summary, .top-three-plan-more > summary { padding-top: var(--space-3); color: var(--color-primary); cursor: pointer; font-size: var(--font-size-sm); font-weight: 750; }
 .focus-dismissed { margin-top: 10px; }
 .focus-dismissed .object-row { align-items: center; padding: 8px 0; }
 .focus-dismissed .object-row > div { flex: 1; color: #758078; }
+@media (max-width: 980px) {
+  .today-priority-grid, .today-live-grid { grid-template-columns: 1fr; }
+  .today-side-rail { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+  .today-summary { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 680px) {
+  .today-side-rail, .today-summary { grid-template-columns: 1fr; }
+  .today-section-heading { display: block; }
+  .today-section-heading > p { margin-top: var(--space-2); text-align: left; }
+  .top-three-row .object-row { flex-wrap: wrap; }
+  .top-three-primary-actions { width: 100%; padding-left: 40px; }
+}
 /* #57: link-resolution candidate picker and in-card errors. */
 .link-candidates { display: grid; gap: 6px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid #dedbcf; border-radius: 7px; background: white; }
 .link-candidates legend { padding: 0 4px; font-size: 12px; font-weight: 750; }
