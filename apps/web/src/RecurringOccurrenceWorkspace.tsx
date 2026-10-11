@@ -65,15 +65,18 @@ function eventDifferences(item: OccurrenceWorkspaceItem, current?: CalendarEvent
   return changed;
 }
 
-export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectionId, timeZone, mode, currentEvent, readOnly, onBodyChange, renderProposal, onSelectSection }: {
+export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectionId, timeZone, mode, currentEvent, seriesNotes = [], readOnly, linkDisabled = false, onBodyChange, onLinkPrevious, renderProposal, onSelectSection }: {
   note: LifeObject;
   occurrences: OccurrenceWorkspaceItem[];
   selectedSectionId?: string;
   timeZone: string;
   mode: "calendar" | "notes";
   currentEvent?: CalendarEvent;
+  seriesNotes?: LifeObject[];
   readOnly: boolean;
+  linkDisabled?: boolean;
   onBodyChange: (body: string) => void;
+  onLinkPrevious?: (noteId: string) => void;
   renderProposal: (review: LifeObject) => ReactNode;
   onSelectSection?: (sectionId: string) => void;
 }) {
@@ -82,9 +85,16 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectio
   const storageKey = `lifeos.occurrence-section.${note.frontmatter.id}`;
   const remembered = typeof localStorage === "undefined" ? undefined : localStorage.getItem(storageKey) ?? undefined;
   const [selected, setSelected] = useState(selectedSectionId ?? remembered ?? fallback);
+  const [previousNoteId, setPreviousNoteId] = useState("");
+  const previous = seriesNotes.find((candidate) => candidate.frontmatter.id === note.frontmatter.previous_series_note_id);
+  const linkable = seriesNotes.filter((candidate) => candidate.frontmatter.id !== note.frontmatter.id && typeof candidate.frontmatter.recurrence_series_id === "string");
   useEffect(() => { if (selectedSectionId) setSelected(selectedSectionId); else if (!selected || !ordered.some((item) => item.sectionId === selected)) setSelected(fallback); }, [selectedSectionId, fallback, ordered, selected]);
 
   return <section className="recurring-occurrence-workspace" aria-label="Recurring meeting occurrences">
+    {previous ? <p className="series-continuity">Previous recurring Note: <b>{previous.frontmatter.title}</b></p> : onLinkPrevious && linkable.length > 0 ? <div className="series-continuity">
+      <label><span>Previous recurring Note</span><select aria-label="Previous recurring Note" value={previousNoteId} disabled={readOnly || linkDisabled} onChange={(event) => setPreviousNoteId(event.target.value)}><option value="">Choose a Note…</option>{linkable.map((candidate) => <option value={candidate.frontmatter.id} key={candidate.frontmatter.id}>{candidate.frontmatter.title}</option>)}</select></label>
+      <button type="button" disabled={readOnly || linkDisabled || !previousNoteId} onClick={() => onLinkPrevious(previousNoteId)}>Link previous Note</button>
+    </div> : null}
     {ordered.map((item) => {
       const active = item.sectionId === selected;
       const meeting = item.meeting.frontmatter;
@@ -94,7 +104,7 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectio
       const differences = eventDifferences(item, current);
       const select = () => { setSelected(item.sectionId); localStorage.setItem(storageKey, item.sectionId); };
       return <details key={item.sectionId} className={active ? "occurrence-section selected" : "occurrence-section"} open={active || undefined} onToggle={(event) => { if (event.currentTarget.open) { select(); onSelectSection?.(item.sectionId); } }}>
-        <summary><span>{new Date(String(meeting.starts_at)).toLocaleDateString([], { timeZone, dateStyle: "full" })}</span><b>{new Date(String(meeting.starts_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}–{new Date(String(meeting.ends_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}</b>{meeting.status === "cancelled" && <em>Cancelled</em>}</summary>
+        <summary><span>{new Date(String(meeting.starts_at)).toLocaleDateString([], { timeZone, dateStyle: "full" })}</span><b>{new Date(String(meeting.starts_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}–{new Date(String(meeting.ends_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}</b>{(meeting.status === "cancelled" || current?.status === "cancelled") && <em>Cancelled</em>}</summary>
         <div className="occurrence-snapshot" aria-label="Saved event snapshot">
           <span>SAVED EVENT DETAILS</span>
           <p><b>{meeting.title}</b></p>

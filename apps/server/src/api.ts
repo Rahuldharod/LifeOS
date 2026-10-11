@@ -261,6 +261,10 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!request.body.changes || typeof request.body.changes !== "object") return reply.status(400).send({ error: "changes are required" });
     return application.updateNoteMetadata(request.params.id, request.body.changes, request.body.expectedHash);
   });
+  route(server, "POST /api/v1/notes/:id/previous-series", async (request, reply) => {
+    if (!hasExpectedHash(request.body) || typeof request.body.previousNoteId !== "string") return reply.status(400).send({ error: "previousNoteId and expectedHash are required" });
+    return application.linkPreviousSeriesNote(request.params.id, request.body.previousNoteId, request.body.expectedHash);
+  });
   route(server, "POST /api/v1/notes/:id/restore", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required to restore a note" });
     return application.restoreNote(request.params.id, request.body.expectedHash);
