@@ -120,6 +120,8 @@ export class CalendarModule {
           endsAt: String(meeting.frontmatter.ends_at),
           timezone: typeof meeting.frontmatter.timezone === "string" ? meeting.frontmatter.timezone : "UTC",
           isAllDay: meeting.frontmatter.is_all_day === true,
+          ...(typeof meeting.frontmatter.location === "string" ? { location: meeting.frontmatter.location } : {}),
+          ...(typeof meeting.frontmatter.join_url === "string" ? { joinUrl: meeting.frontmatter.join_url } : {}),
           attendees,
           hasNote: Boolean(note),
           meetingId: meeting.frontmatter.id,

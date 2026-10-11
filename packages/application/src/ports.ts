@@ -125,6 +125,10 @@ export interface CalendarEvent {
   declined?: boolean;
   /** Display labels (name, else email). Kept for the UI and name-only connectors. */
   attendees: string[];
+  /** Saved meeting-place snapshot. */
+  location?: string;
+  /** Provider joining link, when available. */
+  joinUrl?: string;
   /** Attendees with email when the connector knows it (#38); people are matched on these when present. */
   attendeeDetails?: CalendarAttendee[];
   clientName?: string;
