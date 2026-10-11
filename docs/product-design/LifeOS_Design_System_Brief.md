@@ -60,6 +60,10 @@ Approved on 11 October 2026 during the refinement interview:
 - **Action hierarchy:** allow one filled primary action per action area, followed by outlined secondary actions and text-style tertiary actions. Show destructive emphasis only when the destructive choice is relevant. Loading keeps the control width and action context stable.
 - **Responsive coordinates:** respond to usable workspace width after the sidebar, not named devices. Initial bands are narrow below 760px, compact from 760–1,199px, standard from 1,200–1,799px and wide from 1,800px. Apply an independent short-height treatment below 900px.
 - **Wide-screen boundary:** cap the purposeful working canvas around 1,880px and use balanced outer margins beyond it. Add useful columns only where the content supports them; keep reading, form and editor measures roughly 900–1,200px.
+- **Supporting neutral roles:** use `#FFFFFF` for primary surfaces, `#EAE4D8` for quiet surfaces, `#53636A` for muted text, `#D8D1C4` for decorative separation and `#7B8587` for interactive control borders. Use ocean teal for focus on light surfaces and white for focus on dark navigation.
+- **Navigation reflow:** preserve the user's expanded-or-collapsed sidebar preference throughout compact, standard and wide bands; do not force laptop users to collapse it. In the narrow band, replace the sidebar with a top bar exposing Menu, Search and Capture; Menu opens the navigation sheet.
+- **Short-height treatment:** below 900px, reduce header, padding and banner height while preserving text sizes and control targets. Let panes scroll independently, keep important actions sticky and retain visible actions on warnings.
+- **Semantic placement:** use tinted banners for page-level conditions, place field and workflow errors beside the affected control, show routine save state as calm persistent inline text, and reserve brief notifications for discrete workflow completion.
 
 ## Navigation and workflows
 
