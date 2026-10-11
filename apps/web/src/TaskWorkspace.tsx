@@ -7,6 +7,7 @@ import { areaOptions } from "./envelope.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { ListDetailWorkspace, RecordHeader, StickyRecordActions, WorkspaceFilterBar } from "./WorkspacePatterns.js";
 import { addCalendarDays, dateInTimeZone } from "./zonedTime.js";
+import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 
 export type StructuredEditorGuard = { dirty: boolean; conflict: boolean; saveNow: () => Promise<boolean> };
 export const createStructuredEditorGuard = (): StructuredEditorGuard => ({ dirty: false, conflict: false, saveNow: async () => true });
@@ -59,18 +60,6 @@ const taskFieldsForSave = (draft: TaskDraft): Record<string, unknown> => ({
   primary_client_id: draft.primary_client_id || null, primary_product_id: draft.primary_product_id || null,
   area: draft.area || null
 });
-
-function useNarrowWorkspace() {
-  const media = "(max-width: 760px)";
-  const [narrow, setNarrow] = useState(() => typeof window.matchMedia === "function" && window.matchMedia(media).matches);
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia(media); const update = () => setNarrow(query.matches);
-    query.addEventListener("change", update); update();
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return narrow;
-}
 
 export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, selectedId, today, timeZone, guard, busy, readOnly, run, onOpen, onCloseDetail, onCreate, onSave, onDelete, onComplete, onRestored }: {
   tasks: LifeObject[]; linkables: Linkable[]; labels: Map<string, PersonLabel>; projects: Option[]; selfId?: string; selectedId?: string; today: string; timeZone?: string; guard: StructuredEditorGuard;

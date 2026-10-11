@@ -1,19 +1,9 @@
-import React, { Fragment, type ReactNode, useEffect, useState } from "react";
+import React, { Fragment, type ReactNode } from "react";
 import type { CalendarEvent, CalendarOffline, CalendarOption } from "@lifeos/contracts";
 import { CalendarOfflineBanner } from "./CalendarOffline.js";
 import { useSplitPane } from "./splitPane.js";
-
-function useNarrowCalendar() {
-  const media = "(max-width: 760px)";
-  const [narrow, setNarrow] = useState(() => typeof window.matchMedia === "function" && window.matchMedia(media).matches);
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia(media); const update = () => setNarrow(query.matches);
-    query.addEventListener("change", update); update();
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return narrow;
-}
+import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
+import { zonedDateTime } from "./zonedTime.js";
 
 function formatEventTime(value: string, timeZone: string) {
   return new Date(value).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" });
@@ -30,9 +20,9 @@ export function CalendarWorkspace({ selectedDate, displayTimeZone, events, offli
   onPreviousDay: () => void; onToday: () => void; onNextDay: () => void; onDateChange: (date: string) => void; onFilterChange: (calendarId: string) => void;
   onRetry: () => void; onSelectEvent: (event: CalendarEvent) => void; onBack: () => void; children: ReactNode;
 }) {
-  const split = useSplitPane("lifeos.split.calendar"); const narrow = useNarrowCalendar();
+  const split = useSplitPane("lifeos.split.calendar"); const narrow = useNarrowWorkspace();
   const allDayEvents = events.filter((event) => event.isAllDay); const timedEvents = events.filter((event) => !event.isAllDay);
-  const dateLabel = new Date(`${selectedDate}T12:00:00.000Z`).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone });
+  const dateLabel = zonedDateTime(selectedDate, "12:00", displayTimeZone).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone });
   return <div className={`calendar-workspace${detailOpen ? " detail-open" : ""}`}>
     <article className="event-list" aria-label="Calendar timeline" hidden={narrow && detailOpen}>
       <div className="calendar-workspace-controls" aria-label="Calendar day controls">
@@ -43,7 +33,8 @@ export function CalendarWorkspace({ selectedDate, displayTimeZone, events, offli
       <CalendarOfflineBanner offline={offline} timeZone={displayTimeZone} busy={busy} onRetry={onRetry} />
       {loading ? <div className="timeline-empty" role="status"><b>Loading calendar…</b><small>Reading this day from the local LifeOS service.</small></div>
         : error ? <div className="timeline-empty timeline-error" role="alert"><b>Calendar could not be loaded</b><small>{error}</small></div>
-        : !events.length && !offline ? <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div> : null}
+        : !events.length && offline ? <div className="timeline-empty"><b>No meetings found in LifeOS</b><small>Events not previously opened in LifeOS are unavailable while Calendar is offline.</small></div>
+        : !events.length ? <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div> : null}
       {!loading && !error && <div className="timeline">
         {allDayEvents.map((event) => <TimelineEvent event={event} displayTimeZone={displayTimeZone} busy={busy} allDay onSelect={onSelectEvent} key={`${event.calendarId ?? "calendar"}:${event.externalId}`} />)}
         {timedEvents.map((event, index) => { const previousEnd = index ? Math.max(...timedEvents.slice(0, index).map((candidate) => Date.parse(candidate.endsAt))) : undefined; const gap = previousEnd === undefined ? 0 : Date.parse(event.startsAt) - previousEnd; return <Fragment key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>{gap > 60_000 && <div className="timeline-gap"><span /><span className="gap-rail">•••</span><small>{formatGap(gap)}</small></div>}<TimelineEvent event={event} displayTimeZone={displayTimeZone} busy={busy} onSelect={onSelectEvent} /></Fragment>; })}
