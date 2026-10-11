@@ -67,6 +67,7 @@ Approved on 11 October 2026 during the refinement interview:
 - **Pane sizing:** use workspace-specific minimum and maximum widths for list panes rather than permanent percentages. Give the detail pane the remaining space; in the narrow band, navigate from list to full-width detail and back.
 - **Compact toolbars:** wrap common controls before they clip. Keep search and the most frequent controls first, and move Advanced filters to their own line as space tightens.
 - **Internal content measures:** allow the surrounding detail pane to grow while keeping reading content near `75ch`, structured forms near `900px` and rich editors near `1,200px` maximum width.
+- **Button states:** primary actions use ocean blue by default, brighten to `#2A718E` with a subtle lift and shadow on hover, and deepen with a one-pixel press treatment when active. Focus adds the approved context-aware ring. Disabled controls use explicit readable colours rather than global opacity. Loading retains control width and action context. Final destructive confirmation uses the solid error treatment only after the destructive path is chosen.
 
 ## Navigation and workflows
 
