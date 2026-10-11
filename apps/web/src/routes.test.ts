@@ -88,8 +88,10 @@ describe("routeTarget: a bookmarked id that is gone (PB-027)", () => {
     const currentMeeting = object(currentMeetingId, "meeting");
     const redirected = {
       ...data,
-      notes: [...data.notes, sharedNote, object("old-note", "meeting-note", { redirect_to_note_id: "shared-note", redirect_to_section_id: "occurrence-2026-10-05" })],
-      objects: [...data.objects, currentMeeting, object(oldMeetingId, "meeting", { redirect_to_meeting_id: currentMeetingId, redirect_to_section_id: "occurrence-2026-10-05" })]
+      notes: [...data.notes, sharedNote],
+      // #153 archives the old per-occurrence Note after the redirect is durable, so it is only
+      // available through the all-object link collection used to resolve old bookmarks.
+      objects: [...data.objects, object("old-note", "meeting-note", { archived_at: "2026-10-12T08:00:00Z", redirect_to_note_id: "shared-note", redirect_to_section_id: "occurrence-2026-10-05" }), currentMeeting, object(oldMeetingId, "meeting", { redirect_to_meeting_id: currentMeetingId, redirect_to_section_id: "occurrence-2026-10-05" })]
     };
     expect(routeTarget({ view: "Notes", noteTab: "open", id: "old-note" }, redirected)).toEqual({ kind: "redirect", route: { view: "Notes", noteTab: "open", id: "shared-note", section: "occurrence-2026-10-05" } });
     expect(routeTarget({ view: "Calendar", date: "2026-10-05", id: oldMeetingId }, redirected)).toEqual({ kind: "redirect", route: { view: "Calendar", date: "2026-10-05", id: currentMeetingId, section: "occurrence-2026-10-05" } });

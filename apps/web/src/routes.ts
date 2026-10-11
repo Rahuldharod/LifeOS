@@ -65,7 +65,11 @@ export function routeTarget(route: Route, data: RouteData): RouteTarget {
   const has = (list: LinkedObject[]) => list.some((object) => object.frontmatter.id === id);
   if (route.view === "Notes") {
     const [here, there] = route.noteTab === "deleted" ? [data.deletedNotes, data.notes] : [data.notes, data.deletedNotes];
-    const current = here.find((object) => object.frontmatter.id === id);
+    // Archived legacy meeting Notes are deliberately absent from both Notes tabs, but their
+    // durable redirect must still make old bookmarks land on the shared occurrence section.
+    const current = here.find((object) => object.frontmatter.id === id)
+      ?? data.objects.find((object) => object.frontmatter.id === id && Boolean(object.frontmatter.archived_at)
+        && (object.frontmatter.type === "meeting-note" || object.frontmatter.type === "knowledge-note"));
     if (current) {
       const target = current.frontmatter.redirect_to_note_id;
       if (typeof target !== "string") return { kind: "ok" };

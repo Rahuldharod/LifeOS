@@ -1,10 +1,30 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
-import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
+import { DEFAULT_NOTE_BODY, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
 import { operationKinds, type CalendarEvent, type Operation } from "./ports.js";
 import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote, OneAtATime, resolveObjectRedirect } from "./support.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
+
+type MigrationCandidate = {
+  noteId: string;
+  meetingId: string;
+  title: string;
+  body: string;
+  contentHash: string;
+  occurrenceId: string;
+  sectionId: string;
+  originalStartsAt: string;
+  startsAt: string;
+};
+
+type MigrationOperationCandidate = MigrationCandidate;
+
+export type RecurringMigrationPreview = {
+  seriesId?: string;
+  requiresConfirmation: boolean;
+  candidates: MigrationCandidate[];
+};
 
 export function recurrenceSeriesKey(provider: string, event: Pick<CalendarEvent, "calendarId" | "seriesId">) {
   return event.seriesId ? `${provider}:${event.calendarId ?? "default"}:${event.seriesId}` : undefined;
@@ -66,6 +86,231 @@ export class MeetingsModule {
   async recoverSeriesLinks(operation: Operation) {
     if (typeof operation.payload.seriesId !== "string" || typeof operation.payload.noteId !== "string") return;
     await this.repairSuccessorSeriesLinks(operation.payload.seriesId, operation.payload.noteId, typeof operation.payload.now === "string" ? operation.payload.now : new Date().toISOString(), operation);
+  }
+
+  /** ADR 0013 recovery of #153 resumes the recorded migration; it never rediscovers candidates. */
+  async recoverRecurringMigration(operation: Operation) {
+    await this.runRecurringMigration(operation);
+  }
+
+  /**
+   * A migration candidate is credible only when its Meeting carries the provider series and immutable
+   * occurrence identities. Similar titles, attendees and times are deliberately ignored (ADR 0019).
+   * This is a pure read: rendering a preview or cancelling it changes nothing.
+   */
+  recurringMigrationPreview(meetingId: string): RecurringMigrationPreview {
+    const meeting = this.ctx.required(meetingId, "meeting");
+    const seriesId = typeof meeting.frontmatter.recurrence_series_id === "string" ? meeting.frontmatter.recurrence_series_id : undefined;
+    if (!seriesId) return { seriesId, requiresConfirmation: false, candidates: [] };
+    const shared = this.findSeriesNote(seriesId);
+    const sharedSections = Array.isArray(shared?.frontmatter.occurrence_sections) ? shared.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    const candidates = this.ctx.index.all()
+      .filter((candidate): candidate is LifeOSObject => candidate.frontmatter.type === "meeting" && isLive(candidate)
+        && candidate.frontmatter.recurrence_series_id === seriesId
+        && typeof candidate.frontmatter.recurrence_occurrence_id === "string"
+        && typeof candidate.frontmatter.original_occurrence_starts_at === "string")
+      .flatMap((candidate) => {
+        const notes = this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && isLive(object)
+          && object.frontmatter.meeting_id === candidate.frontmatter.id && !object.frontmatter.recurrence_series_id);
+        // More than one legacy Note for a meeting is a real ambiguity, not an invitation to guess.
+        if (notes.length !== 1) return [];
+        const note = notes[0]!;
+        const originalStartsAt = String(candidate.frontmatter.original_occurrence_starts_at);
+        const occurrenceId = String(candidate.frontmatter.recurrence_occurrence_id);
+        const sectionId = occurrenceSectionId(originalStartsAt);
+        if (sharedSections.some((section) => section.occurrence_id === occurrenceId || section.section_id === sectionId)) return [];
+        return [{
+          noteId: note.frontmatter.id,
+          meetingId: candidate.frontmatter.id,
+          title: candidate.frontmatter.title,
+          body: note.body,
+          contentHash: note.contentHash,
+          occurrenceId,
+          sectionId,
+          originalStartsAt,
+          startsAt: typeof candidate.frontmatter.starts_at === "string" ? candidate.frontmatter.starts_at : originalStartsAt
+        }];
+      })
+      .sort((left, right) => Date.parse(right.startsAt) - Date.parse(left.startsAt) || left.noteId.localeCompare(right.noteId));
+    return { seriesId, requiresConfirmation: candidates.length > 0, candidates };
+  }
+
+  /** Explicit confirmation starts the only write path for migration. Every source hash is guarded. */
+  async confirmRecurringMigration(meetingId: string, expectedHashes: Record<string, string>) {
+    const requested = this.recurringMigrationPreview(meetingId);
+    if (!requested.seriesId) throw new Error("There are no credible existing Notes to migrate");
+    return this.meetingCreations.run(`migration:${requested.seriesId}`, async () => {
+      // Re-read after entering the one-at-a-time scope: a simultaneous confirmation may have won.
+      const pending = (await this.ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.migrateRecurringNotes && operation.payload.seriesId === requested.seriesId);
+      // A durable journal always wins over a fresh preview: it may already have created the target
+      // but still need redirects or archives after an interruption.
+      if (pending) return this.runRecurringMigration(pending);
+      const preview = this.recurringMigrationPreview(meetingId);
+      const existing = this.findSeriesNote(requested.seriesId);
+      if (!preview.candidates.length && existing) return existing;
+      if (!preview.candidates.length) throw new Error("There are no credible existing Notes to migrate");
+      for (const candidate of preview.candidates) {
+        if (expectedHashes[candidate.noteId] !== candidate.contentHash) throw new ObjectConflictError(`Migration preview is stale for Note ${candidate.noteId}`);
+      }
+      const now = new Date().toISOString();
+      const operation = await this.ctx.objects.prepareOperation?.(operationKinds.migrateRecurringNotes, {
+        seriesId: requested.seriesId,
+        noteId: existing?.frontmatter.id ?? uuidV7(),
+        title: `${this.ctx.required(meetingId, "meeting").frontmatter.title} notes`,
+        now,
+        candidates: preview.candidates
+      }, uuidV7());
+      if (!operation) throw new Error("The ObjectStore does not support crash-safe recurring Note migration");
+      return this.runRecurringMigration(operation);
+    });
+  }
+
+  private migrationCandidates(operation: Operation): MigrationOperationCandidate[] {
+    const raw = Array.isArray(operation.payload.candidates) ? operation.payload.candidates : [];
+    return raw.flatMap((value) => {
+      if (typeof value !== "object" || value === null) return [];
+      const candidate = value as Record<string, unknown>;
+      const strings = ["noteId", "meetingId", "title", "body", "contentHash", "occurrenceId", "sectionId", "originalStartsAt", "startsAt"] as const;
+      if (!strings.every((key) => typeof candidate[key] === "string")) return [];
+      return [{
+        noteId: candidate.noteId as string, meetingId: candidate.meetingId as string, title: candidate.title as string, body: candidate.body as string, contentHash: candidate.contentHash as string,
+        occurrenceId: candidate.occurrenceId as string, sectionId: candidate.sectionId as string,
+        originalStartsAt: candidate.originalStartsAt as string, startsAt: candidate.startsAt as string
+      }];
+    });
+  }
+
+  /**
+   * The journal payload is the migration's immutable plan. Recovery uses it rather than current
+   * titles, attendees or calendar data, so an interrupted operation cannot change its meaning.
+   */
+  private async runRecurringMigration(operation: Operation) {
+    const seriesId = typeof operation.payload.seriesId === "string" ? operation.payload.seriesId : undefined;
+    const noteId = typeof operation.payload.noteId === "string" ? operation.payload.noteId : undefined;
+    const title = typeof operation.payload.title === "string" ? operation.payload.title : undefined;
+    const now = typeof operation.payload.now === "string" ? operation.payload.now : new Date().toISOString();
+    const candidates = this.migrationCandidates(operation);
+    if (!seriesId || !noteId || !title || !candidates.length) throw new Error("Invalid recurring Note migration operation");
+
+    const ordered = [...candidates].sort((left, right) => Date.parse(right.startsAt) - Date.parse(left.startsAt) || left.noteId.localeCompare(right.noteId));
+    for (const candidate of ordered) this.assertMigrationSource(candidate, noteId);
+    const restricted = ordered.some((candidate) => isRestricted(this.ctx.index.get(candidate.noteId)) || isRestricted(this.ctx.index.get(candidate.meetingId)));
+    let target = this.ctx.index.get(noteId);
+    const creatingTarget = !target;
+    if (!target) {
+      const occurrenceSections = ordered.map((candidate) => ({
+        occurrence_id: candidate.occurrenceId,
+        section_id: candidate.sectionId,
+        meeting_id: candidate.meetingId,
+        original_starts_at: candidate.originalStartsAt,
+        starts_at: candidate.startsAt
+      }));
+      const body = ordered.map((candidate) => this.recurringSectionBody({ title: candidate.title, startsAt: candidate.startsAt } as CalendarEvent, candidate.sectionId, candidate.body)).join("\n\n");
+      const first = ordered[0]!;
+      target = await this.ctx.replaying([noteId], () => this.ctx.objects.write({
+        relativePath: `meetings/${markdownFileName(title, noteId, first.startsAt)}`,
+        frontmatter: {
+          ...this.ctx.envelope(noteId, "meeting-note", title, now),
+          meeting_id: first.meetingId,
+          meeting_ids: ordered.map((candidate) => candidate.meetingId),
+          recurrence_series_id: seriesId,
+          occurrence_sections: occurrenceSections,
+          ...(restricted ? { sensitivity: "restricted" } : {})
+        },
+        body
+      }));
+      await this.ctx.rebuildIndex();
+      target = this.ctx.required(noteId, "meeting-note");
+    }
+    if (target.frontmatter.type !== "meeting-note" || target.frontmatter.recurrence_series_id !== seriesId) throw new Error(`Migration Note ${noteId} does not match its recorded series`);
+
+    // A pre-existing shared Note is a valid target. Add only sections that are not already
+    // represented by a prior replay; an occupied occurrence is otherwise ambiguous and stays unresolved.
+    const existingSections = Array.isArray(target.frontmatter.occurrence_sections) ? target.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    let updatedBody = target.body;
+    let updatedSections = existingSections;
+    const existingMeetingIds = [...new Set([
+      ...(Array.isArray(target.frontmatter.meeting_ids) ? target.frontmatter.meeting_ids.filter((id): id is string => typeof id === "string") : []),
+      ...(typeof target.frontmatter.meeting_id === "string" ? [target.frontmatter.meeting_id] : [])
+    ])];
+    const meetingIds = [...new Set([...existingMeetingIds, ...ordered.map((candidate) => candidate.meetingId)])];
+    for (const candidate of creatingTarget ? [] : ordered) {
+      const alreadyPresent = updatedSections.find((section) => section.occurrence_id === candidate.occurrenceId || section.section_id === candidate.sectionId);
+      const section = { occurrence_id: candidate.occurrenceId, section_id: candidate.sectionId, meeting_id: candidate.meetingId, original_starts_at: candidate.originalStartsAt, starts_at: candidate.startsAt };
+      const sectionBody = this.recurringSectionBody({ title: candidate.title, startsAt: candidate.startsAt } as CalendarEvent, candidate.sectionId, candidate.body);
+      if (alreadyPresent) {
+        // A crash may have saved the target section before saving its source redirect. Its exact
+        // recorded body proves this journal already performed that durable step; a different body
+        // is an ambiguous external collision and must never be merged or archived.
+        if (!this.isRecordedMigrationSection(alreadyPresent, section, updatedBody, sectionBody)) throw new ObjectConflictError(`Recurring occurrence ${candidate.occurrenceId} is already present in Note ${noteId}`);
+        continue;
+      }
+      const inserted = this.insertRecurringSection(updatedBody, updatedSections, sectionBody, section);
+      updatedBody = inserted.body;
+      updatedSections = inserted.sections;
+    }
+    const targetNeedsUpdate = updatedBody !== target.body || updatedSections.length !== existingSections.length || meetingIds.length !== existingMeetingIds.length || (restricted && target.frontmatter.sensitivity !== "restricted");
+    if (targetNeedsUpdate) {
+      target = await this.ctx.update(target, { meeting_ids: meetingIds, occurrence_sections: updatedSections, ...(restricted ? { sensitivity: "restricted" } : {}) }, { expectedHash: target.contentHash, now, body: updatedBody });
+      await this.ctx.rebuildIndex();
+      target = this.ctx.required(noteId, "meeting-note");
+    }
+
+    // Redirects land before archives. Each source file remains intact; only its envelope gains a link.
+    for (const candidate of ordered) {
+      this.assertMigrationSource(candidate, noteId);
+      const source = this.ctx.index.get(candidate.noteId);
+      if (!source || source.frontmatter.type !== "meeting-note") throw new Error(`Migration source Note is missing: ${candidate.noteId}`);
+      if (source.frontmatter.redirect_to_note_id !== noteId || source.frontmatter.redirect_to_section_id !== candidate.sectionId) {
+        await this.ctx.update(source, { redirect_to_note_id: noteId, redirect_to_section_id: candidate.sectionId }, { expectedHash: source.contentHash, now });
+      }
+    }
+    await this.ctx.rebuildIndex();
+    for (const candidate of ordered) {
+      const sourceMeeting = this.ctx.index.get(candidate.meetingId);
+      if (!sourceMeeting || sourceMeeting.frontmatter.type !== "meeting") throw new Error(`Migration source Meeting is missing: ${candidate.meetingId}`);
+      if (sourceMeeting.frontmatter.redirect_to_section_id !== candidate.sectionId) {
+        await this.ctx.update(sourceMeeting, { redirect_to_section_id: candidate.sectionId }, { expectedHash: sourceMeeting.contentHash, now });
+      }
+    }
+    await this.ctx.rebuildIndex();
+    // Archiving happens only after target and all redirect records are durable.
+    for (const candidate of ordered) {
+      this.assertMigrationSource(candidate, noteId);
+      const source = this.ctx.index.get(candidate.noteId);
+      if (!source || source.frontmatter.type !== "meeting-note") throw new Error(`Migration source Note is missing: ${candidate.noteId}`);
+      if (!source.frontmatter.archived_at) await this.ctx.update(source, { archived_at: now, archived_reason: `Migrated to Recurring Meeting Note ${noteId}` }, { expectedHash: source.contentHash, now });
+    }
+    await this.ctx.rebuildIndex();
+    await this.ctx.writeAuditOnce("meeting-note.migrated", noteId, now, { operation_id: operation.id, series_id: seriesId, source_note_ids: ordered.map((candidate) => candidate.noteId) }, { matchOn: ["operation_id"] });
+    await this.ctx.objects.completeOperation?.(operation.id);
+    return this.ctx.required(noteId, "meeting-note");
+  }
+
+  /** A replay must never archive text which was not copied into its recorded target section. */
+  private assertMigrationSource(candidate: MigrationOperationCandidate, targetNoteId: string) {
+    const source = this.ctx.index.get(candidate.noteId);
+    if (!source || source.frontmatter.type !== "meeting-note") throw new Error(`Migration source Note is missing: ${candidate.noteId}`);
+    if (source.body !== candidate.body) throw new ObjectConflictError(`Migration source Note ${candidate.noteId} changed after confirmation`);
+    const redirectedHere = source.frontmatter.redirect_to_note_id === targetNoteId && source.frontmatter.redirect_to_section_id === candidate.sectionId;
+    if (redirectedHere) return;
+    if (source.frontmatter.redirect_to_note_id || source.frontmatter.redirect_to_section_id) throw new ObjectConflictError(`Migration source Note ${candidate.noteId} has a conflicting redirect`);
+    if (source.contentHash !== candidate.contentHash) throw new ObjectConflictError(`Migration source Note ${candidate.noteId} changed after confirmation`);
+  }
+
+  /** Confirms that an occupied target section is exactly the durable write from this journal. */
+  private isRecordedMigrationSection(actual: Record<string, unknown>, expected: Record<string, string>, body: string, expectedBody: string) {
+    if (!Object.entries(expected).every(([key, value]) => actual[key] === value)) return false;
+    const anchor = `<a id="${expected.section_id}"></a>`;
+    const anchorAt = body.indexOf(anchor);
+    if (anchorAt < 0) return false;
+    const headingAt = body.lastIndexOf("## ", anchorAt);
+    if (headingAt < 0) return false;
+    // Section boundaries are generated occurrence anchors, not Markdown headings inside a user's body.
+    const followingAnchor = body.indexOf('<a id="occurrence-', anchorAt + anchor.length);
+    const end = followingAnchor < 0 ? body.length : body.lastIndexOf("## ", followingAnchor);
+    if (end < headingAt) return false;
+    return body.slice(headingAt, end).trimEnd() === expectedBody.trimEnd();
   }
 
   /**
@@ -163,8 +408,9 @@ export class MeetingsModule {
     const now = new Date().toISOString();
     const context = await this.ensureEventContext(event, now);
     const pendingOperation = (await ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.createMeeting && operation.payload.externalId === externalId && (!event.calendarId || !operation.payload.calendarId || operation.payload.calendarId === event.calendarId));
-    const existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
+    let existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
     if (existing) {
+      existing = await this.recordRecurrenceIdentity(existing, event, now);
       let existingNote = this.noteFor(existing.frontmatter.id);
       if (!existingNote) {
         // Either finishing an interrupted create-meeting operation, or a meeting that has no note
@@ -273,6 +519,7 @@ export class MeetingsModule {
       reviews,
       tasks,
       ...(redirect.sectionId ? { noteSectionId: redirect.sectionId } : {}),
+      ...(note ? { recurringMigration: this.recurringMigrationPreview(resolvedMeetingId) } : {}),
       ...(occurrenceItems.length ? { occurrences: occurrenceItems } : {}),
       context: {
         project: resolve(meeting.frontmatter.primary_project_id),
@@ -415,6 +662,30 @@ export class MeetingsModule {
 
   private occurrenceId(event: CalendarEvent) {
     return recurrenceOccurrenceId(this.ctx.calendar?.provider ?? "calendar", event);
+  }
+
+  /** An existing per-occurrence Note becomes a migration candidate only after its exact Calendar event supplies recurrence identity. */
+  private async recordRecurrenceIdentity(meeting: LifeOSObject, event: CalendarEvent, now: string) {
+    const seriesId = this.seriesKey(event);
+    const occurrenceId = this.occurrenceId(event);
+    if (!seriesId || !occurrenceId || !event.originalOccurrenceStartsAt) return meeting;
+    const stored = {
+      seriesId: meeting.frontmatter.recurrence_series_id,
+      occurrenceId: meeting.frontmatter.recurrence_occurrence_id,
+      originalStartsAt: meeting.frontmatter.original_occurrence_starts_at
+    };
+    // These values identify the provider occurrence, so they are write-once. A calendar event can
+    // supplement an old occurrence only when every stored value agrees; a conflict remains unresolved.
+    if ((stored.seriesId !== undefined && stored.seriesId !== seriesId)
+      || (stored.occurrenceId !== undefined && stored.occurrenceId !== occurrenceId)
+      || (stored.originalStartsAt !== undefined && stored.originalStartsAt !== event.originalOccurrenceStartsAt)) return meeting;
+    if (stored.seriesId === seriesId && stored.occurrenceId === occurrenceId && stored.originalStartsAt === event.originalOccurrenceStartsAt) return meeting;
+    return this.ctx.update(meeting, {
+      ...(stored.seriesId === undefined ? { recurrence_series_id: seriesId } : {}),
+      ...(stored.occurrenceId === undefined ? { recurrence_occurrence_id: occurrenceId } : {}),
+      ...(stored.originalStartsAt === undefined ? { original_occurrence_starts_at: event.originalOccurrenceStartsAt } : {}),
+      ...(meeting.frontmatter.recurrence_series_uid === undefined && event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {})
+    }, { expectedHash: meeting.contentHash, now });
   }
 
   private occurrenceSection(event: CalendarEvent, meetingId: string) {

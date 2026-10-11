@@ -192,6 +192,7 @@ function App() {
   const route = parsedRoute ? referenceRouteInSettings(parsedRoute) : undefined;
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
+  const [dismissedMigration, setDismissedMigration] = useState<string>();
   const [selectedNoteWorkspace, setSelectedNoteWorkspace] = useState<Workspace>();
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   // PB-025: Open/Deleted tabs and keyword search over the notes list.
@@ -945,6 +946,20 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
+  async function confirmRecurringMigration() {
+    if (!workspace?.recurringMigration?.requiresConfirmation) return;
+    setBusy(true);
+    try {
+      await api("POST /api/v1/meetings/:id/recurring-migration", {
+        params: { id: workspace.meeting.frontmatter.id },
+        body: { expectedHashes: Object.fromEntries(workspace.recurringMigration.candidates.map((candidate) => [candidate.noteId, candidate.contentHash])) }
+      });
+      await refreshWorkspace(workspace.meeting.frontmatter.id);
+      setMessage("Recurring Note migration completed");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not migrate these Notes"); }
+    finally { setBusy(false); }
+  }
+
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
   const renderOccurrenceProposal = (review: LifeObject) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />;
 
@@ -1007,6 +1022,12 @@ function App() {
                 </div>
                 {workspace.persisted !== false && <MeetingEnrichment title={workspace.meeting.frontmatter.title} frontmatter={workspace.meeting.frontmatter} disabled={busy || readOnly} onGiveUp={() => void giveUpMeetingEnrichment(workspace.meeting)} />}
               </article>
+              {workspace.recurringMigration?.requiresConfirmation && dismissedMigration !== workspace.meeting.frontmatter.id && <article className="lease-warning" aria-label="Recurring Note migration review">
+                <span>REVIEW REQUIRED</span><h3>{workspace.recurringMigration.candidates.length === 1 ? "Adopt existing Note into this recurring series?" : `Merge ${workspace.recurringMigration.candidates.length} existing Notes into this recurring series?`}</h3>
+                <p>Nothing changes until you confirm. Each original body will be kept in its dated occurrence section, and old links will redirect there.</p>
+                {workspace.recurringMigration.candidates.map((candidate) => <details key={candidate.noteId}><summary>{candidate.title} · {formatDate(candidate.startsAt)}</summary><pre>{candidate.body}</pre></details>)}
+                <button className="takeover" disabled={busy || readOnly} onClick={() => void confirmRecurringMigration()}>Confirm migration</button> <button disabled={busy} onClick={() => setDismissedMigration(workspace.meeting.frontmatter.id)}>Keep notes separate</button>
+              </article>}
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <EditorFrame>
                 {workspace.note
