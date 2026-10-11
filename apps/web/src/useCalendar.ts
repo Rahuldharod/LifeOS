@@ -20,6 +20,7 @@ export type UseCalendarOptions = {
 };
 
 export type Calendar = {
+  loading: boolean;
   events: CalendarEvent[];
   /** Events for the selected calendar, earliest first. */
   filteredEvents: CalendarEvent[];
@@ -49,6 +50,7 @@ export type Calendar = {
 };
 
 export function useCalendar({ selectedDate, displayTimeZone, onFailure, onGoogleStatusStale, call = api }: UseCalendarOptions): Calendar {
+  const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [error, setError] = useState<string>();
   const [offline, setOffline] = useState<CalendarOffline>();
@@ -87,10 +89,12 @@ export function useCalendar({ selectedDate, displayTimeZone, onFailure, onGoogle
     setEvents(day.events);
     setError(undefined);
     setOffline(day.offline);
+    setLoading(false);
     if (day.offline?.reason === "auth") latest.current.onGoogleStatusStale();
   };
 
   const loadDay = async () => {
+    setLoading(true);
     const day = await call("GET /api/v1/calendar/day", { query: dayRange(selectedDate, displayTimeZone) });
     showDay(day);
     setSources((current) => {
@@ -105,6 +109,7 @@ export function useCalendar({ selectedDate, displayTimeZone, onFailure, onGoogle
     const text = failure instanceof Error ? failure.message : "Calendar could not be loaded";
     setEvents([]);
     setOffline(undefined);
+    setLoading(false);
     setError(text);
     // A 401 means Google rejected the tokens; refresh status so the Reconnect banner appears.
     if (failure instanceof ApiError && failure.status === 401) latest.current.onGoogleStatusStale();
@@ -112,6 +117,7 @@ export function useCalendar({ selectedDate, displayTimeZone, onFailure, onGoogle
   };
 
   const syncDay = async () => {
+    setLoading(true);
     let day: CalendarDay;
     try { day = await call("POST /api/v1/calendar/day/sync", { query: dayRange(selectedDate, displayTimeZone) }); }
     catch (failure) { failed(failure); throw failure; }
@@ -152,7 +158,7 @@ export function useCalendar({ selectedDate, displayTimeZone, onFailure, onGoogle
     .sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
 
   return {
-    events, filteredEvents,
+    loading, events, filteredEvents,
     allDayEvents: filteredEvents.filter((event) => event.isAllDay),
     timedEvents: filteredEvents.filter((event) => !event.isAllDay),
     offline, error, filter, setFilter, offered, catalog, catalogLoaded, prefs,

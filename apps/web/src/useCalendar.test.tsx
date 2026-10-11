@@ -56,6 +56,7 @@ describe("useCalendar", () => {
     expect(page.calendar().allDayEvents.map((e) => e.externalId)).toEqual(["c"]);
     expect(page.calendar().offline).toBeUndefined();
     expect(page.calendar().error).toBeUndefined();
+    expect(page.calendar().loading).toBe(false);
   });
 
   it("offline (#88): keeps the stored meetings, exposes the offline state, and does not learn calendars from them", async () => {
@@ -75,6 +76,7 @@ describe("useCalendar", () => {
   it("whole request failed (PB-022a): error text, no events, no offline state, reported once", async () => {
     const page = await setup({ day: () => { throw new ApiError("boom", 500); } });
     expect(page.calendar().error).toBe("boom");
+    expect(page.calendar().loading).toBe(false);
     expect(page.calendar().events).toEqual([]);
     expect(page.calendar().offline).toBeUndefined();
     expect(page.failures).toEqual(["boom"]);
