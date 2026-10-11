@@ -204,6 +204,7 @@ export class LifeOSApplication {
   previewMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) { return this.meetings.previewMeetingFromEvent(externalId, from, to, calendarId); }
   meetingFromEvent(externalId: string) { return this.meetings.meetingFromEvent(externalId); }
   meetingWorkspace(meetingId: string) { return this.meetings.meetingWorkspace(meetingId); }
+  linkPreviousSeriesNote(noteId: string, previousNoteId: string, expectedHash: string) { return this.meetings.linkPreviousSeriesNote(noteId, previousNoteId, expectedHash); }
   reconcileDuplicateMeetings(options: { apply: boolean }) { return this.meetings.reconcileDuplicateMeetings(options); }
 
   // Review

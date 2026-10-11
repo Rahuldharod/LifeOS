@@ -173,6 +173,10 @@ export class NotesModule {
     if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be restored here");
     if (!current.frontmatter.deleted_at) return current;
     const meetingId = current.frontmatter.meeting_id;
+    const seriesId = current.frontmatter.recurrence_series_id;
+    if (typeof seriesId === "string" && this.ctx.index.all().some((note) => note.frontmatter.id !== id && note.frontmatter.type === "meeting-note" && note.frontmatter.recurrence_series_id === seriesId && isLive(note))) {
+      throw new Error("This recurring series already has a newer live canonical Note. Delete that Note first, then restore this one.");
+    }
     if (typeof meetingId === "string" && liveMeetingNote(meetingId, this.ctx.index.all())) {
       throw new Error("This meeting already has a newer note. Delete that note first, then restore this one.");
     }
