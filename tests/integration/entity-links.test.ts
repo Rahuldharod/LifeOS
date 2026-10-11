@@ -88,6 +88,12 @@ describe("entity relationship links (PB-010)", () => {
 
     const task = await application.createEntity("task", { title: "Owned" });
     await expect(application.updateEntity(task.frontmatter.id, { owner_person_id: null }, task.contentHash)).rejects.toThrow(/Owner is required/);
+
+    const project = await application.createEntity("project", { title: "Launch" });
+    const dated = await application.updateEntity(task.frontmatter.id, { due_on: "2026-10-20", primary_project_id: project.frontmatter.id }, task.contentHash);
+    const taskCleared = await application.updateEntity(task.frontmatter.id, { due_on: null, primary_project_id: null }, dated.contentHash);
+    expect(taskCleared.frontmatter.due_on).toBeUndefined();
+    expect(taskCleared.frontmatter.primary_project_id).toBeUndefined();
   });
 
   it("loads and saves an old task file without context links, keeping unknown front matter", async () => {

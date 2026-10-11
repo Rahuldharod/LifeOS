@@ -62,6 +62,7 @@ import { parseRoute, routePath, routeTarget, type Route, type View } from "./rou
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { ApplicationShell } from "./ApplicationShell.js";
+import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
@@ -334,6 +335,7 @@ function App() {
   const imageInput = useRef<HTMLInputElement>(null);
   const notesEditor = useRef<HTMLTextAreaElement>(null);
   const notesImageInput = useRef<HTMLInputElement>(null);
+  const taskEditorGuard = useRef(createStructuredEditorGuard()).current;
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
@@ -440,7 +442,7 @@ function App() {
   // until the same save succeeds (useGuardedNavigation).
   const locationRef = useRef(location);
   locationRef.current = location;
-  const guarded = useGuardedNavigation({ editors: [notesController, meetingController], readOnly, onLeaveFailed: setMessage });
+  const guarded = useGuardedNavigation({ editors: [notesController, meetingController, taskEditorGuard], readOnly, onLeaveFailed: setMessage });
   const leaveEditors = guarded.leave;
   // While a held Back/Forward saves, nothing else may change the URL: a first save over a calendar
   // event would otherwise replace the URL with the new meeting's and release the held navigation.
@@ -795,6 +797,16 @@ function App() {
     await api("POST /api/v1/entities/:type", { params: { type }, body: { fields } });
     await refresh();
   }, `${type} created`);
+
+  const createTask = async (fields: Record<string, unknown>) => {
+    let created: LifeObject | undefined;
+    const ok = await run(async () => {
+      created = await api("POST /api/v1/entities/:type", { params: { type: "task" }, body: { fields } });
+      await refresh();
+    }, "task created");
+    if (ok && created) followRoute({ view: "Tasks", id: created.frontmatter.id }, { replace: true });
+    return ok ? created : undefined;
+  };
 
   const updateEntity = (object: LifeObject, fields: Record<string, unknown>) => run(async () => {
     await api("PATCH /api/v1/entities/by-id/:id", { params: { id: object.frontmatter.id }, body: { fields, expectedHash: object.contentHash } });
@@ -1313,7 +1325,7 @@ function App() {
         </div>
       </>}
 
-      {view === "Tasks" && <EntityCrudPage labels={labels} highlightId={highlightId} type="task" title="Tasks" objects={tasks} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
+      {view === "Tasks" && <TaskWorkspace tasks={withOpenedArchived(tasks, objectLinks as LinkedObject[], "task", route?.view === "Tasks" ? route.id : undefined) as LifeObject[]} linkables={objectLinks} labels={labels} projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: String(project.frontmatter.title) }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} selectedId={route?.view === "Tasks" ? route.id : undefined} today={dateInTimeZone(new Date(), displayTimeZone)} guard={taskEditorGuard} busy={busy} readOnly={readOnly} run={run} onOpen={(id) => followRoute({ view: "Tasks", id })} onCloseDetail={() => followRoute({ view: "Tasks" })} onCreate={createTask} onSave={updateEntity} onDelete={deleteEntity} onComplete={(task, complete) => updateEntity(task, { status: complete ? "Done" : "Next" })} onRestored={refresh} />}
 
       {view === "Projects" && <><PageHeader eyebrow="PROJECTS" title="Project roll-ups" description="Meetings and tasks are computed from stable relationships, not copied lists." />
         <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />

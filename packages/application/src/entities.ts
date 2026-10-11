@@ -66,6 +66,10 @@ export class EntitiesModule {
     checkEntityLinks(this.ctx, type, selected, current.frontmatter);
     const now = new Date().toISOString();
     if (type === "task") {
+      // Browser JSON keeps `null` but drops `undefined`; null is therefore the wire-safe clear
+      // sentinel for optional scalar fields, just as it is for optional relationship fields.
+      for (const key of ["priority", "due_on", "due_at", "due_timezone", "expected_output"])
+        if (selected[key] === null || selected[key] === "") selected[key] = undefined;
       if (selected.status === "Done") selected.completed_at = now; else if (selected.status) selected.completed_at = undefined;
       if (selected.status === "Cancelled") selected.cancelled_at = now; else if (selected.status) selected.cancelled_at = undefined;
       if (selected.status && selected.status !== "Waiting") selected.waiting_for_person_id = undefined;
