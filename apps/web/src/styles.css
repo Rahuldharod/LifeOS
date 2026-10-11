@@ -314,6 +314,7 @@ section.comparing-conflict { max-width: 1900px; width: 100%; padding-right: 40px
 .note-conflict-panel { display: flex; flex-direction: column; resize: both; overflow: auto; width: 100%; height: 720px; min-width: 420px; min-height: 360px; max-width: min(2400px, calc(100vw - 700px)); max-height: 3000px; margin: 0 auto; padding: 20px 28px; background: #fff0db; border: 1px solid #e9c98f; border-radius: 14px; }
 .note-conflict-header { margin-bottom: 14px; font-size: 13px; color: #7a4519; }
 .note-conflict-header b { display: block; margin-bottom: 4px; font-size: 16px; }
+.note-conflict-mode { display: block; margin-top: var(--space-3); border: 0; background: transparent; color: var(--color-primary); font-weight: 750; text-decoration: underline; }
 .note-conflict-columns { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; min-height: 0; }
 .note-conflict-column { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; border-radius: 10px; background: white; border: 1px solid #e3e1d8; }
 .note-conflict-column-heading { padding: 16px 16px 10px; font-size: 12px; font-weight: 800; letter-spacing: .04em; color: #8a6e36; }
@@ -324,9 +325,37 @@ section.comparing-conflict { max-width: 1900px; width: 100%; padding-right: 40px
    diff is short, so the sticky footer below sits at the same height in both columns instead of
    trailing right after whichever column happens to have less text. */
 .note-conflict-text { flex: 1 0 auto; width: 100%; max-width: 90ch; margin: 0 auto; padding: 0 16px; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.6; }
+.note-conflict-rendered { flex: 1 0 auto; width: 100%; max-width: 75ch; margin: 0 auto; padding: 0 20px 20px; overflow-wrap: anywhere; }
+.note-conflict-rendered h1, .note-conflict-rendered h2, .note-conflict-rendered h3 { margin: var(--space-3) 0; color: var(--color-text); font-size: 1.25rem; }
 .note-conflict-column-footer { position: sticky; bottom: 0; margin-top: 14px; padding: 12px 16px; background: white; border-top: 1px solid #e3e1d8; }
 .note-conflict-column button { width: 100%; padding: 10px; border: 1px solid #b8c4bd; border-radius: 7px; background: white; font-size: 13px; font-weight: 750; }
 .note-conflict-column button.primary { background: #23483c; color: white; }
+
+/* #134: persistent Notes list/detail workspace. The list width is a device-local preference. */
+.notes-workspace { display: grid; grid-template-columns: var(--split-width, clamp(330px, 34vw, 480px)) 10px minmax(0, 1fr); min-height: calc(100vh - 92px); margin: -18px -48px -48px; }
+.notes-workspace-list, .notes-workspace-detail { min-width: 0; padding: var(--space-6); }
+.notes-workspace-list { overflow-y: auto; border-right: var(--border-thin) solid var(--color-border); background: var(--color-surface); }
+.notes-workspace-detail { overflow: auto; background: var(--color-canvas); }
+.notes-workspace .split-divider { position: static; height: 100%; }
+.notes-common-filters { display: grid; gap: var(--space-2); }
+.notes-common-filters > input, .note-filter-common button, .note-filter-grid button { min-height: 42px; padding: 9px 11px; border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); }
+.note-filter-common { display: grid; grid-template-columns: minmax(140px, 1fr) auto; gap: var(--space-2); align-items: end; }
+.note-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-3); padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-quiet); }
+.note-filter-grid label { display: grid; gap: var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-sm); font-weight: 650; }
+.note-filter-grid input { min-height: 42px; padding: 9px 11px; border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); }
+.note-filter-grid button { align-self: end; justify-self: start; }
+.note-workspace-rows { margin-top: var(--space-4); }
+.notes-detail-tools { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.notes-detail-tools .mode-switch { margin-left: auto; }
+.notes-read-only { color: var(--color-warning-text); font-size: var(--font-size-sm); font-weight: 750; }
+@media (max-width: 760px) {
+  .notes-workspace { display: block; min-height: 0; margin: -38px -20px; }
+  .notes-workspace-list, .notes-workspace-detail { padding: var(--space-4); }
+  .notes-workspace.detail-open .notes-workspace-list, .notes-workspace:not(.detail-open) .notes-workspace-detail, .notes-workspace .split-divider { display: none; }
+  .note-filter-common, .note-filter-grid { grid-template-columns: 1fr; }
+  .note-conflict-panel { resize: vertical; min-width: 0; height: auto; max-width: 100%; }
+  .note-conflict-columns { grid-template-columns: 1fr; }
+}
 .calendar-list-setting { margin-bottom: 18px; }
 .calendar-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid #e3e2d9; }
 .calendar-row label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
