@@ -86,6 +86,8 @@ export interface Endpoints {
   "POST /api/v1/meetings/from-event": { body: Range & { externalId: string; calendarId?: string; body?: string }; response: W.Workspace };
   "GET /api/v1/meetings/from-event/:externalId": { response: unknown };
   "GET /api/v1/meetings/:id/workspace": { response: W.Workspace };
+  "GET /api/v1/meetings/:id/recurring-migration": { response: W.RecurringMigrationPreview };
+  "POST /api/v1/meetings/:id/recurring-migration": { body: { expectedHashes: Record<string, string> }; response: W.LifeObject };
 
   // Review (#34, #57)
   "GET /api/v1/review-items": { response: W.ReviewItem[] };
