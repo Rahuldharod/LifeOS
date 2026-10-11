@@ -31,7 +31,7 @@ export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, 
         ? <DailyFocusPanel focus={today.focus} tasks={today.tasks} disabled={busy || readOnly} onRefresh={() => void onReplan()} onChange={(change) => void onChangeFocus(change)} onCompleteTask={onCompleteTask} onOpenTasks={onOpenTasks} />
         : <article className="daily-focus today-empty-priority"><span>TOP 3</span><h3>No plan is available yet</h3><p className="muted">Reload Today to build your priority list.</p></article>}
       <div className="today-side-rail">
-        <NextMeetingCard panels={todayPanels} timeZone={timeZone} busy={busy} readOnly={readOnly} onRetryCalendar={onRetryCalendar} onOpenCalendar={onOpenCalendar} />
+        <NextMeetingCard panels={todayPanels} timeZone={timeZone} busy={busy} onRetryCalendar={onRetryCalendar} onOpenCalendar={onOpenCalendar} />
         <article className="quick-capture"><span>QUICK CAPTURE</span><h3>Get it out of your head</h3><div className="capture-row"><input aria-label="Quick Capture" value={capture} onChange={(event) => onCaptureChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) onCapture(); }} placeholder="A task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={onCapture}>Capture</button></div></article>
       </div>
     </div>
@@ -70,10 +70,10 @@ function TodayLoading() {
   </div>;
 }
 
-function NextMeetingCard({ panels, timeZone, busy, readOnly, onRetryCalendar, onOpenCalendar }: { panels?: TodayPanels; timeZone?: string; busy: boolean; readOnly: boolean; onRetryCalendar?: () => void; onOpenCalendar?: () => void }) {
+function NextMeetingCard({ panels, timeZone, busy, onRetryCalendar, onOpenCalendar }: { panels?: TodayPanels; timeZone?: string; busy: boolean; onRetryCalendar?: () => void; onOpenCalendar?: () => void }) {
   const meeting = panels?.nextMeetings[0];
   return <article className="today-next-meeting"><span>NEXT MEETING</span>
-    {panels && <CalendarOfflineBanner offline={panels.calendarOffline} timeZone={timeZone} busy={busy || readOnly} onRetry={onRetryCalendar ?? (() => undefined)} />}
+    {panels && <CalendarOfflineBanner offline={panels.calendarOffline} timeZone={timeZone} busy={busy} onRetry={onRetryCalendar ?? (() => undefined)} />}
     {!panels ? <><div className="today-skeleton-line" /><div className="today-skeleton-line" /></> : meeting ? <>
       <h3>{meeting.inProgress ? "Now" : formatTime(meeting.startsAt)} · {meeting.title}</h3>
       <p className="muted">{meetingTime(meeting)}{meeting.calendarName ? ` · ${meeting.calendarName}` : ""}{meeting.noteId ? " · Has notes" : ""}{meeting.restricted && <> · <LockBadge frontmatter={{ sensitivity: "restricted" }} /></>}</p>

@@ -3,7 +3,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DailyFocus, LifeObject, Today, TodayPanels } from "@lifeos/contracts";
+import type { DailyFocus, FocusChange, LifeObject, Today, TodayPanels } from "@lifeos/contracts";
 import { TodayPage } from "./TodayPage.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -93,5 +93,58 @@ describe("priority-first Today (#132)", () => {
       const control = [...host.querySelectorAll<HTMLButtonElement>(".today-priority-grid button")].find((button) => button.textContent === label);
       expect(control?.disabled).toBe(true);
     }
+  });
+
+  it("keeps Calendar Retry available in read-only mode because retry does not write authoritative data", async () => {
+    const retry = vi.fn();
+    act(() => root.render(<TodayPage {...base} today={today()} readOnly panels={panels({ calendarOffline: { reason: "network", error: "offline" } })} onRetryCalendar={retry} />));
+    const control = host.querySelector<HTMLButtonElement>(".calendar-offline button");
+    expect(control?.textContent).toBe("Retry");
+    expect(control?.disabled).toBe(false);
+    await act(async () => control?.click());
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("preserves Pin, Replace, Restore and reset interactions inside the rearranged focus card", async () => {
+    const primary = task("t1", "Prepare proposal"); const candidate = task("t2", "Review workshop notes"); const dismissed = task("t3", "Confirm venue");
+    const change = vi.fn(async (_change: FocusChange) => undefined);
+    const focusState: DailyFocus = {
+      ...focus([primary]), override: { contentHash: "override-hash" },
+      dismissedTop3: [{ id: "t3", object: dismissed, state: "open", whyToday: "Due today" }]
+    };
+    act(() => root.render(<TodayPage {...base} today={{ ...today(), tasks: [primary, candidate, dismissed], focus: focusState }} panels={panels()} onChangeFocus={change} />));
+
+    await act(async () => host.querySelector<HTMLButtonElement>("button[aria-label='Pin Prepare proposal']")?.click());
+    await act(async () => host.querySelector<HTMLButtonElement>("button[aria-label='Replace Prepare proposal']")?.click());
+    const select = host.querySelector<HTMLSelectElement>("select[aria-label='Task to put in place of Prepare proposal']")!;
+    await act(async () => { select.value = "t2"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const confirmReplace = [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Replace" && button.classList.contains("primary"));
+    await act(async () => confirmReplace?.click());
+    const restore = [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "Restore Confirm venue to today's Top 3");
+    await act(async () => restore?.click());
+    const reset = [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Clear my Top 3 changes for today");
+    await act(async () => reset?.click());
+
+    expect(change.mock.calls.map(([value]) => value)).toEqual([
+      { action: "pin", taskId: "t1" },
+      { action: "replace", taskId: "t1", replacementId: "t2" },
+      { action: "restore", taskId: "t3" },
+      { action: "reset" }
+    ]);
+  });
+
+  it("preserves backup, Inbox, enrichment and Give Up interactions below priorities", async () => {
+    const backUp = vi.fn(); const openInbox = vi.fn(); const enrich = vi.fn(async () => undefined); const giveUp = vi.fn(async () => true);
+    act(() => root.render(<TodayPage {...base} today={today()} panels={panels({ backupWarning: { kind: "backup-failed", message: "Latest backup failed", reason: "Disk unavailable" } })}
+      enrichment={{ proposedGaveUp: [{ meetingId: "m-old", title: "Old client review", requestedAt: "2026-10-09T08:00:00.000Z" }], staleWorkOrders: [] }}
+      onBackUpNow={backUp} onOpenInbox={openInbox} onEnrich={enrich} onGiveUp={giveUp} />));
+
+    const named = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === label);
+    await act(async () => named("Back up now")?.click());
+    await act(async () => named("Open Inbox")?.click());
+    await act(async () => named("Enrich last 48h")?.click());
+    await act(async () => host.querySelector<HTMLButtonElement>("button[aria-label='Give up waiting for material from Old client review']")?.click());
+
+    expect(backUp).toHaveBeenCalledOnce(); expect(openInbox).toHaveBeenCalledOnce(); expect(enrich).toHaveBeenCalledOnce(); expect(giveUp).toHaveBeenCalledWith("m-old");
   });
 });
