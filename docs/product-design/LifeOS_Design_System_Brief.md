@@ -1,6 +1,6 @@
-# LifeOS design system: decisions from the first grilling session
+# LifeOS design system: approved decisions
 
-**Status:** The original page-layout discovery and production specification were approved on 10 October 2026. Production work is in progress. A visual-system and responsive-layout refinement interview began on 11 October 2026; the settled changes below supersede the earlier palette, while exact token roles and responsive rules remain under discovery.
+**Status:** The page-layout direction was approved on 10 October 2026. The visual-system and responsive-layout refinement was completed on 11 October 2026 and published as [GitHub issue #154](https://github.com/Rahuldharod/LifeOS/issues/154). The decisions below supersede the earlier palette and responsive assumptions.
 
 ## Purpose and experience
 
@@ -22,7 +22,7 @@ The approved direction is **dark-blue ocean luxury**: warm, comfortable, calm an
 | Warm accent | `#8E522F` |
 | Warm canvas | `#F6F1E8` |
 
-Exact surface, border, muted-text, focus and interaction-state roles remain to be decided. Do not rely on colour alone to communicate state.
+The supporting neutral, focus and interaction-state roles are defined in the approved foundations below. Do not rely on colour alone to communicate state.
 
 The approved semantic notification treatment is **Deep tint**:
 
@@ -33,7 +33,7 @@ The approved semantic notification treatment is **Deep tint**:
 | Warning | `#583316` | `#E9D0B5` | `#A66A32` |
 | Information | `#123E5A` | `#C9DDE2` | `#3E7480` |
 
-The text/fill pairs measure approximately 7.4:1–8.7:1. Every semantic notification also has an icon and visible label. Stronger solid semantic treatments, if any, remain to be decided.
+The text/fill pairs measure approximately 7.4:1–8.7:1. Every semantic notification also has an icon and visible label. Reserve stronger solid semantic treatments for actions whose consequence has that meaning, such as final destructive confirmation.
 
 ### Production token contract (#129)
 
@@ -46,7 +46,7 @@ The production UI defines these roles in `apps/web/src/design-tokens.css`. Compo
 | Layout | seven spacing steps; small, medium, large and pill radii; thin and strong borders |
 | Elevation and focus | surface and overlay shadows; a two-colour focus ring that remains visible on light and dark surfaces |
 
-The implemented light tokens still contain the superseded purple palette. They must be remapped only after the current interview settles the exact role and state contract. Existing contrast figures for those values are historical, not acceptance evidence for the ocean palette.
+The implemented light tokens still contain the superseded purple palette. Issue #154 remaps them to the approved role and state contract. Existing contrast figures for the purple values are historical, not acceptance evidence for the ocean palette.
 
 Dark theme remains deliberately unshipped. The earlier purple dark mapping is superseded; a later dark-theme ticket must derive a new ocean mapping and re-check every component state before exposing a theme preference.
 
@@ -81,7 +81,8 @@ Approved on 11 October 2026 during the refinement interview:
 - **Assistive feedback and motion:** keep visible status and assistive announcements in the same state. Announce routine progress politely; treat errors immediately and identify their affected control. Reduced-motion removes non-essential movement without hiding state changes.
 - **Surface geometry:** preserve the established 4, 8, 12, 16, 24, 32 and 48px spacing steps; 6px small, 8px control, 14px surface and pill radii; thin borders; restrained surface shadows; and stronger shadows only for overlays.
 - **Theme scope:** complete and validate the light theme in this refinement. Keep role names theme-ready, but defer a new ocean dark mapping to a separate prototype and contrast-validation task rather than preserving or guessing from the superseded purple mapping.
-- **Implementation route:** publish the completed refinement as a new `ready-for-agent` child issue under #127. Keep closed issue #129 as historical evidence, and make the new child a blocker for #142 release validation.
+- **Implementation route:** implement [issue #154](https://github.com/Rahuldharod/LifeOS/issues/154), the `ready-for-agent` child of #127. Keep closed issue #129 as historical evidence. Issue #154 blocks #142 release validation.
+- **Highest automated test seam:** add one Playwright browser seam against the built LifeOS app, localhost API and synthetic data. Cover real CSS layout, responsive band boundaries, clipping, page-level overflow, keyboard movement, focus restoration and accessible states there. Preserve focused component tests for detailed behaviour; #142 retains manual Safari, Chrome, VoiceOver and actual 200%/400% zoom validation.
 
 ## Navigation and workflows
 
@@ -152,31 +153,12 @@ Approved in the second grilling session on 10 October 2026:
 
 The review prototype for these decisions is `apps/web/layout-prototype.html`. It uses the approved palette and navigation, synthetic data and no persistence. A prototype wiring issue that initially prevented Settings sections from opening in the right-hand workspace was corrected after the decision.
 
-## Remaining before production implementation
+## Production implementation frontier
 
-No further product-level page-layout decision is currently open. The production specification is [GitHub issue #127](https://github.com/Rahuldharod/LifeOS/issues/127). Its approved implementation sequence is:
+No further product-level visual or responsive decision is open for this phase. The active specification is [GitHub issue #154](https://github.com/Rahuldharod/LifeOS/issues/154), linked as a child of the parent design-system issue [#127](https://github.com/Rahuldharod/LifeOS/issues/127) and labelled `ready-for-agent`.
 
-1. [Design tokens and application shell — #129](https://github.com/Rahuldharod/LifeOS/issues/129)
-2. [Tasks workspace and reusable list/detail foundation — #130](https://github.com/Rahuldharod/LifeOS/issues/130)
-3. [Global Search and Capture — #131](https://github.com/Rahuldharod/LifeOS/issues/131)
-4. [Priority-first Today — #132](https://github.com/Rahuldharod/LifeOS/issues/132)
-5. [Calendar workspace — #133](https://github.com/Rahuldharod/LifeOS/issues/133)
-6. [Notes workspace and conflict comparison — #134](https://github.com/Rahuldharod/LifeOS/issues/134)
-7. [Inbox review workspace — #135](https://github.com/Rahuldharod/LifeOS/issues/135)
-8. [Decisions and Open Points workspaces — #136](https://github.com/Rahuldharod/LifeOS/issues/136)
-9. [Knowledge workspace — #137](https://github.com/Rahuldharod/LifeOS/issues/137)
-10. [Grouped Settings workspace — #138](https://github.com/Rahuldharod/LifeOS/issues/138)
-11. [Connections and Data & devices Settings — #139](https://github.com/Rahuldharod/LifeOS/issues/139)
-12. [Reference data inside Settings — #140](https://github.com/Rahuldharod/LifeOS/issues/140)
-13. [Accessibility, responsive and release validation — #142](https://github.com/Rahuldharod/LifeOS/issues/142)
+Implement and verify #154 before completing [accessibility, responsive and release validation — #142](https://github.com/Rahuldharod/LifeOS/issues/142). GitHub records #154 as a blocker for #142.
 
-GitHub's native blocking relationships define the implementation frontier. Start with issue #129, then work any unblocked `ready-for-agent` ticket. The remaining production work is:
-
-1. Convert the approved direction into named typography, spacing, radius, border, focus and colour-role tokens. Confirm every interactive state meets WCAG 2.2 AA contrast requirements.
-2. Specify reusable list rows, detail headers, sticky action bars, form controls, banners, empty states, skeletons, confirmations, Search and Capture overlays.
-3. Validate the chosen list-to-detail narrow-screen behaviour on representative Calendar, Tasks, Notes, Inbox and Settings flows at reflow and zoom breakpoints.
-4. Define the dark-theme mappings for the named colour roles without building a dark theme in this phase.
-5. Rewrite the approved prototype patterns as production components. The prototype remains throwaway reference code and must not be promoted directly.
-6. Run keyboard, screen-reader, focus-order, reduced-motion, reflow and production-build checks across every destination and state before release.
+The dark ocean theme remains a separate future prototype and contrast-validation task. Production code must use theme-ready role names, but this phase ships only the validated light theme.
 
 See `README.md`, `docs/product-design/LifeOS_Solution_Design_v0.8.md` and `docs/architecture/README.md` for the existing product and implementation boundaries.
