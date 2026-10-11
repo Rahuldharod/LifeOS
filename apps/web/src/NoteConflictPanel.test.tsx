@@ -30,4 +30,18 @@ describe("NoteConflictPanel", () => {
     expect(browser).toHaveBeenCalledOnce();
     expect(disk).toHaveBeenCalledOnce();
   });
+
+  it("returns to readable versions when the reused panel receives another conflict", async () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    const render = (title: string, draftText: string, diskText: string) => root!.render(<NoteConflictPanel noteTitle={title} draftText={draftText} diskText={diskText} disabled={false} onKeepBrowserVersion={vi.fn()} onKeepDiskVersion={vi.fn()} />);
+    await act(async () => render("First note", "# Browser one", "# File one"));
+    const precise = [...document.querySelectorAll("button")].find((button) => button.textContent === "Show precise changes") as HTMLButtonElement;
+    await act(async () => precise.click());
+    expect(document.querySelector(".diff-line")).toBeTruthy();
+
+    await act(async () => render("Second note", "# Browser two", "# File two"));
+    expect(document.querySelector(".diff-line")).toBeNull();
+    expect(document.querySelectorAll(".note-conflict-rendered h1")).toHaveLength(2);
+    expect(document.querySelector(".note-conflict-mode")?.textContent).toBe("Show precise changes");
+  });
 });
