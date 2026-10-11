@@ -68,6 +68,7 @@ import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { OccurrenceAnchoredMarkdown, scrollVisualOccurrence } from "./occurrenceNavigation.js";
+import { RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
@@ -304,6 +305,7 @@ function App() {
   const route = parsedRoute ? referenceRouteInSettings(parsedRoute) : undefined;
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
+  const [selectedNoteWorkspace, setSelectedNoteWorkspace] = useState<Workspace>();
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   // PB-025: Open/Deleted tabs and keyword search over the notes list.
   const noteTab: "open" | "deleted" = route?.view === "Notes" && route.noteTab === "deleted" ? "deleted" : "open";
@@ -339,6 +341,14 @@ function App() {
   const openPointEditorGuard = useRef(createStructuredEditorGuard()).current;
   const settingsEditorGuard = useRef(createSettingsEditorGuard()).current;
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
+  const selectedRecurringMeetingId = selectedNote?.frontmatter.recurrence_series_id && typeof selectedNote.frontmatter.meeting_id === "string" ? selectedNote.frontmatter.meeting_id : undefined;
+  useEffect(() => {
+    const meetingId = selectedRecurringMeetingId;
+    if (!meetingId) { setSelectedNoteWorkspace(undefined); return; }
+    let current = true;
+    void api("GET /api/v1/meetings/:id/workspace", { params: { id: meetingId } }).then((next) => { if (current) setSelectedNoteWorkspace(next); }).catch(() => { if (current) setSelectedNoteWorkspace(undefined); });
+    return () => { current = false; };
+  }, [selectedNote?.frontmatter.id, selectedNote?.contentHash, selectedRecurringMeetingId]);
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
   const conflictedNoteIds = new Set(notes.filter((note) => isConflictedDraft(readCachedDraft(note), note)).map((note) => note.frontmatter.id));
@@ -1302,7 +1312,17 @@ function App() {
                 {workspace.note
                   ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
                   : <NoteHeader note={pendingHeaderNote(workspace)} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div></NoteHeader>}
-                {editorMode === "write" ? <>
+                {workspace.note && workspace.occurrences?.length ? <RecurringOccurrenceWorkspace
+                  note={{ ...workspace.note, body: meetingController.draft }}
+                  occurrences={workspace.occurrences}
+                  selectedSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || workspace.occurrences.find((item) => item.meeting.frontmatter.id === workspace.meeting.frontmatter.id)?.sectionId}
+                  timeZone={displayTimeZone}
+                  mode="calendar"
+                  currentEvent={calendar.filteredEvents.find((event) => event.meetingId === workspace.meeting.frontmatter.id || event.originalOccurrenceStartsAt === workspace.meeting.frontmatter.original_occurrence_starts_at)}
+                  readOnly={busy || readOnly}
+                  onBodyChange={meetingController.setDraft}
+                  renderProposal={(review) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />}
+                /> : editorMode === "write" ? <>
                   <div className="toolbar">
                     <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { applyHeading(event.target.value); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
                     <button disabled={readOnly} title="Bold" onClick={() => insertMarkdown("**", "**")}>B</button>
@@ -1329,11 +1349,11 @@ function App() {
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </EditorFrame>}
               {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
-              {meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
-              <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
+              {!workspace.occurrences?.length && meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
+              {!workspace.occurrences?.length && <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
                 {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
-              </article>
+              </article>}
             </>}
         </CalendarWorkspace>
       </>}
@@ -1370,7 +1390,16 @@ function App() {
         conflictDetail={selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> : null}
         renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
               <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
-              {notesMode === "write" ? <>
+              {selectedNoteWorkspace?.occurrences?.length ? <RecurringOccurrenceWorkspace
+                note={{ ...selectedNote, body: notesController.draft }}
+                occurrences={selectedNoteWorkspace.occurrences}
+                selectedSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined}
+                timeZone={displayTimeZone}
+                mode="notes"
+                readOnly={busy || readOnly}
+                onBodyChange={notesController.setDraft}
+                renderProposal={(review) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />}
+              /> : notesMode === "write" ? <>
                 <div className="toolbar">
                   <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { if (event.target.value) transformNoteLines((line) => `${"#".repeat(Number(event.target.value))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading"); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
                   <button disabled={readOnly} title="Bold" onClick={() => editNotes("**", "**")}>B</button><button disabled={readOnly} title="Italic" onClick={() => editNotes("*", "*")}><i>I</i></button><button disabled={readOnly} title="Inline code" onClick={() => editNotes("`", "`", "code")}>{"</>"}</button>

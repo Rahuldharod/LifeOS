@@ -6,7 +6,7 @@ const events: CalendarEvent[] = [
   {
     externalId: "api-occurrence-1", calendarId: "work", title: "API weekly",
     startsAt: "2026-10-05T08:00:00.000Z", endsAt: "2026-10-05T09:00:00.000Z", timezone: "Europe/Paris", attendees: [],
-    seriesId: "api-series", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z"
+    seriesId: "api-series", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z", location: "Room Atlas", joinUrl: "https://meet.example.test/weekly"
   },
   {
     externalId: "api-occurrence-2", calendarId: "work", title: "API weekly",
@@ -46,6 +46,10 @@ describe("shared recurring Note API (#148)", () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]!.frontmatter.occurrence_sections).toHaveLength(2);
     expect(notes[0]!.body.indexOf("Newer API words")).toBeLessThan(notes[0]!.body.indexOf("Older API words"));
+
+    const occurrenceWorkspace = await call("GET /api/v1/meetings/:id/workspace", { params: { id: older.meeting.frontmatter.id } });
+    expect(occurrenceWorkspace.occurrences?.map((item) => item.sectionId)).toEqual((notes[0]!.frontmatter.occurrence_sections as Array<{ section_id: string }>).map((item) => item.section_id));
+    expect(occurrenceWorkspace.occurrences?.[1]?.meeting.frontmatter).toMatchObject({ location: "Room Atlas", join_url: "https://meet.example.test/weekly" });
 
     await call("POST /api/v1/meetings/from-event", { body: { externalId: events[1]!.externalId, calendarId: "work", body: "duplicate retry", ...range } });
     const retried = (await call("GET /api/v1/notes", { query: {} }))[0]!;
