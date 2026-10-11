@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useSplitPane } from "./splitPane.js";
 import { useListDetailReturn } from "./useListDetailReturn.js";
 import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
@@ -37,12 +37,12 @@ export function useStructuredEditorGuard({ guard, dirty, canSave, save, discard,
  * Shared list/detail workspace: a bounded, resizable list beside the detail on wider bands, and explicit
  * list-then-detail states with Back in the narrow band. `children` render after both panes (dialogs).
  */
-export function ListDetailWorkspace({ workspace, detailOpen, selectedKey, list, detail, listLabel, detailLabel, listRef, children }: { workspace: ListWorkspace; detailOpen: boolean; selectedKey?: string; list: ReactNode; detail: ReactNode; listLabel: string; detailLabel: string; listRef?: Ref<HTMLElement>; children?: ReactNode }) {
+export function ListDetailWorkspace({ workspace, detailOpen, selectedKey, list, detail, listLabel, detailLabel, children }: { workspace: ListWorkspace; detailOpen: boolean; selectedKey?: string; list: ReactNode; detail: ReactNode; listLabel: string; detailLabel: string; children?: ReactNode }) {
   const narrow = useNarrowWorkspace();
   const split = useSplitPane(workspace);
   const ref = useListDetailReturn(selectedKey ?? (detailOpen ? "open" : undefined));
   return <div ref={ref} className={`task-workspace pane-workspace${detailOpen ? " detail-open" : ""}`} data-workspace={workspace} style={split.style}>
-    <section ref={listRef} className="task-list-pane" data-pane="list" aria-label={listLabel} hidden={narrow && detailOpen}>{list}</section>
+    <section className="task-list-pane" data-pane="list" aria-label={listLabel} hidden={narrow && detailOpen}>{list}</section>
     {!narrow && <div {...split.dividerProps} />}
     <section className="task-detail-pane" data-pane="detail" aria-label={detailLabel} hidden={narrow && !detailOpen}>{detail}</section>
     {children}
@@ -60,8 +60,8 @@ export function RecordHeader({ eyebrow, title, description, backLabel = "Back to
 }
 
 /** Persistent structured-record feedback and explicit Save/Cancel actions. */
-export function StickyRecordActions({ status, busy, saveDisabled, onCancel, onSave }: { status: string; busy: boolean; saveDisabled: boolean; onCancel: () => void; onSave: () => void }) {
-  return <footer className="sticky-record-actions"><span role="status">{busy ? "Saving…" : status}</span><div><button disabled={busy} onClick={onCancel}>Cancel</button><LoadingButton className="primary" loading={busy} loadingLabel="Saving…" disabled={saveDisabled} onClick={onSave}>Save</LoadingButton></div></footer>;
+export function StickyRecordActions({ status, busy, saving = false, saveDisabled, onCancel, onSave }: { status: string; busy: boolean; saving?: boolean; saveDisabled: boolean; onCancel: () => void; onSave: () => void }) {
+  return <footer className="sticky-record-actions"><span role="status">{saving ? "Saving…" : status}</span><div><button disabled={busy || saving} onClick={onCancel}>Cancel</button><LoadingButton className="primary" loading={saving} loadingLabel="Saving…" disabled={saveDisabled} onClick={onSave}>Save</LoadingButton></div></footer>;
 }
 
 /**

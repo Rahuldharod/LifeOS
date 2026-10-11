@@ -119,6 +119,8 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
       <OverlayDialog open={narrow && menuOpen} label="Navigation" variant="sheet" onClose={() => setMenuOpen(false)}>
         <div className="shell-sheet-heading"><span className="shell-brand">LifeOS</span><button type="button" aria-label="Close navigation" onClick={() => setMenuOpen(false)}>×</button></div>
         <div className="shell-sidebar shell-sheet">{navigation}</div>
+        {/* The band follows the sidebar the user prefers, so a collapsed sidebar can bring a mid-size window back to the compact band. */}
+        <button type="button" className="shell-sheet-preference" aria-pressed={collapsed} onClick={() => setNavigationCollapsed(!collapsed)}>{collapsed ? "Use the full sidebar on wider windows" : "Use the collapsed sidebar on wider windows"}</button>
       </OverlayDialog>
       <main id="lifeos-content" ref={content} tabIndex={-1} className={["shell-content", contentClassName].filter(Boolean).join(" ")}>
         <div className="shell-canvas">{children}</div>

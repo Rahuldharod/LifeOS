@@ -92,6 +92,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .shell-sheet-heading button { border: 0; background: transparent; color: var(--color-sidebar-text); font-size: var(--font-size-xl); }
 .shell-sheet-heading button:focus-visible { box-shadow: var(--focus-ring-on-dark); }
 .shell-sheet { flex: 1 1 auto; height: auto; padding: 0; }
+.shell-sheet-preference { margin-top: var(--space-3); border-color: var(--color-sidebar-divider); background: transparent; color: var(--color-sidebar-text); font-size: var(--font-size-sm); }
+.shell-sheet-preference:hover:not(:disabled, [aria-disabled="true"]) { background: var(--color-sidebar-hover); }
+.shell-sheet-preference:focus-visible { box-shadow: var(--focus-ring-on-dark); }
 
 section { min-width: 0; }
 header { margin-bottom: 22px; }
@@ -400,7 +403,6 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
    on small screens) and as tall as the visible column; the text scrolls inside it, and blocks below it
    (Calendar meeting proposals) stay in the column's own scroll. The corner handle resizes it freely. */
 .editor-frame { position: relative; display: flex; flex-direction: column; width: max(70%, min(640px, 100%)); max-width: 100%; height: max(420px, calc(100vh - 140px)); min-width: 360px; min-height: 280px; }
-/* Wide screens: the column is a size container, so 100cqh is exactly its visible height, even in Calendar where other blocks share the column. */
 .editor-frame > * { flex: none; }
 .editor-frame > .visual-markdown-editor, .editor-frame > textarea, .editor-frame > .markdown-preview { flex: 1 1 auto; min-height: 0; overflow: auto; resize: none; }
 .editor-frame .visual-markdown-editor .milkdown-top-bar { position: sticky; top: 0; z-index: 2; }
@@ -497,7 +499,7 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .today-purpose-empty { padding: var(--space-3) 0; }
 .today-purpose-empty h3, .today-purpose-empty h4 { margin: 0 0 var(--space-1); }
 .today-purpose-empty p { margin: 0 0 var(--space-3); }
-.today-skeleton-line { height: .8rem; margin-top: var(--space-4); border-radius: var(--radius-pill); background: linear-gradient(90deg, var(--color-surface-quiet), var(--color-surface-quiet), var(--color-surface-quiet)); background-size: 220% 100%; animation: today-skeleton 1.4s ease-in-out infinite; }
+.today-skeleton-line { height: .8rem; margin-top: var(--space-4); border-radius: var(--radius-pill); background: linear-gradient(90deg, var(--color-surface-quiet), var(--color-surface-raised), var(--color-surface-quiet)); background-size: 220% 100%; animation: today-skeleton 1.4s ease-in-out infinite; }
 .today-skeleton-line:nth-of-type(2) { width: 78%; }
 .today-skeleton-line:nth-of-type(3) { width: 62%; }
 @keyframes today-skeleton { from { background-position: 100% 0; } to { background-position: -100% 0; } }
@@ -554,12 +556,12 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 
 /* #85: per-object history (kept versions, external edits, restore). */
 .history-link { margin: 4px 0; }
-.history-panel { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--color-border)); border-radius: 8px; }
+.history-panel { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; }
 .history-panel > span { font-size: var(--font-size-xs); letter-spacing: 0.06em; }
-.history-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 6px 0; border-top: 1px solid var(--color-border)); }
+.history-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 6px 0; border-top: 1px solid var(--color-border); }
 .history-row > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .history-row small { display: block; width: 100%; }
-.history-tag { font-size: var(--font-size-xs); padding: 1px 6px; border-radius: 999px; background: var(--color-surface-quiet)); }
+.history-tag { font-size: var(--font-size-xs); padding: 1px 6px; border-radius: 999px; background: var(--color-surface-quiet); }
 .history-tag.external { background: var(--color-warning-surface); }
 .history-confirm { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 /* PB-030: the permanent-delete confirmation pop-up. */
@@ -588,7 +590,7 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 /* PB-029: Copy link button and its "Copied" feedback */
 .copy-link { display: inline-flex; align-items: center; gap: 6px; }
 .copy-link small { min-width: 5.5em; }
-.copy-link-failed { color: var(--color-error)); }
+.copy-link-failed { color: var(--color-error); }
 
 /* #146: one calm, keyboard-contained overlay shared by global actions. */
 .overlay-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: start center; padding: min(12vh, 96px) var(--space-4); background: var(--color-scrim); }
@@ -665,6 +667,11 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .visual-markdown-editor .milkdown .ProseMirror, textarea, .markdown-preview { font-size: var(--font-size-editor); line-height: var(--line-height-editor); }
 .markdown-preview { padding-right: 32px !important; }
 textarea { padding-right: 24px !important; }
+
+/* PB-028: Notes and Calendar detail panes are size containers, so the editor is as tall as the visible pane and the
+   page never scrolls to reach its footer; Calendar's header and proposals scroll with the pane around it. */
+.notes-workspace > [data-pane="detail"], .calendar-workspace > [data-pane="detail"] { container-type: size; }
+.pane-workspace .editor-frame { height: max(360px, calc(100cqh - 2 * var(--space-5))); }
 
 /* Calendar: the bounded timeline and the meeting work area are the two panes; proposals stay below the editor. */
 .calendar-workspace > .event-list { margin: 0; border: 0; border-radius: 0; box-shadow: none; }

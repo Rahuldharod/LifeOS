@@ -1,7 +1,7 @@
 // The shared bounded divider between a list pane and its detail (PB-024, #154). Each workspace has its own clamp
 // (workspaceLayout.ts); a dragged width is a per-device preference (ADR 0005), stored per workspace in browser
 // storage and clamped again on read, so an old or hand-edited value can never break the layout. Double-click resets.
-import { useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { clampListWidth, listClamps, type ListWorkspace } from "./workspaceLayout.js";
 
 /** Earlier releases used these keys for Notes and Calendar; keep them so a remembered width survives. */
@@ -28,6 +28,17 @@ export function useSplitPane(workspace: ListWorkspace) {
   const [width, setWidth] = useState(() => readStoredWidth(workspace));
   const update = (next: number | undefined) => { setWidth(next); writeWidth(workspace, next); };
   const { min, max } = listClamps[workspace];
+  // The default width comes from CSS, so announce the width the list actually has, not a guess.
+  const [divider, setDivider] = useState<HTMLDivElement | null>(null);
+  const [rendered, setRendered] = useState<number>();
+  useEffect(() => {
+    const list = divider?.previousElementSibling;
+    if (!list || typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(() => setRendered(Math.round(list.getBoundingClientRect().width)));
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [divider]);
+  const ref = useCallback((element: HTMLDivElement | null) => setDivider(element), []);
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     const divider = event.currentTarget;
@@ -61,7 +72,7 @@ export function useSplitPane(workspace: ListWorkspace) {
     style: { "--list-min": `${min}px`, "--list-max": `${max}px`, ...(width === undefined ? {} : { "--split-width": `${width}px` }) } as CSSProperties,
     dividerProps: {
       role: "separator", "aria-orientation": "vertical" as const, "aria-label": "Resize list (double-click or Enter to reset)", tabIndex: 0,
-      "aria-valuemin": min, "aria-valuemax": max, "aria-valuenow": width ?? min,
+      ref, "aria-valuemin": min, "aria-valuemax": max, "aria-valuenow": width ?? rendered ?? min,
       title: "Drag to resize · double-click to reset", className: "split-divider",
       onPointerDown, onKeyDown, onDoubleClick: () => update(undefined)
     }

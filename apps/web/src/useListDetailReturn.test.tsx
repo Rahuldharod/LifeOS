@@ -33,8 +33,10 @@ describe("list/detail focus continuity (#154)", () => {
     expect(list.scrollTop).toBe(120);
   });
 
-  it("does not steal focus when a record opens from a direct link", () => {
+  it("does not steal focus when a record opens from a direct link, nor when it closes", () => {
     act(() => root.render(<Workspace initial="Three" />));
     expect(document.activeElement).toBe(document.body);
+    act(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Back")!.click());
+    expect(document.activeElement?.getAttribute("aria-label")).toBeNull();
   });
 });

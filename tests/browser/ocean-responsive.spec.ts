@@ -59,6 +59,16 @@ test.describe("responsive bands follow the usable workspace after the sidebar", 
     });
   }
 
+  test("a mid-size window can leave the narrow band by choosing the collapsed sidebar", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 900 });
+    await open(page, "/tasks");
+    expect(await band(page)).toBe("narrow");
+    await page.getByRole("button", { name: "Menu" }).click();
+    await page.getByRole("button", { name: "Use the collapsed sidebar on wider windows" }).click();
+    await expect(page.locator(".application-shell")).toHaveAttribute("data-band", "compact");
+    await expect(page.getByRole("button", { name: "Expand navigation" })).toBeVisible();
+  });
+
   test("320 CSS px (the 400% reflow equivalent) keeps one working view with global navigation reachable", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await open(page, "/tasks");
@@ -102,6 +112,7 @@ test.describe("bounded canvas, pane clamps and content measures", () => {
     await page.setViewportSize({ width: 2560, height: 1440 });
     await open(page, "/tasks");
     const divider = page.getByRole("separator", { name: /Resize list/ });
+    await expect(divider).toHaveAttribute("aria-valuenow", String(Math.round(await width(page, "[aria-label='Tasks list']"))));
     await divider.focus();
     await page.keyboard.press("Home");
     expect(Math.round(await width(page, "[aria-label='Tasks list']"))).toBe(460);

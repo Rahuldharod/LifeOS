@@ -9,7 +9,7 @@ import { useCallback, useLayoutEffect, useRef } from "react";
  */
 export function useListDetailReturn(selectedKey: string | undefined) {
   const root = useRef<HTMLElement | null>(null);
-  const memory = useRef<{ scrollTop: number; row?: HTMLElement; label?: string; fromList: boolean; at: number }>({ scrollTop: 0, fromList: false, at: 0 });
+  const memory = useRef<{ scrollTop: number; row?: HTMLElement; label?: string; fromList: boolean; at: number; openedFromList: boolean }>({ scrollTop: 0, fromList: false, at: 0, openedFromList: false });
   const previous = useRef(selectedKey);
   const cleanup = useRef<() => void>(undefined);
 
@@ -23,8 +23,10 @@ export function useListDetailReturn(selectedKey: string | undefined) {
       const pane = list();
       if (!pane || !(event.target instanceof Element) || !pane.contains(event.target)) return;
       if (event instanceof KeyboardEvent && event.key !== "Enter" && event.key !== " ") return;
-      const row = event.target.closest<HTMLElement>("button, a, [role='option'], [tabindex]");
-      memory.current = { scrollTop: pane.scrollTop, row: row ?? undefined, label: row?.getAttribute("aria-label") ?? undefined, fromList: true, at: Date.now() };
+      // Only activating a row counts; typing in the list's search box or toggling a checkbox does not.
+      const row = event.target.closest<HTMLElement>("button, a, [role='option']");
+      if (!row) return;
+      memory.current = { ...memory.current, scrollTop: pane.scrollTop, row, label: row.getAttribute("aria-label") ?? undefined, fromList: true, at: Date.now() };
     };
     const scroll = (event: Event) => { if (event.target === list()) memory.current.scrollTop = (event.target as HTMLElement).scrollTop; };
     element.addEventListener("click", remember, true);
@@ -39,6 +41,7 @@ export function useListDetailReturn(selectedKey: string | undefined) {
     const saved = memory.current;
     const userInitiated = saved.fromList && Date.now() - saved.at < 1_500;
     if (selectedKey) {
+      saved.openedFromList = userInitiated;
       if (!userInitiated) return;
       saved.fromList = false;
       const detail = root.current.querySelector<HTMLElement>("[data-pane='detail']");
@@ -57,6 +60,9 @@ export function useListDetailReturn(selectedKey: string | undefined) {
       const timeout = window.setTimeout(() => observer.disconnect(), 3_000);
       return () => { observer.disconnect(); window.clearTimeout(timeout); };
     }
+    // Only a detail opened from this list returns there; a direct link or search result leaves focus alone.
+    if (!saved.openedFromList) return;
+    saved.openedFromList = false;
     const list = root.current.querySelector<HTMLElement>("[data-pane='list']");
     if (!list) return;
     list.scrollTop = saved.scrollTop;

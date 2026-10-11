@@ -75,10 +75,9 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
   const [creating, setCreating] = useState(false); const [draft, setDraft] = useState<TaskDraft>(() => selected ? taskDraftFrom(selected, selfId) : blankTaskDraft(selfId));
   const [baseline, setBaseline] = useState<TaskDraft>(() => selected ? taskDraftFrom(selected, selfId) : blankTaskDraft(selfId));
   const [saved, setSaved] = useState(false); const [decision, setDecision] = useState<((value: boolean) => void) | undefined>();
-  const [saveError, setSaveError] = useState("");
+  const [saveError, setSaveError] = useState(""); const [saving, setSaving] = useState(false);
   const [completionNotice, setCompletionNotice] = useState<{ id: string; title: string } | undefined>();
   const savedId = useRef<string | undefined>(undefined);
-  const listPane = useRef<HTMLElement | null>(null);
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
   const displayTimeZone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const dirty = !sameTaskDraft(draft, baseline);
@@ -101,15 +100,6 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
   }, [listView, query, sort, status, priority, project, dueFilter, selectedId]);
 
   useEffect(() => {
-    if (selectedId || creating) return;
-    const savedScroll = JSON.parse(sessionStorage.getItem("lifeos.tasks.scroll") ?? "{}") as { pane?: number; page?: number };
-    requestAnimationFrame(() => {
-      if (savedScroll.pane && listPane.current) listPane.current.scrollTo({ top: savedScroll.pane });
-      if (savedScroll.page && typeof window.scrollTo === "function") window.scrollTo({ top: savedScroll.page });
-    });
-  }, [selectedId, creating]);
-
-  useEffect(() => {
     if (creating) return;
     if (dirtyRef.current) return;
     const next = selected ? taskDraftFrom(selected, selfId) : blankTaskDraft(selfId);
@@ -119,7 +109,10 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
   }, [selected, creating, selfId]);
   const save = async () => {
     if (!dirty || readOnly) return !dirty;
-    setSaveError("");
+    setSaveError(""); setSaving(true);
+    try { return await persist(); } finally { setSaving(false); }
+  };
+  const persist = async () => {
     const fields = taskFieldsForSave(draft);
     const created = creating ? await onCreate(fields) : undefined;
     const ok = creating ? Boolean(created) : selected ? await onSave(selected, fields) : false;
@@ -182,15 +175,14 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
     const ok = await onComplete(tasksRef.current.find((candidate) => candidate.frontmatter.id === task.frontmatter.id) ?? task, complete);
     if (ok) setCompletionNotice(complete ? { id: task.frontmatter.id, title: String(task.frontmatter.title) } : undefined);
   };
-  const rememberListPosition = () => sessionStorage.setItem("lifeos.tasks.scroll", JSON.stringify({ pane: listPane.current?.scrollTop ?? 0, page: window.scrollY }));
 
-  return <ListDetailWorkspace workspace="tasks" detailOpen={Boolean(selected || creating)} selectedKey={creating ? "new" : selected?.frontmatter.id} listRef={listPane} listLabel="Tasks list" detailLabel="Task detail" list={<>
+  return <ListDetailWorkspace workspace="tasks" detailOpen={Boolean(selected || creating)} selectedKey={creating ? "new" : selected?.frontmatter.id} listLabel="Tasks list" detailLabel="Task detail" list={<>
       <header className="workspace-heading"><div><span>TASKS · {visible.length}</span><h2>Tasks</h2><p className="muted">Commitments grouped for action.</p></div><button className="primary" disabled={busy || readOnly} onClick={startNew}>New Task</button></header>
       <div className="workspace-tabs" role="group" aria-label="Task views">{[["mine", "My Tasks"], ["waiting", "Waiting on others"], ["others", "Other people's tasks"]].map(([key, label]) => <button key={key} className={listView === key ? "selected" : ""} aria-pressed={listView === key} onClick={() => setListView(key as TaskListView)}>{label}</button>)}</div>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}><input type="search" aria-label="Search tasks" placeholder="Search tasks…" value={query} onChange={(event) => setQuery(event.target.value)} /><select aria-label="Sort tasks" value={sort} onChange={(event) => setSort(event.target.value as TaskSort)}><option value="default">Default order</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Title</option><option value="updated">Recently updated</option></select></WorkspaceFilterBar>
       {advanced && <div className="task-advanced-filters"><label>Status<select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Active statuses</option>{taskStatuses.map((value) => <option key={value}>{value}</option>)}</select></label><label>Priority<select aria-label="Filter by priority" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Any priority</option>{taskPriorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Project<select aria-label="Filter by project" value={project} onChange={(event) => setProject(event.target.value)}><option value="">Any project</option>{projects.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label>Due<select aria-label="Filter by due period" value={dueFilter} onChange={(event) => setDueFilter(event.target.value as DueFilter)}><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="next7">Next 7 days</option><option value="later">Later</option><option value="none">No due date</option></select></label><button onClick={clearFilters}>Clear filters</button></div>}
       {completionNotice && <div className="task-completion-notice" role="status">Task completed: {completionNotice.title}. <button disabled={busy || readOnly} onClick={() => { const task = tasksRef.current.find((candidate) => candidate.frontmatter.id === completionNotice.id); if (task) void completeTask(task, false); }}>Undo</button></div>}
-      <div className="task-rows">{visible.map((task) => { const done = task.frontmatter.status === "Done"; const dueDate = taskDueDate(task, displayTimeZone); return <div className={task.frontmatter.id === selectedId ? "task-row selected" : "task-row"} key={task.frontmatter.id}><input type="checkbox" aria-label={`${done ? "Reopen" : "Complete"} ${task.frontmatter.title}`} checked={done} disabled={busy || readOnly} onChange={(event) => { const complete = event.target.checked; void leaveThen(() => completeTask(task, complete)); }} /><button aria-label={`Open task: ${task.frontmatter.title}`} onClick={() => void leaveThen(() => { rememberListPosition(); onOpen(task.frontmatter.id); })}><strong>{String(task.frontmatter.title)}</strong><small>{[task.frontmatter.priority, projects.find((item) => item.id === task.frontmatter.primary_project_id)?.title, dueDate && `due ${dueDate}`].filter(Boolean).join(" · ") || String(task.frontmatter.status)}</small></button><span>{String(task.frontmatter.status)}</span></div>; })}{!visible.length && <p className="workspace-empty">No tasks match these filters.</p>}</div>
+      <div className="task-rows">{visible.map((task) => { const done = task.frontmatter.status === "Done"; const dueDate = taskDueDate(task, displayTimeZone); return <div className={task.frontmatter.id === selectedId ? "task-row selected" : "task-row"} key={task.frontmatter.id}><input type="checkbox" aria-label={`${done ? "Reopen" : "Complete"} ${task.frontmatter.title}`} checked={done} disabled={busy || readOnly} onChange={(event) => { const complete = event.target.checked; void leaveThen(() => completeTask(task, complete)); }} /><button aria-label={`Open task: ${task.frontmatter.title}`} onClick={() => void leaveThen(() => onOpen(task.frontmatter.id))}><strong>{String(task.frontmatter.title)}</strong><small>{[task.frontmatter.priority, projects.find((item) => item.id === task.frontmatter.primary_project_id)?.title, dueDate && `due ${dueDate}`].filter(Boolean).join(" · ") || String(task.frontmatter.status)}</small></button><span>{String(task.frontmatter.status)}</span></div>; })}{!visible.length && <p className="workspace-empty">No tasks match these filters.</p>}</div>
     </>} detail={<>
       {!selected && !creating ? <div className="workspace-empty"><h3>Select a task</h3><p>Choose a row to inspect and edit it.</p></div> : <>
         <RecordHeader eyebrow={creating ? "NEW TASK" : "TASK"} title={draft.title || "Untitled task"} description="Click the checkbox to complete; click the row to open." onBack={() => void leaveThen(onCloseDetail)} />
@@ -199,7 +191,7 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
           <label className="wide">Expected output<input value={draft.expected_output} disabled={busy || readOnly} onChange={(event) => updateDraft("expected_output", event.target.value)} /></label><label>Area<select value={draft.area} disabled={busy || readOnly} onChange={(event) => updateDraft("area", event.target.value)}><option value="">None</option>{areaOptions.map((value) => <option key={value}>{value}</option>)}</select></label><label className="sensitivity-field">Sensitivity<select value={draft.sensitivity} disabled={busy || readOnly} onChange={(event) => updateDraft("sensitivity", event.target.value as TaskDraft["sensitivity"])}><option value="normal">Normal</option><option value="restricted">Restricted</option></select></label></div>
         {!creating && selected && <details className="record-more"><summary>More</summary><div><HistoryLink objectId={selected.frontmatter.id} title={String(selected.frontmatter.title)} disabled={busy || readOnly} run={run} onRestored={onRestored} /><CopyLink object={selected} disabled={busy} /><button className="danger" disabled={busy || readOnly} onClick={() => { if (window.confirm(`Soft-delete ${selected.frontmatter.title}? The Markdown file will be retained.`)) void onDelete(selected); }}>Delete task</button></div></details>}
         {saveError && <p className="field-error" role="alert">{saveError}</p>}
-        <StickyRecordActions status={creating && !dirty ? "Not saved yet" : dirty ? "Unsaved changes" : saved ? "Saved" : "No changes"} busy={busy} saveDisabled={busy || readOnly || !dirty || !draft.title.trim()} onCancel={() => { setDraft(baseline); setSaved(false); setSaveError(""); if (creating) { setCreating(false); onCloseDetail(); } }} onSave={() => void save()} />
+        <StickyRecordActions saving={saving} status={creating && !dirty ? "Not saved yet" : dirty ? "Unsaved changes" : saved ? "Saved" : "No changes"} busy={busy} saveDisabled={busy || readOnly || !dirty || !draft.title.trim()} onCancel={() => { setDraft(baseline); setSaved(false); setSaveError(""); if (creating) { setCreating(false); onCloseDetail(); } }} onSave={() => void save()} />
       </>}
     </>}>
     {decision && <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="leave-task-title" className="leave-dialog"><h3 id="leave-task-title">Save changes before leaving?</h3><p>Your task has unsaved changes.</p><div><button className="primary" onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></section></div>}
