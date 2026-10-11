@@ -346,3 +346,23 @@ test.describe("workspace-specific reflow", () => {
     await expect(page.getByRole("heading", { name: data.projects[0]!.title })).toBeFocused();
   });
 });
+
+test.describe("breadcrumbs (#114)", () => {
+  test("crumb links use the muted role, underline only on hover and focus, and the current page is not a link", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, recordUrl("Tasks", data.tasks[0]!.id));
+    const trail = page.getByRole("navigation", { name: "Breadcrumb" });
+    const crumb = trail.getByRole("link").first();
+    const look = () => crumb.evaluate((element) => ({ color: getComputedStyle(element).color, underline: getComputedStyle(element).textDecorationLine, ring: getComputedStyle(element).boxShadow }));
+    expect(await look()).toMatchObject({ color: "rgb(83, 99, 106)", underline: "none" });
+    await crumb.hover();
+    expect(await look()).toMatchObject({ color: "rgb(18, 62, 90)", underline: "underline" });
+    await page.mouse.move(0, 0);
+    await crumb.focus(); await page.keyboard.press("Shift+Tab"); await page.keyboard.press("Tab");
+    await expect.poll(async () => (await look()).ring).toContain("rgb(46, 111, 115)");
+    expect((await look()).underline).toBe("underline");
+    const current = trail.locator("[aria-current='page']");
+    expect(await current.evaluate((element) => element.tagName)).toBe("SPAN");
+    expect(await current.evaluate((element) => getComputedStyle(element).color)).toBe("rgb(11, 31, 51)");
+  });
+});
