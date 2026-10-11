@@ -109,6 +109,11 @@ export class NotesModule {
     if ("title" in changes) {
       if (typeof changes.title !== "string" || !changes.title.trim()) throw new Error("Title is required");
       selected.title = changes.title.trim();
+      if (current.frontmatter.type === "meeting-note" && current.frontmatter.recurrence_series_id && selected.title !== current.frontmatter.title) {
+        // A recurring Note follows Calendar renames only until the user deliberately names it.
+        // This durable marker also protects the title from later syncs and retries.
+        selected.title_manually_renamed = true;
+      }
     }
     const live = (linkId: string, type: ObjectEnvelope["type"], label: string) => {
       const target = this.ctx.index.get(linkId);

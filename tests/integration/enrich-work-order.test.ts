@@ -159,6 +159,25 @@ describe("Enrich last 48h Work Order", () => {
     expect(application.object(noted.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
   });
 
+  it("excludes every occurrence governed by one restricted recurring Note (#148)", async () => {
+    const firstEvent = event("series-first", 30, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(30) });
+    const secondEvent = event("series-second", 3, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(3) });
+    const { root, application } = await vault([firstEvent, secondEvent]);
+    const first = await application.createMeetingFromEvent(firstEvent.externalId, range.from, range.to, "work", "First occurrence\n");
+    const second = await application.createMeetingFromEvent(secondEvent.externalId, range.from, range.to, "work", "Second occurrence\n");
+    expect(first.note?.frontmatter.id).toBe(second.note?.frontmatter.id);
+    await application.setSensitivity(first.note!.frontmatter.id, "restricted", second.note!.contentHash);
+
+    const result = await application.requestEnrichment({ now });
+
+    expect(result.meetings).toEqual([]);
+    expect(result.restrictedExcluded).toBe(2);
+    expect(result.workOrder).toBeUndefined();
+    expect(await requestFiles(root)).toEqual([]);
+    expect(application.object(first.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
+    expect(application.object(second.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
+  });
+
   it("never lists the email of a restricted person (#63)", async () => {
     const attendeeDetails = [{ email: "hidden@client.example", displayName: "Hidden Person" }, { email: "joel@client.example", displayName: "Joel Martin" }];
     const { root, application } = await vault([event("a", 3, { attendees: ["Hidden Person", "Joel Martin"], attendeeDetails })]);
