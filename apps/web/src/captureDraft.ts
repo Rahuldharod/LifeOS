@@ -1,6 +1,7 @@
 export type CaptureSensitivity = "normal" | "restricted";
 
 export type CaptureDraft = {
+  requestId: string;
   text: string;
   primaryProjectId: string;
   dueOn: string;
@@ -12,6 +13,7 @@ export type CaptureDraft = {
 const storageKey = "lifeos.capture.draft.v1";
 
 export const blankCaptureDraft = (selfId = ""): CaptureDraft => ({
+  requestId: crypto.randomUUID(),
   text: "",
   primaryProjectId: "",
   dueOn: "",
@@ -27,6 +29,7 @@ export function readCaptureDraft(selfId = ""): CaptureDraft {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? "null") as Partial<CaptureDraft> | null;
     if (!value || typeof value.text !== "string") return fallback;
     return {
+      requestId: typeof value.requestId === "string" && value.requestId ? value.requestId : fallback.requestId,
       text: value.text,
       primaryProjectId: typeof value.primaryProjectId === "string" ? value.primaryProjectId : "",
       dueOn: typeof value.dueOn === "string" ? value.dueOn : "",
@@ -48,4 +51,3 @@ export function clearCaptureDraft() {
   try { localStorage.removeItem(storageKey); }
   catch { /* ignored */ }
 }
-

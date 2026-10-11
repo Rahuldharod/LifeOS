@@ -4,7 +4,7 @@ import { blankCaptureDraft, clearCaptureDraft, readCaptureDraft, writeCaptureDra
 import "./CapturePanel.css";
 
 export type CaptureOption = { id: string; title: string };
-export type CaptureTask = BodyOf<"POST /api/v1/capture">;
+export type CaptureRequest = BodyOf<"POST /api/v1/capture">;
 
 type Props = {
   projects: CaptureOption[];
@@ -12,7 +12,7 @@ type Props = {
   selfId?: string;
   busy?: boolean;
   readOnly: boolean;
-  onSave: (task: CaptureTask) => Promise<LifeObject>;
+  onSave: (request: CaptureRequest) => Promise<LifeObject>;
   onViewTask: (id: string) => void;
 };
 
@@ -39,6 +39,7 @@ export function CapturePanel({ projects, owners, selfId = "", busy = false, read
     setSaving(true); setError("");
     try {
       const task = await onSave({
+        requestId: draft.requestId,
         text: draft.text,
         primaryProjectId: draft.primaryProjectId || undefined,
         dueOn: draft.dueOn || undefined,

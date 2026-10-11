@@ -3,7 +3,7 @@ import { AgentIndexModule, type AgentIndexOptions } from "./agent-index.js";
 import { BackupModule, type AutoBackupOptions, type BackupService } from "./backups.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
-import { CaptureModule, type QuickCaptureDetails } from "./capture.js";
+import { CaptureModule, type QuickCaptureInput } from "./capture.js";
 import { EnrichmentModule } from "./enrichment.js";
 import { DecisionsModule, type DecisionFilters } from "./decisions.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
@@ -46,7 +46,7 @@ export { agentIndexContentWithoutTimestamp, agentIndexFileNames, defaultAgentInd
 export type { AgentIndexOptions, AgentIndexStatus } from "./agent-index.js";
 export { stopBackupTimeoutMs } from "./backups.js";
 export type { AutoBackupOptions, AutoBackups, BackupService, BackupSettings, BackupStatus, BackupSummary, BackupTrigger, BackupWarning, BackupWarningKind } from "./backups.js";
-export type { QuickCaptureDetails } from "./capture.js";
+export type { QuickCaptureInput } from "./capture.js";
 
 /**
  * The public application facade. It only wires and delegates: behaviour lives in one feature
@@ -88,11 +88,11 @@ export class LifeOSApplication {
     this.openPointsModule = new OpenPointsModule(ctx, this.decisionsModule);
     this.enrichment = new EnrichmentModule(ctx, this.meetings, this.calendarModule, inbox);
     this.notesModule = new NotesModule(ctx);
-    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.enrichment, this.openPointsModule, this.patches, this.notesModule);
+    this.capture = new CaptureModule(ctx);
+    this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.capture, this.enrichment, this.openPointsModule, this.patches, this.notesModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.focus = new DailyFocusModule(ctx, inbox);
     this.todayModule = new TodayModule(ctx, this.entitiesModule, this.adoption, this.enrichment, this.meetings, this.calendarModule, this.people);
-    this.capture = new CaptureModule(ctx);
     this.history = new HistoryModule(ctx);
     const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite };
     this.agentIndex = new AgentIndexModule(ctx, this.decisionsModule, this.adoption, inbox, agentIndex, agentIndexOptions);
@@ -217,7 +217,7 @@ export class LifeOSApplication {
   suggestPersonMerges() { return this.review.merges.suggest(); }
 
   // Capture and knowledge
-  quickCapture(text: string, details?: QuickCaptureDetails) { return this.capture.quickCapture(text, details); }
+  quickCapture(text: string, details?: QuickCaptureInput) { return this.capture.quickCapture(text, details); }
   knowledge(query = "") { return this.capture.knowledge(query); }
   ingestTextSource(title: string, text: string) { return this.capture.ingestTextSource(title, text); }
 

@@ -1,6 +1,7 @@
 import { sensitivities, sensitivityOf, type Sensitivity } from "@lifeos/domain";
 import type { AdoptionModule } from "./adoption.js";
 import type { AppContext } from "./context.js";
+import type { CaptureModule } from "./capture.js";
 import type { EnrichmentModule } from "./enrichment.js";
 import type { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
@@ -18,7 +19,7 @@ export const notRecoveredAtStartup = [operationKinds.adoptDraft, operationKinds.
 
 /** Index, health, crash recovery and generic object access. */
 export class SystemModule {
-  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly adoption: AdoptionModule, private readonly decisions: DecisionsModule, private readonly enrichment?: EnrichmentModule, private readonly openPoints?: OpenPointsModule, private readonly patches?: PatchModule, private readonly notes?: NotesModule) {}
+  constructor(private readonly ctx: AppContext, private readonly meetings: MeetingsModule, private readonly review: ReviewModule, private readonly adoption: AdoptionModule, private readonly decisions: DecisionsModule, private readonly capture: CaptureModule, private readonly enrichment?: EnrichmentModule, private readonly openPoints?: OpenPointsModule, private readonly patches?: PatchModule, private readonly notes?: NotesModule) {}
 
   rebuildIndex() {
     return this.ctx.rebuildIndex();
@@ -67,7 +68,8 @@ export class SystemModule {
     [operationKinds.supersedeDecision]: async (operation) => (await this.decisions.recoverSupersede(operation), true),
     [operationKinds.resolveOpenPoint]: async (operation) => !!this.openPoints && (await this.openPoints.recoverResolve(operation), true),
     [operationKinds.applyPatch]: async (operation) => !!this.patches && (await this.patches.recoverJournal(operation), true),
-    [operationKinds.purgeNote]: async (operation) => typeof operation.payload.noteId === "string" && !!this.notes && (await this.notes.recoverPurge(operation), true)
+    [operationKinds.purgeNote]: async (operation) => typeof operation.payload.noteId === "string" && !!this.notes && (await this.notes.recoverPurge(operation), true),
+    [operationKinds.quickCapture]: async (operation) => (await this.capture.recoverCapture(operation), true)
   };
 
   private recoverOne(operation: Operation) {

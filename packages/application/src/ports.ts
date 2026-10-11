@@ -55,7 +55,8 @@ export const operationKinds = {
   applyPatch: "apply-patch",
   adoptDraft: "adopt-draft",
   adoptBatch: "adopt-batch",
-  purgeNote: "purge-note"
+  purgeNote: "purge-note",
+  quickCapture: "quick-capture"
 } as const;
 export type OperationKind = typeof operationKinds[keyof typeof operationKinds];
 

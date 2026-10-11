@@ -285,8 +285,8 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   route(server, "GET /api/v1/tasks", async () => application.tasks());
   route(server, "PATCH /api/v1/tasks/:id", async (request) => application.updateTask(request.params.id, request.body.changes, request.body.expectedHash));
   route(server, "POST /api/v1/capture", async (request) => {
-    const { text, primaryProjectId, dueOn, ownerPersonId, sensitivity } = request.body;
-    return application.quickCapture(text, { primaryProjectId, dueOn, ownerPersonId, sensitivity });
+    const { text, primaryProjectId, dueOn, ownerPersonId, sensitivity, requestId } = request.body;
+    return application.quickCapture(text, { primaryProjectId, dueOn, ownerPersonId, sensitivity, requestId });
   });
   route(server, "GET /api/v1/knowledge", async (request) => application.knowledge(request.query.q));
   route(server, "POST /api/v1/sources/text", async (request) => application.ingestTextSource(request.body.title, request.body.text));
