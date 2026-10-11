@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LifeObject } from "@lifeos/contracts";
-import { CapturePanel, type CaptureTask } from "./CapturePanel.js";
+import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -50,7 +50,7 @@ describe("CapturePanel", () => {
   });
 
   it("keeps Enter as a line break and saves with Cmd/Ctrl+Enter through the public form", async () => {
-    const onSave = vi.fn(async (_task: CaptureTask) => savedTask());
+    const onSave = vi.fn(async (_request: CaptureRequest) => savedTask());
     const onViewTask = vi.fn();
     act(() => root.render(<CapturePanel projects={[]} owners={[]} selfId="self-1" readOnly={false} onSave={onSave} onViewTask={onViewTask} />));
     change(textarea(), "Call Marie\nBring the revised figures");
@@ -59,11 +59,19 @@ describe("CapturePanel", () => {
     expect(onSave).not.toHaveBeenCalled();
     await act(async () => textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true })));
 
-    expect(onSave).toHaveBeenCalledWith({ text: "Call Marie\nBring the revised figures", primaryProjectId: undefined, dueOn: undefined, ownerPersonId: "self-1", sensitivity: "normal" });
+    expect(onSave).toHaveBeenCalledWith({ requestId: expect.any(String), text: "Call Marie\nBring the revised figures", primaryProjectId: undefined, dueOn: undefined, ownerPersonId: "self-1", sensitivity: "normal" });
     expect(textarea().value).toBe("");
     expect(document.body.textContent).toContain("Task saved");
     act(() => button("View task").click());
     expect(onViewTask).toHaveBeenCalledWith("0199b4d6-a708-7000-8000-000000000131");
+  });
+
+  it("also saves with Ctrl+Enter", async () => {
+    const onSave = vi.fn(async () => savedTask());
+    act(() => root.render(<CapturePanel projects={[]} owners={[]} selfId="self-1" readOnly={false} onSave={onSave} onViewTask={vi.fn()} />));
+    change(textarea(), "Call Marie");
+    await act(async () => textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true })));
+    expect(onSave).toHaveBeenCalledOnce();
   });
 
   it("keeps a device-local draft across close/reopen and while read-only", async () => {
@@ -97,6 +105,6 @@ describe("CapturePanel", () => {
 
     expect(document.querySelector("[role='alert']")?.textContent).toBe("Write access changed");
     expect(textarea().value).toBe("Send the deck");
-    expect(onSave).toHaveBeenCalledWith({ text: "Send the deck", primaryProjectId: "project-1", dueOn: "2026-10-20", ownerPersonId: "person-2", sensitivity: "restricted" });
+    expect(onSave).toHaveBeenCalledWith({ requestId: expect.any(String), text: "Send the deck", primaryProjectId: "project-1", dueOn: "2026-10-20", ownerPersonId: "person-2", sensitivity: "restricted" });
   });
 });

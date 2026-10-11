@@ -6,6 +6,23 @@ import { MockAiProvider } from "@lifeos/ai";
 import { LifeOSApplication } from "@lifeos/application";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import type { ObjectEnvelope } from "@lifeos/domain";
+
+type WriteInput = { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string };
+
+class CrashingCaptureStore extends MarkdownObjectStore {
+  crashBeforeAudit = false;
+  crashOnClose = false;
+  override async write(input: WriteInput) {
+    if (this.crashBeforeAudit && input.frontmatter.type === "audit-event") { this.crashBeforeAudit = false; throw new Error("power cut before audit"); }
+    return super.write(input);
+  }
+  override async completeOperation(operationId: string) {
+    const capture = (await this.incompleteOperations()).find((operation) => operation.id === operationId)?.kind === "quick-capture";
+    if (this.crashOnClose && capture) { this.crashOnClose = false; throw new Error("power cut before close"); }
+    return super.completeOperation(operationId);
+  }
+}
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
@@ -51,5 +68,49 @@ describe("capture and knowledge workflows", () => {
     expect(task.frontmatter).toMatchObject({ title: "Send the deck", status: "Inbox", primary_project_id: project.frontmatter.id, due_on: "2026-10-20", owner_person_id: owner.frontmatter.id, sensitivity: "restricted" });
     expect(task.body).toBe("# Send the deck\n\nInclude the revised figures.\n");
     expect((await store.read(task.relativePath)).frontmatter).toMatchObject({ status: "Inbox", sensitivity: "restricted" });
+  });
+
+  it("rejects stale, deleted and wrong-type capture links before journalling", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-global-capture-links-"));
+    roots.push(root);
+    const store = new MarkdownObjectStore(root);
+    const application = new LifeOSApplication(store, new MemoryIndex(), undefined, undefined, "test-device");
+    await application.rebuildIndex();
+    const person = await application.createEntity("person", { title: "Marie" });
+    const wrongType = await application.createEntity("person", { title: "Pierre" });
+    const project = await application.createEntity("project", { title: "Launch" });
+    const archived = await application.archiveObject(project.frontmatter.id, project.contentHash);
+    const deleted = await application.deleteEntity(person.frontmatter.id, person.contentHash);
+
+    await expect(application.quickCapture("Wrong project", { primaryProjectId: wrongType.frontmatter.id })).rejects.toThrow("Project not found");
+    await expect(application.quickCapture("Archived project", { primaryProjectId: archived.frontmatter.id })).rejects.toThrow("Project not found");
+    await expect(application.quickCapture("Deleted owner", { ownerPersonId: deleted.frontmatter.id })).rejects.toThrow("Owner not found");
+    expect(await store.incompleteOperations()).toEqual([]);
+  });
+
+  it("recovers capture failures without duplicating the task or its audit", async () => {
+    for (const failure of ["before-audit", "before-close"] as const) {
+      const root = await mkdtemp(path.join(tmpdir(), `lifeos-global-capture-${failure}-`));
+      roots.push(root);
+      const crashedStore = new CrashingCaptureStore(root);
+      const crashed = new LifeOSApplication(crashedStore, new MemoryIndex(), undefined, undefined, "test-device");
+      await crashed.rebuildIndex();
+      crashedStore.crashBeforeAudit = failure === "before-audit";
+      crashedStore.crashOnClose = failure === "before-close";
+      await expect(crashed.quickCapture("Call Marie", { requestId: `capture-${failure}` })).rejects.toThrow("power cut");
+
+      const store = new MarkdownObjectStore(root);
+      const restarted = new LifeOSApplication(store, new MemoryIndex(), undefined, undefined, "test-device");
+      await restarted.rebuildIndex();
+      await restarted.recoverOperations();
+      await restarted.rebuildIndex();
+      const recovered = await restarted.quickCapture("Call Marie", { requestId: `capture-${failure}` });
+      const objects = await restarted.listObjects();
+
+      expect(objects.filter((object) => object.frontmatter.type === "task" && object.frontmatter.title === "Call Marie"), failure).toHaveLength(1);
+      expect(objects.filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === "task.quick-captured"), failure).toHaveLength(1);
+      expect(recovered.frontmatter.title).toBe("Call Marie");
+      expect(await store.incompleteOperations()).toEqual([]);
+    }
   });
 });
