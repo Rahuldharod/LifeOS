@@ -119,7 +119,7 @@ export class MeetingsModule {
         existingNote = await this.attachOrCreateNote(event, existing, recoveredNoteId, recoveredBody, context, now);
       }
       await this.enrichMeetingContext(existing, context, now);
-      if (existingNote?.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(existingNote.frontmatter.recurrence_series_id), existingNote.frontmatter.id, now);
+      if (existingNote?.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(existingNote.frontmatter.recurrence_series_id), existingNote.frontmatter.id, now, undefined, existingNote);
       if (pendingOperation) {
         // #160: the crash may have come after the meeting or note and before the audit.
         await ctx.writeAuditOnce("meeting.created", existing.frontmatter.id, now, { operation_id: pendingOperation.id, external_id: externalId }, { matchOn: ["operation_id"] });
@@ -136,7 +136,7 @@ export class MeetingsModule {
     const noteBody = initialBody ?? (typeof operation?.payload.body === "string" ? operation.payload.body : DEFAULT_NOTE_BODY);
     const meeting = await this.writeMeeting(event, meetingId, context, now);
     const note = await this.attachOrCreateNote(event, meeting, noteId, noteBody, context, now);
-    if (note.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(note.frontmatter.recurrence_series_id), note.frontmatter.id, now);
+    if (note.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(note.frontmatter.recurrence_series_id), note.frontmatter.id, now, undefined, note);
     await ctx.writeAuditOnce("meeting.created", meetingId, now, { operation_id: operationId, external_id: externalId }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operationId);
     await ctx.rebuildIndex();
@@ -325,13 +325,33 @@ export class MeetingsModule {
     if (event.previousSeriesId) return this.findSeriesNote(this.seriesKey(event, event.previousSeriesId));
     if (!event.seriesUid) return undefined;
     const calendarScope = `${this.ctx.calendar?.provider ?? "calendar"}:${event.calendarId}:`;
+    const occurrence = Date.parse(event.originalOccurrenceStartsAt ?? event.startsAt);
     return this.ctx.index.all()
       .filter((object) => object.frontmatter.type === "meeting-note" && isLive(object)
         && object.frontmatter.recurrence_series_uid === event.seriesUid
         && typeof object.frontmatter.recurrence_series_id === "string"
         && object.frontmatter.recurrence_series_id.startsWith(calendarScope)
-        && object.frontmatter.recurrence_series_id !== seriesId)
-      .sort((left, right) => String(right.frontmatter.updated_at).localeCompare(String(left.frontmatter.updated_at)))[0];
+        && object.frontmatter.recurrence_series_id !== seriesId
+        && this.seriesStart(object) < occurrence)
+      .sort((left, right) => this.seriesStart(right) - this.seriesStart(left))[0];
+  }
+
+  private seriesStart(note: LifeOSObject) {
+    const sections = Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    const starts = sections.map((section) => Date.parse(String(section.original_starts_at))).filter(Number.isFinite);
+    return starts.length ? Math.min(...starts) : Number.NaN;
+  }
+
+  private insertRecurringSection(existingBody: string, existingSections: Array<Record<string, unknown>>, sectionBody: string, section: Record<string, unknown>) {
+    const ordered = [...existingSections, section].sort((left, right) => Date.parse(String(right.original_starts_at)) - Date.parse(String(left.original_starts_at)));
+    const index = ordered.findIndex((candidate) => candidate.section_id === section.section_id);
+    if (index === 0) return { body: `${sectionBody}\n\n${existingBody}`, sections: ordered };
+    if (index === ordered.length - 1) return { body: `${existingBody}\n\n${sectionBody}`, sections: ordered };
+    const nextAnchor = `<a id="${String(ordered[index + 1]!.section_id)}"></a>`;
+    const anchorOffset = existingBody.indexOf(nextAnchor);
+    const headingOffset = anchorOffset < 0 ? -1 : existingBody.lastIndexOf("\n## ", anchorOffset);
+    const insertAt = headingOffset < 0 ? existingBody.length : headingOffset + 1;
+    return { body: `${existingBody.slice(0, insertAt)}${sectionBody}\n\n${existingBody.slice(insertAt)}`, sections: ordered };
   }
 
   private recurringSectionBody(event: CalendarEvent, sectionId: string, body: string) {
@@ -357,10 +377,11 @@ export class MeetingsModule {
       const sections = Array.isArray(existing.frontmatter.occurrence_sections) ? existing.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
       if (sections.some((candidate) => candidate.occurrence_id === section.occurrence_id)) return existing;
       const meetingIds = Array.isArray(existing.frontmatter.meeting_ids) ? existing.frontmatter.meeting_ids.filter((id): id is string => typeof id === "string") : [String(existing.frontmatter.meeting_id)];
+      const inserted = this.insertRecurringSection(existing.body, sections, this.recurringSectionBody(event, section.section_id, body), section);
       return this.ctx.update(existing, {
         meeting_ids: [meeting.frontmatter.id, ...meetingIds.filter((id) => id !== meeting.frontmatter.id)],
-        occurrence_sections: [section, ...sections]
-      }, { expectedHash: existing.contentHash, now, body: `${this.recurringSectionBody(event, section.section_id, body)}\n\n${existing.body}` });
+        occurrence_sections: inserted.sections
+      }, { expectedHash: existing.contentHash, now, body: inserted.body });
     }
 
     const previousSeries = this.findPreviousSeriesNote(event, seriesId);
@@ -376,6 +397,7 @@ export class MeetingsModule {
         recurrence_series_id: seriesId,
         ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
         ...(previousSeriesId ? { previous_recurrence_series_id: previousSeriesId } : {}),
+        ...(previousSeriesId ? { previous_recurrence_series_source: event.previousSeriesId ? "provider" : "series-uid" } : {}),
         occurrence_sections: [section],
         ...(previousSeries ? { previous_series_note_id: previousSeries.frontmatter.id } : {}),
         ...base
@@ -385,11 +407,22 @@ export class MeetingsModule {
   }
 
   /** Repairs an out-of-order split after the predecessor series Note is materialized. */
-  private async repairSuccessorSeriesLinks(seriesId: string, noteId: string, now: string, replay?: Operation) {
+  private async repairSuccessorSeriesLinks(seriesId: string, noteId: string, now: string, replay?: Operation, sourceNote?: LifeOSObject) {
     const pending = replay ?? (await this.ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.linkRecurringSeries && operation.payload.seriesId === seriesId && operation.payload.noteId === noteId);
     const operation = pending ?? await this.ctx.objects.prepareOperation?.(operationKinds.linkRecurringSeries, { seriesId, noteId, now }, uuidV7());
-    for (const successor of this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && isLive(object) && object.frontmatter.previous_recurrence_series_id === seriesId && !object.frontmatter.previous_series_note_id)) {
-      await this.ctx.update(successor, { previous_series_note_id: noteId }, { expectedHash: successor.contentHash, now });
+    const predecessor = sourceNote ?? this.ctx.index.get(noteId);
+    for (const successor of this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && isLive(object))) {
+      const explicit = successor.frontmatter.previous_recurrence_series_id === seriesId && !successor.frontmatter.previous_series_note_id;
+      const inferred = predecessor?.frontmatter.recurrence_series_uid
+        && successor.frontmatter.recurrence_series_uid === predecessor.frontmatter.recurrence_series_uid
+        && successor.frontmatter.previous_recurrence_series_source !== "provider"
+        && this.seriesStart(predecessor) < this.seriesStart(successor)
+        && (() => {
+          const current = this.findSeriesNote(typeof successor.frontmatter.previous_recurrence_series_id === "string" ? successor.frontmatter.previous_recurrence_series_id : undefined);
+          return !current || this.seriesStart(current) < this.seriesStart(predecessor);
+        })();
+      if (!explicit && !inferred) continue;
+      await this.ctx.update(successor, inferred ? { previous_recurrence_series_id: seriesId, previous_series_note_id: noteId, previous_recurrence_series_source: "series-uid" } : { previous_series_note_id: noteId }, { expectedHash: successor.contentHash, now });
     }
     if (operation) await this.ctx.objects.completeOperation?.(operation.id);
   }

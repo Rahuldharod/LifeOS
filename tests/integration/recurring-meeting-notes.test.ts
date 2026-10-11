@@ -59,6 +59,17 @@ describe("recurring meeting notes (#147)", () => {
     expect(retry.note?.body).not.toContain("must not duplicate");
   });
 
+  it("keeps occurrence metadata and body sections newest-first when older edits arrive later", async () => {
+    const older = event({ externalId: "older", seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const newer = event({ externalId: "newer", startsAt: "2026-10-12T08:00:00.000Z", endsAt: "2026-10-12T09:00:00.000Z", seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const { app } = await setup([older, newer]);
+    await app.createMeetingFromEvent(newer.externalId, undefined, undefined, newer.calendarId, "Newer words\n");
+    const workspace = await app.createMeetingFromEvent(older.externalId, undefined, undefined, older.calendarId, "Older words\n");
+
+    expect((workspace.note!.frontmatter.occurrence_sections as Array<{ original_starts_at: string }>).map((section) => section.original_starts_at)).toEqual([newer.originalOccurrenceStartsAt, older.originalOccurrenceStartsAt]);
+    expect(workspace.note!.body.indexOf("Newer words")).toBeLessThan(workspace.note!.body.indexOf("Older words"));
+  });
+
   it("starts a linked Note after a provider split and does not infer copied events as recurring", async () => {
     const before = event({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
     const after = event({ externalId: "occurrence-after-split", seriesId: "series-b", previousSeriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
@@ -91,6 +102,22 @@ describe("recurring meeting notes (#147)", () => {
 
     expect(newSeries.note?.frontmatter.previous_recurrence_series_id).toBe("synthetic:work:series-a");
     expect(newSeries.note?.frontmatter.previous_series_note_id).toBe(oldSeries.note?.frontmatter.id);
+  });
+
+  it("converges a new-first, three-series split chain by occurrence chronology", async () => {
+    const first = event({ externalId: "first", seriesId: "series-a", seriesUid: "provider-series", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const middle = event({ externalId: "middle", seriesId: "series-b", seriesUid: "provider-series", startsAt: "2026-10-12T08:00:00.000Z", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const newest = event({ externalId: "newest", seriesId: "series-c", seriesUid: "provider-series", startsAt: "2026-10-19T08:00:00.000Z", originalOccurrenceStartsAt: "2026-10-19T08:00:00.000Z" });
+    const { app } = await setup([first, middle, newest]);
+    const newestSeries = await app.createMeetingFromEvent(newest.externalId);
+    const firstSeries = await app.createMeetingFromEvent(first.externalId);
+    expect(app.object(newestSeries.note!.frontmatter.id).frontmatter.previous_series_note_id).toBe(firstSeries.note!.frontmatter.id);
+
+    const middleSeries = await app.createMeetingFromEvent(middle.externalId);
+    const repairedNewest = app.object(newestSeries.note!.frontmatter.id);
+    expect(middleSeries.note!.frontmatter.previous_series_note_id).toBe(firstSeries.note!.frontmatter.id);
+    expect(repairedNewest.frontmatter.previous_series_note_id).toBe(middleSeries.note!.frontmatter.id);
+    expect(repairedNewest.frontmatter.previous_recurrence_series_id).toBe("synthetic:work:series-b");
   });
 
   it("replays an interrupted predecessor link repair without duplicating work", async () => {
