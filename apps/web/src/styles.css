@@ -240,8 +240,6 @@ textarea { display: block; width: 100%; min-height: 330px; padding: 22px 24px; r
 .timezone-setting select { width: min(100%, 420px); border: 1px solid #c9c8be; border-radius: 8px; padding: .7rem .8rem; background: white; color: #21352e; font: inherit; }
 .secret-card h3 { margin-top: 10px; }
 .inline-success { margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: #e7f3e9; color: #356643; font-size: 12px; font-weight: 750; }
-.crud-panel { margin-bottom: 18px; }
-.crud-list { display: grid; gap: 14px; margin-top: 18px; }
 .crud-card { padding: 16px; border: 1px solid #dedbd0; border-radius: 10px; background: #faf9f4; }
 .crud-fields { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 12px; }
 .crud-fields label { display: grid; gap: 5px; }
@@ -362,16 +360,10 @@ section.comparing-conflict { max-width: 1900px; width: 100%; padding-right: 40px
   .note-conflict-panel { resize: vertical; min-width: 0; height: auto; max-width: 100%; }
   .note-conflict-columns { grid-template-columns: 1fr; }
 }
-.calendar-list-setting { margin-bottom: 18px; }
 .calendar-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid #e3e2d9; }
 .calendar-row label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .calendar-row i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.calendar-toolbar { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
 .calendar-row { min-height: 38px; }
-.calendar-default-badge { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: #e1ebe6; color: #2f5a4a; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-.calendar-row-actions { opacity: 0; transition: opacity .12s; }
-.calendar-row:hover .calendar-row-actions, .calendar-row:focus-within .calendar-row-actions { opacity: 1; }
-.calendar-save { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .calendar-error { color: #a33a2c; font-size: 12px; font-weight: 700; margin: 8px 0 0; }
 .calendar-saved { color: #2f6b4f; font-size: 12px; font-weight: 700; }
 

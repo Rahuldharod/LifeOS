@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider, useLocation } from "react-router";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
@@ -16,17 +16,15 @@ import { useWorkspaceData } from "./useWorkspaceData.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
 import { EditorFrame } from "./EditorFrame.js";
 import { NoteHeader, PENDING_NOTE_HASH } from "./NoteHeader.js";
-import { EnvelopeBadges } from "./EnvelopeBadges.js";
-import { areaOptions, isRestricted } from "./envelope.js";
+import { isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
 import { addCalendarDays, dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
-import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice } from "./personLabels.js";
+import { externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { MeetingEnrichment } from "./MeetingEnrichment.js";
-import { PersonReviewControl } from "./PersonReview.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { CopyLink } from "./CopyLink.js";
@@ -38,9 +36,8 @@ import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.j
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
 import { reviewInFlight } from "./reviewInFlight.js";
 import { displayTimeZone as storedDisplayTimeZone, formatDate } from "./dateFormat.js";
-import { contextLinkFields, entityLinkFields } from "@lifeos/shared";
-import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
-import { PageHeader, Summary, objectRow } from "./pageParts.js";
+import { contextLinkFields } from "@lifeos/shared";
+import { PageHeader, Summary } from "./pageParts.js";
 import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { createSettingsEditorGuard, type SettingsSection } from "./SettingsWorkspace.js";
@@ -75,7 +72,7 @@ import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
-import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
+import type { AppliedPatch, BackupVerification, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -867,11 +864,6 @@ function App() {
     await refreshTodayPanels();
   }, "Calendar reloaded");
 
-  const createEntity = (type: EntityType, fields: Record<string, unknown>) => run(async () => {
-    await api("POST /api/v1/entities/:type", { params: { type }, body: { fields } });
-    await refresh();
-  }, `${type} created`);
-
   const createReferenceEntity = async (type: ReferenceEntityType, fields: Record<string, unknown>) => {
     let created: LifeObject | undefined;
     const ok = await run(async () => {
@@ -1533,44 +1525,6 @@ function PeopleMeta({ label, people, labels, empty }: { label: string; people: L
   const text = people.map((person) => personLabel(labels, person).label).join(", ") || empty;
   return <div className="meta"><small>{label}</small><b title={text}>{people.length ? <PeopleList people={people} labels={labels} /> : empty}</b></div>;
 }
-function ObjectList({ title, objects, empty }: { title: string; objects: LifeObject[]; empty: string }) {
-  return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map(objectRow)}</article>;
-}
-
-// Relationship fields are not listed here: they come from `entityLinkFields` (PB-010) and use EntityLinkPicker.
-const entityFields: Record<EntityType, Array<{ key: string; label: string; kind?: "select" | "date"; options?: string[] }>> = {
-  task: [{ key: "status", label: "Status", kind: "select", options: ["Inbox", "Next", "Waiting", "Done", "Cancelled"] }, { key: "priority", label: "Priority", kind: "select", options: ["", "High", "Medium", "Low"] }, { key: "due_on", label: "Due date", kind: "date" }, { key: "expected_output", label: "Expected output" }],
-  project: [{ key: "status", label: "Status" }, { key: "objective", label: "Objective" }, { key: "success_criteria", label: "Success criteria" }, { key: "target_end_on", label: "Target end", kind: "date" }],
-  client: [{ key: "status", label: "Status" }, { key: "summary", label: "Summary" }, { key: "website_url", label: "Website" }],
-  product: [{ key: "status", label: "Status" }, { key: "description", label: "Description" }],
-  person: [{ key: "given_name", label: "Given name" }, { key: "family_name", label: "Family name" }, { key: "organization_name", label: "Organization" }, { key: "job_title", label: "Job title" }, { key: "timezone", label: "Timezone" }]
-};
-
-// #30: every entity can carry an agreed Area and be marked restricted. A legacy Area shows as "None"
-// in the picker but is kept on save unless the user picks a new one (the server allows unchanged legacy values).
-const envelopeEntityFields = [{ key: "area", label: "Area", kind: "select" as const, options: ["", ...areaOptions] }, { key: "sensitivity", label: "Sensitivity", kind: "select" as const, options: ["normal", "restricted"] }];
-
-function EntityCrudPage({ type, title, objects: listed, linkables, labels, onSetExternal, onConfirmReviewed, busy, readOnly, embedded = false, highlightId, onCreate, onUpdate, onDelete, run, onRestored }: { run: (action: () => Promise<void>, success: string) => Promise<boolean>; onRestored: () => Promise<void>; type: EntityType; title: string; objects: LifeObject[]; linkables: Linkable[]; labels: Map<string, PersonLabel>; onSetExternal?: (object: LifeObject, choice: ExternalChoice) => void; onConfirmReviewed?: (object: LifeObject) => void; busy: boolean; readOnly: boolean; embedded?: boolean; highlightId?: string; onCreate: (type: EntityType, fields: Record<string, unknown>) => void; onUpdate: (object: LifeObject, fields: Record<string, unknown>) => void; onDelete: (object: LifeObject) => void }) {
-  // #118: the tab lists live objects; a link to an archived one still opens it here.
-  const objects = useMemo(() => withOpenedArchived(listed, linkables as LinkedObject[], type, highlightId) as LifeObject[], [listed, linkables, type, highlightId]);
-  const [newTitle, setNewTitle] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
-  useEffect(() => setDrafts(Object.fromEntries(objects.map((object) => [object.frontmatter.id, { ...object.frontmatter }]))), [objects]);
-  const setField = (id: string, key: string, value: unknown) => setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
-  const create = () => { onCreate(type, { title: newTitle }); setNewTitle(""); };
-  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{[...entityFields[type], ...entityLinkFields[type], ...envelopeEntityFields].map((field) => "target" in field ? <EntityLinkPicker key={field.key} field={field} value={draft[field.key]} objects={linkables} labels={labels} selfId={object.frontmatter.id} disabled={busy || readOnly} onChange={(value) => setField(object.frontmatter.id, field.key, value)} /> : <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions">{type === "person" && <PersonExternalControl person={object} labels={labels} disabled={busy || readOnly} onChange={onSetExternal} />}{type === "person" && onConfirmReviewed && <PersonReviewControl person={object} disabled={busy || readOnly} onConfirm={() => onConfirmReviewed(object)} />}<EnvelopeBadges frontmatter={object.frontmatter} />{Boolean(object.frontmatter.archived_at) && <small className="archived-tag">Archived</small>}<small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button><CopyLink object={object} /><HistoryLink objectId={object.frontmatter.id} title={object.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={onRestored} /></div></div>; })}</div></article></>;
-}
-
-/** #39: the person's badge label, and the External choice (Auto follows the email domain). Saves on change. */
-function PersonExternalControl({ person, labels, disabled, onChange }: { person: LifeObject; labels: Map<string, PersonLabel>; disabled: boolean; onChange?: (object: LifeObject, choice: ExternalChoice) => void }) {
-  const label = personLabel(labels, person);
-  const isSelf = person.frontmatter.is_self === true;
-  const derived = labels.get(person.frontmatter.id)?.isExternal ? "external" : "internal";
-  return <span className="person-external"><small>Shown as</small><b><PersonName {...label} /></b>{!isSelf && onChange && <label><small>External</small><select value={externalChoiceOf(person.frontmatter)} disabled={disabled} onChange={(event) => onChange(person, event.target.value as ExternalChoice)}>
-    <option value="auto">Auto (by email domain{externalChoiceOf(person.frontmatter) === "auto" ? `: ${derived}` : ""})</option><option value="external">External</option><option value="internal">Internal</option>
-  </select></label>}</span>;
-}
-
 // PB-027: one catch-all route; App reads the path itself (routes.ts). A data router is needed for
 // useBlocker, which holds Back/Forward until the open note is saved.
 const router = createBrowserRouter([{ path: "*", element: <App /> }]);
