@@ -7,6 +7,8 @@ import { KnowledgeSourceForm, knowledgeSkillHelp } from "./KnowledgeSourceForm.j
 import { OverlayDialog } from "./OverlayDialog.js";
 import { areaOptions } from "./envelope.js";
 import { foldText } from "./searchOptions.js";
+import { useSplitPane } from "./splitPane.js";
+import { useListDetailReturn } from "./useListDetailReturn.js";
 import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 import { dateInTimeZone } from "./zonedTime.js";
 import "./KnowledgeWorkspace.css";
@@ -91,8 +93,10 @@ export function KnowledgeWorkspace({ notes, sources, projects, people, selectedI
   const detailOpen = Boolean(selectedId);
   const set = (patch: Partial<Filters>) => setFilters((current) => ({ ...current, ...patch }));
 
-  return <div className={`knowledge-workspace${detailOpen ? " detail-open" : ""}`}>
-    <section className="knowledge-list-pane" aria-label="Knowledge list" hidden={narrow && detailOpen}>
+  const split = useSplitPane("knowledge");
+  const ref = useListDetailReturn(selectedId);
+  return <div ref={ref} className={`knowledge-workspace pane-workspace${detailOpen ? " detail-open" : ""}`} data-workspace="knowledge" style={split.style}>
+    <section className="knowledge-list-pane" data-pane="list" aria-label="Knowledge list" hidden={narrow && detailOpen}>
       <header className="knowledge-heading"><div><span>KNOWLEDGE</span><h2>Published Knowledge Notes</h2><p className="muted">Browse accepted ideas and research. Original Sources remain separate and traceable.</p></div><button className="primary" disabled={readOnly} onClick={() => setIntakeOpen(true)}>Preserve Source</button></header>
       {readOnly && <p className="knowledge-read-only">Read-only on this Mac. Published notes remain available to read.</p>}
       <div className="knowledge-common-filters">
@@ -111,10 +115,11 @@ export function KnowledgeWorkspace({ notes, sources, projects, people, selectedI
       {error && !(narrow && detailOpen) && <p className="knowledge-error" role="alert">{error}</p>}
       {loading ? <p className="muted" role="status">Loading published Knowledge Notes…</p> : published.length ? <div className="knowledge-rows">{published.map((note) => <button className={`knowledge-row${note.frontmatter.id === selectedId ? " selected" : ""}`} key={note.frontmatter.id} aria-label={`Open Knowledge Note: ${note.frontmatter.title}`} onClick={() => onOpen(note.frontmatter.id)}><strong>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} /></strong><small>{note.frontmatter.area ? label(String(note.frontmatter.area)) : "No area"} · Published {publishedDay(note, displayTimeZone)}</small><span>{preview(note.body)}</span></button>)}</div> : <article className="knowledge-empty"><h3>No published Knowledge Notes yet</h3><p>Preserve a Source, then use LifeOS capture to propose a Knowledge Note for review.</p></article>}
     </section>
-    <section className="knowledge-detail-pane" aria-label="Knowledge detail" hidden={narrow && !detailOpen}>
+    {!narrow && <div {...split.dividerProps} />}
+    <section className="knowledge-detail-pane" data-pane="detail" aria-label="Knowledge detail" hidden={narrow && !detailOpen}>
       <button className="knowledge-back" onClick={onBack}>Back to knowledge</button>
       {error && narrow && detailOpen && <p className="knowledge-error" role="alert">{error}</p>}
-      {loading && narrow ? <p className="muted" role="status">Loading published Knowledge Notes…</p> : selected ? <article className="knowledge-reader"><header><span>PUBLISHED KNOWLEDGE NOTE</span><h1>{selected.frontmatter.title}</h1><div><LockBadge frontmatter={selected.frontmatter} /><small>{selected.frontmatter.area ? label(String(selected.frontmatter.area)) : "No area"} · Published {publishedDay(selected, displayTimeZone)}</small></div></header><div className="knowledge-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.body || "_Empty note._"}</ReactMarkdown></div><footer>{sourceTypes(selected, sourceById).length ? `Sources: ${sourceTypes(selected, sourceById).map(label).join(", ")}` : "No source type recorded"}</footer></article> : <article className="knowledge-empty"><h3>Select a Knowledge Note</h3><p>Choose a published note to read it here.</p></article>}
+      {loading && narrow ? <p className="muted" role="status">Loading published Knowledge Notes…</p> : selected ? <article className="knowledge-reader"><header><span>PUBLISHED KNOWLEDGE NOTE</span><h1 data-detail-heading tabIndex={-1}>{selected.frontmatter.title}</h1><div><LockBadge frontmatter={selected.frontmatter} /><small>{selected.frontmatter.area ? label(String(selected.frontmatter.area)) : "No area"} · Published {publishedDay(selected, displayTimeZone)}</small></div></header><div className="knowledge-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.body || "_Empty note._"}</ReactMarkdown></div><footer aria-label="Sources">{sourceTypes(selected, sourceById).length ? `Sources: ${sourceTypes(selected, sourceById).map(label).join(", ")}` : "No source type recorded"}</footer></article> : <article className="knowledge-empty"><h3>Select a Knowledge Note</h3><p>Choose a published note to read it here.</p></article>}
     </section>
     <KnowledgeIntakePanel open={intakeOpen} readOnly={readOnly} onClose={() => setIntakeOpen(false)} onPreserve={onPreserve} />
   </div>;

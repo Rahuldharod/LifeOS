@@ -1216,14 +1216,12 @@ function App() {
   }
 
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
-  const contentClassName = [(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined;
 
   return <ApplicationShell
     activeView={view}
     pendingReviewCount={pendingReviews.length}
     status={readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}
     readOnly={readOnly}
-    contentClassName={contentClassName}
     onNavigate={(item) => void go(tabRoute(item))}
     onSearch={() => setSearchOpen(true)}
     onCapture={() => setCaptureOpen(true)}
@@ -1256,6 +1254,7 @@ function App() {
           busy={busy}
           readOnly={readOnly}
           detailOpen={Boolean(workspace)}
+          detailKey={workspace?.meeting.frontmatter.id}
           onPreviousDay={() => void go(calendarRoute(addCalendarDays(selectedDate, -1)))}
           onToday={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}
           onNextDay={() => void go(calendarRoute(addCalendarDays(selectedDate, 1)))}

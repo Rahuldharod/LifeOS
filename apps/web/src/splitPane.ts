@@ -1,40 +1,43 @@
-// Draggable divider between a side column and the main column (PB-024), shared by Notes and
-// Calendar. The default width is set in CSS and grows with the screen; a dragged width is a
-// per-device preference (ADR 0005), so it lives in browser storage. Double-click resets it.
+// The shared bounded divider between a list pane and its detail (PB-024, #154). Each workspace has its own clamp
+// (workspaceLayout.ts); a dragged width is a per-device preference (ADR 0005), stored per workspace in browser
+// storage and clamped again on read, so an old or hand-edited value can never break the layout. Double-click resets.
 import { useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { clampListWidth, listClamps, type ListWorkspace } from "./workspaceLayout.js";
 
-const MIN_WIDTH = 260;
-const MAX_SHARE = 0.6;
+/** Earlier releases used these keys for Notes and Calendar; keep them so a remembered width survives. */
+export const splitStorageKey = (workspace: ListWorkspace) => workspace === "notes" ? "lifeos.notesSplitWidth" : `lifeos.split.${workspace}`;
 
-function readWidth(key: string) {
+export function readStoredWidth(workspace: ListWorkspace) {
   try {
-    const value = Number(localStorage.getItem(key));
-    return Number.isFinite(value) && value >= MIN_WIDTH ? value : undefined;
+    const raw = localStorage.getItem(splitStorageKey(workspace));
+    const value = raw === null ? Number.NaN : Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    const { min, max } = listClamps[workspace];
+    return Math.round(Math.min(Math.max(value, min), max));
   } catch { return undefined; }
 }
 
-function writeWidth(key: string, width: number | undefined) {
-  try { if (width === undefined) localStorage.removeItem(key); else localStorage.setItem(key, String(Math.round(width))); }
+function writeWidth(workspace: ListWorkspace, width: number | undefined) {
+  try { if (width === undefined) localStorage.removeItem(splitStorageKey(workspace)); else localStorage.setItem(splitStorageKey(workspace), String(Math.round(width))); }
   catch { /* the default width still applies */ }
 }
 
-export function clampSplitWidth(width: number, containerWidth: number) {
-  return Math.round(Math.min(Math.max(width, MIN_WIDTH), Math.max(MIN_WIDTH, containerWidth * MAX_SHARE)));
-}
+const STEP = 24;
 
-export function useSplitPane(storageKey: string) {
-  const [width, setWidth] = useState(() => readWidth(storageKey));
-  const update = (next: number | undefined) => { setWidth(next); writeWidth(storageKey, next); };
+export function useSplitPane(workspace: ListWorkspace) {
+  const [width, setWidth] = useState(() => readStoredWidth(workspace));
+  const update = (next: number | undefined) => { setWidth(next); writeWidth(workspace, next); };
+  const { min, max } = listClamps[workspace];
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     const divider = event.currentTarget;
     const container = divider.parentElement;
-    if (!container) return;
+    if (!container || event.button !== 0) return;
     event.preventDefault();
-    divider.setPointerCapture(event.pointerId);
+    divider.setPointerCapture?.(event.pointerId);
     const move = (moveEvent: globalThis.PointerEvent) => {
       const bounds = container.getBoundingClientRect();
-      update(clampSplitWidth(moveEvent.clientX - bounds.left, bounds.width));
+      update(clampListWidth(moveEvent.clientX - bounds.left, workspace, bounds.width));
     };
     const stop = () => { divider.removeEventListener("pointermove", move); divider.removeEventListener("pointerup", stop); divider.removeEventListener("pointercancel", stop); };
     divider.addEventListener("pointermove", move);
@@ -43,18 +46,22 @@ export function useSplitPane(storageKey: string) {
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     const container = event.currentTarget.parentElement;
     const current = event.currentTarget.previousElementSibling?.getBoundingClientRect().width;
     if (!container || current === undefined) return;
+    const containerWidth = container.getBoundingClientRect().width;
+    const next = event.key === "ArrowLeft" ? current - STEP : event.key === "ArrowRight" ? current + STEP : event.key === "Home" ? min : event.key === "End" ? max : undefined;
+    if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); update(undefined); return; }
+    if (next === undefined) return;
     event.preventDefault();
-    update(clampSplitWidth(current + (event.key === "ArrowRight" ? 24 : -24), container.getBoundingClientRect().width));
+    update(clampListWidth(next, workspace, containerWidth));
   }
 
   return {
-    style: (width === undefined ? {} : { "--split-width": `${width}px` }) as CSSProperties,
+    style: { "--list-min": `${min}px`, "--list-max": `${max}px`, ...(width === undefined ? {} : { "--split-width": `${width}px` }) } as CSSProperties,
     dividerProps: {
-      role: "separator", "aria-orientation": "vertical" as const, "aria-label": "Resize column (double-click to reset)", tabIndex: 0,
+      role: "separator", "aria-orientation": "vertical" as const, "aria-label": "Resize list (double-click or Enter to reset)", tabIndex: 0,
+      "aria-valuemin": min, "aria-valuemax": max, "aria-valuenow": width ?? min,
       title: "Drag to resize · double-click to reset", className: "split-divider",
       onPointerDown, onKeyDown, onDoubleClick: () => update(undefined)
     }

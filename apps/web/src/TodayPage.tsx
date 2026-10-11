@@ -27,36 +27,38 @@ export function TodayPage({ today, panels: todayPanels, enrichment, eventCount, 
     <PageHeader eyebrow="HOME / TODAY" title="What needs your attention?" description="Choose what moves today forward. Everything else is still close at hand." />
     {readOnly && <p className="today-read-only" role="status">Read-only: viewing today without changing it.</p>}
     <div className="today-priority-grid">
-      {today.focus
+      <div className="today-top3">{today.focus
         ? <DailyFocusPanel focus={today.focus} tasks={today.tasks} disabled={busy || readOnly} onRefresh={() => void onReplan()} onChange={(change) => void onChangeFocus(change)} onCompleteTask={onCompleteTask} onOpenTasks={onOpenTasks} />
-        : <article className="daily-focus today-empty-priority"><span>TOP 3</span><h3>No plan is available yet</h3><p className="muted">Reload Today to build your priority list.</p></article>}
+        : <article className="daily-focus today-empty-priority"><span>TOP 3</span><h3>No plan is available yet</h3><p className="muted">Reload Today to build your priority list.</p></article>}</div>
       <div className="today-side-rail">
         <NextMeetingCard panels={todayPanels} timeZone={timeZone} busy={busy} onRetryCalendar={onRetryCalendar} onOpenCalendar={onOpenCalendar} />
         <article className="quick-capture"><span>QUICK CAPTURE</span><h3>Get it out of your head</h3><div className="capture-row"><input aria-label="Quick Capture" value={capture} onChange={(event) => onCaptureChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && capture.trim()) onCapture(); }} placeholder="A task or commitment…" /><button className="primary" disabled={!capture.trim() || busy || readOnly} onClick={onCapture}>Capture</button></div></article>
       </div>
-    </div>
-    <div className="today-warning-stack">
-      <SelfEmailWarning warning={todayPanels?.setupWarning} onOpenSettings={onOpenSettingsCard} />
-      <BackupWarning warning={todayPanels?.backupWarning} disabled={busy || readOnly || !onBackUpNow} onBackUpNow={() => onBackUpNow?.()} />
-    </div>
-    <div className="summary today-summary" aria-label="Supporting counts">
-      <Summary label="ACTIVE TASKS" value={today.tasks.length} detail="across all contexts" />
-      <Summary label="REVIEW INBOX" value={today.reviewCount} detail="awaiting confirmation" />
-      <Summary label="TODAY'S EVENTS" value={eventCount} detail="across connected calendars" />
-      <Summary label="WARNINGS" value={warnings} detail="need attention" />
-    </div>
-    <section className="today-supporting" aria-labelledby="today-supporting-title">
-      <div className="today-section-heading"><div><span>SUPPORTING WORK</span><h3 id="today-supporting-title">More from today</h3></div><p className="muted">Live counts and workflows, kept below your priorities.</p></div>
-      <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void onEnrich()}>Enrich last 48h</button></div>
-        <CappedRows items={enrichment.proposedGaveUp} row={(meeting) => <GiveUpRow key={meeting.meetingId} meeting={meeting} disabled={busy || readOnly} onGiveUp={(meetingId) => void onGiveUp(meetingId)} />} /></article>
-      <div className="today-live-grid">
-        {todayPanels ? <TodayLivePanels panels={todayPanels} onOpenInbox={onOpenInbox} /> : <>
-          <LivePanel title="Overdue" items={today.overdue} empty="Nothing overdue." row={objectRow} />
-          <LivePanel title="Due today" items={today.dueToday} empty="Nothing due today." row={objectRow} />
-          <LivePanel title="Waiting" items={today.waiting} empty="Nothing waiting on someone else." row={objectRow} />
-        </>}
+      <div className="today-context">
+        <div className="today-warning-stack">
+          <SelfEmailWarning warning={todayPanels?.setupWarning} onOpenSettings={onOpenSettingsCard} />
+          <BackupWarning warning={todayPanels?.backupWarning} disabled={busy || readOnly || !onBackUpNow} onBackUpNow={() => onBackUpNow?.()} />
+        </div>
+        <div className="summary today-summary" aria-label="Supporting counts">
+          <Summary label="ACTIVE TASKS" value={today.tasks.length} detail="across all contexts" />
+          <Summary label="REVIEW INBOX" value={today.reviewCount} detail="awaiting confirmation" />
+          <Summary label="TODAY'S EVENTS" value={eventCount} detail="across connected calendars" />
+          <Summary label="WARNINGS" value={warnings} detail="need attention" />
+        </div>
+        <section className="today-supporting" aria-labelledby="today-supporting-title">
+          <div className="today-section-heading"><div><span>SUPPORTING WORK</span><h3 id="today-supporting-title">More from today</h3></div><p className="muted">Live counts and workflows, kept below your priorities.</p></div>
+          <article className="enrichment"><span>AFTER MEETINGS</span><div className="capture-row"><p>Ask Claude to collect transcripts, recordings and Gong material for meetings that ended in the last 48 hours.</p><button className="primary" disabled={busy || readOnly} onClick={() => void onEnrich()}>Enrich last 48h</button></div>
+            <CappedRows items={enrichment.proposedGaveUp} row={(meeting) => <GiveUpRow key={meeting.meetingId} meeting={meeting} disabled={busy || readOnly} onGiveUp={(meetingId) => void onGiveUp(meetingId)} />} /></article>
+          <div className="today-live-grid">
+            {todayPanels ? <TodayLivePanels panels={todayPanels} onOpenInbox={onOpenInbox} /> : <>
+              <LivePanel title="Overdue" items={today.overdue} empty="Nothing overdue." row={objectRow} />
+              <LivePanel title="Due today" items={today.dueToday} empty="Nothing due today." row={objectRow} />
+              <LivePanel title="Waiting" items={today.waiting} empty="Nothing waiting on someone else." row={objectRow} />
+            </>}
+          </div>
+        </section>
       </div>
-    </section>
+    </div>
   </>;
 }
 

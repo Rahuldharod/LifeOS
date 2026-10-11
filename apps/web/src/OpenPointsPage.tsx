@@ -78,7 +78,7 @@ export function OpenPointsPage({ projects, clients, products, people, busy, read
   const detailOpen = Boolean(creating || selectedId);
   const leaveThen = async (action: () => void) => { if (await editorGuard.saveNow()) action(); };
   const closeDetail = () => void leaveThen(() => { setCreating(false); setSelectedId(undefined); });
-  return <ListDetailWorkspace detailOpen={detailOpen} listLabel="Open points list" detailLabel="Open point detail" list={<>
+  return <ListDetailWorkspace workspace="openPoints" detailOpen={detailOpen} selectedKey={creating ? "new" : selectedId} listLabel="Open points list" detailLabel="Open point detail" list={<>
       <header className="workspace-heading"><div><span>OPEN POINTS · {visible.length}</span><h2>Open points</h2><p className="muted">Questions still waiting for an answer.</p></div><button className="primary" disabled={busy || readOnly} onClick={() => void leaveThen(() => { setSelectedId(undefined); setCreating(true); })}>New Open Point</button></header>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}><input type="search" aria-label="Search open points" placeholder="Search open points…" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Filter open points by status" value={filters.status} onChange={(event) => setFilter("status", event.target.value)}><option value="">Any status</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></WorkspaceFilterBar>
       {advanced && <div className="task-advanced-filters decision-advanced-filters" aria-label="Advanced open point filters">
@@ -178,6 +178,7 @@ function OpenPointPanel({ guard, detail, projects, clients, products, people, bu
 
   return <article className="decision-detail" aria-label={`Open point: ${value.title}`}>
     <span>OPEN POINT · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
+    <h2 className="decision-heading" data-detail-heading tabIndex={-1}>{value.title}</h2>
     <details className="decision-more"><summary>More</summary><div><CopyLink object={openPoint} /><HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />{isOpen && <button className="danger" disabled={locked || Boolean(action)} onClick={() => void navigation.leaveThen(() => { if (writable.current) setAction({ kind: "close", reason: "" }); })}>Close…</button>}</div></details>
     {value.status === "resolved" && <p className="decision-chain" role="note">Resolved {formatDate(value.resolved_at)}{detail.resolutionDecision ? <> by decision {link(detail.resolutionDecision)}</> : value.resolution_decision_id ? <span className="muted"> by a decision that is missing</span> : null}</p>}
     {value.status === "closed" && <p className="decision-chain" role="note">Closed {formatDate(value.closed_at)}{value.close_reason ? `: ${String(value.close_reason)}` : " (no reason given)"}</p>}

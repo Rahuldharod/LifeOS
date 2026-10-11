@@ -12,6 +12,8 @@ let host: HTMLDivElement | undefined;
 
 beforeEach(() => {
   localStorage.clear();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -109,4 +111,54 @@ describe("ApplicationShell", () => {
     expect(onNavigate).not.toHaveBeenCalled();
     expect(location.pathname).toBe("/calendar/2026-10-11");
   });
+
+  it("publishes the workspace band after the sidebar and the short-height treatment (#154)", () => {
+    setViewport(1280, 800);
+    act(() => root!.render(<ApplicationShell activeView="Today" status="Ready" onNavigate={vi.fn()} onSearch={vi.fn()} onCapture={vi.fn()}><p>Page</p></ApplicationShell>));
+    const shell = document.querySelector(".application-shell")!;
+    expect(shell.getAttribute("data-band")).toBe("compact");
+    expect(shell.getAttribute("data-height")).toBe("short");
+    act(() => button("Collapse navigation")!.click());
+    expect(shell.getAttribute("data-band")).toBe("standard");
+    setViewport(2560, 1440);
+    expect(shell.getAttribute("data-band")).toBe("wide");
+    expect(shell.getAttribute("data-height")).toBe("regular");
+  });
+
+  it("replaces the sidebar with Menu, Search and Capture in the narrow band; the sheet returns focus to Menu", () => {
+    setViewport(700, 900);
+    const onNavigate = vi.fn(); const onSearch = vi.fn(); const onCapture = vi.fn();
+    act(() => root!.render(<ApplicationShell activeView="Tasks" status="Ready" onNavigate={onNavigate} onSearch={onSearch} onCapture={onCapture}><p>Page</p></ApplicationShell>));
+    expect(document.querySelector("aside.shell-sidebar")).toBeNull();
+    act(() => button("Search")!.click()); act(() => button("Capture")!.click());
+    expect(onSearch).toHaveBeenCalledOnce(); expect(onCapture).toHaveBeenCalledOnce();
+    const menu = button("Menu")!; menu.focus();
+    act(() => menu.click());
+    expect(document.querySelector("[role='dialog'][aria-label='Navigation']")).toBeTruthy();
+    expect(menu.getAttribute("aria-expanded")).toBe("true");
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(document.querySelector("[role='dialog']")).toBeNull();
+    expect(document.activeElement).toBe(menu);
+    act(() => menu.click());
+    act(() => button("Notes")!.click());
+    expect(onNavigate).toHaveBeenCalledWith("Notes");
+    expect(document.querySelector("[role='dialog']")).toBeNull();
+  });
+
+  it("offers a skip link that moves focus past navigation to the workspace", () => {
+    act(() => root!.render(<ApplicationShell activeView="Today" status="Ready" onNavigate={vi.fn()} onSearch={vi.fn()} onCapture={vi.fn()}><h2>Page</h2></ApplicationShell>));
+    const skip = [...document.querySelectorAll("a")].find((link) => link.textContent === "Skip to content")!;
+    expect(document.querySelector(".application-shell")!.firstElementChild).toBe(skip);
+    act(() => skip.click());
+    expect(document.activeElement?.id).toBe("lifeos-content");
+    expect(document.activeElement?.tagName).toBe("MAIN");
+  });
 });
+
+function setViewport(width: number, height: number) {
+  act(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+    window.dispatchEvent(new Event("resize"));
+  });
+}

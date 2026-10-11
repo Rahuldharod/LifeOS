@@ -77,7 +77,7 @@ export function DecisionsPage({ projects, clients, products, people, busy, readO
   const detailOpen = Boolean(creating || selectedId);
   const leaveThen = async (action: () => void) => { if (await editorGuard.saveNow()) action(); };
   const closeDetail = () => void leaveThen(() => { setCreating(false); setSelectedId(undefined); });
-  return <ListDetailWorkspace detailOpen={detailOpen} listLabel="Decisions list" detailLabel="Decision detail" list={<>
+  return <ListDetailWorkspace workspace="decisions" detailOpen={detailOpen} selectedKey={creating ? "new" : selectedId} listLabel="Decisions list" detailLabel="Decision detail" list={<>
       <header className="workspace-heading"><div><span>DECISIONS · {visible.length}</span><h2>Decisions</h2><p className="muted">What was decided, why, and what replaced it.</p></div><button className="primary" disabled={busy || readOnly} onClick={() => void leaveThen(() => { setSelectedId(undefined); setCreating(true); })}>New Decision</button></header>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}><input type="search" aria-label="Search decisions" placeholder="Search decisions…" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Filter decisions by status" value={filters.status} onChange={(event) => setFilter("status", event.target.value)}><option value="">Any status</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></WorkspaceFilterBar>
       {advanced && <div className="task-advanced-filters decision-advanced-filters" aria-label="Advanced decision filters">
@@ -188,6 +188,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
 
   return <article className="decision-detail" aria-label={`Decision: ${value.title}`}>
     <span>DECISION · <span className={`status-label status-${String(value.status)}`}>{statusLabel(value.status)}</span></span>
+    <h2 className="decision-heading" data-detail-heading tabIndex={-1}>{value.title}</h2>
     <details className="decision-more"><summary>More</summary><div><CopyLink object={decision} /><HistoryLink objectId={value.id} title={value.title} disabled={busy || readOnly} run={run} onRestored={() => refresh(value.id)} />{active && <button className="danger" disabled={locked} onClick={() => void navigation.leaveThen(reverse)}>Mark reversed…</button>}</div></details>
     {detail.supersededBy && <p className="decision-chain" role="note">Superseded by <button className="link-button" onClick={() => onSelect(detail.supersededBy!.frontmatter.id)}>{detail.supersededBy.frontmatter.title}</button></p>}
     {detail.resolvesOpenPoints?.map((point) => <p className="decision-chain" key={point.frontmatter.id}>Resolves open point <button className="link-button" onClick={() => onOpen(point.frontmatter.id)}>{point.frontmatter.title}</button></p>)}

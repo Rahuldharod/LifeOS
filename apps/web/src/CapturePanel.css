@@ -7,4 +7,4 @@
 .capture-message { padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-quiet); }
 .capture-error { color: var(--color-error); }
 .capture-hint { color: var(--color-text-muted); font-size: .8125rem; }
-@media (max-width: 42rem) { .capture-details { grid-template-columns: 1fr; } }
+@media (max-width: 42rem) { .capture-details { grid-template-columns: minmax(0, 1fr); } }

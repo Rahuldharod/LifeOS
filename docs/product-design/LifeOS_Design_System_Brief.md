@@ -35,20 +35,32 @@ The approved semantic notification treatment is **Deep tint**:
 
 The text/fill pairs measure approximately 7.4:1–8.7:1. Every semantic notification also has an icon and visible label. Reserve stronger solid semantic treatments for actions whose consequence has that meaning, such as final destructive confirmation.
 
-### Production token contract (#129)
+### Production token contract (#129, remapped in #154)
 
-The production UI defines these roles in `apps/web/src/design-tokens.css`. Components use role names rather than palette values.
+The production UI defines these roles in `apps/web/src/design-tokens.css`. Components use role names rather than palette values; no production stylesheet carries a raw palette value.
 
 | Token family | Named roles |
 | --- | --- |
-| Colour | canvas, surface, quiet surface, text, muted text, primary, primary hover/active, accent, border/strong border, focus, error, success, warning, sidebar/hover/active/text/muted |
-| Typography | sans family; xs, sm, md, lg, xl and 2xl sizes; tight and body line heights |
-| Layout | seven spacing steps; small, medium, large and pill radii; thin and strong borders |
-| Elevation and focus | surface and overlay shadows; a two-colour focus ring that remains visible on light and dark surfaces |
+| Colour | canvas, surface, quiet and raised surface, text, muted and inverse text, border (decorative) and strong border (interactive), primary with hover and active, link, selection, accent and warm accent, focus and focus-on-dark, disabled surface/border/text, success/error/warning/information text, fill and border, danger, scrim, sidebar roles |
+| Typography | system sans and mono families; xs (13px) to 2xl sizes plus an editor size; tight, body (1.55) and editor (1.65) line heights |
+| Layout | seven spacing steps; small, medium, large and pill radii; thin and strong borders; minimum target; canvas cap; reading, form and editor measures; sidebar widths |
+| Elevation and focus | surface, raised and overlay shadows; a focus ring for light surfaces and one for dark navigation |
 
-The implemented light tokens still contain the superseded purple palette. Issue #154 remaps them to the approved role and state contract. Existing contrast figures for the purple values are historical, not acceptance evidence for the ocean palette.
+The responsive bands, short-height threshold and list clamps live in `apps/web/src/workspaceLayout.ts`. The shell publishes the result as `data-band` and `data-height`, so CSS and the accessible `hidden` state of list and detail panes always agree.
 
-Dark theme remains deliberately unshipped. The earlier purple dark mapping is superseded; a later dark-theme ticket must derive a new ocean mapping and re-check every component state before exposing a theme preference.
+Dark theme remains deliberately unshipped. The earlier purple dark mapping is removed; a later dark-theme ticket must derive a new ocean mapping and re-check every component state before exposing a theme preference.
+
+### Implementation status (#154)
+
+Implemented and covered by the Playwright browser seam (`tests/browser/`, `pnpm test:browser`) and focused component tests:
+
+- Ocean light roles, Deep tint semantic roles, action hierarchy (filled primary, outlined secondary, text tertiary), explicit disabled colours, width-stable loading with `aria-busy`, and the solid final destructive confirmation.
+- Workspace-width bands with the narrow top bar (Menu, Search, Capture) and navigation sheet, the short-height treatment, the 1,880px canvas cap and the reading, form and editor measures.
+- Per-workspace list clamps with a keyboard-operable divider remembered per workspace on this device and reset on double-click or Enter; the Settings section rail stays fixed.
+- Narrow list → detail with Back, focus on the detail heading after opening, and restored row focus and list scroll after Back. Knowledge Notes now have direct links like other records.
+- Skip link, overlay focus containment and return, reduced-motion handling, wide internal rails for Inbox evidence, Decision and Open Point relationships and Knowledge sources, and Reference data list/detail only in the standard and wide bands.
+
+Left to #142: manual Safari, Chrome and VoiceOver checks, actual 200% and 400% browser zoom, contrast review of every interactive state on real displays, and reduced-motion review.
 
 ### Approved visual and responsive foundations
 

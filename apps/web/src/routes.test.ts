@@ -21,6 +21,9 @@ describe("routes (PB-027)", () => {
     expect(parseRoute(`/tasks/${NOTE}`)).toEqual({ view: "Tasks", id: NOTE });
     expect(parseRoute(`/inbox/${NOTE}`)).toEqual({ view: "Inbox", id: NOTE });
     expect(parseRoute("/settings/settings-self-emails")).toEqual({ view: "Settings", id: "settings-self-emails" });
+    // #154: a published Knowledge Note has a direct link, so narrow list → detail survives reload and bookmarks.
+    expect(parseRoute("/knowledge/knowledge-1")).toEqual({ view: "Knowledge", id: "knowledge-1" });
+    expect(routePath({ view: "Knowledge", id: "knowledge-1" })).toBe("/knowledge/knowledge-1");
   });
 
   it("puts the day and the meeting in a calendar path", () => {

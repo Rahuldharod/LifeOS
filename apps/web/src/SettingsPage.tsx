@@ -316,7 +316,7 @@ function CalendarListCard({ catalog, loaded, prefs, disabled: readOnly, onSave }
       const enabled = !disabled.includes(calendar.id);
       const isDefault = defaultId === calendar.id;
       return <div className="calendar-row" key={calendar.id}>
-        <label><input type="checkbox" checked={enabled} disabled={readOnly} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "#9aa39d" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
+        <label><input type="checkbox" checked={enabled} disabled={readOnly} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "var(--color-border-strong)" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
         {enabled && <span className="calendar-row-actions">
           {isDefault
             ? <button type="button" disabled={readOnly} onClick={() => edit(setDefaultId, undefined)}>Remove default</button>

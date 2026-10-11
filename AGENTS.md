@@ -63,6 +63,7 @@ corepack pnpm dev
 corepack pnpm typecheck
 corepack pnpm test --exclude '.claude/**'   # skip test copies inside agent worktrees
 corepack pnpm build
+corepack pnpm test:browser                  # UI layout, focus and responsive behaviour (Playwright, synthetic data, port 4319)
 ```
 
 Two separate runtimes (ADR 0006):
@@ -77,7 +78,7 @@ One-off maintenance: `pnpm reconcile-meetings` reports duplicate meetings; `--ap
 1. Inspect the relevant port, use case, adapter, schema, and integration test before editing.
 2. Make the smallest change that preserves the architecture boundaries above.
 3. Add or update an integration test for persistence, connector, recovery, or cross-layer behavior.
-4. Run typecheck and the relevant tests; run the production build for UI, server, dependency, or bundling changes.
+4. Run typecheck and the relevant tests; run the production build for UI, server, dependency, or bundling changes, and `test:browser` for UI layout or interaction changes.
 5. Update documentation only when its stated contract changes:
    - setup or top-level capabilities: `README.md`;
    - boundaries or component responsibilities: architecture README;
