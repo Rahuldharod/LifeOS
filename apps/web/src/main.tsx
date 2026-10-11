@@ -8,23 +8,20 @@ import "@milkdown/crepe/theme/frame.css";
 import "./design-tokens.css";
 import "./styles.css";
 import { isConflictedDraft } from "./noteDraft.js";
-import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
+import { NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api, ApiError, useServerConnection } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
 import { useCalendar } from "./useCalendar.js";
 import { useWorkspaceData } from "./useWorkspaceData.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
-import { groupByDay } from "./noteGroups.js";
-import { useSplitPane } from "./splitPane.js";
 import { EditorFrame } from "./EditorFrame.js";
 import { NoteHeader, PENDING_NOTE_HASH } from "./NoteHeader.js";
-import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
+import { EnvelopeBadges } from "./EnvelopeBadges.js";
 import { areaOptions, isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
 import { addCalendarDays, dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
-import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
 import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
@@ -40,7 +37,7 @@ import { awaitingAdoptionLabel } from "./todayPanels.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
 import { reviewInFlight } from "./reviewInFlight.js";
-import { displayTimeZone as storedDisplayTimeZone, formatDate, formatTime } from "./dateFormat.js";
+import { displayTimeZone as storedDisplayTimeZone, formatDate } from "./dateFormat.js";
 import { contextLinkFields, entityLinkFields } from "@lifeos/shared";
 import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { PageHeader, Summary, objectRow } from "./pageParts.js";
@@ -67,6 +64,7 @@ import { recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
+import { NotesWorkspace } from "./NotesWorkspace.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
@@ -308,7 +306,6 @@ function App() {
   const [noteResults, setNoteResults] = useState<LifeObject[]>();
   const [selectedDeletedId, setSelectedDeletedId] = useState<string>();
   const [highlightId, setHighlightId] = useState<string>();
-  const [notesMode, setNotesMode] = useState<"visual" | "write" | "preview">("visual");
   const [capture, setCapture] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -375,7 +372,6 @@ function App() {
   // when a first edit turns the preview into a persisted workspace.
   const [editorSession, setEditorSession] = useState(0);
   const server = useServerConnection();
-  const notesSplit = useSplitPane("lifeos.split.notes");
   const notesController = useNoteDraftController({
     note: selectedNote,
     readOnly,
@@ -542,7 +538,7 @@ function App() {
     if (!note) { notesController.reset(); setSelectedNoteId(undefined); return; }
     const opened = notesController.open(note, readCachedDraft(note));
     if (note.frontmatter.type === "knowledge-note") recordRecentSearchId(note.frontmatter.id);
-    setSelectedNoteId(note.frontmatter.id); setNotesMode("visual");
+    setSelectedNoteId(note.frontmatter.id);
     if (opened.conflict) setMessage("Recovered a browser draft, but the Markdown file also changed. Review before saving.");
   }, [location.pathname, collectionsLoaded, notes, deletedNotes]);
 
@@ -1271,33 +1267,38 @@ function App() {
         </CalendarWorkspace>
       </>}
 
-      {view === "Notes" && <>
-        <PageHeader eyebrow="NOTES" title="Recent notes" description="Open the latest meeting and knowledge notes, edit the Markdown, and save changes back to the portable repository." />
-        <div className="notes-layout split-layout" style={notesSplit.style}>
-          <article className="notes-list">
-            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteSearching ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
-            <div className="notes-tabs" role="tablist" aria-label="Notes">
-              <button role="tab" aria-selected={noteTab === "open"} className={noteTab === "open" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "open", id: selectedNoteId })}>Open <small>{notes.length}</small></button>
-              <button role="tab" aria-selected={noteTab === "deleted"} className={noteTab === "deleted" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "deleted", id: selectedDeletedId })}>Deleted <small>{deletedNotes.length}</small></button>
-            </div>
-            <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
-            <NoteFiltersPanel filters={noteFilters} onChange={setNoteFilters} tab={noteTab} projects={entityOptions(projects.map(({ project }) => project))} clients={entityOptions(clients.map(({ entity }) => entity))} products={entityOptions(products.map(({ entity }) => entity))} people={entityOptions(people.map(({ entity }) => entity))} />
-            {!visibleNotes.length && <p className="muted">{emptyNotesMessage(noteTab, noteQuery, noteFilters)}</p>}
-            {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => void go({ view: "Notes", noteTab, id: note.frontmatter.id })}>
-              <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
-            </button>)}</div>)}
-          </article>
-          <div {...notesSplit.dividerProps} />
-          <div className="notes-main">
-            {noteTab === "deleted" ? (!selectedDeleted ? <article className="empty-state"><h3>Select a deleted note</h3><p>Deleted notes are kept on disk. Choose one to read it or restore it.</p></article> : <article className="editor-card">
+      {view === "Notes" && <NotesWorkspace
+        notes={visibleNotes}
+        openCount={notes.length}
+        deletedCount={deletedNotes.length}
+        tab={noteTab}
+        selectedId={noteTab === "open" ? selectedNoteId : selectedDeletedId}
+        query={noteQuery}
+        filters={noteFilters}
+        projects={entityOptions(projects.map(({ project }) => project))}
+        clients={entityOptions(clients.map(({ entity }) => entity))}
+        products={entityOptions(products.map(({ entity }) => entity))}
+        people={entityOptions(people.map(({ entity }) => entity))}
+        timeZone={displayTimeZone}
+        loading={!collectionsLoaded}
+        readOnly={readOnly}
+        conflictedNoteIds={conflictedNoteIds}
+        emptyMessage={emptyNotesMessage(noteTab, noteQuery, noteFilters)}
+        detailState={noteTab === "deleted" ? (selectedDeleted ? "deleted" : "empty") : selectedNote && notesController.conflict ? "conflict" : selectedNote ? "open" : "empty"}
+        onQueryChange={setNoteQuery}
+        onFiltersChange={setNoteFilters}
+        onTabChange={(tab) => void go({ view: "Notes", noteTab: tab, id: tab === "open" ? selectedNoteId : selectedDeletedId })}
+        onOpen={(id) => void go({ view: "Notes", noteTab, id })}
+        onBack={() => void go({ view: "Notes", noteTab })}
+        deletedDetail={!selectedDeleted ? null : <article className="editor-card">
               <div className="editor-heading"><div><span>DELETED {selectedDeleted.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedDeleted.frontmatter.title}</h3></div></div>
               <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{selectedDeleted.body || "_Empty note._"}</ReactMarkdown></div>
               <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><PermanentDeleteButton key={selectedDeleted.frontmatter.id} note={selectedDeleted} disabled={busy || readOnly} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onDeleted={async (deleted) => { if (deleted) setSelectedDeletedId(undefined); await refresh(); }} /><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedDeleted.frontmatter.created_at)} /><Meta label="Deleted" value={formatDate(String(selectedDeleted.frontmatter.deleted_at))} /><Meta label="Revision" value={String(selectedDeleted.frontmatter.revision)} /><Meta label="File" value={selectedDeleted.relativePath} /></div>
-            </article>) :
-            selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :
-            !selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <EditorFrame>
-              <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><div className="mode-switch"><button className={notesMode === "visual" ? "selected" : ""} onClick={() => setNotesMode("visual")}>Visual</button><button className={notesMode === "write" ? "selected" : ""} onClick={() => setNotesMode("write")}>Markdown</button><button className={notesMode === "preview" ? "selected" : ""} onClick={() => setNotesMode("preview")}>Preview</button></div><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
+            </article>}
+        conflictDetail={selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> : null}
+        renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
+              <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
               {notesMode === "write" ? <>
                 <div className="toolbar">
                   <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { if (event.target.value) transformNoteLines((line) => `${"#".repeat(Number(event.target.value))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading"); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
@@ -1313,9 +1314,7 @@ function App() {
               <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}
-          </div>
-        </div>
-      </>}
+      />}
 
       {view === "Tasks" && <TaskWorkspace tasks={withOpenedArchived(tasks, objectLinks as LinkedObject[], "task", route?.view === "Tasks" ? route.id : undefined) as LifeObject[]} linkables={objectLinks} labels={labels} projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: String(project.frontmatter.title) }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} selectedId={route?.view === "Tasks" ? route.id : undefined} today={dateInTimeZone(new Date(), displayTimeZone)} timeZone={displayTimeZone} guard={taskEditorGuard} busy={busy} readOnly={readOnly} run={run} onOpen={(id) => followRoute({ view: "Tasks", id })} onCloseDetail={() => followRoute({ view: "Tasks" })} onCreate={createTask} onSave={updateEntity} onDelete={deleteEntity} onComplete={(task, complete) => updateEntity(task, { status: complete ? "Done" : "Next" })} onRestored={refresh} />}
 

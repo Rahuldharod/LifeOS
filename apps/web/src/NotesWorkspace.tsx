@@ -6,6 +6,7 @@ import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import type { NoteFilterState } from "./noteFilters.js";
 import { groupByDay } from "./noteGroups.js";
 import { useSplitPane } from "./splitPane.js";
+import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 
 type Option = { id: string; title: string };
 export type NoteEditorMode = "visual" | "write" | "preview";
@@ -48,20 +49,6 @@ const timeIn = (value: unknown, timeZone: string) => {
   catch { return new Date(value).toLocaleTimeString([], { timeStyle: "short" }); }
 };
 
-function useNarrowNotesWorkspace() {
-  const media = "(max-width: 760px)";
-  const [narrow, setNarrow] = useState(() => typeof window.matchMedia === "function" && window.matchMedia(media).matches);
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia(media);
-    const update = () => setNarrow(query.matches);
-    query.addEventListener("change", update);
-    update();
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return narrow;
-}
-
 /**
  * The persistent Notes list/detail shell. Authoritative note editing stays in the caller so the
  * existing draft controller, expected-hash saves, image handling and Markdown round trips remain
@@ -71,7 +58,7 @@ export function NotesWorkspace(props: NotesWorkspaceProps) {
   const [advanced, setAdvanced] = useState(false);
   const [mode, setMode] = useState<NoteEditorMode>("visual");
   const split = useSplitPane("lifeos.notesSplitWidth");
-  const narrow = useNarrowNotesWorkspace();
+  const narrow = useNarrowWorkspace();
   const detailOpen = Boolean(props.selectedId) || props.loading;
   const state = props.detailState ?? (props.selectedId ? (props.tab === "deleted" ? "deleted" : "open") : "empty");
 
