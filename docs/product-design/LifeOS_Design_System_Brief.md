@@ -64,6 +64,9 @@ Approved on 11 October 2026 during the refinement interview:
 - **Navigation reflow:** preserve the user's expanded-or-collapsed sidebar preference throughout compact, standard and wide bands; do not force laptop users to collapse it. In the narrow band, replace the sidebar with a top bar exposing Menu, Search and Capture; Menu opens the navigation sheet.
 - **Short-height treatment:** below 900px, reduce header, padding and banner height while preserving text sizes and control targets. Let panes scroll independently, keep important actions sticky and retain visible actions on warnings.
 - **Semantic placement:** use tinted banners for page-level conditions, place field and workflow errors beside the affected control, show routine save state as calm persistent inline text, and reserve brief notifications for discrete workflow completion.
+- **Pane sizing:** use workspace-specific minimum and maximum widths for list panes rather than permanent percentages. Give the detail pane the remaining space; in the narrow band, navigate from list to full-width detail and back.
+- **Compact toolbars:** wrap common controls before they clip. Keep search and the most frequent controls first, and move Advanced filters to their own line as space tightens.
+- **Internal content measures:** allow the surrounding detail pane to grow while keeping reading content near `75ch`, structured forms near `900px` and rich editors near `1,200px` maximum width.
 
 ## Navigation and workflows
 
