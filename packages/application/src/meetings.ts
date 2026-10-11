@@ -26,6 +26,9 @@ export class MeetingsModule {
    */
   async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
     const event = await this.findEvent(externalId, from, to, calendarId);
+    const existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
+    const hasUserContent = typeof initialBody === "string" && initialBody.trim() !== "" && initialBody.trim() !== DEFAULT_NOTE_BODY.trim();
+    if (event.status === "cancelled" && !existing && !hasUserContent) return this.previewMeetingFromEvent(externalId, from, to, calendarId);
     // Recurring occurrences share a note, so serialize the whole provider series as one write scope.
     return this.meetingCreations.run(this.seriesKey(event) ?? externalId, () => this.createMeetingFromEventSerialized(event, initialBody));
   }
