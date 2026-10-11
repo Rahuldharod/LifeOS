@@ -115,12 +115,13 @@ function NewDecisionPanel({ guard, projects, clients, products, people, busy, re
   const set = (key: keyof typeof draft, value: string | string[]) => { setDraft((current) => ({ ...current, [key]: value })); setFailed(false); };
   const dirty = JSON.stringify(draft) !== JSON.stringify(empty); const locked = busy || readOnly;
   const save = async () => {
+    if (locked || !draft.title.trim()) return false;
     const { decidedAt, ...fields } = draft;
     const ok = await onCreate({ ...fields, ...(decidedAt ? { decided_at: zonedDateTime(decidedAt.slice(0, 10), decidedAt.slice(11, 16), timeZone).toISOString() } : {}) });
     setFailed(!ok);
     return ok;
   };
-  const navigation = useStructuredEditorGuard({ guard, dirty, save, discard: () => { setDraft(empty); setFailed(false); }, noun: "decision" });
+  const navigation = useStructuredEditorGuard({ guard, dirty, canSave: !locked && Boolean(draft.title.trim()), save, discard: () => { setDraft(empty); setFailed(false); }, noun: "decision" });
   return <article className="decision-detail" aria-label="New decision">
     <span>NEW DECISION</span>
     <div className="crud-fields decision-fields">
@@ -152,6 +153,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
   const locked = busy || readOnly;
 
   const save = async () => {
+    if (locked || !draft.title.trim() || !draft.decision_text.trim()) return false;
     const { decidedAt, ...fields } = draft;
     const changes: Record<string, unknown> = { ...fields, ...(decidedAt && decidedAt !== originalDecidedAt ? { decided_at: zonedDateTime(decidedAt.slice(0, 10), decidedAt.slice(11, 16), timeZone).toISOString() } : {}) };
     // A failed write keeps this draft visible; the next successful refresh adopts the new disk hash.
@@ -162,6 +164,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
 
   const supersede = async () => {
     if (!successor) return true;
+    if (locked || !successor.title.trim()) return false;
     let nextId: string | undefined;
     const done = await run(async () => {
       const result = await api("POST /api/v1/decisions/:id/supersede", { params: { id: value.id }, body: { fields: successor, expectedHash: decision.contentHash } });
@@ -176,7 +179,8 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
     await refresh(value.id);
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline) || Boolean(successor);
-  const navigation = useStructuredEditorGuard({ guard, dirty, save: successor ? supersede : save, discard: () => { setDraft(baseline); setSuccessor(undefined); }, noun: "decision" });
+  const canSave = !locked && (successor ? Boolean(successor.title.trim()) : Boolean(draft.title.trim() && draft.decision_text.trim()));
+  const navigation = useStructuredEditorGuard({ guard, dirty, canSave, save: successor ? supersede : save, discard: () => { setDraft(baseline); setSuccessor(undefined); }, noun: "decision" });
 
   const link = (object: LifeObject | undefined, fallback = "None") => object ? <button className="link-button" onClick={() => onOpen(object.frontmatter.id)}>{object.frontmatter.title}</button> : <span className="muted">{fallback}</span>;
 

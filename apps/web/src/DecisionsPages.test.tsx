@@ -27,6 +27,7 @@ async function click(name: string) { const button = [...document.querySelectorAl
 async function clickDialog(name: string) { const button = [...document.querySelectorAll("[role='dialog'] button")].find((item) => item.textContent?.trim() === name) as HTMLElement; await act(async () => button.click()); await settle(); }
 async function input(label: string, value: string) { const control = document.querySelector(`[aria-label='${label}']`) as HTMLInputElement; await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function mount(page: React.ReactNode) { root = createRoot(document.body.appendChild(document.createElement("div"))); await act(async () => root!.render(page)); await settle(); }
+async function rerender(page: React.ReactNode) { await act(async () => root!.render(page)); await settle(); }
 
 describe("Decisions and Open Points workspaces (#136)", () => {
   it("keeps search and status visible and relationships/dates under Advanced", async () => {
@@ -93,6 +94,41 @@ describe("Decisions and Open Points workspaces (#136)", () => {
     expect(document.querySelector("[role='dialog']")).toBeTruthy();
     expect(document.body.textContent).toContain("Could not save");
     expect((document.querySelector("[aria-label='Decision title']") as HTMLInputElement).value).toBe("Retry this decision");
+  });
+
+  it("disables Decision guard saves when the lease becomes read-only", async () => {
+    const guard = createStructuredEditorGuard();
+    call.mockResolvedValue([]);
+    await mount(<DecisionsPage {...common} guard={guard} />);
+    await click("New Decision"); await input("Decision title", "Held during handoff");
+    let leaving: boolean | undefined;
+    await act(async () => { void guard.saveNow().then((value) => { leaving = value; }); });
+    expect(([...document.querySelectorAll("[role='dialog'] button")].find((button) => button.textContent === "Save") as HTMLButtonElement).disabled).toBe(false);
+    await rerender(<DecisionsPage {...common} guard={guard} readOnly />);
+    const buttons = [...document.querySelectorAll("[role='dialog'] button")] as HTMLButtonElement[];
+    expect(buttons.find((button) => button.textContent === "Save")?.disabled).toBe(true);
+    expect(buttons.find((button) => button.textContent === "Discard")?.disabled).toBe(false);
+    expect(buttons.find((button) => button.textContent === "Stay")?.disabled).toBe(false);
+    await clickDialog("Save"); expect(leaving).toBeUndefined();
+    expect(call.mock.calls.some(([endpoint]) => endpoint === "POST /api/v1/decisions")).toBe(false);
+    await clickDialog("Stay"); expect(leaving).toBe(false);
+    expect((document.querySelector("[aria-label='Decision title']") as HTMLInputElement).value).toBe("Held during handoff");
+  });
+
+  it("disables Open Point guard saves when the lease becomes read-only", async () => {
+    const guard = createStructuredEditorGuard();
+    call.mockResolvedValue([]);
+    await mount(<OpenPointsPage {...common} guard={guard} />);
+    await click("New Open Point"); await input("Open point title", "Who approves the handoff?");
+    await act(async () => { void guard.saveNow(); });
+    expect(([...document.querySelectorAll("[role='dialog'] button")].find((button) => button.textContent === "Save") as HTMLButtonElement).disabled).toBe(false);
+    await rerender(<OpenPointsPage {...common} guard={guard} readOnly />);
+    const save = [...document.querySelectorAll("[role='dialog'] button")].find((button) => button.textContent === "Save") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    await clickDialog("Save");
+    expect(call.mock.calls.some(([endpoint]) => endpoint === "POST /api/v1/open-points")).toBe(false);
+    await clickDialog("Discard");
+    expect(document.querySelector("[role='dialog']")).toBeNull();
   });
 
   it("lets the shared workspace own narrow list/detail visibility", async () => {
