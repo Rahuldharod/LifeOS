@@ -45,7 +45,6 @@ import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
-import { KnowledgeSourceForm, sourcePreservedToast } from "./KnowledgeSourceForm.js";
 import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
 import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
@@ -66,6 +65,7 @@ import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
+import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
@@ -310,8 +310,6 @@ function App() {
   const [capture, setCapture] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
-  const [sourceTitle, setSourceTitle] = useState("");
-  const [sourceText, setSourceText] = useState("");
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
@@ -771,10 +769,10 @@ function App() {
     await refresh();
   }, `Undid the change to ${patch.title}`);
 
-  const ingestSource = () => run(async () => {
-    await api("POST /api/v1/sources/text", { body: { title: sourceTitle, text: sourceText } });
-    setSourceTitle(""); setSourceText(""); await refresh();
-  }, sourcePreservedToast);
+  const preserveSource = async (title: string, text: string) => {
+    await api("POST /api/v1/sources/text", { body: { title, text } });
+    await refresh();
+  };
 
   const connectGoogle = () => run(async () => {
     const response = await api("GET /api/v1/connections/google/start");
@@ -1355,7 +1353,19 @@ function App() {
         />
       </>}
 
-      {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text. Claude proposes Knowledge Notes from it through the LifeOS skills; you review them in Inbox." /><KnowledgeSourceForm title={sourceTitle} text={sourceText} disabled={busy || readOnly} onTitleChange={setSourceTitle} onTextChange={setSourceText} onPreserve={ingestSource} /><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
+      {view === "Knowledge" && <KnowledgeWorkspace
+        notes={knowledge}
+        sources={objectLinks.filter((object): object is LifeObject => object.frontmatter.type === "source" && "body" in object)}
+        projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))}
+        people={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: personLabel(labels, entity).label }))}
+        selectedId={route?.view === "Knowledge" ? route.id : undefined}
+        loading={!collectionsLoaded}
+        readOnly={readOnly}
+        displayTimeZone={displayTimeZone}
+        onOpen={(id) => void go({ view: "Knowledge", id })}
+        onBack={() => void go({ view: "Knowledge" })}
+        onPreserve={preserveSource}
+      />}
 
       {view === "System" && <><PageHeader eyebrow="SYSTEM" title="Health and device handoff" description="Integrity checks and an advisory lease protect the Markdown root during sequential two-device use." />
         <div className="summary">
