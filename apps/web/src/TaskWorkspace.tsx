@@ -5,12 +5,12 @@ import { CopyLink } from "./CopyLink.js";
 import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { areaOptions } from "./envelope.js";
 import { HistoryLink } from "./HistoryPanel.js";
-import { ListDetailWorkspace, RecordHeader, StickyRecordActions, WorkspaceFilterBar } from "./WorkspacePatterns.js";
+import { createStructuredEditorGuard, ListDetailWorkspace, RecordHeader, StickyRecordActions, WorkspaceFilterBar, type StructuredEditorGuard } from "./WorkspacePatterns.js";
 import { addCalendarDays, dateInTimeZone } from "./zonedTime.js";
 import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 
-export type StructuredEditorGuard = { dirty: boolean; conflict: boolean; saveNow: () => Promise<boolean> };
-export const createStructuredEditorGuard = (): StructuredEditorGuard => ({ dirty: false, conflict: false, saveNow: async () => true });
+export { createStructuredEditorGuard };
+export type { StructuredEditorGuard };
 
 type Option = { id: string; title: string };
 const taskStatuses = ["Inbox", "Next", "Waiting", "Done", "Cancelled"] as const;
