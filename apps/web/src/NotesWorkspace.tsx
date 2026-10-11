@@ -24,8 +24,8 @@ export type NotesWorkspaceProps = {
   products: Option[];
   people: Option[];
   timeZone: string;
-  searching: boolean;
   loading: boolean;
+  error?: string | null;
   readOnly: boolean;
   conflictedNoteIds: ReadonlySet<string>;
   emptyMessage: string;
@@ -89,6 +89,7 @@ export function NotesWorkspace(props: NotesWorkspaceProps) {
         <input type="search" aria-label="Search notes" placeholder={props.tab === "open" ? "Search notes…" : "Search deleted notes…"} value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} />
         <NoteFiltersPanel filters={props.filters} onChange={props.onFiltersChange} tab={props.tab} projects={props.projects} clients={props.clients} products={props.products} people={props.people} advanced={advanced} onToggleAdvanced={() => setAdvanced((value) => !value)} />
       </div>
+      {props.error && !(narrow && detailOpen) && <p className="notes-workspace-error" role="alert">{props.error}</p>}
       {props.loading ? <p className="muted" role="status">Loading notes…</p> : <>
         {!props.notes.length && <p className="muted">{props.emptyMessage}</p>}
         <div className="note-workspace-rows">
@@ -114,6 +115,7 @@ export function NotesWorkspace(props: NotesWorkspaceProps) {
           <button className={mode === "preview" ? "selected" : ""} aria-pressed={mode === "preview"} onClick={() => setMode("preview")}>Preview</button>
         </div>}
       </div>
+      {props.error && narrow && detailOpen && <p className="notes-workspace-error" role="alert">{props.error}</p>}
       {props.loading ? <article className="empty-state" role="status"><h3>Loading note…</h3><p>Reading the current Markdown file.</p></article>
         : state === "deleted" ? props.deletedDetail
         : state === "conflict" ? props.conflictDetail
