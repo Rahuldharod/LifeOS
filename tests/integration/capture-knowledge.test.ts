@@ -8,6 +8,10 @@ import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import type { ObjectEnvelope } from "@lifeos/domain";
 
+// #115: alone this finishes in well under a second, but a full parallel suite on a busy laptop has pushed it past
+// Vitest's 5 s default. A per-test limit keeps the assertions strict; only the wall-clock allowance grows.
+const SLOW_UNDER_LOAD_MS = 30_000;
+
 type WriteInput = { relativePath: string; frontmatter: ObjectEnvelope; body: string; expectedHash?: string };
 
 class CrashingCaptureStore extends MarkdownObjectStore {
@@ -47,7 +51,7 @@ describe("capture and knowledge workflows", () => {
     expect(note.frontmatter.type).toBe("knowledge-note");
     expect(application.knowledge("portable")).toHaveLength(1);
     expect(await store.incompleteOperations()).toHaveLength(0);
-  });
+  }, SLOW_UNDER_LOAD_MS);
 
   it("persists global capture details and multiline text through the application boundary", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "lifeos-global-capture-"));

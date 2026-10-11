@@ -11,6 +11,10 @@ import { escapeLinkTitle } from "../../apps/web/src/objectLinkMarkdown.js";
 import { insertLink } from "../../apps/web/src/visualLinkPaste.js";
 import { prepareVisualEditor, type ImageAwareEditor } from "../../apps/web/src/visualEditorImages.js";
 
+// #115: this takes about 4 s even on an idle machine, so a busy full-suite run can push it past Vitest's 5 s
+// default. A per-test limit keeps the assertions strict; only the wall-clock allowance grows.
+const SLOW_UNDER_LOAD_MS = 30_000;
+
 // Issue #89 (PB-003): opening a note in the visual editor and saving it must not change Markdown the
 // user did not edit. Every fixture is loaded into the real Milkdown Crepe editor through the app's
 // load/save path (visualMarkdown → Crepe → storedMarkdown) and serialised again without any edit —
@@ -273,7 +277,7 @@ describe("visual editor round trip (#89, PB-003)", () => {
         const { body } = await loadBody(name);
         expect(lostImages(body, await throughVisualEditor(body)), name).toEqual([]);
       }
-    });
+    }, SLOW_UNDER_LOAD_MS);
 
     it("the save guard catches a real loss: unpatched Crepe drops an untitled image", async () => {
       const body = "Whiteboard:\n\n![Whiteboard photo](../assets/whiteboard.png)\n\nEnd.\n";

@@ -6,6 +6,10 @@ import { LifeOSApplication } from "@lifeos/application";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 
+// #115: alone this finishes in well under a second, but a full parallel suite on a busy laptop has pushed it past
+// Vitest's 5 s default. A per-test limit keeps the assertions strict; only the wall-clock allowance grows.
+const SLOW_UNDER_LOAD_MS = 30_000;
+
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
@@ -30,7 +34,7 @@ describe("entity CRUD", () => {
     await application.deleteEntity(updated.frontmatter.id, updated.contentHash);
     expect(application.entities("task")).toHaveLength(0);
     expect((await application.health()).status).toBe("healthy");
-  });
+  }, SLOW_UNDER_LOAD_MS);
 
   it("persists task completion and waiting lifecycle metadata", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "lifeos-task-lifecycle-"));
