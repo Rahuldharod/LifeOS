@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider, useLocation } from "react-router";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
@@ -18,7 +18,10 @@ import { EditorFrame } from "./EditorFrame.js";
 import { NoteHeader, PENDING_NOTE_HASH } from "./NoteHeader.js";
 import { isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
-import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
+import { MarkdownEditor, ModeSwitch, type EditorOwner } from "./MarkdownEditor.js";
+import { MarkdownPreview } from "./MarkdownPreview.js";
+import { withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
+import { useLifeosLinks } from "./useLifeosLinks.js";
 import { addCalendarDays, dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
@@ -28,9 +31,6 @@ import { MeetingEnrichment } from "./MeetingEnrichment.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { CopyLink } from "./CopyLink.js";
-import { objectLinkMarkdown } from "./objectLinkMarkdown.js";
-import { markdownPasteAction } from "./markdownPaste.js";
-import { pasteLifeosLink } from "./visualLinkPaste.js";
 import { awaitingAdoptionLabel } from "./todayPanels.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
@@ -45,9 +45,6 @@ import { ReferenceDataSettings } from "./ReferenceDataSettings.js";
 import { parseReferenceSettingsId, referenceCardIdFromRoute, referenceRouteInSettings, referenceSettingsCardId, referenceSettingsId, type ReferenceEntityType } from "./referenceSettingsRoutes.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
-import { lostImages, roundTripReport, storedMarkdown, visualEditorFeatures, visualMarkdown, type RoundTripReport } from "./editorMarkdown.js";
-import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
-import { ImageLossNotice } from "./ImageLossNotice.js";
 import { takeoverCaution } from "./LeaseBanner.js";
 import { AppStatusBanners } from "./ConnectionDeviceSettings.js";
 import { useActivityHeartbeat } from "./activityHeartbeat.js";
@@ -70,16 +67,6 @@ import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
-type CrepeInstance = {
-  create(): Promise<unknown>;
-  getMarkdown(): string;
-  destroy(): Promise<unknown>;
-  setReadonly(value: boolean): unknown;
-  editor: { config(configure: (ctx: { set(slice: string, value: unknown): void; update(slice: string, updater: (value: never) => unknown): void }) => void): unknown };
-  on(callback: (listener: { markdownUpdated(callback: (context: unknown, markdown: string, previousMarkdown: string) => void): unknown }) => void): unknown;
-};
-type CrepeConstructor = new (config: { root: Node; defaultValue: string; features?: Record<string, boolean>; featureConfigs?: Record<string, unknown> }) => CrepeInstance;
-
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
 
@@ -87,96 +74,6 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function imagePreviewSource(source?: string) {
-  if (!source || /^(?:https?:|data:|blob:)/i.test(source)) return source;
-  const marker = source.lastIndexOf("assets/");
-  if (marker === -1) return source;
-  return `/api/v1/assets/${encodeURIComponent(source.slice(marker + "assets/".length))}`;
-}
-
-/** react-markdown drops unknown protocols; LifeOS object links must survive so they can be clicked (PB-007). */
-const keepLifeosLinks = (url: string) => lifeosLinkId(url) ? url : defaultUrlTransform(url);
-
-function fileContentBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read the image"));
-    reader.readAsDataURL(file);
-  });
-}
-
-/** The note a visual editor writes managed images against. For a calendar event with no note yet
- * (PB-020), `ensureOwner` creates it on demand — inserting an image is a real edit. */
-type EditorOwner = { id: string; relativePath: string };
-
-function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnly, onChange, linkObjects }: { linkObjects: LinkedObject[]; editorKey: string; owner: EditorOwner | undefined; ensureOwner?: () => Promise<EditorOwner | undefined>; markdown: string; readOnly: boolean; onChange: (markdown: string) => void }) {
-  const root = useRef<HTMLDivElement>(null);
-  const crepe = useRef<CrepeInstance | undefined>(undefined);
-  // Latest props for callbacks created once per mount. Reading these through refs matters: `readOnly`
-  // is true while an event is being opened (busy) and the editor finishes loading asynchronously, so
-  // a value captured at mount time would leave the editor — and its ribbon, which Crepe hides when
-  // read-only — locked until the next remount (PB-019).
-  const latest = useRef({ owner, ensureOwner, readOnly, onChange, linkObjects });
-  latest.current = { owner, ensureOwner, readOnly, onChange, linkObjects };
-  // Only changes made after the user has focused the editor count as edits. Crepe can re-emit
-  // normalized Markdown on its own after loading; that must never dirty the draft or trigger a save.
-  const engaged = useRef(false);
-  // #89: whether saving from this editor would rewrite Markdown the user did not edit.
-  const [roundTrip, setRoundTrip] = useState<RoundTripReport>();
-  // #91: images this editor would drop if it saved. When any, the editor stays read-only and never saves.
-  const [lost, setLost] = useState<string[]>();
-  const blocked = useRef(false);
-
-  useEffect(() => {
-    if (!root.current) return;
-    let active = true;
-    let instance: CrepeInstance | undefined;
-    const editorRoot = root.current;
-    engaged.current = false;
-    blocked.current = false;
-    setRoundTrip(undefined);
-    setLost(undefined);
-    void Promise.all([import("@milkdown/crepe"), import("./visualEditorImages.js")]).then(async ([crepePackage, { prepareVisualEditor }]) => {
-      if (!active) return;
-      const Crepe = (crepePackage as unknown as { Crepe: CrepeConstructor }).Crepe;
-      const uploadManagedImage = async (file: File) => {
-        const target = latest.current.owner ?? await latest.current.ensureOwner?.();
-        if (!target) throw new Error("Could not create the note to attach this image to");
-        const stored = await api("POST /api/v1/objects/:id/assets", { params: { id: target.id }, body: { fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64: await fileContentBase64(file) } });
-        return `/api/v1/assets/${encodeURIComponent(stored.relativePath.replace(/^assets\//, ""))}`;
-      };
-      instance = new Crepe({
-        root: editorRoot,
-        defaultValue: visualMarkdown(markdown),
-        features: visualEditorFeatures,
-        featureConfigs: { "image-block": { onUpload: uploadManagedImage, inlineOnUpload: uploadManagedImage, blockOnUpload: uploadManagedImage, proxyDomURL: imagePreviewSource } }
-      });
-      crepe.current = instance;
-      prepareVisualEditor(instance);
-      // Milkdown blanks the href of links it does not consider safe, which includes lifeos://. Keep the
-      // target on a data attribute so the app's click handler can still follow it (PB-007).
-      instance.editor.config((ctx) => ctx.set("linkAttr", (mark: { attrs: { href?: string } }) => (lifeosLinkId(mark.attrs.href) ? { "data-lifeos-href": mark.attrs.href } : {})));
-      instance.on((listener) => listener.markdownUpdated((_context, nextMarkdown) => {
-        if (!engaged.current || blocked.current) return;
-        latest.current.onChange(storedMarkdown(nextMarkdown, latest.current.owner?.relativePath ?? "meetings/pending.md", markdown));
-      }));
-      await instance.create();
-      if (!active) return;
-      const unedited = storedMarkdown(instance.getMarkdown(), latest.current.owner?.relativePath ?? "meetings/pending.md", markdown);
-      const missing = lostImages(markdown, unedited);
-      blocked.current = missing.length > 0;
-      instance.setReadonly(latest.current.readOnly || blocked.current);
-      setLost(missing);
-      setRoundTrip(roundTripReport(markdown, unedited));
-    });
-    return () => { active = false; crepe.current = undefined; if (instance) void instance.destroy(); };
-  }, [editorKey]);
-
-  useEffect(() => { crepe.current?.setReadonly(readOnly || blocked.current); }, [readOnly]);
-  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }
 
 type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
@@ -324,10 +221,6 @@ function App() {
   const calendar = useCalendar({ selectedDate, displayTimeZone, onFailure: setMessage, onGoogleStatusStale: refreshGoogleConnection });
   const [editorMode, setEditorMode] = useState<"visual" | "write" | "preview">("visual");
   const [busy, setBusy] = useState(false);
-  const editor = useRef<HTMLTextAreaElement>(null);
-  const imageInput = useRef<HTMLInputElement>(null);
-  const notesEditor = useRef<HTMLTextAreaElement>(null);
-  const notesImageInput = useRef<HTMLInputElement>(null);
   const taskEditorGuard = useRef(createStructuredEditorGuard()).current;
   const decisionEditorGuard = useRef(createStructuredEditorGuard()).current;
   const openPointEditorGuard = useRef(createStructuredEditorGuard()).current;
@@ -897,55 +790,6 @@ function App() {
     void api("GET /api/v1/connections/google").then(setGoogleConnection).catch(() => undefined);
   };
 
-  function insertMarkdown(before: string, after = "", placeholder = "text") {
-    const area = editor.current;
-    if (!area) return;
-    const start = area.selectionStart;
-    const end = area.selectionEnd;
-    const draft = meetingController.draft;
-    const selected = draft.slice(start, end) || placeholder;
-    const next = `${draft.slice(0, start)}${before}${selected}${after}${draft.slice(end)}`;
-    meetingController.setDraft(next);
-    requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + before.length, start + before.length + selected.length); });
-  }
-
-  function insertAtCursor(content: string, selectFrom = 0, selectLength = 0) {
-    const area = editor.current;
-    if (!area) return;
-    const start = area.selectionStart;
-    const end = area.selectionEnd;
-    const draft = meetingController.draft;
-    meetingController.setDraft(`${draft.slice(0, start)}${content}${draft.slice(end)}`);
-    requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + selectFrom, start + selectFrom + selectLength); });
-  }
-
-  function transformLines(transform: (line: string, index: number) => string, placeholder = "List item") {
-    const area = editor.current;
-    if (!area) return;
-    const selectionStart = area.selectionStart;
-    const selectionEnd = area.selectionEnd;
-    const draft = meetingController.draft;
-    const start = draft.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
-    const nextBreak = draft.indexOf("\n", selectionEnd);
-    const end = nextBreak === -1 ? draft.length : nextBreak;
-    const source = draft.slice(start, end) || placeholder;
-    const replacement = source.split("\n").map(transform).join("\n");
-    meetingController.setDraft(`${draft.slice(0, start)}${replacement}${draft.slice(end)}`);
-    requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start, start + replacement.length); });
-  }
-
-  function applyHeading(level: string) {
-    if (!level) return;
-    transformLines((line) => `${"#".repeat(Number(level))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading");
-  }
-
-  function insertCodeBlock() {
-    const language = window.prompt("Code language (for example: typescript, python, sql)", "typescript");
-    if (language === null) return;
-    const selected = editor.current ? meetingController.draft.slice(editor.current.selectionStart, editor.current.selectionEnd) : "";
-    insertMarkdown(`\n\n\`\`\`${language.trim()}\n`, "\n```\n\n", selected || "code");
-  }
-
   // The meeting note, creating it first if the event has none yet (inserting an image is a real edit).
   async function ensureMeetingNote(): Promise<EditorOwner | undefined> {
     const existing = workspaceRef.current?.note ?? createdWorkspace.current?.note;
@@ -953,35 +797,6 @@ function App() {
     if (!(await meetingController.saveNow({ allowEmpty: true }))) return undefined;
     const created = createdWorkspace.current?.note;
     return created ? { id: created.frontmatter.id, relativePath: created.relativePath } : undefined;
-  }
-
-  async function uploadImage(file: File) {
-    if (!workspace || !editorReady || !file.type.startsWith("image/")) return;
-    const draft = meetingController.draft;
-    const insertionStart = editor.current?.selectionStart ?? draft.length;
-    const insertionEnd = editor.current?.selectionEnd ?? insertionStart;
-    const suggestedAlt = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ");
-    const altText = window.prompt("Describe this image for accessibility", suggestedAlt);
-    if (altText === null) return;
-    setBusy(true);
-    try {
-      const contentBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-        reader.onerror = () => reject(reader.error ?? new Error("Could not read the image"));
-        reader.readAsDataURL(file);
-      });
-      const owner = await ensureMeetingNote();
-      if (!owner) throw new Error("Could not create the note to attach this image to");
-      const stored = await api("POST /api/v1/objects/:id/assets", { params: { id: owner.id }, body: { fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 } });
-      const markdown = `![${altText.trim()}](${stored.markdownPath})`;
-      meetingController.setDraft(`${draft.slice(0, insertionStart)}${markdown}${draft.slice(insertionEnd)}`);
-      requestAnimationFrame(() => { editor.current?.focus(); editor.current?.setSelectionRange(insertionStart + markdown.length, insertionStart + markdown.length); });
-      setMessage(stored.deduplicated ? "Existing image reused; Markdown link inserted" : "Image stored locally; Markdown link inserted");
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Image upload failed");
-    } finally { setBusy(false); }
   }
 
 
@@ -1052,58 +867,12 @@ function App() {
     } finally { setBusy(false); }
   };
 
-  // PB-007: a `lifeos://object/<id>` link opens the object inside the app. The object list is fetched
-  // fresh so a link to something created a moment ago still works, and the note being edited is saved
-  // first so leaving it can never drop text. PB-027: each link opened is a history entry.
-  const openLifeosLink = async (href: string) => {
-    try {
-      if (!(await leaveEditors())) return;
-      const objects = await refreshObjectLinks();
-      const target = resolveLifeosLink(href, objects);
-      if (target.kind === "invalid") return;
-      if (target.kind === "missing") { setMessage("That linked object no longer exists."); return; }
-      if (target.kind === "unsupported") { setMessage(`Opening a ${target.type.replace("-", " ")} from a link is not supported yet.`); return; }
-      if (target.kind === "note") {
-        const { open, deleted } = await refreshNoteLists();
-        setNoteQuery("");
-        const live = open.find((note) => note.frontmatter.id === target.id);
-        const gone = deleted.find((note) => note.frontmatter.id === target.id);
-        if (!live && !gone) { setMessage("That linked note no longer exists."); return; }
-        followRoute({ view: "Notes", noteTab: live ? "open" : "deleted", id: target.id });
-      } else if (target.kind === "meeting") {
-        const meeting = objects.find((object) => object.frontmatter.id === target.id);
-        const date = meeting?.frontmatter.starts_at ? dateInTimeZone(new Date(String(meeting.frontmatter.starts_at)), displayTimeZone) : selectedDate;
-        followRoute({ view: "Calendar", date, id: target.id });
-      } else if (target.kind === "inbox") {
-        followRoute({ view: "Inbox", id: target.id });
-      } else {
-        followRoute(referenceRouteInSettings({ view: target.view, id: target.id }));
-        // The same card again (no URL change) still flashes.
-        setHighlightId(target.id);
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not open the link");
-    }
-  };
-  // The click listener is attached once; it calls whichever handler the latest render created.
-  const linkHandler = useRef(openLifeosLink);
-  linkHandler.current = openLifeosLink;
-  useEffect(() => {
-    function onClick(event: MouseEvent) {
-      const anchor = (event.target as Element | null)?.closest?.("a[href], a[data-lifeos-href]");
-      if (!anchor) return;
-      // The editor's link bubble shows the raw address as its text, with an emptied href (PB-007).
-      const href = anchor.getAttribute("data-lifeos-href") ?? (anchor.closest(".milkdown-link-preview") ? anchor.textContent : anchor.getAttribute("href"));
-      if (!lifeosLinkId(href)) return;
-      // The browser cannot open lifeos:// itself, so it must never follow the link (an emptied href
-      // would open this page again in a new tab). One click opens the object, in every mode.
-      event.preventDefault();
-      event.stopPropagation();
-      void linkHandler.current(href!.trim());
-    }
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, []);
+  // PB-007: `lifeos://` links, from both editors, the copy-link feature and the Decisions/Open Points pages.
+  // Reference records (projects, clients, products, people) open inside Settings (#140).
+  const { openLifeosLink } = useLifeosLinks({
+    leaveEditors, refreshObjectLinks, refreshNoteLists, followRoute: (next) => followRoute(referenceRouteInSettings(next)), onMessage: setMessage, selectedDate, displayTimeZone,
+    onNoteOpened: () => setNoteQuery(""), onHighlight: setHighlightId
+  });
   /** #76: opens Settings and moves focus to the given card once it has rendered. */
   const openSettingsCard = async (cardId: string) => {
     await go({ view: "Settings", id: cardId });
@@ -1147,57 +916,6 @@ function App() {
       }
     };
   };
-
-  function editNotes(before: string, after = "", placeholder = "text") {
-    const area = notesEditor.current;
-    if (!area) return;
-    const start = area.selectionStart; const end = area.selectionEnd;
-    const notesDraft = notesController.draft;
-    const selected = notesDraft.slice(start, end) || placeholder;
-    notesController.setDraft(`${notesDraft.slice(0, start)}${before}${selected}${after}${notesDraft.slice(end)}`);
-    requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + before.length, start + before.length + selected.length); });
-  }
-
-  function insertNotes(content: string) {
-    const area = notesEditor.current;
-    if (!area) return;
-    const start = area.selectionStart; const end = area.selectionEnd;
-    const notesDraft = notesController.draft;
-    notesController.setDraft(`${notesDraft.slice(0, start)}${content}${notesDraft.slice(end)}`);
-    requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start + content.length, start + content.length); });
-  }
-
-  function transformNoteLines(transform: (line: string, index: number) => string, placeholder = "List item") {
-    const area = notesEditor.current;
-    if (!area) return;
-    const selectionStart = area.selectionStart; const selectionEnd = area.selectionEnd;
-    const notesDraft = notesController.draft;
-    const start = notesDraft.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
-    const nextBreak = notesDraft.indexOf("\n", selectionEnd); const end = nextBreak === -1 ? notesDraft.length : nextBreak;
-    const replacement = (notesDraft.slice(start, end) || placeholder).split("\n").map(transform).join("\n");
-    notesController.setDraft(`${notesDraft.slice(0, start)}${replacement}${notesDraft.slice(end)}`);
-    requestAnimationFrame(() => { area.focus(); area.setSelectionRange(start, start + replacement.length); });
-  }
-
-  async function uploadNotesImage(file: File) {
-    if (!selectedNote || !file.type.startsWith("image/")) return;
-    const notesDraft = notesController.draft;
-    const start = notesEditor.current?.selectionStart ?? notesDraft.length;
-    const end = notesEditor.current?.selectionEnd ?? start;
-    const altText = window.prompt("Describe this image for accessibility", file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "));
-    if (altText === null) return;
-    setBusy(true);
-    try {
-      const contentBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1] ?? ""); reader.onerror = () => reject(reader.error ?? new Error("Could not read the image")); reader.readAsDataURL(file);
-      });
-      const stored = await api("POST /api/v1/objects/:id/assets", { params: { id: selectedNote.frontmatter.id }, body: { fileName: file.name || "pasted-screenshot.png", mimeType: file.type, contentBase64 } });
-      const markdown = `![${altText.trim()}](${stored.markdownPath})`;
-      notesController.setDraft(`${notesDraft.slice(0, start)}${markdown}${notesDraft.slice(end)}`);
-      setMessage(stored.deduplicated ? "Existing image reused; Markdown link inserted" : "Image stored locally; Markdown link inserted");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Image upload failed"); }
-    finally { setBusy(false); }
-  }
 
   // "Keep browser version" / "Keep disk version" for both editors now live on their respective
   // controller (useNoteDraftController.ts) — wrapped with `busy` here since only the caller knows
@@ -1271,28 +989,9 @@ function App() {
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <EditorFrame>
                 {workspace.note
-                  ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
-                  : <NoteHeader note={pendingHeaderNote(workspace)} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><div className="mode-switch"><button className={editorMode === "visual" ? "selected" : ""} onClick={() => setEditorMode("visual")}>Visual</button><button className={editorMode === "write" ? "selected" : ""} onClick={() => setEditorMode("write")}>Markdown</button><button className={editorMode === "preview" ? "selected" : ""} onClick={() => setEditorMode("preview")}>Preview</button></div></NoteHeader>}
-                {editorMode === "write" ? <>
-                  <div className="toolbar">
-                    <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { applyHeading(event.target.value); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
-                    <button disabled={readOnly} title="Bold" onClick={() => insertMarkdown("**", "**")}>B</button>
-                    <button disabled={readOnly} title="Italic" onClick={() => insertMarkdown("*", "*")}><i>I</i></button>
-                    <button disabled={readOnly} title="Inline code" onClick={() => insertMarkdown("`", "`", "code")}>{"</>"}</button>
-                    <button disabled={readOnly} title="Fenced code block" onClick={insertCodeBlock}>Code block</button>
-                    <button disabled={readOnly} title="Bulleted list" onClick={() => transformLines((line) => `- ${line.replace(/^[-*+]\s+/, "")}`)}>• List</button>
-                    <button disabled={readOnly} title="Numbered list" onClick={() => transformLines((line, index) => `${index + 1}. ${line.replace(/^\d+\.\s+/, "")}`)}>1. List</button>
-                    <button disabled={readOnly} title="Task checkbox" onClick={() => transformLines((line) => `- [ ] ${line.replace(/^- \[[ xX]\]\s+/, "")}`)}>☐ Task</button>
-                    <button disabled={readOnly} title="Blockquote" onClick={() => transformLines((line) => `> ${line.replace(/^>\s?/, "")}`)}>❯ Quote</button>
-                    <button disabled={readOnly} title="Link" onClick={() => insertMarkdown("[", "](https://)", "link text")}>Link</button>
-                    <button disabled={readOnly || busy} title="Upload image" onClick={() => imageInput.current?.click()}>Image</button>
-                    <input ref={imageInput} className="hidden-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); event.target.value = ""; }} />
-                    <button disabled={readOnly} title="Horizontal divider" onClick={() => insertAtCursor("\n\n---\n\n")}>―</button>
-                    <button disabled={readOnly} title="Insert table" onClick={() => insertAtCursor("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>
-                    <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertAtCursor(objectLinkMarkdown(object)); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
-                  </div>
-                  <textarea ref={editor} disabled={!editorReady || busy || readOnly} value={meetingController.draft} onChange={(event) => meetingController.setDraft(event.target.value)} onPaste={(event) => { const paste = markdownPasteAction(event.clipboardData, objectLinks); if (paste?.kind === "image") { event.preventDefault(); void uploadImage(paste.file); } else if (paste) { event.preventDefault(); insertAtCursor(paste.markdown); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadImage(file); } }} placeholder="Capture meeting notes… Paste or drop an image here." />
-                </> : editorMode === "visual" && editorReady ? <VisualMarkdownEditor linkObjects={objectLinks} editorKey={`meeting:${editorSession}`} owner={meetingOwner} ensureOwner={ensureMeetingNote} markdown={meetingController.draft} readOnly={busy || readOnly} onChange={meetingController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{meetingController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+                  ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><ModeSwitch mode={editorMode} onChange={setEditorMode} /><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
+                  : <NoteHeader note={pendingHeaderNote(workspace)} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><ModeSwitch mode={editorMode} onChange={setEditorMode} /></NoteHeader>}
+                <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraft} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage />
                 <div className="editor-footer">
                   <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.pending && !meetingController.dirty ? "Not saved yet · nothing is written until you edit" : meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>
                   <MeetingNoteActions canDelete={Boolean(workspace.note)} deleteDisabled={busy || readOnly || meetingController.autoSaving} saveDisabled={!editorReady || busy || !meetingController.dirty || readOnly} onDelete={deleteMeetingNote} onSave={saveNote} />
@@ -1334,25 +1033,14 @@ function App() {
         onBack={() => void go({ view: "Notes", noteTab })}
         deletedDetail={!selectedDeleted ? null : <article className="editor-card">
               <div className="editor-heading"><div><span>DELETED {selectedDeleted.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedDeleted.frontmatter.title}</h3></div></div>
-              <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{selectedDeleted.body || "_Empty note._"}</ReactMarkdown></div>
+              <MarkdownPreview markdown={selectedDeleted.body} empty="_Empty note._" />
               <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><PermanentDeleteButton key={selectedDeleted.frontmatter.id} note={selectedDeleted} disabled={busy || readOnly} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onDeleted={async (deleted) => { if (deleted) setSelectedDeletedId(undefined); await refresh(); }} /><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedDeleted.frontmatter.created_at)} /><Meta label="Deleted" value={formatDate(String(selectedDeleted.frontmatter.deleted_at))} /><Meta label="Revision" value={String(selectedDeleted.frontmatter.revision)} /><Meta label="File" value={selectedDeleted.relativePath} /></div>
             </article>}
         conflictDetail={selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> : null}
         renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
               <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
-              {notesMode === "write" ? <>
-                <div className="toolbar">
-                  <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { if (event.target.value) transformNoteLines((line) => `${"#".repeat(Number(event.target.value))} ${line.replace(/^#{1,6}\s+/, "")}`, "Heading"); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
-                  <button disabled={readOnly} title="Bold" onClick={() => editNotes("**", "**")}>B</button><button disabled={readOnly} title="Italic" onClick={() => editNotes("*", "*")}><i>I</i></button><button disabled={readOnly} title="Inline code" onClick={() => editNotes("`", "`", "code")}>{"</>"}</button>
-                  <button disabled={readOnly} title="Fenced code block" onClick={() => { const language = window.prompt("Code language", "typescript"); if (language !== null) editNotes(`\n\n\`\`\`${language.trim()}\n`, "\n```\n\n", "code"); }}>Code block</button>
-                  <button disabled={readOnly} title="Bulleted list" onClick={() => transformNoteLines((line) => `- ${line.replace(/^[-*+]\s+/, "")}`)}>• List</button><button disabled={readOnly} title="Numbered list" onClick={() => transformNoteLines((line, index) => `${index + 1}. ${line.replace(/^\d+\.\s+/, "")}`)}>1. List</button><button disabled={readOnly} title="Task checkbox" onClick={() => transformNoteLines((line) => `- [ ] ${line.replace(/^- \[[ xX]\]\s+/, "")}`)}>☐ Task</button><button disabled={readOnly} title="Blockquote" onClick={() => transformNoteLines((line) => `> ${line.replace(/^>\s?/, "")}`)}>❯ Quote</button>
-                  <button disabled={readOnly} title="Link" onClick={() => editNotes("[", "](https://)", "link text")}>Link</button><button disabled={readOnly || busy} title="Upload image" onClick={() => notesImageInput.current?.click()}>Image</button><input ref={notesImageInput} className="hidden-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadNotesImage(file); event.target.value = ""; }} />
-                  <button disabled={readOnly} title="Horizontal divider" onClick={() => insertNotes("\n\n---\n\n")}>―</button><button disabled={readOnly} title="Insert table" onClick={() => insertNotes("\n\n| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |\n\n")}>Table</button>
-                  <select disabled={readOnly} aria-label="Link a LifeOS object" defaultValue="" onChange={(event) => { const object = objectLinks.find((candidate) => candidate.frontmatter.id === event.target.value); if (object) insertNotes(objectLinkMarkdown(object)); event.target.value = ""; }}><option value="" disabled>Link object…</option>{objectLinks.filter((object) => !object.frontmatter.deleted_at).sort((a, b) => a.frontmatter.title.localeCompare(b.frontmatter.title)).map((object) => <option key={object.frontmatter.id} value={object.frontmatter.id}>{object.frontmatter.type} · {object.frontmatter.title}</option>)}</select>
-                </div>
-                <textarea ref={notesEditor} disabled={busy || readOnly} value={notesController.draft} onChange={(event) => notesController.setDraft(event.target.value)} onPaste={(event) => { const paste = markdownPasteAction(event.clipboardData, objectLinks); if (paste?.kind === "image") { event.preventDefault(); void uploadNotesImage(paste.file); } else if (paste) { event.preventDefault(); insertNotes(paste.markdown); } }} onDragOver={(event) => { if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) event.preventDefault(); }} onDrop={(event) => { const file = Array.from(event.dataTransfer.files).find((candidate) => candidate.type.startsWith("image/")); if (file) { event.preventDefault(); void uploadNotesImage(file); } }} placeholder="Write Markdown… Paste or drop an image here." />
-              </> : notesMode === "visual" ? <VisualMarkdownEditor linkObjects={objectLinks} editorKey={selectedNote.frontmatter.id} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} markdown={notesController.draft} readOnly={busy || readOnly} onChange={notesController.setDraft} /> : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={keepLifeosLinks} components={{ img: ({ src, alt, ...props }) => <img {...props} src={imagePreviewSource(src)} alt={alt ?? ""} /> }}>{notesController.draft || "_Nothing to preview yet._"}</ReactMarkdown></div>}
+              <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
               <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}
