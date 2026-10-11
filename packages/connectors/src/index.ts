@@ -156,17 +156,18 @@ export class GoogleCalendarConnector implements CalendarConnector {
         };
       });
     }));
-    const events = eventGroups.flat().sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
+    const events = eventGroups.flat();
     // Google implements "this and following" by trimming one recurring event and inserting another.
     // The new recurringEventId changes, while a retained iCalUID gives a provider-native continuity signal.
     const lastSeriesByUid = new Map<string, string>();
-    return events.map((event) => {
+    const withSplits = [...events].sort((left, right) => Date.parse(left.originalOccurrenceStartsAt ?? left.startsAt) - Date.parse(right.originalOccurrenceStartsAt ?? right.startsAt)).map((event) => {
       if (!event.seriesId || !event.seriesUid) return event;
       const seriesScope = `${event.calendarId}:${event.seriesUid}`;
       const prior = lastSeriesByUid.get(seriesScope);
       lastSeriesByUid.set(seriesScope, event.seriesId);
       return prior && prior !== event.seriesId && !event.previousSeriesId ? { ...event, previousSeriesId: prior } : event;
     });
+    return withSplits.sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt));
   }
 
   private ref(suffix: string) { return `google:${this.accountKey}:${suffix}`; }
