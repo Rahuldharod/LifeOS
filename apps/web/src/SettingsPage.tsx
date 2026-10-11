@@ -3,10 +3,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api.js";
 import type { BackupSummary, BackupVerification, CalendarOption, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, SystemHealth, TodaySettings, Weekday } from "@lifeos/contracts";
-import { ConnectionsNotice, type ConnectionsState } from "./connections.js";
+import type { ConnectionsState } from "./connections.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
-import { BackupFolderCard } from "./BackupFolderCard.js";
 import { internalDomainsCardId, selfEmailsCardId } from "./SelfEmailWarning.js";
 import { SettingsDesignPrototype } from "./SettingsDesignPrototype.js";
 import { createSettingsEditorGuard, SettingsWorkspace, useSettingsCardGuard, type SettingsEditorGuard, type SettingsSection } from "./SettingsWorkspace.js";
@@ -124,7 +123,6 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
 
   if ((import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV && new URLSearchParams(window.location.search).has("variant")) return <SettingsDesignPrototype />;
 
-  const connectionStatus = (state?: { configured: boolean; connected: boolean }) => state?.connected ? "Connected" : state?.configured ? "Configured" : "Not connected";
   const sections: SettingsSection[] = [
     { id: "my-lifeos", group: "My LifeOS", label: "Preferences", cards: [
       { id: "settings-display-timezone", label: "Display timezone", safeStatus: displayTimeZone, content: <DisplayTimeZoneCard displayTimeZone={displayTimeZone} disabled={readOnly} onSave={onDisplayTimeZoneChange} /> },
@@ -276,61 +274,6 @@ function SelfEmailsCard({ setting, disabled, onSave }: { setting?: { emails: str
     {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div>}
     {setting && !setting.emails.length && !status && <p className="muted" role="status">Not set yet: no attendee is recognised as you by email.</p>}
     <SaveStatus status={status} />
-  </article>;
-}
-
-function CalendarListCard({ catalog, loaded, prefs, disabled: readOnly, onSave }: { catalog: CalendarOption[]; loaded: boolean; prefs: CalendarPrefs; disabled: boolean; onSave: (prefs: CalendarPrefs) => Promise<string | undefined> }) {
-  // Edits stay in this draft until Save, so a half-finished change (for example, nothing ticked) is never stored.
-  const [disabled, setDisabled] = useState(prefs.disabledCalendarIds);
-  const [defaultId, setDefaultId] = useState(prefs.defaultCalendarId);
-  const [status, setStatus] = useState<SaveState>();
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { setDisabled(prefs.disabledCalendarIds); setDefaultId(prefs.defaultCalendarId); }, [prefs]);
-
-  const selectedCount = catalog.filter((calendar) => !disabled.includes(calendar.id)).length;
-  const allSelected = catalog.length > 0 && selectedCount === catalog.length;
-  const noneSelected = catalog.length > 0 && selectedCount === 0;
-  const dirty = defaultId !== prefs.defaultCalendarId || [...disabled].sort().join("|") !== [...prefs.disabledCalendarIds].sort().join("|");
-  const defaultOff = Boolean(defaultId) && disabled.includes(defaultId!);
-  const edit = <T,>(setter: (value: T) => void, value: T) => { setter(value); setStatus(undefined); };
-
-  const save = async (): Promise<boolean> => {
-    if (noneSelected) { setStatus({ kind: "error", text: "Select at least one calendar before saving." }); return false; }
-    setSaving(true);
-    const error = await onSave({ ...prefs, disabledCalendarIds: disabled, defaultCalendarId: defaultId });
-    setSaving(false);
-    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Your other devices will pick this up when the data folder syncs." });
-    return !error;
-  };
-  useSettingsCardGuard("settings-calendar-list", { dirty, save, discard: () => { setDisabled(prefs.disabledCalendarIds); setDefaultId(prefs.defaultCalendarId); setStatus(undefined); } });
-
-  return <article className="calendar-list-setting"><span>CALENDARS</span><h3>Calendars in the Calendar view</h3>
-    <p className="muted">Tick the calendars to include. Hover a calendar to make it the default; the Calendar view opens on it.</p>
-    {!loaded && <p className="muted">Loading calendars…</p>}
-    {loaded && !catalog.length && <p className="muted">No calendars available. Connect Google Calendar to choose from your calendars.</p>}
-    {catalog.length > 0 && <div className="calendar-toolbar">
-      <button type="button" disabled={readOnly} onClick={() => edit(setDisabled, allSelected ? catalog.map((calendar) => calendar.id) : [])}>{allSelected ? "Unselect all" : "Select all"}</button>
-      <small className="muted">{selectedCount} of {catalog.length} selected</small>
-    </div>}
-    {catalog.map((calendar) => {
-      const enabled = !disabled.includes(calendar.id);
-      const isDefault = defaultId === calendar.id;
-      return <div className="calendar-row" key={calendar.id}>
-        <label><input type="checkbox" checked={enabled} disabled={readOnly} onChange={(event) => edit(setDisabled, event.target.checked ? disabled.filter((id) => id !== calendar.id) : [...disabled, calendar.id])} /><i style={{ background: calendar.color ?? "var(--color-border-strong)" }} />{calendar.name}{isDefault && <b className="calendar-default-badge">Default</b>}</label>
-        {enabled && <span className="calendar-row-actions">
-          {isDefault
-            ? <button type="button" disabled={readOnly} onClick={() => edit(setDefaultId, undefined)}>Remove default</button>
-            : <button type="button" disabled={readOnly} onClick={() => edit(setDefaultId, calendar.id)}>Set as default</button>}
-        </span>}
-      </div>;
-    })}
-    {noneSelected && <p className="calendar-error" role="alert">Select at least one calendar. You can't save with none selected.</p>}
-    {defaultOff && !noneSelected && <p className="muted" role="status">The default calendar is unticked, so the Calendar view will open on All calendars.</p>}
-    {catalog.length > 0 && <div className="calendar-save">
-      <button type="button" disabled={readOnly || !dirty || noneSelected || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
-      {dirty && !status && !noneSelected && <small className="muted">Unsaved changes</small>}
-      <SaveStatus status={status} />
-    </div>}
   </article>;
 }
 
