@@ -1,6 +1,6 @@
-# LifeOS design system: decisions from the first grilling session
+# LifeOS design system: approved decisions
 
-**Status:** Page-layout discovery and production specification are approved. Production implementation remains. Recorded 10 October 2026 on `codex/design-system-prototypes`. These are design decisions, not a production UI release.
+**Status:** The page-layout direction was approved on 10 October 2026. The visual-system and responsive-layout refinement was completed on 11 October 2026 and published as [GitHub issue #154](https://github.com/Rahuldharod/LifeOS/issues/154). The decisions below supersede the earlier palette and responsive assumptions.
 
 ## Purpose and experience
 
@@ -12,44 +12,97 @@
 
 ## Chosen colour direction
 
-Option A from `apps/web/palette-prototype-blue-accents.html?variant=A` is the approved palette comparison. The user found the earlier yellow and cream backgrounds too warm. Use a subtle warm-neutral canvas.
+The approved direction is **dark-blue ocean luxury**: warm, comfortable, calm and modern. This supersedes the earlier purple/blue Option A palette and its future dark-theme mapping.
 
-| Intended role shown in the mockup | Colour |
+| Settled palette role | Colour |
 | --- | --- |
-| Dark navigation and strongest text | `#201E43` |
-| Primary buttons and links | `#134B70` |
-| Selected navigation and focus accents | `#5473A1` |
-| Quiet secondary surface | `#EEEEEE` |
-| Supporting warm-neutral canvas | `#F8F6F4` |
-| Content surface | `#FFFFFF` |
+| Navigation / deepest blue | `#0B1F33` |
+| Primary ocean blue | `#123E5A` |
+| Supporting ocean teal | `#2E6F73` |
+| Warm accent | `#8E522F` |
+| Warm canvas | `#F6F1E8` |
 
-The first four colours are the selected palette. The final two are supporting neutrals from the comparison. Colour roles still need production contrast checks across all states. Do not rely on colour alone to communicate state.
+The supporting neutral, focus and interaction-state roles are defined in the approved foundations below. Do not rely on colour alone to communicate state.
 
-### Production token contract (#129)
+The approved semantic notification treatment is **Deep tint**:
 
-The production UI defines these roles in `apps/web/src/design-tokens.css`. Components use role names rather than palette values.
+| Meaning | Text | Fill | Border |
+| --- | --- | --- | --- |
+| Success | `#163C2D` | `#C9DED2` | `#4F8069` |
+| Error | `#681F28` | `#EBCAC9` | `#A94D55` |
+| Warning | `#583316` | `#E9D0B5` | `#A66A32` |
+| Information | `#123E5A` | `#C9DDE2` | `#3E7480` |
+
+The text/fill pairs measure approximately 7.4:1–8.7:1. Every semantic notification also has an icon and visible label. Reserve stronger solid semantic treatments for actions whose consequence has that meaning, such as final destructive confirmation.
+
+### Production token contract (#129, remapped in #154)
+
+The production UI defines these roles in `apps/web/src/design-tokens.css`. Components use role names rather than palette values; no production stylesheet carries a raw palette value.
 
 | Token family | Named roles |
 | --- | --- |
-| Colour | canvas, surface, quiet surface, text, muted text, primary, primary hover/active, accent, border/strong border, focus, error, success, warning, sidebar/hover/active/text/muted |
-| Typography | sans family; xs, sm, md, lg, xl and 2xl sizes; tight and body line heights |
-| Layout | seven spacing steps; small, medium, large and pill radii; thin and strong borders |
-| Elevation and focus | surface and overlay shadows; a two-colour focus ring that remains visible on light and dark surfaces |
+| Colour | canvas, surface, quiet and raised surface, text, muted and inverse text, border (decorative) and strong border (interactive), primary with hover and active, link, selection, accent and warm accent, focus and focus-on-dark, disabled surface/border/text, success/error/warning/information text, fill and border, danger, scrim, sidebar roles |
+| Typography | system sans and mono families; xs (13px) to 2xl sizes plus an editor size; tight, body (1.55) and editor (1.65) line heights |
+| Layout | seven spacing steps; small, medium, large and pill radii; thin and strong borders; minimum target; canvas cap; reading, form and editor measures; sidebar widths |
+| Elevation and focus | surface, raised and overlay shadows; a focus ring for light surfaces and one for dark navigation |
 
-The light roles use the approved palette. Supporting state colours are chosen for readable text and visible controls. Checked contrast ratios include body text on canvas **14.67:1**, muted text on canvas **6.03:1**, primary/link text on white **9.26:1**, white text on the primary action **9.26:1**, white text on selected navigation **4.83:1**, sidebar text **15.81:1**, sidebar muted text **9.73:1**, and the focus accent against white **4.83:1** and canvas **4.48:1**. Hover has an accent edge as well as a background change; selected state uses text plus `aria-current`, so colour is not the only signal. Disabled controls retain their native disabled state and are not communicated through colour alone.
+The responsive bands, short-height threshold and list clamps live in `apps/web/src/workspaceLayout.ts`. The shell publishes the result as `data-band` and `data-height`, so CSS and the accessible `hidden` state of list and detail panes always agree.
 
-Dark theme is deliberately not shipped. Its approved future mapping is:
+Dark theme remains deliberately unshipped. The earlier purple dark mapping is removed; a later dark-theme ticket must derive a new ocean mapping and re-check every component state before exposing a theme preference.
 
-| Role | Dark mapping |
-| --- | --- |
-| canvas / surface / quiet surface | `#121225` / `#1C1A36` / `#292743` |
-| text / muted text | `#F7F5FA` / `#C8C5D3` |
-| primary / accent / focus | `#8FC7EC` / `#9CB7DE` / `#ADC8F0` |
-| border / strong border | `#57536F` / `#8D88A3` |
-| error / success / warning | `#FFB4AB` / `#8ED4AD` / `#F1C27D` |
-| sidebar / hover / active / text / muted | `#0B0A18` / `#29264F` / `#445E8A` / `#F7F5FA` / `#C8C5D3` |
+### Implementation status (#154)
 
-The dark foreground roles all exceed 10:1 against the dark canvas. A later dark-theme ticket must re-check every component state before exposing a theme preference.
+Implemented and covered by the Playwright browser seam (`tests/browser/`, `pnpm test:browser`) and focused component tests:
+
+- Ocean light roles, Deep tint semantic roles, action hierarchy (filled primary, outlined secondary, text tertiary), explicit disabled colours, width-stable loading with `aria-busy`, and the solid final destructive confirmation.
+- Workspace-width bands with the narrow top bar (Menu, Search, Capture) and navigation sheet, the short-height treatment, the 1,880px canvas cap and the reading, form and editor measures.
+- Per-workspace list clamps with a keyboard-operable divider remembered per workspace on this device and reset on double-click or Enter; the Settings section rail stays fixed.
+- Narrow list → detail with Back, focus on the detail heading after opening, and restored row focus and list scroll after Back. Knowledge Notes now have direct links like other records.
+- Skip link, overlay focus containment and return, reduced-motion handling, wide internal rails for Inbox evidence, Decision and Open Point relationships and Knowledge sources, and Reference data list/detail only in the standard and wide bands.
+
+### Release-validation status (#142)
+
+Implemented and automated with synthetic data only:
+
+- Chromium checks cover Calendar, Tasks, Notes, Inbox and Settings at 320px and desktop widths, with one main landmark, no page-level horizontal overflow, narrow navigation controls, skip link, overlay focus return and reduced-motion rules.
+- Shared list/detail workspaces move focus to a labelled detail heading when opened and restore the initiating row after Back. Notifications use visible text plus polite status announcements; destructive lifecycle actions stay explicitly confirmed, while permanent note deletion uniquely requires an exact title match.
+- Focused tests cover keyboard-operable split dividers, list/detail return, landmark structure, semantic status feedback and permanent-delete confirmation. Typecheck, full tests, browser seam and production build are release gates.
+
+Manual checks remain required and are intentionally not represented as automated success: current Safari and Chrome keyboard traversal, VoiceOver with Safari landmarks/headings/names/status announcements, actual browser zoom at 200% and 400%, and human review of interactive contrast states on target displays.
+
+### Approved visual and responsive foundations
+
+Approved on 11 October 2026 during the refinement interview:
+
+- **Surface hierarchy:** place white primary content surfaces on the warm canvas. Use warmer quiet surfaces, thin borders and restrained shadow for secondary separation rather than flattening everything onto the canvas.
+- **Core colour responsibilities:** use the deepest blue for navigation and strongest text, ocean blue for primary actions and links, ocean teal for selection, focus and supporting emphasis, and warm brown sparingly for editorial emphasis. Warm brown is not the general action or warning colour.
+- **Semantic strength:** use the Deep tint system for banners, inline errors and status treatments. Reserve solid semantic colour for actions whose consequence has that meaning, such as the final destructive confirmation. Keep icons and visible labels alongside colour.
+- **Action hierarchy:** allow one filled primary action per action area, followed by outlined secondary actions and text-style tertiary actions. Show destructive emphasis only when the destructive choice is relevant. Loading keeps the control width and action context stable.
+- **Responsive coordinates:** respond to usable workspace width after the sidebar, not named devices. Initial bands are narrow below 760px, compact from 760–1,199px, standard from 1,200–1,799px and wide from 1,800px. Apply an independent short-height treatment below 900px.
+- **Wide-screen boundary:** cap the purposeful working canvas around 1,880px and use balanced outer margins beyond it. Add useful columns only where the content supports them; keep reading, form and editor measures roughly 900–1,200px.
+- **Supporting neutral roles:** use `#FFFFFF` for primary surfaces, `#EAE4D8` for quiet surfaces, `#53636A` for muted text, `#D8D1C4` for decorative separation and `#7B8587` for interactive control borders. Use ocean teal for focus on light surfaces and white for focus on dark navigation.
+- **Navigation reflow:** preserve the user's expanded-or-collapsed sidebar preference throughout compact, standard and wide bands; do not force laptop users to collapse it. In the narrow band, replace the sidebar with a top bar exposing Menu, Search and Capture; Menu opens the navigation sheet.
+- **Short-height treatment:** below 900px, reduce header, padding and banner height while preserving text sizes and control targets. Let panes scroll independently, keep important actions sticky and retain visible actions on warnings.
+- **Semantic placement:** use tinted banners for page-level conditions, place field and workflow errors beside the affected control, show routine save state as calm persistent inline text, and reserve brief notifications for discrete workflow completion.
+- **Pane sizing:** use workspace-specific minimum and maximum widths for list panes rather than permanent percentages. Give the detail pane the remaining space; in the narrow band, navigate from list to full-width detail and back.
+- **Compact toolbars:** wrap common controls before they clip. Keep search and the most frequent controls first, and move Advanced filters to their own line as space tightens.
+- **Internal content measures:** allow the surrounding detail pane to grow while keeping reading content near `75ch`, structured forms near `900px` and rich editors near `1,200px` maximum width.
+- **Button states:** primary actions use ocean blue by default, brighten to `#2A718E` with a subtle lift and shadow on hover, and deepen with a one-pixel press treatment when active. Focus adds the approved context-aware ring. Disabled controls use explicit readable colours rather than global opacity. Loading retains control width and action context. Final destructive confirmation uses the solid error treatment only after the destructive path is chosen.
+- **Workspace list clamps:** use 460–640px for Tasks, 320–480px for Calendar, 360–520px for Notes, 380–520px for Inbox, 380–560px for Decisions and Open Points, 360–520px for Knowledge, 240–320px for the Settings section rail and 320–480px for Reference data lists.
+- **Resizable panes:** primary list/detail workspaces share a bounded divider whose position is remembered per workspace on this device and resets on double-click. Keep the outer Settings section rail fixed; allow the nested Reference data list to resize.
+- **Wide-screen columns:** preserve master/detail as the default grammar. Today may use three purposeful columns, and content-rich detail may add an internal evidence or relationships rail. Do not add a third column merely to fill available space.
+- **Today reflow:** never stretch Top 3 to match taller neighbouring content. Keep priorities first on narrow screens; allow three purposeful columns on wide screens for Top 3, next meeting/Capture and supporting day context.
+- **Tasks, Calendar and Notes reflow:** use the approved list clamps, independent pane scrolling and narrow list-to-detail navigation. Keep forms, editors and prose within their approved internal measures. Calendar proposals remain below the editor; Note conflict versions stack only in the narrow band.
+- **Inbox, Decisions, Open Points and Knowledge reflow:** preserve a focused record workflow on narrow screens. On wide screens, supporting evidence, relationships or Sources may form an internal rail inside the record detail, never a universal app-level pane.
+- **Settings reflow:** keep the outer section rail stable. Show nested Reference data list/detail only when it fits; compact and narrow layouts navigate through successive section-to-content and list-to-detail steps rather than squeezing three columns.
+- **Zoom and reflow:** at 200% and 400% zoom, move naturally through the approved responsive bands without page-level horizontal scrolling. Only inherently two-dimensional content may scroll inside its own bounded region.
+- **Keyboard movement:** provide a skip link past navigation. Opening detail moves focus to its heading; Back restores the originating list row and scroll position. Overlays trap focus and return it to their trigger.
+- **Typography and targets:** use the system sans family with no separate font preference in this phase. Use 16px/1.55 for UI body text, 17px/1.65 for the long-form editor and never less than 13px for supporting text. Interactive targets are at least 40px on desktop and 44px for coarse pointers.
+- **Assistive feedback and motion:** keep visible status and assistive announcements in the same state. Announce routine progress politely; treat errors immediately and identify their affected control. Reduced-motion removes non-essential movement without hiding state changes.
+- **Surface geometry:** preserve the established 4, 8, 12, 16, 24, 32 and 48px spacing steps; 6px small, 8px control, 14px surface and pill radii; thin borders; restrained surface shadows; and stronger shadows only for overlays.
+- **Theme scope:** complete and validate the light theme in this refinement. Keep role names theme-ready, but defer a new ocean dark mapping to a separate prototype and contrast-validation task rather than preserving or guessing from the superseded purple mapping.
+- **Implementation route:** implement [issue #154](https://github.com/Rahuldharod/LifeOS/issues/154), the `ready-for-agent` child of #127. Keep closed issue #129 as historical evidence. Issue #154 blocks #142 release validation.
+- **Highest automated test seam:** add one Playwright browser seam against the built LifeOS app, localhost API and synthetic data. Cover real CSS layout, responsive band boundaries, clipping, page-level overflow, keyboard movement, focus restoration and accessible states there. Preserve focused component tests for detailed behaviour; #142 retains manual Safari, Chrome, VoiceOver and actual 200%/400% zoom validation.
 
 ## Navigation and workflows
 
@@ -120,31 +173,12 @@ Approved in the second grilling session on 10 October 2026:
 
 The review prototype for these decisions is `apps/web/layout-prototype.html`. It uses the approved palette and navigation, synthetic data and no persistence. A prototype wiring issue that initially prevented Settings sections from opening in the right-hand workspace was corrected after the decision.
 
-## Remaining before production implementation
+## Production implementation frontier
 
-No further product-level page-layout decision is currently open. The production specification is [GitHub issue #127](https://github.com/Rahuldharod/LifeOS/issues/127). Its approved implementation sequence is:
+No further product-level visual or responsive decision is open for this phase. [GitHub issue #154](https://github.com/Rahuldharod/LifeOS/issues/154), the child of [#127](https://github.com/Rahuldharod/LifeOS/issues/127), supplied the completed visual and responsive foundation.
 
-1. [Design tokens and application shell — #129](https://github.com/Rahuldharod/LifeOS/issues/129)
-2. [Tasks workspace and reusable list/detail foundation — #130](https://github.com/Rahuldharod/LifeOS/issues/130)
-3. [Global Search and Capture — #131](https://github.com/Rahuldharod/LifeOS/issues/131)
-4. [Priority-first Today — #132](https://github.com/Rahuldharod/LifeOS/issues/132)
-5. [Calendar workspace — #133](https://github.com/Rahuldharod/LifeOS/issues/133)
-6. [Notes workspace and conflict comparison — #134](https://github.com/Rahuldharod/LifeOS/issues/134)
-7. [Inbox review workspace — #135](https://github.com/Rahuldharod/LifeOS/issues/135)
-8. [Decisions and Open Points workspaces — #136](https://github.com/Rahuldharod/LifeOS/issues/136)
-9. [Knowledge workspace — #137](https://github.com/Rahuldharod/LifeOS/issues/137)
-10. [Grouped Settings workspace — #138](https://github.com/Rahuldharod/LifeOS/issues/138)
-11. [Connections and Data & devices Settings — #139](https://github.com/Rahuldharod/LifeOS/issues/139)
-12. [Reference data inside Settings — #140](https://github.com/Rahuldharod/LifeOS/issues/140)
-13. [Accessibility, responsive and release validation — #142](https://github.com/Rahuldharod/LifeOS/issues/142)
+The automated release gate is [accessibility, responsive and release validation — #142](https://github.com/Rahuldharod/LifeOS/issues/142). The manual assistive-technology and browser checks above remain a release handoff item.
 
-GitHub's native blocking relationships define the implementation frontier. Start with issue #129, then work any unblocked `ready-for-agent` ticket. The remaining production work is:
-
-1. Convert the approved direction into named typography, spacing, radius, border, focus and colour-role tokens. Confirm every interactive state meets WCAG 2.2 AA contrast requirements.
-2. Specify reusable list rows, detail headers, sticky action bars, form controls, banners, empty states, skeletons, confirmations, Search and Capture overlays.
-3. Validate the chosen list-to-detail narrow-screen behaviour on representative Calendar, Tasks, Notes, Inbox and Settings flows at reflow and zoom breakpoints.
-4. Define the dark-theme mappings for the named colour roles without building a dark theme in this phase.
-5. Rewrite the approved prototype patterns as production components. The prototype remains throwaway reference code and must not be promoted directly.
-6. Run keyboard, screen-reader, focus-order, reduced-motion, reflow and production-build checks across every destination and state before release.
+The dark ocean theme remains a separate future prototype and contrast-validation task. Production code must use theme-ready role names, but this phase ships only the validated light theme.
 
 See `README.md`, `docs/product-design/LifeOS_Solution_Design_v0.8.md` and `docs/architecture/README.md` for the existing product and implementation boundaries.

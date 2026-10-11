@@ -1,4 +1,4 @@
-.reference-settings { display: grid; grid-template-columns: minmax(240px, 34%) minmax(0, 1fr); min-height: 560px; border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface); }
+.reference-settings { display: grid; grid-template-columns: minmax(320px, min(34%, 480px)) minmax(0, 1fr); min-height: 560px; border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface); }
 .reference-list, .reference-detail { min-width: 0; padding: var(--space-4); }
 .reference-list { border-right: var(--border-thin) solid var(--color-border); background: var(--color-surface-quiet); }
 .reference-list header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -17,6 +17,12 @@
 .reference-fields input, .reference-fields select { width: 100%; }
 .reference-person-controls, .reference-record-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .reference-detail .record-more { margin: var(--space-4) 0 72px; }
+.reference-settings[data-stacked="true"] { display: block; min-height: 0; }
+.reference-settings[data-stacked="true"].detail-open .reference-list { display: none; }
+.reference-settings[data-stacked="true"]:not(.detail-open) .reference-detail { display: none; }
+.reference-settings[data-stacked="true"] .reference-list { border-right: 0; }
+.reference-settings[data-stacked="true"] .reference-back { display: inline-flex; }
+.reference-settings[data-stacked="true"] .reference-fields { grid-template-columns: 1fr; }
 @media (max-width: 760px) {
   .reference-settings { display: block; min-height: 0; }
   .reference-settings.detail-open .reference-list { display: none; }

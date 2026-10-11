@@ -4,7 +4,9 @@ import { LockBadge } from "./EnvelopeBadges.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { WorkspaceFilterBar } from "./WorkspacePatterns.js";
 import { addCalendarDays, dateInTimeZone, zonedMidnight } from "./zonedTime.js";
-import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
+import { useSplitPane } from "./splitPane.js";
+import { useListDetailReturn } from "./useListDetailReturn.js";
+import { useStackedWorkspace } from "./useNarrowWorkspace.js";
 import "./InboxWorkspace.css";
 
 export type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
@@ -30,7 +32,6 @@ const proposalCategory = (review: InboxReview): ProposalCategory => {
   if (review.frontmatter.target_object_type === "open-point") return "Open points";
   return "Updates";
 };
-const isNarrowNow = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches;
 
 const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string) => {
   if (!period) return undefined;
@@ -46,8 +47,9 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   onAccept: (review: InboxReview) => Promise<ActionResult>; onReject: (review: InboxReview) => Promise<ActionResult>; onSave: (review: InboxReview, edits: ReviewEdits) => Promise<ActionResult>;
   linkActionsFor?: (reviewId: string) => LinkCardActions;
 }) {
-  const narrow = useNarrowWorkspace();
-  const [openedId, setOpenedId] = useState<string | undefined>(() => selectedId ?? (isNarrowNow() ? undefined : reviews[0]?.frontmatter.id));
+  const narrow = useStackedWorkspace("inbox");
+  const [openedId, setOpenedId] = useState<string | undefined>(() => selectedId ?? (narrow ? undefined : reviews[0]?.frontmatter.id));
+  const split = useSplitPane("inbox");
   const [query, setQuery] = useState(""); const [type, setType] = useState(""); const [advanced, setAdvanced] = useState(false);
   const [meetingId, setMeetingId] = useState(""); const [period, setPeriod] = useState<CreatedPeriod>("");
   const [completion, setCompletion] = useState<Completion>(); const [notification, setNotification] = useState(""); const [actionError, setActionError] = useState("");
@@ -96,9 +98,10 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   };
   const itemBusy = Boolean(busy || (selected && activeId === selected.frontmatter.id));
 
-  return <div className={`inbox-workspace${selected ? " detail-open" : ""}`}>
+  const ref = useListDetailReturn(selected?.frontmatter.id);
+  return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" data-stacked={narrow} style={split.style}>
     {notification && <div className="inbox-toast" role="status">{notification}</div>}
-    <section className="inbox-queue" aria-label="Review queue" hidden={narrow && Boolean(selected)}>
+    <section className="inbox-queue" data-pane="list" aria-label="Review queue" hidden={narrow && Boolean(selected)}>
       <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div></header>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}>
         <input type="search" aria-label="Search proposals" placeholder="Search proposals…" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -111,9 +114,10 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       </div>}
       {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviews.length ? "No matching proposals" : "Inbox clear"}</h3><p>{reviews.length ? "Change or clear the filters." : "No proposals require your attention."}</p></div> : <div className="inbox-rows">{visible.map((review) => <button className={openedId === review.frontmatter.id ? "inbox-row selected" : "inbox-row"} aria-label={`Open proposal: ${review.frontmatter.title}`} aria-pressed={openedId === review.frontmatter.id} key={review.frontmatter.id} onClick={() => open(review.frontmatter.id)}><span><strong>{review.frontmatter.title}</strong><small>{proposalLabel(review)} · {dateInTimeZone(new Date(review.frontmatter.created_at), displayTimeZone)}</small></span><LockBadge frontmatter={review.frontmatter} /></button>)}</div>}
     </section>
-    <section className="inbox-detail" aria-label="Review detail" hidden={narrow && !selected}>
+    {!narrow && <div {...split.dividerProps} />}
+    <section className="inbox-detail" data-pane="detail" aria-label="Review detail" hidden={narrow && !selected}>
       {!selected ? <div className="inbox-state"><h3>Select a proposal</h3><p>Choose a row to review its source, evidence and proposed change.</p></div> : <>
-        <header className="inbox-record-header"><div><span>{proposalLabel(selected)}</span><h2>{selected.frontmatter.title}</h2><div className="inbox-record-meta"><LockBadge frontmatter={selected.frontmatter} /><small>{String(selected.frontmatter.confidence_label ?? "Unrated")} confidence</small></div></div><button className="narrow-back" aria-label="Back to review queue" onClick={back}>Back</button></header>
+        <header className="inbox-record-header"><button className="narrow-back" aria-label="Back to review queue" onClick={back}>Back</button><div><span>{proposalLabel(selected)}</span><h2 data-detail-heading tabIndex={-1}>{selected.frontmatter.title}</h2><div className="inbox-record-meta"><LockBadge frontmatter={selected.frontmatter} /><small>{String(selected.frontmatter.confidence_label ?? "Unrated")} confidence</small></div></div></header>
         {readOnly && <p className="inbox-read-only">Read-only on this Mac. Take back the write lease before accepting, editing or rejecting proposals.</p>}
         {selectedCompletion && <div className={`inbox-completion ${selectedCompletion}`}><strong>{selectedCompletion === "accepted" ? "Accepted" : "Rejected"}</strong><span>This decision is recorded. The proposal remains here until you choose another item.</span></div>}
         {actionError && <p className="review-error" role="alert">{actionError}</p>}
@@ -133,10 +137,10 @@ function SourceAndEvidence({ review, objectById }: { review: InboxReview; object
   const meeting = objectById.get(text(review.frontmatter.source_meeting_id));
   const sourceIds = Array.isArray(review.frontmatter.source_ids) ? review.frontmatter.source_ids.filter((id): id is string => typeof id === "string") : [];
   const evidence = Object.values(review.evidence ?? {}).flat();
-  return <>
+  return <div className="inbox-evidence-rail" role="group" aria-label="Source and evidence">
     <section className="inbox-detail-section"><h3>Source</h3>{meeting ? <p><strong>Meeting:</strong> {meeting.frontmatter.title}</p> : review.frontmatter.source_meeting_id ? <p className="unresolved">Meeting unavailable: {String(review.frontmatter.source_meeting_id)}</p> : <p className="muted">No source meeting recorded.</p>}{sourceIds.length > 0 && <ul>{sourceIds.map((id) => <li key={id}>{objectById.get(id)?.frontmatter.title ?? `Unavailable source: ${id}`}</li>)}</ul>}</section>
     <section className="inbox-detail-section"><h3>Evidence</h3>{evidence.length ? <ul className="review-evidence">{evidence.map((entry, index) => <Evidence key={`${entry.field}-${index}`} entry={entry} />)}</ul> : <p className="muted">No field evidence recorded.</p>}</section>
-  </>;
+  </div>;
 }
 
 function Evidence({ entry }: { entry: ReviewEvidence }) {

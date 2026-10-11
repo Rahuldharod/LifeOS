@@ -19,6 +19,7 @@ describe("routes (PB-027)", () => {
     expect(parseRoute("/notes/deleted")).toEqual({ view: "Notes", noteTab: "deleted" });
     expect(parseRoute("/notes")).toEqual({ view: "Notes", noteTab: "open" });
     expect(parseRoute(`/tasks/${NOTE}`)).toEqual({ view: "Tasks", id: NOTE });
+    expect(parseRoute(`/knowledge/${NOTE}`)).toEqual({ view: "Knowledge", id: NOTE });
     expect(parseRoute(`/inbox/${NOTE}`)).toEqual({ view: "Inbox", id: NOTE });
     expect(parseRoute("/settings/settings-self-emails")).toEqual({ view: "Settings", id: "settings-self-emails" });
   });
@@ -30,7 +31,7 @@ describe("routes (PB-027)", () => {
   });
 
   it("round-trips every shape it builds", () => {
-    for (const path of ["/today", "/notes", "/notes/deleted", `/notes/${NOTE}`, `/notes/deleted/${NOTE}`, "/calendar", "/calendar/2026-01-31", `/calendar/2026-01-31/${MEETING}`, `/people/${NOTE}`, "/knowledge", "/system", "/settings/settings-self-emails"]) {
+    for (const path of ["/today", "/notes", "/notes/deleted", `/notes/${NOTE}`, `/notes/deleted/${NOTE}`, "/calendar", "/calendar/2026-01-31", `/calendar/2026-01-31/${MEETING}`, `/people/${NOTE}`, "/knowledge", `/knowledge/${NOTE}`, "/system", "/settings/settings-self-emails"]) {
       expect(routePath(parseRoute(path)!)).toBe(path);
     }
   });
@@ -69,6 +70,7 @@ describe("routeTarget: a bookmarked id that is gone (PB-027)", () => {
     expect(routeTarget({ view: "Notes", noteTab: "open", id: NOTE }, data)).toEqual({ kind: "ok" });
     expect(routeTarget({ view: "Calendar", date: "2026-10-09", id: MEETING }, data)).toEqual({ kind: "ok" });
     expect(routeTarget({ view: "Tasks", id: TASK }, data)).toEqual({ kind: "ok" });
+    expect(routeTarget({ view: "Knowledge", id: NOTE }, data)).toEqual({ kind: "ok" });
     expect(routeTarget({ view: "Inbox", id: REVIEW }, data)).toEqual({ kind: "ok" });
     expect(routeTarget({ view: "Tasks" }, data)).toEqual({ kind: "ok" });
   });
@@ -100,6 +102,7 @@ describe("routeTarget: a bookmarked id that is gone (PB-027)", () => {
     expect(routeTarget({ view: "Calendar", date: "2026-10-09", id: TASK }, data)).toEqual({ kind: "missing", message: "That meeting no longer exists." });
     expect(routeTarget({ view: "Tasks", id: "gone-task" }, data)).toEqual({ kind: "missing", message: "That task no longer exists." });
     expect(routeTarget({ view: "Projects", id: TASK }, data)).toEqual({ kind: "missing", message: "That project no longer exists." });
+    expect(routeTarget({ view: "Knowledge", id: "nope" }, data)).toEqual({ kind: "missing", message: "That Knowledge Note no longer exists." });
     expect(routeTarget({ view: "Inbox", id: "accepted" }, data)).toEqual({ kind: "missing", message: "That proposal is no longer waiting in the Inbox." });
   });
 });

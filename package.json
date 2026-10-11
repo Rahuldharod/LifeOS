@@ -15,6 +15,7 @@
     "build": "corepack pnpm -r build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:browser": "pnpm --filter @lifeos/web build && playwright test",
     "lint": "eslint ."
   },
   "devDependencies": {
@@ -27,6 +28,7 @@
     "@lifeos/index-memory": "workspace:*",
     "@lifeos/object-store-markdown": "workspace:*",
     "@lifeos/secrets": "workspace:*",
+    "@playwright/test": "1.56.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

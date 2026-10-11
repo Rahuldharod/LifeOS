@@ -1,7 +1,7 @@
 // Decisions workspace (#41): a filtered list beside a detail panel. The detail edits a decision with a
 // guarded save, supersedes it with a linked successor, and shows where it came from (meeting, sources,
 // evidence). Open Points (#42, OpenPointsPage.tsx) mirror this page with their own lifecycle actions.
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { CopyLink } from "./CopyLink.js";
@@ -77,7 +77,7 @@ export function DecisionsPage({ projects, clients, products, people, busy, readO
   const detailOpen = Boolean(creating || selectedId);
   const leaveThen = async (action: () => void) => { if (await editorGuard.saveNow()) action(); };
   const closeDetail = () => void leaveThen(() => { setCreating(false); setSelectedId(undefined); });
-  return <ListDetailWorkspace detailOpen={detailOpen} listLabel="Decisions list" detailLabel="Decision detail" list={<>
+  return <ListDetailWorkspace workspace="decisions" detailOpen={detailOpen} selectedKey={creating ? "new" : selectedId} listLabel="Decisions list" detailLabel="Decision detail" list={<>
       <header className="workspace-heading"><div><span>DECISIONS · {visible.length}</span><h2>Decisions</h2><p className="muted">What was decided, why, and what replaced it.</p></div><button className="primary" disabled={busy || readOnly} onClick={() => void leaveThen(() => { setSelectedId(undefined); setCreating(true); })}>New Decision</button></header>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}><input type="search" aria-label="Search decisions" placeholder="Search decisions…" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Filter decisions by status" value={filters.status} onChange={(event) => setFilter("status", event.target.value)}><option value="">Any status</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></WorkspaceFilterBar>
       {advanced && <div className="task-advanced-filters decision-advanced-filters" aria-label="Advanced decision filters">
@@ -104,7 +104,7 @@ export function DecisionsPage({ projects, clients, products, people, busy, readO
     </>} detail={<>
       <button className="narrow-back" onClick={closeDetail}>Back to decisions</button>
       {creating ? <NewDecisionPanel guard={editorGuard} projects={projects} clients={clients} products={products} people={people} busy={busy} readOnly={readOnly} timeZone={timeZone} onCancel={() => setCreating(false)} onCreate={create} />
-        : detail ? <DecisionPanel key={`${detail.decision.frontmatter.id}:${detail.decision.contentHash}`} guard={editorGuard} detail={detail} projects={projects} clients={clients} products={products} people={people} busy={busy} readOnly={readOnly} timeZone={timeZone} run={run} onOpen={onOpen} onSelect={setSelectedId} refresh={refresh} formatDate={formatDate} />
+        : detail ? <DecisionPanel guard={editorGuard} detail={detail} projects={projects} clients={clients} products={products} people={people} busy={busy} readOnly={readOnly} timeZone={timeZone} run={run} onOpen={onOpen} onSelect={setSelectedId} refresh={refresh} formatDate={formatDate} />
         : <article className="empty-state"><h3>No decision selected</h3><p>Pick a decision to see its source, meeting and evidence, edit it, or supersede it.</p></article>}
     </>} />;
 }
@@ -145,13 +145,20 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
   const { decision } = detail;
   const value = decision.frontmatter;
   const originalDecidedAt = text(value.decided_at) ? zonedInputValue(text(value.decided_at), timeZone) : "";
-  const baseline = { title: value.title, decision_text: text(value.decision_text), rationale: text(value.rationale), decidedAt: originalDecidedAt, primary_project_id: text(value.primary_project_id), primary_client_id: text(value.primary_client_id), primary_product_id: text(value.primary_product_id), people_ids: Array.isArray(value.people_ids) ? value.people_ids.map(String) : [] };
+  const baseline = useMemo(() => ({ title: value.title, decision_text: text(value.decision_text), rationale: text(value.rationale), decidedAt: originalDecidedAt, primary_project_id: text(value.primary_project_id), primary_client_id: text(value.primary_client_id), primary_product_id: text(value.primary_product_id), people_ids: Array.isArray(value.people_ids) ? value.people_ids.map(String) : [] }), [originalDecidedAt, value.decision_text, value.people_ids, value.primary_client_id, value.primary_product_id, value.primary_project_id, value.rationale, value.title]);
   const [draft, setDraft] = useState(baseline);
+  const [saveStatus, setSaveStatus] = useState("");
+  const previousId = useRef(value.id);
   const [successor, setSuccessor] = useState<{ title: string; decision_text: string; rationale: string }>();
-  const set = (key: keyof typeof draft, next: unknown) => setDraft((current) => ({ ...current, [key]: next }));
+  const set = (key: keyof typeof draft, next: unknown) => { setSaveStatus("Unsaved changes"); setDraft((current) => ({ ...current, [key]: next })); };
   const active = value.status === "active";
   const locked = busy || readOnly;
   const writable = useRef(!locked); writable.current = !locked;
+  useEffect(() => {
+    setDraft(baseline);
+    if (previousId.current !== value.id) setSaveStatus("");
+    previousId.current = value.id;
+  }, [baseline, value.id]);
 
   const save = async () => {
     if (!writable.current || !draft.title.trim() || !draft.decision_text.trim()) return false;
@@ -159,7 +166,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
     const changes: Record<string, unknown> = { ...fields, ...(decidedAt && decidedAt !== originalDecidedAt ? { decided_at: zonedDateTime(decidedAt.slice(0, 10), decidedAt.slice(11, 16), timeZone).toISOString() } : {}) };
     // A failed write keeps this draft visible; the next successful refresh adopts the new disk hash.
     const done = await run(async () => { await api("PATCH /api/v1/decisions/:id", { params: { id: value.id }, body: { fields: changes, expectedHash: decision.contentHash } }); }, "Decision saved");
-    if (done) await refresh(value.id);
+    if (done) { setSaveStatus("Saved"); await refresh(value.id); }
     return done;
   };
 
@@ -205,7 +212,7 @@ function DecisionPanel({ guard, detail, projects, clients, products, people, bus
     </div>
     <SensitivityToggle object={decision} noun="decision" disabled={locked} run={run} onChanged={() => refresh(value.id)} />
     <div className="crud-actions">
-      <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small>
+      <EnvelopeBadges frontmatter={value} lock={false} /><small>Revision {value.revision} · {formatDate(value.updated_at)}</small><small role="status">{saveStatus}</small>
       <button disabled={locked || !draft.title.trim() || !draft.decision_text.trim()} onClick={() => void save()}>Save changes</button>
       <button disabled={locked || !active || Boolean(successor)} title={active ? undefined : "Only active decisions can be superseded"} onClick={() => void navigation.leaveThen(() => { if (writable.current) setSuccessor({ title: "", decision_text: "", rationale: "" }); })}>Supersede…</button>
     </div>
