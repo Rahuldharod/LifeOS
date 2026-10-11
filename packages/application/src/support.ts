@@ -148,6 +148,8 @@ export const replayRoles = {
   main: role("main"),
   /** The meeting a meeting-material draft creates. */
   meeting: role("meeting"),
+  /** The shared recurring Note a meeting-material draft may materialize. */
+  meetingNote: role("meeting-note"),
   /** The summary Review Item of meeting material. */
   summary: role("summary"),
   /** The update Review Item a patch raises. */
