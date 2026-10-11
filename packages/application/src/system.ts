@@ -64,7 +64,7 @@ export class SystemModule {
     [operationKinds.acceptReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverAccept(operation), true),
     [operationKinds.mergePerson]: async (operation) => (await this.review.recoverMerge(operation), true),
     [operationKinds.rejectReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverReject(operation), true),
-    [operationKinds.createMeeting]: async (operation) => typeof operation.payload.externalId === "string" && !!this.ctx.calendar && (await this.meetings.createMeetingFromEvent(operation.payload.externalId), true),
+    [operationKinds.createMeeting]: async (operation) => typeof operation.payload.externalId === "string" && !!this.ctx.calendar && (await this.meetings.recoverCreateMeeting(operation), true),
     [operationKinds.supersedeDecision]: async (operation) => (await this.decisions.recoverSupersede(operation), true),
     [operationKinds.resolveOpenPoint]: async (operation) => !!this.openPoints && (await this.openPoints.recoverResolve(operation), true),
     [operationKinds.applyPatch]: async (operation) => !!this.patches && (await this.patches.recoverJournal(operation), true),
@@ -83,6 +83,22 @@ export class SystemModule {
 
   object(id: string) {
     return this.ctx.required(id);
+  }
+
+  /** Resolves additive recurrence-migration redirects while keeping the old Markdown object intact. */
+  resolveObjectLink(id: string) {
+    const redirectedFrom: string[] = [];
+    let object = this.ctx.required(id);
+    const seen = new Set([id]);
+    while (true) {
+      const target = object.frontmatter.type === "meeting-note" ? object.frontmatter.redirect_to_note_id : object.frontmatter.type === "meeting" ? object.frontmatter.redirect_to_meeting_id : undefined;
+      if (typeof target !== "string") break;
+      if (seen.has(target)) throw new Error(`Object redirect cycle at ${target}`);
+      redirectedFrom.push(object.frontmatter.id);
+      seen.add(target);
+      object = this.ctx.required(target);
+    }
+    return { object, redirectedFrom, ...(typeof this.ctx.required(id).frontmatter.redirect_to_section_id === "string" ? { sectionId: this.ctx.required(id).frontmatter.redirect_to_section_id } : {}) };
   }
 
   /** #30: the user can mark any object restricted, or normal again. Repeating the same value writes nothing. */
