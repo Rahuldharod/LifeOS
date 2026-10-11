@@ -1,4 +1,4 @@
-import React, { useState, type ReactNode } from "react";
+import React, { useEffect, useState, type ReactNode } from "react";
 import type { View } from "./routes.js";
 
 export const navigationCollapsedKey = "lifeos.navigation.collapsed";
@@ -49,6 +49,16 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(readCollapsedPreference);
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        onSearch();
+      }
+    };
+    document.addEventListener("keydown", keydown);
+    return () => document.removeEventListener("keydown", keydown);
+  }, [onSearch]);
   const setNavigationCollapsed = (next: boolean) => {
     setCollapsed(next);
     try { localStorage.setItem(navigationCollapsedKey, String(next)); } catch { /* browser storage unavailable */ }

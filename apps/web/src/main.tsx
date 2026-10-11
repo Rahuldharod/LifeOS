@@ -62,6 +62,8 @@ import { parseRoute, routePath, routeTarget, type Route, type View } from "./rou
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { ApplicationShell } from "./ApplicationShell.js";
+import { GlobalSearchOverlay } from "./GlobalSearchOverlay.js";
+import { recordRecentSearchId } from "./globalSearch.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
@@ -317,6 +319,7 @@ function App() {
   const [highlightId, setHighlightId] = useState<string>();
   const [notesMode, setNotesMode] = useState<"visual" | "write" | "preview">("visual");
   const [capture, setCapture] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceText, setSourceText] = useState("");
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
@@ -547,6 +550,7 @@ function App() {
     const note = notes.find((candidate) => candidate.frontmatter.id === id);
     if (!note) { notesController.reset(); setSelectedNoteId(undefined); return; }
     const opened = notesController.open(note, readCachedDraft(note));
+    if (note.frontmatter.type === "knowledge-note") recordRecentSearchId(note.frontmatter.id);
     setSelectedNoteId(note.frontmatter.id); setNotesMode("visual");
     if (opened.conflict) setMessage("Recovered a browser draft, but the Markdown file also changed. Review before saving.");
   }, [location.pathname, collectionsLoaded, notes, deletedNotes]);
@@ -580,6 +584,7 @@ function App() {
   useEffect(() => {
     if (!collectionsLoaded || !route || route.view === "Notes" || route.view === "Calendar") return;
     setHighlightId(route.id);
+    if (route.view === "Tasks" && route.id && tasks.some((task) => task.frontmatter.id === route.id)) recordRecentSearchId(route.id);
   }, [location.pathname, collectionsLoaded]);
 
   async function run(action: () => Promise<void>, success: string) {
@@ -1169,9 +1174,10 @@ function App() {
     readOnly={readOnly}
     contentClassName={contentClassName}
     onNavigate={(item) => void go(tabRoute(item))}
-    onSearch={() => undefined}
+    onSearch={() => setSearchOpen(true)}
     onCapture={() => undefined}
   >
+      <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
       <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />

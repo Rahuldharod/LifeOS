@@ -481,3 +481,26 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .copy-link { display: inline-flex; align-items: center; gap: 6px; }
 .copy-link small { min-width: 5.5em; }
 .copy-link-failed { color: var(--danger, #b3261e); }
+
+/* #146: one calm, keyboard-contained overlay shared by global actions. */
+.overlay-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: start center; padding: min(12vh, 96px) var(--space-4); background: rgb(32 30 67 / .58); }
+.overlay-dialog { width: min(720px, 100%); max-height: min(76vh, 760px); overflow: auto; padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-overlay); }
+.global-search-header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-4); }
+.global-search-header span, .global-search-hint { color: var(--color-text-muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.global-search-header h2 { margin: 3px 0 var(--space-4); }
+.global-search-header button { min-width: 40px; font-size: 22px; }
+.overlay-dialog > input[type="search"] { width: 100%; }
+.global-search-hint { margin: var(--space-4) 0 0; }
+.global-search-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.global-search-group h3 { margin: var(--space-4) 0 var(--space-2); font-size: 14px; }
+.global-search-result { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: 4px; padding: 10px 12px; text-align: left; background: var(--color-surface-subtle); }
+.global-search-result span:first-child { display: grid; min-width: 0; }
+.global-search-result b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.global-search-result small { color: var(--color-text-muted); }
+.global-search-more { margin-top: var(--space-2); }
+@media (max-width: 640px) {
+  .overlay-backdrop { place-items: end center; padding: 0; }
+  .overlay-dialog { width: 100%; max-height: 88vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .global-search-groups { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .overlay-backdrop, .overlay-dialog { scroll-behavior: auto; } }

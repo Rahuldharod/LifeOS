@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApplicationShell, navigationCollapsedKey } from "./ApplicationShell.js";
+import { views } from "./routes.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -72,5 +73,27 @@ describe("ApplicationShell", () => {
     expect(onNavigate).toHaveBeenCalledWith("Calendar");
     expect(onSearch).toHaveBeenCalledOnce();
     expect(onCapture).toHaveBeenCalledOnce();
+  });
+
+  it("opens Search with the platform keyboard shortcut without navigating", () => {
+    const onNavigate = vi.fn(); const onSearch = vi.fn();
+    act(() => root!.render(<ApplicationShell activeView="Today" status="Ready" onNavigate={onNavigate} onSearch={onSearch} onCapture={vi.fn()}><p>Page</p></ApplicationShell>));
+    const event = new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true });
+    act(() => document.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(onSearch).toHaveBeenCalledOnce();
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("opens Search with Ctrl+K from every routed workspace and keeps the current URL", () => {
+    const onNavigate = vi.fn(); const onSearch = vi.fn();
+    history.replaceState(null, "", "/notes/example");
+    for (const activeView of views) {
+      act(() => root!.render(<ApplicationShell activeView={activeView} status="Ready" onNavigate={onNavigate} onSearch={onSearch} onCapture={vi.fn()}><p>{activeView}</p></ApplicationShell>));
+      act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "K", ctrlKey: true, bubbles: true, cancelable: true })));
+    }
+    expect(onSearch).toHaveBeenCalledTimes(views.length);
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(location.pathname).toBe("/notes/example");
   });
 });
