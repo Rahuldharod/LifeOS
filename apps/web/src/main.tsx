@@ -570,13 +570,30 @@ function App() {
     void (async () => {
       // A meeting created a moment ago may not be in the object list yet; ask the server once more.
       let objects = objectLinks;
-      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { objects = await refreshObjectLinks().catch(() => objects); }
-      if (routeTarget(route, { ...routeData, objects }).kind !== "ok") { close(); return; }
+      let target = routeTarget(route, { ...routeData, objects });
+      if (target.kind === "missing") { objects = await refreshObjectLinks().catch(() => objects); target = routeTarget(route, { ...routeData, objects }); }
+      if (target.kind === "redirect") { followRoute(target.route, { replace: true }); return; }
+      if (target.kind !== "ok") { close(); return; }
       previewTarget.current = undefined;
       setEditorMode("visual"); setEditorSession((session) => session + 1);
       await run(() => refreshWorkspace(meetingId), "Meeting opened");
     })();
   }, [location.pathname, collectionsLoaded]);
+
+  // ADR 0019: a legacy recurring Meeting/Note link names the exact occurrence section.
+  // Preview-mode anchors scroll natively; write mode also selects the stored anchor marker.
+  useEffect(() => {
+    const sectionId = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    if (!sectionId) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const anchor = document.getElementById(sectionId);
+      if (anchor) { anchor.scrollIntoView({ block: "center" }); return; }
+      const area = route?.view === "Calendar" ? editor.current : route?.view === "Notes" ? notesEditor.current : undefined;
+      const body = route?.view === "Calendar" ? meetingController.draft : route?.view === "Notes" ? notesController.draft : "";
+      const offset = body.indexOf(`<a id="${sectionId}"></a>`);
+      if (area && offset >= 0) { area.focus(); area.setSelectionRange(offset, offset); area.scrollIntoView({ block: "center" }); }
+    }));
+  }, [location.pathname, workspace?.note?.frontmatter.id, selectedNote?.frontmatter.id, editorMode]);
 
   // PB-027: a task, project, decision… in the URL is highlighted on its tab, as a PB-007 link does.
   // The plain list (e.g. the breadcrumb's tab crumb, PB-026) clears the highlight.

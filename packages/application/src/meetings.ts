@@ -37,6 +37,11 @@ export class MeetingsModule {
     if (typeof operation.payload.externalId === "string") return this.createMeetingFromEvent(operation.payload.externalId);
   }
 
+  async recoverSeriesLinks(operation: Operation) {
+    if (typeof operation.payload.seriesId !== "string" || typeof operation.payload.noteId !== "string") return;
+    await this.repairSuccessorSeriesLinks(operation.payload.seriesId, operation.payload.noteId, typeof operation.payload.now === "string" ? operation.payload.now : new Date().toISOString(), operation);
+  }
+
   /**
    * #45: the meeting for a calendar event, created if missing, WITHOUT its note: enrichment can attach
    * material to a meeting the user never opened, and the note still appears only on the first edit
@@ -87,6 +92,7 @@ export class MeetingsModule {
         is_all_day: event.isAllDay ?? false,
         ...(event.seriesId && event.originalOccurrenceStartsAt ? {
           recurrence_series_id: this.seriesKey(event),
+          ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
           recurrence_occurrence_id: this.occurrenceId(event),
           original_occurrence_starts_at: event.originalOccurrenceStartsAt
         } : {}),
@@ -347,6 +353,7 @@ export class MeetingsModule {
         meeting_id: meeting.frontmatter.id,
         meeting_ids: [meeting.frontmatter.id],
         recurrence_series_id: seriesId,
+        ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
         ...(event.previousSeriesId ? { previous_recurrence_series_id: this.seriesKey(event, event.previousSeriesId) } : {}),
         occurrence_sections: [section],
         ...(previousSeries ? { previous_series_note_id: previousSeries.frontmatter.id } : {}),
@@ -357,10 +364,13 @@ export class MeetingsModule {
   }
 
   /** Repairs an out-of-order split after the predecessor series Note is materialized. */
-  private async repairSuccessorSeriesLinks(seriesId: string, noteId: string, now: string) {
+  private async repairSuccessorSeriesLinks(seriesId: string, noteId: string, now: string, replay?: Operation) {
+    const pending = replay ?? (await this.ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.linkRecurringSeries && operation.payload.seriesId === seriesId && operation.payload.noteId === noteId);
+    const operation = pending ?? await this.ctx.objects.prepareOperation?.(operationKinds.linkRecurringSeries, { seriesId, noteId, now }, uuidV7());
     for (const successor of this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && isLive(object) && object.frontmatter.previous_recurrence_series_id === seriesId && !object.frontmatter.previous_series_note_id)) {
       await this.ctx.update(successor, { previous_series_note_id: noteId }, { expectedHash: successor.contentHash, now });
     }
+    if (operation) await this.ctx.objects.completeOperation?.(operation.id);
   }
 
   private async findEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) {
