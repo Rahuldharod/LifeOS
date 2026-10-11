@@ -112,6 +112,21 @@ describe("ReferenceDataSettings (#140)", () => {
     confirm.mockReturnValue(true); await click("Delete project"); expect(remove).toHaveBeenCalledWith(projectA);
   });
 
+  it("does not let dirty drafts be bypassed by History restore or deletion", async () => {
+    const remove = vi.fn(async () => true); const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await render(defaults({ onDelete: remove }));
+    await enterText("project title", "Unsaved launch"); await click("More");
+    const history = [...document.querySelectorAll("button")].find((button) => button.textContent === "History") as HTMLButtonElement;
+    const deleteButton = [...document.querySelectorAll("button")].find((button) => button.textContent === "Delete project") as HTMLButtonElement;
+    expect(history.disabled).toBe(true); expect(deleteButton.disabled).toBe(true);
+    await act(async () => { history.click(); deleteButton.click(); });
+    expect(document.querySelector("[aria-label^='History of']")).toBeNull(); expect(confirm).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled();
+    expect((document.querySelector("[aria-label='project title']") as HTMLInputElement).value).toBe("Unsaved launch");
+    await click("Cancel");
+    expect(([...document.querySelectorAll("button")].find((button) => button.textContent === "History") as HTMLButtonElement).disabled).toBe(false);
+    expect(([...document.querySelectorAll("button")].find((button) => button.textContent === "Delete project") as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("disables creation, editing, saving and deletion when read-only", async () => {
     await render(defaults({ readOnly: true }));
     expect((document.querySelector("[aria-label='project title']") as HTMLInputElement).disabled).toBe(true);
