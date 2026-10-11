@@ -1,7 +1,7 @@
 // Side-by-side conflict resolution for the Notes view (PB-002). Chosen after prototyping three
 // directions (inline banner, this split panel, a blocking modal) — see the
 // prototype/pb-002-conflict-ui branch for the other two and why this one won.
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { diffNoteLines, type LineDiff } from "./noteDraft.js";
@@ -47,6 +47,7 @@ export type NoteConflictPanelProps = {
  */
 export function NoteConflictPanel({ noteTitle, draftText, diskText, disabled, onKeepBrowserVersion, onKeepDiskVersion }: NoteConflictPanelProps) {
   const [precise, setPrecise] = useState(false);
+  useEffect(() => { setPrecise(false); }, [noteTitle, draftText, diskText]);
   const lines = diffNoteLines(diskText, draftText);
   return (
     <div className="note-conflict-panel">
