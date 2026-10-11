@@ -6,6 +6,24 @@ import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote, OneAtATime,
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
 
+export function recurrenceSeriesKey(provider: string, event: Pick<CalendarEvent, "calendarId" | "seriesId">) {
+  return event.seriesId ? `${provider}:${event.calendarId ?? "default"}:${event.seriesId}` : undefined;
+}
+
+export function occurrenceSectionId(originalOccurrenceStartsAt: string) {
+  return `occurrence-${originalOccurrenceStartsAt.replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}`;
+}
+
+export function recurrenceOccurrenceId(provider: string, event: Pick<CalendarEvent, "calendarId" | "seriesId" | "originalOccurrenceStartsAt">) {
+  const series = recurrenceSeriesKey(provider, event);
+  return series && event.originalOccurrenceStartsAt ? `${series}:${event.originalOccurrenceStartsAt}` : undefined;
+}
+
+export interface EnrichmentOccurrenceTarget {
+  occurrenceId: string;
+  sectionId: string;
+}
+
 function userNoteText(body: string) {
   const trimmed = body.trim();
   return trimmed && trimmed !== DEFAULT_NOTE_BODY.trim() ? trimmed : "";
@@ -75,6 +93,31 @@ export class MeetingsModule {
       await this.ctx.rebuildIndex();
       return { meeting: this.ctx.index.get(options.meetingId) ?? meeting, created: true };
     });
+  }
+
+  /** Read-only recurrence target used to validate an Agent draft before Adoption writes anything. */
+  async enrichmentOccurrenceForEvent(externalId: string, from: Date, to: Date, calendarId?: string): Promise<EnrichmentOccurrenceTarget | undefined> {
+    const event = await this.findEvent(externalId, from, to, calendarId);
+    const occurrenceId = recurrenceOccurrenceId(this.ctx.calendar?.provider ?? "calendar", event);
+    return occurrenceId && event.originalOccurrenceStartsAt ? { occurrenceId, sectionId: occurrenceSectionId(event.originalOccurrenceStartsAt) } : undefined;
+  }
+
+  /** Recurrence target already stored on an occurrence Meeting. */
+  enrichmentOccurrenceForMeeting(meeting: LifeOSObject): EnrichmentOccurrenceTarget | undefined {
+    const occurrenceId = typeof meeting.frontmatter.recurrence_occurrence_id === "string" ? meeting.frontmatter.recurrence_occurrence_id : undefined;
+    const original = typeof meeting.frontmatter.original_occurrence_starts_at === "string" ? meeting.frontmatter.original_occurrence_starts_at : undefined;
+    return occurrenceId && original ? { occurrenceId, sectionId: occurrenceSectionId(original) } : undefined;
+  }
+
+  /** Explicit enrichment may materialize an otherwise empty occurrence section when material was found. */
+  async ensureOccurrenceSectionForEnrichment(meeting: LifeOSObject, from: Date, to: Date, calendarId?: string) {
+    const target = this.enrichmentOccurrenceForMeeting(meeting);
+    if (!target) return undefined;
+    const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<Record<string, unknown>> : [];
+    const externalId = refs.find((ref) => typeof ref.external_id === "string")?.external_id;
+    if (typeof externalId !== "string") throw new Error(`Recurring meeting ${meeting.frontmatter.id} has no Calendar occurrence reference`);
+    const workspace = await this.createMeetingFromEvent(externalId, from, to, calendarId, "");
+    return { note: workspace.note, target };
   }
 
   /** The `meeting.created` audit of a meeting an adopted draft created, if a crash stopped it being written (#59). */
@@ -355,8 +398,7 @@ export class MeetingsModule {
   }
 
   private seriesKey(event: CalendarEvent, seriesId = event.seriesId) {
-    if (!seriesId) return undefined;
-    return `${this.ctx.calendar?.provider ?? "calendar"}:${event.calendarId ?? "default"}:${seriesId}`;
+    return recurrenceSeriesKey(this.ctx.calendar?.provider ?? "calendar", { ...event, seriesId });
   }
 
   /** One shared sensitivity covers stored and not-yet-materialized occurrences in the provider series. */
@@ -369,15 +411,14 @@ export class MeetingsModule {
   }
 
   private occurrenceId(event: CalendarEvent) {
-    const series = this.seriesKey(event);
-    return series && event.originalOccurrenceStartsAt ? `${series}:${event.originalOccurrenceStartsAt}` : undefined;
+    return recurrenceOccurrenceId(this.ctx.calendar?.provider ?? "calendar", event);
   }
 
   private occurrenceSection(event: CalendarEvent, meetingId: string) {
     const occurrenceId = this.occurrenceId(event)!;
     return {
       occurrence_id: occurrenceId,
-      section_id: `occurrence-${event.originalOccurrenceStartsAt!.replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}`,
+      section_id: occurrenceSectionId(event.originalOccurrenceStartsAt!),
       meeting_id: meetingId,
       original_starts_at: event.originalOccurrenceStartsAt!,
       starts_at: event.startsAt

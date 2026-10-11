@@ -5,6 +5,14 @@ import "./RecurringOccurrenceWorkspace.css";
 
 type SectionRange = { sectionId: string; notesStart: number; notesEnd: number };
 
+function materialsBlock(markdown: string, sectionId: string) {
+  const start = `<!-- lifeos:materials:start ${sectionId} -->`;
+  const end = `<!-- lifeos:materials:end ${sectionId} -->`;
+  const from = markdown.indexOf(start);
+  const to = from < 0 ? -1 : markdown.indexOf(end, from + start.length);
+  return from >= 0 && to >= 0 ? markdown.slice(from, to + end.length) : "";
+}
+
 function ranges(markdown: string, occurrences: OccurrenceWorkspaceItem[]): SectionRange[] {
   return occurrences.flatMap((occurrence, index) => {
     const anchor = `<a id="${occurrence.sectionId}"></a>`;
@@ -20,7 +28,10 @@ function ranges(markdown: string, occurrences: OccurrenceWorkspaceItem[]): Secti
 
 export function occurrenceNotes(markdown: string, occurrences: OccurrenceWorkspaceItem[], sectionId: string) {
   const range = ranges(markdown, occurrences).find((candidate) => candidate.sectionId === sectionId);
-  return range ? markdown.slice(range.notesStart, range.notesEnd).trimEnd() : "";
+  if (!range) return "";
+  const section = markdown.slice(range.notesStart, range.notesEnd);
+  const managed = materialsBlock(section, sectionId);
+  return (managed ? section.replace(managed, "") : section).trimEnd();
 }
 
 export function replaceOccurrenceNotes(markdown: string, occurrences: OccurrenceWorkspaceItem[], sectionId: string, notes: string) {
@@ -28,7 +39,10 @@ export function replaceOccurrenceNotes(markdown: string, occurrences: Occurrence
   if (!range) return markdown;
   const before = markdown.slice(0, range.notesStart);
   const after = markdown.slice(range.notesEnd);
-  return `${before}${notes.replace(/^\s+|\s+$/g, "")}${after ? "\n\n" : ""}${after}`;
+  const managed = materialsBlock(markdown.slice(range.notesStart, range.notesEnd), sectionId);
+  const editable = notes.replace(/^\s+|\s+$/g, "");
+  const section = [editable, managed].filter(Boolean).join("\n\n");
+  return `${before}${section}${after ? "\n\n" : ""}${after}`;
 }
 
 function day(value: string, timeZone: string) {
