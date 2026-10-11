@@ -2,7 +2,7 @@ import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
 import { operationKinds, type CalendarEvent, type Operation } from "./ports.js";
-import { isLive, liveMeetingNote, OneAtATime, resolveObjectRedirect } from "./support.js";
+import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote, OneAtATime, resolveObjectRedirect } from "./support.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
 
@@ -40,27 +40,6 @@ export class MeetingsModule {
   async recoverSeriesLinks(operation: Operation) {
     if (typeof operation.payload.seriesId !== "string" || typeof operation.payload.noteId !== "string") return;
     await this.repairSuccessorSeriesLinks(operation.payload.seriesId, operation.payload.noteId, typeof operation.payload.now === "string" ? operation.payload.now : new Date().toISOString(), operation);
-  }
-
-  /** Explicit Calendar sync may refresh generated recurring-note titles, but never creates a Note or section. */
-  async syncRecurringNoteTitles(events: CalendarEvent[]) {
-    const latestBySeries = new Map<string, CalendarEvent>();
-    for (const event of events) {
-      const seriesId = this.seriesKey(event);
-      if (!seriesId || !event.originalOccurrenceStartsAt || event.status === "cancelled") continue;
-      const previous = latestBySeries.get(seriesId);
-      if (!previous || Date.parse(event.startsAt) > Date.parse(previous.startsAt)) latestBySeries.set(seriesId, event);
-    }
-    let changed = false;
-    for (const [seriesId, event] of latestBySeries) {
-      await this.meetingCreations.run(seriesId, async () => {
-        const note = this.findSeriesNote(seriesId);
-        if (!note) return;
-        const updated = await this.followCalendarTitle(note, event, new Date().toISOString());
-        changed ||= updated.contentHash !== note.contentHash;
-      });
-    }
-    if (changed) await this.ctx.rebuildIndex();
   }
 
   /**
@@ -318,6 +297,15 @@ export class MeetingsModule {
   private seriesKey(event: CalendarEvent, seriesId = event.seriesId) {
     if (!seriesId) return undefined;
     return `${this.ctx.calendar?.provider ?? "calendar"}:${event.calendarId ?? "default"}:${seriesId}`;
+  }
+
+  /** One shared sensitivity covers stored and not-yet-materialized occurrences in the provider series. */
+  isEventRestricted(event: CalendarEvent) {
+    const meeting = this.findMeetingForEvent(event.externalId, event.calendarId, event);
+    const notes = this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && !object.frontmatter.deleted_at);
+    if (isMeetingRestricted(meeting, notes)) return true;
+    const seriesId = this.seriesKey(event);
+    return Boolean(seriesId && notes.some((note) => note.frontmatter.recurrence_series_id === seriesId && isRestricted(note)));
   }
 
   private occurrenceId(event: CalendarEvent) {

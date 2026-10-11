@@ -122,20 +122,6 @@ describe("recurring meeting notes (#147)", () => {
     expect(preserved.note?.frontmatter.id).toBe(created.note?.frontmatter.id);
   });
 
-  it("updates a generated title on explicit Calendar sync without creating sections", async () => {
-    const recurring = event({ externalId: "sync-title", title: "Original calendar title", seriesId: "series-sync-title", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
-    const { app } = await setup([recurring]);
-    const created = await app.createMeetingFromEvent(recurring.externalId, undefined, undefined, recurring.calendarId, "Existing notes\n");
-    recurring.title = "Renamed in Calendar";
-
-    await app.syncCalendar(new Date("2026-10-01T00:00:00.000Z"), new Date("2026-10-20T00:00:00.000Z"));
-
-    const renamed = app.object(created.note!.frontmatter.id);
-    expect(renamed.frontmatter.title).toBe("Renamed in Calendar notes");
-    expect(renamed.frontmatter.occurrence_sections).toHaveLength(1);
-    expect(renamed.body).toContain("Existing notes");
-  });
-
   it("starts a linked Note after a provider split and does not infer copied events as recurring", async () => {
     const before = event({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
     const after = event({ externalId: "occurrence-after-split", seriesId: "series-b", previousSeriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });

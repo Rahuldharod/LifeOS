@@ -73,7 +73,6 @@ export class CalendarModule {
     const started = new Date().toISOString();
     try {
       const events = await calendar.listEvents(from, to);
-      await this.meetings.syncRecurringNoteTitles(events);
       if (calendar.provider === "google") await this.writeSyncRun("succeeded", started, events.length);
       return this.meetings.withNoteLinks(events);
     } catch (error) {
