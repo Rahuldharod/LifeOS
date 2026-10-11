@@ -22,7 +22,7 @@ import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
 import { areaOptions, isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
 import { lifeosLinkId, resolveLifeosLink, withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
-import { dateInTimeZone, dayRange } from "./zonedTime.js";
+import { addCalendarDays, dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
@@ -57,7 +57,7 @@ import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { BackupWarning } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { PermanentDeleteButton } from "./PermanentDelete.js";
-import { CalendarOfflineBanner } from "./CalendarOffline.js";
+import { CalendarWorkspace } from "./CalendarWorkspace.js";
 import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
@@ -82,17 +82,6 @@ type CrepeConstructor = new (config: { root: Node; defaultValue: string; feature
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
-
-function formatEventTime(value: string, timeZone: string) {
-  return new Date(value).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" });
-}
-
-function formatGap(milliseconds: number) {
-  const minutes = Math.round(milliseconds / 60_000);
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return hours ? `${hours}h${remainder ? ` ${remainder}m` : ""} free` : `${minutes}m free`;
-}
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -387,7 +376,6 @@ function App() {
   const [editorSession, setEditorSession] = useState(0);
   const server = useServerConnection();
   const notesSplit = useSplitPane("lifeos.split.notes");
-  const calendarSplit = useSplitPane("lifeos.split.calendar");
   const notesController = useNoteDraftController({
     note: selectedNote,
     readOnly,
@@ -1209,48 +1197,27 @@ function App() {
         {googleConnection?.reason === "expired" && <article className="lease-warning" role="alert"><span>GOOGLE CALENDAR</span><h3>Reconnect Google Calendar</h3><p>Google no longer accepts the saved access, so events cannot sync. {googleConnection.lastSuccessfulSyncAt ? `Last successful sync: ${new Date(googleConnection.lastSuccessfulSyncAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: displayTimeZone })}.` : "No successful sync recorded yet."}</p><button className="takeover" disabled={busy} onClick={connectGoogle}>Reconnect</button></article>}
         {googleConnection && !googleConnection.connected && googleConnection.reason !== "expired" && <article className="lease-warning"><span>GOOGLE CALENDAR</span><h3>{googleConnection.configured ? "Ready to connect" : "Configuration required"}</h3><p>{googleConnection.configured ? "Authorize read-only access to replace the mock calendar with your upcoming events." : "Add the Google Calendar OAuth client under Settings, then return here to connect."}</p>{googleConnection.configured ? <button className="takeover" disabled={busy} onClick={connectGoogle}>Connect Google Calendar</button> : <button onClick={() => void go({ view: "Settings" })}>Open Settings</button>}</article>}
         {googleConnection?.connected && <article className="connection-card"><span>GOOGLE CALENDAR CONNECTED</span><p className="muted">Read-only access is active. Each manual sync records a durable Sync Run.</p><button disabled={busy || readOnly} onClick={syncGoogle}>Sync now</button></article>}
-        <div className="meeting-layout split-layout" style={calendarSplit.style}>
-          <article className="event-list">
-            <div className="event-list-heading"><span>DAY TIMELINE</span><button onClick={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}>Today</button></div>
-            <div className="calendar-controls">
-              <label><small>Date</small><input type="date" value={selectedDate} onChange={(event) => { if (event.target.value) void go(calendarRoute(event.target.value)); }} /></label>
-              <label><small>Calendar</small><select value={calendar.filter} onChange={(event) => calendar.setFilter(event.target.value)}>
-                <option value="all">All calendars</option>
-                {[...calendar.offered].sort((left, right) => left.name.localeCompare(right.name)).map((calendar) => <option value={calendar.id} key={calendar.id}>{calendar.name}</option>)}
-              </select></label>
-            </div>
-            <h3 className="timeline-date">{new Date(`${selectedDate}T12:00:00.000Z`).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone })}</h3>
-            <CalendarOfflineBanner offline={calendar.offline} timeZone={displayTimeZone} busy={busy} onRetry={() => void retryCalendar()} />
-            {calendar.error
-              ? <div className="timeline-empty timeline-error" role="alert"><b>Calendar could not be loaded</b><small>{calendar.error}</small></div>
-              : !calendar.filteredEvents.length && !calendar.offline && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
-            <div className="timeline">
-              {calendar.allDayEvents.map((event) => <div className="timeline-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
-                <span className="timeline-time">All day</span><span className="timeline-rail"><i style={{ background: event.calendarColor ?? "#5f8b7c" }} /></span>
-                <button className={`event${event.hasNote ? " has-note" : ""}`} disabled={busy} onClick={() => openEvent(event)}>
-                  <span className="event-title"><b>{event.title}</b>{event.hasNote && <span className="note-badge">✓ Note created</span>}</span>
-                  <small>{event.calendarName ?? "Calendar"}</small>
-                </button>
-              </div>)}
-              {calendar.timedEvents.map((event, index) => {
-                const previousEnd = index ? Math.max(...calendar.timedEvents.slice(0, index).map((candidate) => Date.parse(candidate.endsAt))) : undefined;
-                const gap = previousEnd === undefined ? 0 : Date.parse(event.startsAt) - previousEnd;
-                return <React.Fragment key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
-                  {gap > 60_000 && <div className="timeline-gap"><span /><span className="gap-rail">•••</span><small>{formatGap(gap)}</small></div>}
-                  <div className="timeline-row">
-                    <span className="timeline-time">{formatEventTime(event.startsAt, displayTimeZone)}</span><span className="timeline-rail"><i style={{ background: event.calendarColor ?? "#5f8b7c" }} /></span>
-                    <button className={`event${event.hasNote ? " has-note" : ""}`} disabled={busy} onClick={() => openEvent(event)}>
-                      <span className="event-title"><b>{event.title}</b>{event.hasNote && <span className="note-badge">✓ Note created</span>}</span>
-                      <small>{formatEventTime(event.startsAt, displayTimeZone)}–{formatEventTime(event.endsAt, displayTimeZone)} · {event.calendarName ?? "Calendar"}</small>
-                      <small>{event.attendees.length ? `${event.attendees.length} attendee${event.attendees.length === 1 ? "" : "s"}` : "No attendees"}</small>
-                    </button>
-                  </div>
-                </React.Fragment>;
-              })}
-            </div>
-          </article>
-          <div {...calendarSplit.dividerProps} />
-          <div className="meeting-main">
+        <CalendarWorkspace
+          selectedDate={selectedDate}
+          displayTimeZone={displayTimeZone}
+          events={calendar.filteredEvents}
+          offline={calendar.offline}
+          error={calendar.error}
+          loading={calendar.loading}
+          filter={calendar.filter}
+          offered={calendar.offered}
+          busy={busy}
+          readOnly={readOnly}
+          detailOpen={Boolean(workspace)}
+          onPreviousDay={() => void go(calendarRoute(addCalendarDays(selectedDate, -1)))}
+          onToday={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}
+          onNextDay={() => void go(calendarRoute(addCalendarDays(selectedDate, 1)))}
+          onDateChange={(date) => void go(calendarRoute(date))}
+          onFilterChange={calendar.setFilter}
+          onRetry={() => void retryCalendar()}
+          onSelectEvent={(event) => void openEvent(event)}
+          onBack={() => void go({ view: "Calendar", date: selectedDate })}
+        >
             {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
                 <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3><CopyLink object={workspace.persisted !== false ? workspace.meeting : undefined} />{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
@@ -1301,8 +1268,7 @@ function App() {
                 {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
               </article>
             </>}
-          </div>
-        </div>
+        </CalendarWorkspace>
       </>}
 
       {view === "Notes" && <>
