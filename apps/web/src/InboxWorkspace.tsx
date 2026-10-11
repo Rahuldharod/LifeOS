@@ -3,6 +3,7 @@ import type { LifeObject, ObjectLink, PersonLabel, ReviewEdits, ReviewEvidence }
 import { LockBadge } from "./EnvelopeBadges.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { WorkspaceFilterBar } from "./WorkspacePatterns.js";
+import { addCalendarDays, dateInTimeZone, zonedMidnight } from "./zonedTime.js";
 import "./InboxWorkspace.css";
 
 export type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
@@ -10,6 +11,8 @@ export type InboxReview = LifeObject & { evidence?: Record<string, ReviewEvidenc
 type Completion = { review: InboxReview; outcome: "accepted" | "rejected" };
 type ActionResult = boolean | void;
 type CreatedPeriod = "" | "today" | "7d" | "30d";
+type ProposalCategory = "Tasks" | "Decisions" | "Open points" | "Updates";
+const proposalCategories: ProposalCategory[] = ["Tasks", "Decisions", "Open points", "Updates"];
 
 const editableByTarget: Record<string, string[]> = {
   task: ["owner_person_id", "due_on", "priority", "primary_project_id", "primary_client_id", "primary_product_id"],
@@ -19,6 +22,13 @@ const editableByTarget: Record<string, string[]> = {
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const reviewType = (review: InboxReview) => text(review.frontmatter.review_type) || "create";
 const proposalLabel = (review: InboxReview) => reviewType(review) === "create" ? `Create ${text(review.frontmatter.target_object_type) || "item"}` : reviewType(review).replaceAll("-", " ");
+const proposalCategory = (review: InboxReview): ProposalCategory => {
+  if (reviewType(review) !== "create") return "Updates";
+  if (review.frontmatter.target_object_type === "task") return "Tasks";
+  if (review.frontmatter.target_object_type === "decision") return "Decisions";
+  if (review.frontmatter.target_object_type === "open-point") return "Open points";
+  return "Updates";
+};
 const isNarrowNow = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches;
 
 function useNarrowWorkspace() {
@@ -32,17 +42,16 @@ function useNarrowWorkspace() {
   return narrow;
 }
 
-const createdAfter = (period: CreatedPeriod, now: Date) => {
+const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string) => {
   if (!period) return undefined;
-  const start = new Date(now);
-  if (period === "today") start.setHours(0, 0, 0, 0);
-  else start.setDate(start.getDate() - (period === "7d" ? 7 : 30));
-  return start.getTime();
+  const today = dateInTimeZone(now, timeZone);
+  const startDay = period === "today" ? today : addCalendarDays(today, -(period === "7d" ? 6 : 29));
+  return { from: zonedMidnight(startDay, timeZone).getTime(), to: zonedMidnight(addCalendarDays(today, 1), timeZone).getTime() };
 };
 
-export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, linkActionsFor }: {
+export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, linkActionsFor }: {
   reviews: InboxReview[]; objects: Array<LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices;
-  selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; now?: Date;
+  selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; displayTimeZone: string; now?: Date;
   onOpen?: (id: string) => void; onBack?: () => void;
   onAccept: (review: InboxReview) => Promise<ActionResult>; onReject: (review: InboxReview) => Promise<ActionResult>; onSave: (review: InboxReview, edits: ReviewEdits) => Promise<ActionResult>;
   linkActionsFor?: (reviewId: string) => LinkCardActions;
@@ -58,17 +67,17 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current); }, []);
 
   const objectById = useMemo(() => new Map(objects.map((object) => [String(object.frontmatter.id), object])), [objects]);
-  const types = useMemo(() => [...new Set(reviews.map(reviewType))].sort(), [reviews]);
   const meetings = useMemo(() => objects.filter((object) => object.frontmatter.type === "meeting"), [objects]);
-  const threshold = createdAfter(period, now);
-  const visible = useMemo(() => reviews.filter((review) => {
+  const window = createdWindow(period, now, displayTimeZone);
+  const visible = reviews.filter((review) => {
     const search = `${review.frontmatter.title} ${review.body} ${reviewType(review)} ${review.frontmatter.target_object_type ?? ""}`.toLowerCase();
     if (query.trim() && !search.includes(query.trim().toLowerCase())) return false;
-    if (type && reviewType(review) !== type) return false;
+    if (type && proposalCategory(review) !== type) return false;
     if (meetingId && review.frontmatter.source_meeting_id !== meetingId) return false;
-    if (threshold !== undefined && Date.parse(String(review.frontmatter.created_at)) < threshold) return false;
+    const createdAt = Date.parse(String(review.frontmatter.created_at));
+    if (window && (createdAt < window.from || createdAt >= window.to)) return false;
     return true;
-  }).sort((a, b) => String(b.frontmatter.created_at).localeCompare(String(a.frontmatter.created_at))), [reviews, query, type, meetingId, threshold]);
+  }).sort((a, b) => String(b.frontmatter.created_at).localeCompare(String(a.frontmatter.created_at)));
 
   useEffect(() => {
     if (narrow || openedId || !visible.length) return;
@@ -103,14 +112,14 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div></header>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}>
         <input type="search" aria-label="Search proposals" placeholder="Search proposals…" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <select aria-label="Filter by proposal type" value={type} onChange={(event) => setType(event.target.value)}><option value="">All proposal types</option>{types.map((value) => <option value={value} key={value}>{value.replaceAll("-", " ")}</option>)}</select>
+        <select aria-label="Filter by proposal type" value={type} onChange={(event) => setType(event.target.value)}><option value="">All proposal types</option>{proposalCategories.map((value) => <option value={value} key={value}>{value}</option>)}</select>
       </WorkspaceFilterBar>
       {advanced && <div className="inbox-advanced-filters">
         <label>Source meeting<select aria-label="Filter by source meeting" value={meetingId} onChange={(event) => setMeetingId(event.target.value)}><option value="">Any meeting</option>{meetings.map((meeting) => <option value={meeting.frontmatter.id} key={meeting.frontmatter.id}>{meeting.frontmatter.title}</option>)}</select></label>
         <label>Created<select aria-label="Filter by created period" value={period} onChange={(event) => setPeriod(event.target.value as CreatedPeriod)}><option value="">Any time</option><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
         <button onClick={() => { setMeetingId(""); setPeriod(""); }}>Clear advanced filters</button>
       </div>}
-      {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviews.length ? "No matching proposals" : "Inbox clear"}</h3><p>{reviews.length ? "Change or clear the filters." : "No proposals require your attention."}</p></div> : <div className="inbox-rows">{visible.map((review) => <button className={openedId === review.frontmatter.id ? "inbox-row selected" : "inbox-row"} aria-label={`Open proposal: ${review.frontmatter.title}`} aria-pressed={openedId === review.frontmatter.id} key={review.frontmatter.id} onClick={() => open(review.frontmatter.id)}><span><strong>{review.frontmatter.title}</strong><small>{proposalLabel(review)} · {new Date(review.frontmatter.created_at).toLocaleDateString()}</small></span><LockBadge frontmatter={review.frontmatter} /></button>)}</div>}
+      {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviews.length ? "No matching proposals" : "Inbox clear"}</h3><p>{reviews.length ? "Change or clear the filters." : "No proposals require your attention."}</p></div> : <div className="inbox-rows">{visible.map((review) => <button className={openedId === review.frontmatter.id ? "inbox-row selected" : "inbox-row"} aria-label={`Open proposal: ${review.frontmatter.title}`} aria-pressed={openedId === review.frontmatter.id} key={review.frontmatter.id} onClick={() => open(review.frontmatter.id)}><span><strong>{review.frontmatter.title}</strong><small>{proposalLabel(review)} · {dateInTimeZone(new Date(review.frontmatter.created_at), displayTimeZone)}</small></span><LockBadge frontmatter={review.frontmatter} /></button>)}</div>}
     </section>
     <section className="inbox-detail" aria-label="Review detail" hidden={narrow && !selected}>
       {!selected ? <div className="inbox-state"><h3>Select a proposal</h3><p>Choose a row to review its source, evidence and proposed change.</p></div> : <>
