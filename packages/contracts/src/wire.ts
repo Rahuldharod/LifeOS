@@ -36,6 +36,7 @@ export type Workspace = {
   note?: LifeObject;
   reviews: LifeObject[];
   tasks: LifeObject[];
+  noteSectionId?: string;
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
 export type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };

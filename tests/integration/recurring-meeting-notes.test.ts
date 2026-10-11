@@ -64,12 +64,14 @@ describe("recurring meeting notes (#147)", () => {
     const after = event({ externalId: "occurrence-after-split", seriesId: "series-b", previousSeriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
     const copied = event({ externalId: "copied", title: "Copied standalone" });
     const { app } = await setup([before, after, copied]);
-    const oldSeries = await app.createMeetingFromEvent(before.externalId);
     const newSeries = await app.createMeetingFromEvent(after.externalId);
+    expect(newSeries.note?.frontmatter.previous_recurrence_series_id).toBe("synthetic:work:series-a");
+    expect(newSeries.note?.frontmatter.previous_series_note_id).toBeUndefined();
+    const oldSeries = await app.createMeetingFromEvent(before.externalId);
     const copy = await app.createMeetingFromEvent(copied.externalId, undefined, undefined, copied.calendarId, "plain body\n");
 
     expect(newSeries.note?.frontmatter.id).not.toBe(oldSeries.note?.frontmatter.id);
-    expect(newSeries.note?.frontmatter.previous_series_note_id).toBe(oldSeries.note?.frontmatter.id);
+    expect(app.object(newSeries.note!.frontmatter.id).frontmatter.previous_series_note_id).toBe(oldSeries.note?.frontmatter.id);
     expect(copy.note?.frontmatter.recurrence_series_id).toBeUndefined();
     expect(copy.note?.body).toBe("plain body\n");
   });
@@ -79,11 +81,13 @@ describe("recurring meeting notes (#147)", () => {
     const { app, store } = await setup([]);
     const meetingId = uuidV7();
     const noteId = uuidV7();
-    await store.prepareOperation("create-meeting", { externalId: recurring.externalId, calendarId: recurring.calendarId, event: recurring, meetingId, noteId, body: "Recovered words\n" }, uuidV7());
+    const operationId = uuidV7();
+    await store.prepareOperation("create-meeting", { externalId: recurring.externalId, calendarId: recurring.calendarId, event: recurring, meetingId, noteId, body: "Recovered words\n" }, operationId);
 
     await app.recoverOperations();
     expect(app.object(meetingId).frontmatter.recurrence_occurrence_id).toContain(recurring.originalOccurrenceStartsAt);
     expect(app.object(noteId).body).toContain("Recovered words");
+    expect((await app.listObjects()).filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === "meeting.created" && (object.frontmatter.metadata as { operation_id?: string }).operation_id === operationId)).toHaveLength(1);
 
     const legacyId = uuidV7();
     const current = app.object(noteId);

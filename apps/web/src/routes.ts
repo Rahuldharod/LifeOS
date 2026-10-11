@@ -11,7 +11,7 @@ export const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions"
  * `id` is the open item: a note on Notes, a meeting on Calendar, the highlighted card on an entity
  * tab, the Review Item on Inbox. `date` is the Calendar day; `noteTab` the Notes list being shown.
  */
-export type Route = { view: View; id?: string; date?: string; noteTab?: "open" | "deleted" };
+export type Route = { view: View; id?: string; date?: string; noteTab?: "open" | "deleted"; /** Stable recurring-note section reached through a legacy redirect. */ section?: string };
 
 const slugs = Object.fromEntries(views.map((view) => [view, view.toLowerCase().replace(/ /g, "-")])) as Record<View, string>;
 const viewsBySlug = new Map(views.map((view) => [slugs[view], view]));
@@ -46,7 +46,8 @@ export function routePath(route: Route): string {
   if (route.view === "Notes" && route.noteTab === "deleted") parts.push("deleted");
   if (route.view === "Calendar" && route.date) parts.push(route.date);
   if (route.id && (route.view === "Notes" || itemViews.has(route.view) || (route.view === "Calendar" && route.date))) parts.push(route.id);
-  return `/${parts.map(encodeURIComponent).join("/")}`;
+  const path = `/${parts.map(encodeURIComponent).join("/")}`;
+  return route.section ? `${path}#${encodeURIComponent(route.section)}` : path;
 }
 
 export type RouteData = { notes: LinkedObject[]; deletedNotes: LinkedObject[]; objects: LinkedObject[]; pendingReviewIds: string[] };
@@ -64,13 +65,26 @@ export function routeTarget(route: Route, data: RouteData): RouteTarget {
   const has = (list: LinkedObject[]) => list.some((object) => object.frontmatter.id === id);
   if (route.view === "Notes") {
     const [here, there] = route.noteTab === "deleted" ? [data.deletedNotes, data.notes] : [data.notes, data.deletedNotes];
-    if (has(here)) return { kind: "ok" };
+    const current = here.find((object) => object.frontmatter.id === id);
+    if (current) {
+      const target = current.frontmatter.redirect_to_note_id;
+      if (typeof target !== "string") return { kind: "ok" };
+      const targetTab = data.notes.some((object) => object.frontmatter.id === target) ? "open" : data.deletedNotes.some((object) => object.frontmatter.id === target) ? "deleted" : undefined;
+      if (!targetTab) return { kind: "missing", message: "That note redirect is broken." };
+      return { kind: "redirect", route: { view: "Notes", noteTab: targetTab, id: target, ...(typeof current.frontmatter.redirect_to_section_id === "string" ? { section: current.frontmatter.redirect_to_section_id } : {}) } };
+    }
     if (has(there)) return { kind: "redirect", route: { ...route, noteTab: route.noteTab === "deleted" ? "open" : "deleted" } };
     return { kind: "missing", message: "That note no longer exists." };
   }
   if (route.view === "Inbox") return data.pendingReviewIds.includes(id) ? { kind: "ok" } : { kind: "missing", message: "That proposal is no longer waiting in the Inbox." };
   const target = resolveLifeosLink(`lifeos://object/${id}`, data.objects);
-  if (route.view === "Calendar") return target.kind === "meeting" ? { kind: "ok" } : { kind: "missing", message: "That meeting no longer exists." };
+  if (route.view === "Calendar") {
+    if (target.kind !== "meeting") return { kind: "missing", message: "That meeting no longer exists." };
+    const current = data.objects.find((object) => object.frontmatter.id === id);
+    return typeof current?.frontmatter.redirect_to_meeting_id === "string"
+      ? { kind: "redirect", route: { ...route, id: current.frontmatter.redirect_to_meeting_id, ...(typeof current.frontmatter.redirect_to_section_id === "string" ? { section: current.frontmatter.redirect_to_section_id } : {}) } }
+      : { kind: "ok" };
+  }
   const noun = nouns[route.view];
   if (!noun) return { kind: "ok" };
   return target.kind === "entity" && target.view === route.view ? { kind: "ok" } : { kind: "missing", message: `That ${noun} no longer exists.` };
