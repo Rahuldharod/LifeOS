@@ -68,6 +68,9 @@ Approved on 11 October 2026 during the refinement interview:
 - **Compact toolbars:** wrap common controls before they clip. Keep search and the most frequent controls first, and move Advanced filters to their own line as space tightens.
 - **Internal content measures:** allow the surrounding detail pane to grow while keeping reading content near `75ch`, structured forms near `900px` and rich editors near `1,200px` maximum width.
 - **Button states:** primary actions use ocean blue by default, brighten to `#2A718E` with a subtle lift and shadow on hover, and deepen with a one-pixel press treatment when active. Focus adds the approved context-aware ring. Disabled controls use explicit readable colours rather than global opacity. Loading retains control width and action context. Final destructive confirmation uses the solid error treatment only after the destructive path is chosen.
+- **Workspace list clamps:** use 460–640px for Tasks, 320–480px for Calendar, 360–520px for Notes, 380–520px for Inbox, 380–560px for Decisions and Open Points, 360–520px for Knowledge, 240–320px for the Settings section rail and 320–480px for Reference data lists.
+- **Resizable panes:** primary list/detail workspaces share a bounded divider whose position is remembered per workspace on this device and resets on double-click. Keep the outer Settings section rail fixed; allow the nested Reference data list to resize.
+- **Wide-screen columns:** preserve master/detail as the default grammar. Today may use three purposeful columns, and content-rich detail may add an internal evidence or relationships rail. Do not add a third column merely to fill available space.
 
 ## Navigation and workflows
 
