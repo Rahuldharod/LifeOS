@@ -129,6 +129,9 @@ describe("recurring meeting notes (#147)", () => {
     const preview = await app.previewMeetingFromEvent(cancelled.externalId, undefined, undefined, cancelled.calendarId);
     expect(preview.persisted).toBe(false);
     expect(app.notes()).toEqual([]);
+    const untouched = await app.createMeetingFromEvent(cancelled.externalId, undefined, undefined, cancelled.calendarId);
+    expect(untouched.persisted).toBe(false);
+    expect((await app.listObjects()).filter((object) => object.frontmatter.type === "meeting" || object.frontmatter.type === "meeting-note")).toEqual([]);
 
     const confirmed = { ...cancelled, status: "confirmed" as const };
     calendar.events.splice(0, 1, confirmed);
