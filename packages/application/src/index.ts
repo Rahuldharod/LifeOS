@@ -116,6 +116,7 @@ export class LifeOSApplication {
   recoverOperations(options?: Parameters<SystemModule["recoverOperations"]>[0]) { return this.system.recoverOperations(options); }
   listObjects() { return this.system.listObjects(); }
   object(id: string) { return this.system.object(id); }
+  resolveObjectLink(id: string) { return this.system.resolveObjectLink(id); }
   archiveObject(id: string, expectedHash: string) { return this.system.archiveObject(id, expectedHash); }
   /** Called by the file watcher (U4, U5). */
   recordExternalChanges() { return this.history.recordExternalChanges(); }

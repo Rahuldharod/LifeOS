@@ -116,15 +116,20 @@ export class GoogleCalendarConnector implements CalendarConnector {
   async listEvents(from: Date, to: Date) {
     const { headers, calendars } = await this.fetchCalendars();
     const eventGroups = await Promise.all(calendars.map(async (calendar) => {
-      const query = new URLSearchParams({ timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: "true", orderBy: "startTime", maxResults: "250" });
+      const query = new URLSearchParams({ timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: "true", showDeleted: "true", orderBy: "startTime", maxResults: "250" });
       const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(String(calendar.id))}/events?${query}`, { headers });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw Google Calendar JSON, mapped field by field below
       const payload = await response.json() as { items?: Array<Record<string, any>>; error?: { message?: string } };
       if (!response.ok) throw new Error(`Google Calendar request failed for ${String(calendar.summary ?? calendar.id)}: ${payload.error?.message ?? response.status}`);
-      return (payload.items ?? []).filter((event) => event.status !== "cancelled" && event.id && event.start && event.end).map((event) => {
-        const allDay = Boolean(event.start.date && !event.start.dateTime);
-        const rawStart = String(event.start.dateTime ?? `${event.start.date}T00:00:00.000Z`);
-        const rawEnd = String(event.end.dateTime ?? `${event.end.date}T00:00:00.000Z`);
+      return (payload.items ?? []).filter((event) => event.id && (event.start || event.originalStartTime) && (event.end || event.status === "cancelled")).map((event) => {
+        const start = event.start ?? event.originalStartTime;
+        const end = event.end ?? start;
+        const allDay = Boolean(start.date && !start.dateTime);
+        const rawStart = String(start.dateTime ?? `${start.date}T00:00:00.000Z`);
+        const rawEnd = String(end.dateTime ?? `${end.date}T00:00:00.000Z`);
+        const original = event.originalStartTime;
+        const originalRaw = original ? String(original.dateTime ?? `${original.date}T00:00:00.000Z`) : undefined;
+        const previousSeriesId = event.extendedProperties?.private?.lifeosPreviousSeriesId;
         return {
           externalId: String(event.id),
           calendarId: String(calendar.id),
@@ -133,8 +138,12 @@ export class GoogleCalendarConnector implements CalendarConnector {
           title: String(event.summary ?? "Untitled event"),
           startsAt: new Date(rawStart).toISOString(),
           endsAt: new Date(rawEnd).toISOString(),
-          timezone: String(event.start.timeZone ?? event.end.timeZone ?? calendar.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
+          timezone: String(start.timeZone ?? end.timeZone ?? calendar.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
           isAllDay: allDay,
+          ...(typeof event.recurringEventId === "string" ? { seriesId: event.recurringEventId } : {}),
+          ...(originalRaw ? { originalOccurrenceStartsAt: new Date(originalRaw).toISOString() } : {}),
+          ...(typeof previousSeriesId === "string" ? { previousSeriesId } : {}),
+          status: event.status === "cancelled" ? "cancelled" as const : "confirmed" as const,
           declined: Array.isArray(event.attendees) && event.attendees.some((attendee: Record<string, unknown>) => attendee.self === true && attendee.responseStatus === "declined"),
           attendees: Array.isArray(event.attendees) ? event.attendees.map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : [],
           // #38: emails for matching People. Rooms and other resources are not people.

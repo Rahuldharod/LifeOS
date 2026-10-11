@@ -25,6 +25,7 @@ describe("Google Calendar connector", () => {
     // #44: an invitation the user declined is flagged so enrichment skips it.
     expect(events.map((event) => event.declined)).toEqual([false, true]);
     expect(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]?.[0])).toContain("singleEvents=true");
+    expect(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]?.[0])).toContain("showDeleted=true");
     expect(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]?.[0])).toContain("calendars/primary/events");
   });
 
@@ -42,5 +43,28 @@ describe("Google Calendar connector", () => {
       { id: "family@example.com", name: "Home", color: undefined }
     ]);
     expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+  });
+
+  it("preserves recurring occurrence identity, moves, cancellations and provider series splits", async () => {
+    const secrets = new MemorySecretStore();
+    await secrets.set("google:default:tokens", JSON.stringify({ access_token: "access", expires_at: Date.now() + 3_600_000 }));
+    const connector = new GoogleCalendarConnector({ clientId: "client.apps.googleusercontent.com", redirectUri: "http://127.0.0.1/callback", secrets });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "primary", summary: "Work", timeZone: "Europe/Paris" }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [
+        { id: "instance-normal", recurringEventId: "series-a", status: "confirmed", summary: "Weekly", originalStartTime: { dateTime: "2026-10-05T10:00:00+02:00" }, start: { dateTime: "2026-10-05T10:00:00+02:00" }, end: { dateTime: "2026-10-05T11:00:00+02:00" } },
+        { id: "instance-moved", recurringEventId: "series-a", status: "confirmed", summary: "Weekly moved", originalStartTime: { dateTime: "2026-10-12T10:00:00+02:00" }, start: { dateTime: "2026-10-13T14:00:00+02:00" }, end: { dateTime: "2026-10-13T15:00:00+02:00" } },
+        { id: "instance-cancelled", recurringEventId: "series-a", status: "cancelled", originalStartTime: { dateTime: "2026-10-19T10:00:00+02:00" } },
+        { id: "instance-split", recurringEventId: "series-b", status: "confirmed", summary: "Weekly new time", originalStartTime: { dateTime: "2026-10-26T09:00:00+01:00" }, start: { dateTime: "2026-10-26T09:00:00+01:00" }, end: { dateTime: "2026-10-26T10:00:00+01:00" }, extendedProperties: { private: { lifeosPreviousSeriesId: "series-a" } } },
+        { id: "copied-event", iCalUID: "same-series-looking@example.com", status: "confirmed", summary: "Copied", start: { dateTime: "2026-10-27T09:00:00+01:00" }, end: { dateTime: "2026-10-27T10:00:00+01:00" } }
+      ] }), { status: 200 }));
+
+    const events = await connector.listEvents(new Date("2026-10-01T00:00:00Z"), new Date("2026-11-01T00:00:00Z"));
+
+    expect(events.find((event) => event.externalId === "instance-normal")).toMatchObject({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z", status: "confirmed" });
+    expect(events.find((event) => event.externalId === "instance-moved")).toMatchObject({ startsAt: "2026-10-13T12:00:00.000Z", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    expect(events.find((event) => event.externalId === "instance-cancelled")).toMatchObject({ seriesId: "series-a", status: "cancelled", originalOccurrenceStartsAt: "2026-10-19T08:00:00.000Z" });
+    expect(events.find((event) => event.externalId === "instance-split")).toMatchObject({ seriesId: "series-b", previousSeriesId: "series-a" });
+    expect(events.find((event) => event.externalId === "copied-event")).not.toHaveProperty("seriesId");
   });
 });
