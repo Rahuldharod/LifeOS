@@ -536,6 +536,31 @@ describe("meeting-material adoption", () => {
     expect(summary!.frontmatter.sensitivity).toBe("restricted");
   });
 
+  it("recalculates a revised recurring summary from its new restricted evidence (#151, ADR 0018)", async () => {
+    const occurrence = event("recurring-sensitive", { seriesId: "weekly-series", originalOccurrenceStartsAt: startedAt });
+    const { root, application } = await vault([occurrence]);
+    const workspace = await application.createMeetingFromEvent(occurrence.externalId, range.from, range.to, "work", "User notes.\n");
+    const section = (workspace.note!.frontmatter.occurrence_sections as Array<{ section_id: string; occurrence_id: string }>)[0]!;
+    const occurrenceFields = `occurrence_section_id: ${section.section_id}\nrecurrence_occurrence_id: ${section.occurrence_id}`;
+    await dropDraft(root, "first-summary.md", material({
+      key: "sensitive-first", meeting: workspace.meeting.frontmatter.id, sources: ["drive-doc"], proposals: "proposals: []", summary: "First summary.\n",
+      extra: `${occurrenceFields}\nsummary_evidence:\n  - source: drive-doc-1\n    locator: "${section.section_id}#page-1"`
+    }));
+    await application.adoptDrafts();
+    const [driveDoc] = await ofType(application, "source");
+    await application.setSensitivity(driveDoc!.frontmatter.id, "restricted", driveDoc!.contentHash);
+
+    await dropDraft(root, "revised-summary.md", material({
+      key: "sensitive-revised", meeting: workspace.meeting.frontmatter.id, sources: ["meet-transcript"], proposals: "proposals: []", summary: "Revised summary.\n",
+      extra: `${occurrenceFields}\nsummary_evidence:\n  - source: drive-doc-1\n    locator: "${section.section_id}#page-2"`
+    }));
+    expect((await application.adoptDrafts()).drafts[0]!.outcome).toBe("adopted");
+
+    const summaries = application.reviews().filter((review) => review.frontmatter.review_type === "summary");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.frontmatter).toMatchObject({ sensitivity: "restricted", proposed_fields: { summary: "Revised summary." } });
+  });
+
   it("keeps a source's link to another meeting and lists it on this one instead", async () => {
     const { root, application } = await vault([event("evt-1"), event("evt-2")]);
     await dropDraft(root, "one.md", material({ key: "one", sources: ["gong-call"], proposals: "proposals: []" }));
