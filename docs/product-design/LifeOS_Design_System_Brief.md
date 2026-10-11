@@ -71,6 +71,10 @@ Approved on 11 October 2026 during the refinement interview:
 - **Workspace list clamps:** use 460–640px for Tasks, 320–480px for Calendar, 360–520px for Notes, 380–520px for Inbox, 380–560px for Decisions and Open Points, 360–520px for Knowledge, 240–320px for the Settings section rail and 320–480px for Reference data lists.
 - **Resizable panes:** primary list/detail workspaces share a bounded divider whose position is remembered per workspace on this device and resets on double-click. Keep the outer Settings section rail fixed; allow the nested Reference data list to resize.
 - **Wide-screen columns:** preserve master/detail as the default grammar. Today may use three purposeful columns, and content-rich detail may add an internal evidence or relationships rail. Do not add a third column merely to fill available space.
+- **Today reflow:** never stretch Top 3 to match taller neighbouring content. Keep priorities first on narrow screens; allow three purposeful columns on wide screens for Top 3, next meeting/Capture and supporting day context.
+- **Tasks, Calendar and Notes reflow:** use the approved list clamps, independent pane scrolling and narrow list-to-detail navigation. Keep forms, editors and prose within their approved internal measures. Calendar proposals remain below the editor; Note conflict versions stack only in the narrow band.
+- **Inbox, Decisions, Open Points and Knowledge reflow:** preserve a focused record workflow on narrow screens. On wide screens, supporting evidence, relationships or Sources may form an internal rail inside the record detail, never a universal app-level pane.
+- **Settings reflow:** keep the outer section rail stable. Show nested Reference data list/detail only when it fits; compact and narrow layouts navigate through successive section-to-content and list-to-detail steps rather than squeezing three columns.
 
 ## Navigation and workflows
 
