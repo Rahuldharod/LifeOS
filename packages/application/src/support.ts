@@ -43,7 +43,8 @@ export const byIdentifier = <T extends WithFrontmatter>(matches: T[]) => {
  */
 export function liveMeetingNote<T extends WithFrontmatter>(meetingId: string, objects: Iterable<T>): T | undefined {
   for (const object of objects) {
-    if (object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && isLive(object)) return object;
+    const meetingIds = Array.isArray(object.frontmatter.meeting_ids) ? object.frontmatter.meeting_ids : [];
+    if (object.frontmatter.type === "meeting-note" && (object.frontmatter.meeting_id === meetingId || meetingIds.includes(meetingId)) && isLive(object)) return object;
   }
   return undefined;
 }

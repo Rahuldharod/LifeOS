@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
-import { operationKinds, type CalendarEvent } from "./ports.js";
+import { operationKinds, type CalendarEvent, type Operation } from "./ports.js";
 import { isLive, liveMeetingNote, OneAtATime } from "./support.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
@@ -25,9 +25,16 @@ export class MeetingsModule {
    * recreates the note with the user's text rather than a placeholder.
    */
   async createMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
-    // PB-004: two near-simultaneous first edits both saw "no meeting yet" and each created one.
-    // Calls for the same event now run one after the other, so the second finds the first's meeting.
-    return this.meetingCreations.run(externalId, () => this.createMeetingFromEventSerialized(externalId, from, to, calendarId, initialBody));
+    const event = await this.findEvent(externalId, from, to, calendarId);
+    // Recurring occurrences share a note, so serialize the whole provider series as one write scope.
+    return this.meetingCreations.run(this.seriesKey(event) ?? externalId, () => this.createMeetingFromEventSerialized(event, initialBody));
+  }
+
+  /** ADR 0013 recovery uses the captured provider event, not a new date-window query. */
+  async recoverCreateMeeting(operation: Operation) {
+    const event = operation.payload.event as CalendarEvent | undefined;
+    if (event?.externalId) return this.meetingCreations.run(this.seriesKey(event) ?? event.externalId, () => this.createMeetingFromEventSerialized(event));
+    if (typeof operation.payload.externalId === "string") return this.createMeetingFromEvent(operation.payload.externalId);
   }
 
   /**
@@ -45,6 +52,8 @@ export class MeetingsModule {
       if (!this.ctx.calendar) throw new Error("Calendar connector is not configured");
       const event = (await this.ctx.calendar.listEvents(options.from, options.to)).find((candidate) => candidate.externalId === externalId && (!options.calendarId || candidate.calendarId === options.calendarId));
       if (!event) return undefined;
+      const sameOccurrence = this.findMeetingForEvent(event.externalId, event.calendarId, event);
+      if (sameOccurrence) return { meeting: sameOccurrence, created: false };
       const now = new Date().toISOString();
       const meeting = await this.writeMeeting(event, options.meetingId, await this.ensureEventContext(event, now), now);
       const metadata = { external_id: externalId, reason: "enrichment" };
@@ -67,7 +76,7 @@ export class MeetingsModule {
       relativePath: `meetings/${markdownFileName(event.title, meetingId, event.startsAt, event.timezone)}`,
       frontmatter: {
         ...ctx.envelope(meetingId, "meeting", event.title, now, "calendar"),
-        status: "scheduled",
+        status: event.status === "cancelled" ? "cancelled" : "scheduled",
         starts_at: event.startsAt,
         ends_at: event.endsAt,
         timezone: event.timezone,
@@ -76,19 +85,24 @@ export class MeetingsModule {
         primary_product_id: context.product?.frontmatter.id,
         primary_project_id: context.project?.frontmatter.id,
         is_all_day: event.isAllDay ?? false,
-        external_refs: [{ provider: ctx.calendar?.provider ?? "calendar", external_id: event.externalId, calendar_id: event.calendarId }]
+        ...(event.seriesId && event.originalOccurrenceStartsAt ? {
+          recurrence_series_id: this.seriesKey(event),
+          recurrence_occurrence_id: this.occurrenceId(event),
+          original_occurrence_starts_at: event.originalOccurrenceStartsAt
+        } : {}),
+        external_refs: [{ provider: ctx.calendar?.provider ?? "calendar", external_id: event.externalId, calendar_id: event.calendarId, ...(event.seriesId ? { series_id: event.seriesId } : {}), ...(event.originalOccurrenceStartsAt ? { original_occurrence_starts_at: event.originalOccurrenceStartsAt } : {}) }]
       },
       body: `# ${event.title}\n\nCanonical meeting created from ${ctx.calendar?.provider ?? "calendar"}.\n`
     });
   }
 
-  private async createMeetingFromEventSerialized(externalId: string, from?: Date, to?: Date, calendarId?: string, initialBody?: string) {
+  private async createMeetingFromEventSerialized(event: CalendarEvent, initialBody?: string) {
     const { ctx } = this;
-    const event = await this.findEvent(externalId, from, to, calendarId);
+    const externalId = event.externalId;
     const now = new Date().toISOString();
     const context = await this.ensureEventContext(event, now);
-    const pendingOperation = (await ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.createMeeting && operation.payload.externalId === externalId);
-    const existing = this.findMeetingForEvent(event.externalId, event.calendarId);
+    const pendingOperation = (await ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.createMeeting && operation.payload.externalId === externalId && (!event.calendarId || !operation.payload.calendarId || operation.payload.calendarId === event.calendarId));
+    const existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
     if (existing) {
       const existingNote = this.noteFor(existing.frontmatter.id);
       if (!existingNote) {
@@ -96,7 +110,7 @@ export class MeetingsModule {
         // yet (the PB-020 flow, or a meeting created before it): create the note now.
         const recoveredNoteId = pendingOperation && typeof pendingOperation.payload.noteId === "string" ? pendingOperation.payload.noteId : uuidV7();
         const recoveredBody = initialBody ?? (typeof pendingOperation?.payload.body === "string" ? pendingOperation.payload.body : DEFAULT_NOTE_BODY);
-        await ctx.objects.write({ relativePath: `meetings/${markdownFileName(`${event.title} notes`, recoveredNoteId, event.startsAt, event.timezone)}`, frontmatter: { ...ctx.envelope(recoveredNoteId, "meeting-note", `${event.title} notes`, now), meeting_id: existing.frontmatter.id, people_ids: context.people.map((person) => person.frontmatter.id), primary_client_id: context.client?.frontmatter.id, primary_product_id: context.product?.frontmatter.id, primary_project_id: context.project?.frontmatter.id }, body: recoveredBody });
+        await this.attachOrCreateNote(event, existing, recoveredNoteId, recoveredBody, context, now);
       }
       await this.enrichMeetingContext(existing, context, now);
       if (pendingOperation) await ctx.objects.completeOperation?.(pendingOperation.id);
@@ -105,23 +119,12 @@ export class MeetingsModule {
     }
 
     const operationId = pendingOperation?.id ?? uuidV7();
-    const operation = pendingOperation ?? await ctx.objects.prepareOperation?.(operationKinds.createMeeting, { externalId, meetingId: uuidV7(), noteId: uuidV7(), body: initialBody ?? DEFAULT_NOTE_BODY }, operationId);
+    const operation = pendingOperation ?? await ctx.objects.prepareOperation?.(operationKinds.createMeeting, { externalId, calendarId: event.calendarId, event, meetingId: uuidV7(), noteId: uuidV7(), body: initialBody ?? DEFAULT_NOTE_BODY }, operationId);
     const meetingId = typeof operation?.payload.meetingId === "string" ? operation.payload.meetingId : uuidV7();
     const noteId = typeof operation?.payload.noteId === "string" ? operation.payload.noteId : uuidV7();
     const noteBody = initialBody ?? (typeof operation?.payload.body === "string" ? operation.payload.body : DEFAULT_NOTE_BODY);
-    await this.writeMeeting(event, meetingId, context, now);
-    await ctx.objects.write({
-      relativePath: `meetings/${markdownFileName(`${event.title} notes`, noteId, event.startsAt, event.timezone)}`,
-      frontmatter: {
-        ...ctx.envelope(noteId, "meeting-note", `${event.title} notes`, now),
-        meeting_id: meetingId,
-        people_ids: context.people.map((person) => person.frontmatter.id),
-        primary_client_id: context.client?.frontmatter.id,
-        primary_product_id: context.product?.frontmatter.id,
-        primary_project_id: context.project?.frontmatter.id
-      },
-      body: noteBody
-    });
+    const meeting = await this.writeMeeting(event, meetingId, context, now);
+    await this.attachOrCreateNote(event, meeting, noteId, noteBody, context, now);
     await ctx.writeAuditOnce("meeting.created", meetingId, now, { operation_id: operationId, external_id: externalId }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operationId);
     await ctx.rebuildIndex();
@@ -137,7 +140,7 @@ export class MeetingsModule {
    */
   async previewMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) {
     const event = await this.findEvent(externalId, from, to, calendarId);
-    const existing = this.findMeetingForEvent(event.externalId, event.calendarId);
+    const existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
     if (existing) return this.meetingWorkspace(existing.frontmatter.id);
     const now = new Date().toISOString();
     const synthetic = (type: ObjectEnvelope["type"], title: string): LifeOSObject => ({ frontmatter: { ...this.ctx.envelope(`preview:${type}:${externalId}:${title}`, type, title, now, "calendar") }, body: "", relativePath: "", contentHash: "" });
@@ -168,10 +171,17 @@ export class MeetingsModule {
 
   async meetingWorkspace(meetingId: string) {
     const { index } = this.ctx;
-    const meeting = this.ctx.required(meetingId, "meeting");
-    const note = this.noteFor(meetingId);
-    const reviews = index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === meetingId);
-    const tasks = index.all().filter((object) => object.frontmatter.type === "task" && isLive(object) && object.frontmatter.source_meeting_id === meetingId);
+    let meeting = this.ctx.required(meetingId, "meeting");
+    const redirects = new Set([meetingId]);
+    while (typeof meeting.frontmatter.redirect_to_meeting_id === "string") {
+      if (redirects.has(meeting.frontmatter.redirect_to_meeting_id)) throw new Error(`Meeting redirect cycle at ${meeting.frontmatter.redirect_to_meeting_id}`);
+      redirects.add(meeting.frontmatter.redirect_to_meeting_id);
+      meeting = this.ctx.required(meeting.frontmatter.redirect_to_meeting_id, "meeting");
+    }
+    const resolvedMeetingId = meeting.frontmatter.id;
+    const note = this.noteFor(resolvedMeetingId);
+    const reviews = index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === resolvedMeetingId);
+    const tasks = index.all().filter((object) => object.frontmatter.type === "task" && isLive(object) && object.frontmatter.source_meeting_id === resolvedMeetingId);
     const resolve = (value: unknown) => typeof value === "string" ? index.get(value) : undefined;
     const attendeeIds = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids : [];
     return {
@@ -244,7 +254,7 @@ export class MeetingsModule {
   /** Calendar events annotated with the LifeOS meeting and note they already have, if any. */
   withNoteLinks(events: CalendarEvent[]) {
     return events.map((event) => {
-      const meeting = this.findMeetingForEvent(event.externalId, event.calendarId);
+      const meeting = this.findMeetingForEvent(event.externalId, event.calendarId, event);
       const note = meeting ? this.noteFor(meeting.frontmatter.id) : undefined;
       return {
         ...event,
@@ -257,14 +267,16 @@ export class MeetingsModule {
 
   /** The live meeting for a calendar event. Identity is provider + calendar + event id (PB-004);
    * refs written before calendar_id or provider were recorded match on the fields they have. */
-  private findMeetingForEvent(externalId: string, calendarId?: string) {
+  private findMeetingForEvent(externalId: string, calendarId?: string, event?: CalendarEvent) {
     const provider = this.ctx.calendar?.provider;
     return this.ctx.index.all().find((object) => object.frontmatter.type === "meeting" && isLive(object) &&
       Array.isArray(object.frontmatter.external_refs) &&
       object.frontmatter.external_refs.some((reference: unknown) => {
         if (typeof reference !== "object" || reference === null) return false;
-        const ref = reference as { provider?: string; external_id?: string; calendar_id?: string };
-        return ref.external_id === externalId &&
+        const ref = reference as { provider?: string; external_id?: string; calendar_id?: string; series_id?: string; original_occurrence_starts_at?: string };
+        const sameExternalEvent = ref.external_id === externalId;
+        const sameOccurrence = Boolean(event?.seriesId && event.originalOccurrenceStartsAt && ref.series_id === event.seriesId && ref.original_occurrence_starts_at === event.originalOccurrenceStartsAt);
+        return (sameExternalEvent || sameOccurrence) &&
           (!provider || !ref.provider || ref.provider === provider) &&
           (!calendarId || !ref.calendar_id || ref.calendar_id === calendarId);
       }));
@@ -272,6 +284,75 @@ export class MeetingsModule {
 
   private noteFor(meetingId: string) {
     return liveMeetingNote(meetingId, this.ctx.index.all());
+  }
+
+  private seriesKey(event: CalendarEvent, seriesId = event.seriesId) {
+    if (!seriesId) return undefined;
+    return `${this.ctx.calendar?.provider ?? "calendar"}:${event.calendarId ?? "default"}:${seriesId}`;
+  }
+
+  private occurrenceId(event: CalendarEvent) {
+    const series = this.seriesKey(event);
+    return series && event.originalOccurrenceStartsAt ? `${series}:${event.originalOccurrenceStartsAt}` : undefined;
+  }
+
+  private occurrenceSection(event: CalendarEvent, meetingId: string) {
+    const occurrenceId = this.occurrenceId(event)!;
+    return {
+      occurrence_id: occurrenceId,
+      section_id: `occurrence-${event.originalOccurrenceStartsAt!.replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}`,
+      meeting_id: meetingId,
+      original_starts_at: event.originalOccurrenceStartsAt!
+    };
+  }
+
+  private findSeriesNote(seriesId: string | undefined) {
+    return seriesId ? this.ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && isLive(object) && object.frontmatter.recurrence_series_id === seriesId) : undefined;
+  }
+
+  private recurringSectionBody(event: CalendarEvent, sectionId: string, body: string) {
+    return `## ${event.title} — ${event.startsAt}\n<a id="${sectionId}"></a>\n\n${body}`;
+  }
+
+  /** Creates a one-off note unchanged, or idempotently attaches an occurrence to its shared series note. */
+  private async attachOrCreateNote(event: CalendarEvent, meeting: LifeOSObject, noteId: string, body: string, context: EventContext, now: string) {
+    const seriesId = this.seriesKey(event);
+    const base = {
+      people_ids: context.people.map((person) => person.frontmatter.id),
+      primary_client_id: context.client?.frontmatter.id,
+      primary_product_id: context.product?.frontmatter.id,
+      primary_project_id: context.project?.frontmatter.id
+    };
+    if (!seriesId || !event.originalOccurrenceStartsAt) {
+      return this.ctx.objects.write({ relativePath: `meetings/${markdownFileName(`${event.title} notes`, noteId, event.startsAt, event.timezone)}`, frontmatter: { ...this.ctx.envelope(noteId, "meeting-note", `${event.title} notes`, now), meeting_id: meeting.frontmatter.id, ...base }, body });
+    }
+
+    const section = this.occurrenceSection(event, meeting.frontmatter.id);
+    const existing = this.findSeriesNote(seriesId);
+    if (existing) {
+      const sections = Array.isArray(existing.frontmatter.occurrence_sections) ? existing.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+      if (sections.some((candidate) => candidate.occurrence_id === section.occurrence_id)) return existing;
+      const meetingIds = Array.isArray(existing.frontmatter.meeting_ids) ? existing.frontmatter.meeting_ids.filter((id): id is string => typeof id === "string") : [String(existing.frontmatter.meeting_id)];
+      return this.ctx.update(existing, {
+        meeting_ids: [meeting.frontmatter.id, ...meetingIds.filter((id) => id !== meeting.frontmatter.id)],
+        occurrence_sections: [section, ...sections]
+      }, { expectedHash: existing.contentHash, now, body: `${this.recurringSectionBody(event, section.section_id, body)}\n\n${existing.body}` });
+    }
+
+    const previousSeries = event.previousSeriesId ? this.findSeriesNote(this.seriesKey(event, event.previousSeriesId)) : undefined;
+    return this.ctx.objects.write({
+      relativePath: `meetings/${markdownFileName(`${event.title} notes`, noteId, event.startsAt, event.timezone)}`,
+      frontmatter: {
+        ...this.ctx.envelope(noteId, "meeting-note", `${event.title} notes`, now),
+        meeting_id: meeting.frontmatter.id,
+        meeting_ids: [meeting.frontmatter.id],
+        recurrence_series_id: seriesId,
+        occurrence_sections: [section],
+        ...(previousSeries ? { previous_series_note_id: previousSeries.frontmatter.id } : {}),
+        ...base
+      },
+      body: this.recurringSectionBody(event, section.section_id, body)
+    });
   }
 
   private async findEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) {

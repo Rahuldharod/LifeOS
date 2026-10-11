@@ -110,6 +110,14 @@ export interface CalendarEvent {
   endsAt: string;
   timezone: string;
   isAllDay?: boolean;
+  /** Provider recurrence series. Absent for one-off and copied standalone events. */
+  seriesId?: string;
+  /** Immutable provider occurrence identity; unlike startsAt this survives a move. */
+  originalOccurrenceStartsAt?: string;
+  /** Provider-declared predecessor when "this and following" creates a new series. */
+  previousSeriesId?: string;
+  /** Cancelled exceptions remain visible to sync/reconciliation even when they have no displayable event. */
+  status?: "confirmed" | "cancelled";
   /** The user declined the invitation; declined events are never enriched (#44). */
   declined?: boolean;
   /** Display labels (name, else email). Kept for the UI and name-only connectors. */
