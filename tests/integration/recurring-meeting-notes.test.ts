@@ -32,6 +32,28 @@ async function setup(events: CalendarEvent[]) {
 }
 
 describe("recurring meeting notes (#147)", () => {
+  it("serializes simultaneous first edits into one canonical Note with one stable section per occurrence", async () => {
+    const older = event({ externalId: "older-race", seriesId: "series-race", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const newer = event({ externalId: "newer-race", startsAt: "2026-10-12T08:00:00.000Z", endsAt: "2026-10-12T09:00:00.000Z", seriesId: "series-race", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const { app } = await setup([older, newer]);
+
+    const [first, second] = await Promise.all([
+      app.createMeetingFromEvent(older.externalId, undefined, undefined, older.calendarId, "Older tab words\n"),
+      app.createMeetingFromEvent(newer.externalId, undefined, undefined, newer.calendarId, "Newer tab words\n")
+    ]);
+
+    expect(first.note?.frontmatter.id).toBe(second.note?.frontmatter.id);
+    expect(app.notes()).toHaveLength(1);
+    const sections = second.note?.frontmatter.occurrence_sections as Array<{ occurrence_id: string; section_id: string }>;
+    expect(new Set(sections.map(({ occurrence_id }) => occurrence_id)).size).toBe(2);
+    expect(new Set(sections.map(({ section_id }) => section_id)).size).toBe(2);
+
+    const retry = await app.createMeetingFromEvent(newer.externalId, undefined, undefined, newer.calendarId, "Retry must not replace the first edit\n");
+    expect(retry.note?.body).toContain("Newer tab words");
+    expect(retry.note?.body).not.toContain("Retry must not replace");
+    expect(retry.note?.frontmatter.occurrence_sections).toHaveLength(2);
+  });
+
   it("keeps one Meeting per occurrence and one Note per series with stable newest-first sections", async () => {
     const first = event({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
     const moved = event({ externalId: "occurrence-2", startsAt: "2026-10-13T12:00:00.000Z", endsAt: "2026-10-13T13:00:00.000Z", seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
@@ -68,6 +90,50 @@ describe("recurring meeting notes (#147)", () => {
 
     expect((workspace.note!.frontmatter.occurrence_sections as Array<{ original_starts_at: string }>).map((section) => section.original_starts_at)).toEqual([newer.originalOccurrenceStartsAt, older.originalOccurrenceStartsAt]);
     expect(workspace.note!.body.indexOf("Newer words")).toBeLessThan(workspace.note!.body.indexOf("Older words"));
+  });
+
+  it("orders sections by actual occurrence time while immutable original time keeps section identity", async () => {
+    const movedLater = event({ externalId: "moved-later", startsAt: "2026-10-20T08:00:00.000Z", endsAt: "2026-10-20T09:00:00.000Z", seriesId: "series-moved", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const ordinary = event({ externalId: "ordinary", startsAt: "2026-10-12T08:00:00.000Z", endsAt: "2026-10-12T09:00:00.000Z", seriesId: "series-moved", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const { app } = await setup([movedLater, ordinary]);
+    await app.createMeetingFromEvent(movedLater.externalId, undefined, undefined, movedLater.calendarId, "Moved later words\n");
+    const workspace = await app.createMeetingFromEvent(ordinary.externalId, undefined, undefined, ordinary.calendarId, "Ordinary words\n");
+
+    const sections = workspace.note!.frontmatter.occurrence_sections as Array<{ original_starts_at: string; starts_at: string }>;
+    expect(sections.map(({ starts_at }) => starts_at)).toEqual([movedLater.startsAt, ordinary.startsAt]);
+    expect(sections[0]!.original_starts_at).toBe(movedLater.originalOccurrenceStartsAt);
+    expect(workspace.note!.body.indexOf("Moved later words")).toBeLessThan(workspace.note!.body.indexOf("Ordinary words"));
+  });
+
+  it("follows Calendar title changes until the shared Note is manually renamed", async () => {
+    const first = event({ externalId: "title-first", title: "Weekly planning", seriesId: "series-title", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const renamed = event({ externalId: "title-second", title: "Delivery planning", startsAt: "2026-10-12T08:00:00.000Z", endsAt: "2026-10-12T09:00:00.000Z", seriesId: "series-title", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
+    const later = event({ externalId: "title-third", title: "Planning renamed again", startsAt: "2026-10-19T08:00:00.000Z", endsAt: "2026-10-19T09:00:00.000Z", seriesId: "series-title", originalOccurrenceStartsAt: "2026-10-19T08:00:00.000Z" });
+    const { app } = await setup([first, renamed, later]);
+
+    const created = await app.createMeetingFromEvent(first.externalId, undefined, undefined, first.calendarId, "First\n");
+    const followed = await app.createMeetingFromEvent(renamed.externalId, undefined, undefined, renamed.calendarId, "Second\n");
+    expect(followed.note?.frontmatter.title).toBe("Delivery planning notes");
+
+    const custom = await app.updateNoteMetadata(followed.note!.frontmatter.id, { title: "My delivery journal" }, followed.note!.contentHash);
+    expect(custom.frontmatter.title_manually_renamed).toBe(true);
+    const preserved = await app.createMeetingFromEvent(later.externalId, undefined, undefined, later.calendarId, "Third\n");
+    expect(preserved.note?.frontmatter.title).toBe("My delivery journal");
+    expect(preserved.note?.frontmatter.id).toBe(created.note?.frontmatter.id);
+  });
+
+  it("updates a generated title on explicit Calendar sync without creating sections", async () => {
+    const recurring = event({ externalId: "sync-title", title: "Original calendar title", seriesId: "series-sync-title", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
+    const { app } = await setup([recurring]);
+    const created = await app.createMeetingFromEvent(recurring.externalId, undefined, undefined, recurring.calendarId, "Existing notes\n");
+    recurring.title = "Renamed in Calendar";
+
+    await app.syncCalendar(new Date("2026-10-01T00:00:00.000Z"), new Date("2026-10-20T00:00:00.000Z"));
+
+    const renamed = app.object(created.note!.frontmatter.id);
+    expect(renamed.frontmatter.title).toBe("Renamed in Calendar notes");
+    expect(renamed.frontmatter.occurrence_sections).toHaveLength(1);
+    expect(renamed.body).toContain("Existing notes");
   });
 
   it("starts a linked Note after a provider split and does not infer copied events as recurring", async () => {
