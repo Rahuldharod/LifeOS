@@ -185,6 +185,17 @@ describe("TaskWorkspace", () => {
     expect(document.body.textContent).not.toContain("Yesterday");
   });
 
+  it("derives a timed due date in the selected display timezone for labels, filters and sorting", async () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    const tasks = [object("utc-eleven", "Local twelfth", { due_at: "2026-10-11T23:30:00.000Z", due_timezone: "UTC" }), object("later", "Later local day", { due_at: "2026-10-12T23:30:00.000Z", due_timezone: "UTC" })];
+    await act(async () => root!.render(<TaskWorkspace tasks={tasks} linkables={tasks} labels={new Map()} projects={[]} selfId="self" today="2026-10-12" timeZone="Europe/Paris" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={async () => true} onRestored={async () => undefined} />));
+    expect(document.querySelector(".task-row small")?.textContent).toContain("due 2026-10-12");
+    await click("Advanced");
+    await choose("Filter by due period", "today");
+    expect(document.body.textContent).toContain("Local twelfth");
+    expect(document.body.textContent).not.toContain("Later local day");
+  });
+
   it("preserves established task relationship and envelope fields", async () => {
     const task = object("mine", "Prepare proposal", { primary_client_id: "client", primary_product_id: "product", dependency_ids: ["blocker"], area: "work" });
     const linkables = [task, object("blocker", "Confirm scope"), { ...object("client", "Acme"), frontmatter: { ...object("client", "Acme").frontmatter, type: "client" } }, { ...object("product", "Rewards"), frontmatter: { ...object("product", "Rewards").frontmatter, type: "product" } }];
@@ -258,5 +269,49 @@ describe("TaskWorkspace", () => {
     expect(selectedId).toBeUndefined();
     expect((document.querySelector("[aria-label='Tasks list']") as HTMLElement).hidden).toBe(false);
     expect((document.querySelector("[aria-label='Task detail']") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("preserves narrow list URL, sort, filters and scroll through detail and Back", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, media: "(max-width: 760px)", onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() })));
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 1; });
+    vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number, y?: number) { this.scrollTop = typeof options === "number" ? y ?? 0 : options?.top ?? 0; });
+    window.history.replaceState({}, "", "/tasks?taskView=others&taskDue=next7&taskSort=title");
+    const task = object("direct", "Delegated task", { owner_person_id: "other", due_on: "2026-10-15" });
+    const props = { tasks: [task], linkables: [task], labels: new Map(), projects: [], selfId: "self", today: "2026-10-11", timeZone: "Europe/Paris", guard: createStructuredEditorGuard(), busy: false, readOnly: false, run: async () => true, onCreate: async () => undefined, onSave: async () => true, onDelete: async () => true, onComplete: async () => true, onRestored: async () => undefined };
+    function Harness() {
+      const [selectedId, setSelectedId] = React.useState<string>();
+      return <TaskWorkspace {...props} selectedId={selectedId} onOpen={(id) => { window.history.pushState({}, "", `/tasks/${id}`); setSelectedId(id); }} onCloseDetail={() => { window.history.pushState({}, "", "/tasks"); setSelectedId(undefined); }} />;
+    }
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<Harness />));
+    const list = document.querySelector("[aria-label='Tasks list']") as HTMLElement;
+    list.scrollTop = 175;
+    await click("Open task: Delegated task");
+    expect(window.location.pathname).toBe("/tasks/direct");
+    expect(window.location.search).toContain("taskView=others");
+    expect(list.hidden).toBe(true);
+    await click("Back to tasks");
+    expect(window.location.pathname).toBe("/tasks");
+    expect(window.location.search).toContain("taskDue=next7");
+    expect((document.querySelector("select[aria-label='Sort tasks']") as HTMLSelectElement).value).toBe("title");
+    expect((document.querySelector("select[aria-label='Filter by due period']") as HTMLSelectElement).value).toBe("next7");
+    expect((document.querySelector("button[aria-pressed='true']") as HTMLButtonElement).textContent).toBe("Other people's tasks");
+    expect(list.hidden).toBe(false);
+    expect(list.scrollTop).toBe(175);
+  });
+
+  it("opens a direct narrow task link as detail and returns to its filtered parent list", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, media: "(max-width: 760px)", onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() })));
+    window.history.replaceState({}, "", "/tasks/direct?taskView=others&taskSort=title");
+    const task = object("direct", "Delegated task", { owner_person_id: "other" });
+    let selectedId: string | undefined = "direct";
+    const render = () => root!.render(<TaskWorkspace tasks={[task]} linkables={[task]} labels={new Map()} projects={[]} selfId="self" selectedId={selectedId} today="2026-10-11" timeZone="Europe/Paris" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={() => { window.history.pushState({}, "", "/tasks"); selectedId = undefined; render(); }} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={async () => true} onRestored={async () => undefined} />);
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => render());
+    expect((document.querySelector("[aria-label='Tasks list']") as HTMLElement).hidden).toBe(true);
+    expect((document.querySelector("[aria-label='Task detail']") as HTMLElement).hidden).toBe(false);
+    await click("Back to tasks");
+    expect((document.querySelector("[aria-label='Tasks list']") as HTMLElement).hidden).toBe(false);
+    expect(window.location.search).toContain("taskView=others");
   });
 });

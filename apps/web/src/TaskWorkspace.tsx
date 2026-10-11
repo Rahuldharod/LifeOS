@@ -6,6 +6,7 @@ import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { areaOptions } from "./envelope.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { ListDetailWorkspace, RecordHeader, StickyRecordActions, WorkspaceFilterBar } from "./WorkspacePatterns.js";
+import { addCalendarDays, dateInTimeZone } from "./zonedTime.js";
 
 export type StructuredEditorGuard = { dirty: boolean; conflict: boolean; saveNow: () => Promise<boolean> };
 export const createStructuredEditorGuard = (): StructuredEditorGuard => ({ dirty: false, conflict: false, saveNow: async () => true });
@@ -39,12 +40,8 @@ const taskDraftFrom = (task: LifeObject, selfId?: string): TaskDraft => ({
 });
 const blankTaskDraft = (selfId?: string): TaskDraft => ({ title: "", status: "Inbox", priority: "", due_on: "", expected_output: "", owner_person_id: selfId ?? "", waiting_for_person_id: "", primary_project_id: "", primary_client_id: "", primary_product_id: "", dependency_ids: [], area: "", sensitivity: "normal" });
 const sameTaskDraft = (a: TaskDraft, b: TaskDraft) => JSON.stringify(a) === JSON.stringify(b);
-const taskDueDate = (task: LifeObject) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? task.frontmatter.due_at.slice(0, 10) : "";
+const taskDueDate = (task: LifeObject, timeZone: string) => typeof task.frontmatter.due_on === "string" ? task.frontmatter.due_on : typeof task.frontmatter.due_at === "string" ? dateInTimeZone(new Date(task.frontmatter.due_at), timeZone) : "";
 const priorityRank = (value: unknown) => ({ High: 0, Medium: 1, Low: 2 }[String(value)] ?? 3);
-const addDays = (date: string, days: number) => {
-  const value = new Date(`${date}T12:00:00.000Z`); value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-};
 const taskQuery = () => typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
 const queryView = (params: URLSearchParams): TaskListView => {
   const value = params.get("taskView"); return value === "waiting" || value === "others" ? value : "mine";
@@ -75,8 +72,8 @@ function useNarrowWorkspace() {
   return narrow;
 }
 
-export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, selectedId, today, guard, busy, readOnly, run, onOpen, onCloseDetail, onCreate, onSave, onDelete, onComplete, onRestored }: {
-  tasks: LifeObject[]; linkables: Linkable[]; labels: Map<string, PersonLabel>; projects: Option[]; selfId?: string; selectedId?: string; today: string; guard: StructuredEditorGuard;
+export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, selectedId, today, timeZone, guard, busy, readOnly, run, onOpen, onCloseDetail, onCreate, onSave, onDelete, onComplete, onRestored }: {
+  tasks: LifeObject[]; linkables: Linkable[]; labels: Map<string, PersonLabel>; projects: Option[]; selfId?: string; selectedId?: string; today: string; timeZone?: string; guard: StructuredEditorGuard;
   busy: boolean; readOnly: boolean; run: (action: () => Promise<void>, success: string) => Promise<boolean>;
   onOpen: (id: string) => void; onCloseDetail: () => void; onCreate: (fields: Record<string, unknown>) => Promise<LifeObject | undefined>;
   onSave: (task: LifeObject, fields: Record<string, unknown>) => Promise<boolean>; onDelete: (task: LifeObject) => Promise<boolean>;
@@ -95,6 +92,7 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
   const savedId = useRef<string | undefined>(undefined);
   const listPane = useRef<HTMLElement | null>(null);
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
+  const displayTimeZone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const narrow = useNarrowWorkspace();
   const dirty = !sameTaskDraft(draft, baseline);
   const dirtyRef = useRef(dirty); dirtyRef.current = dirty;
@@ -156,11 +154,11 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
     if (status && task.frontmatter.status !== status) return false;
     if (priority && task.frontmatter.priority !== priority) return false;
     if (project && task.frontmatter.primary_project_id !== project) return false;
-    const dueDate = taskDueDate(task);
+    const dueDate = taskDueDate(task, displayTimeZone);
     if (dueFilter === "overdue" && (!dueDate || dueDate >= today)) return false;
     if (dueFilter === "today" && dueDate !== today) return false;
-    if (dueFilter === "next7" && (!dueDate || dueDate <= today || dueDate > addDays(today, 7))) return false;
-    if (dueFilter === "later" && (!dueDate || dueDate <= addDays(today, 7))) return false;
+    if (dueFilter === "next7" && (!dueDate || dueDate <= today || dueDate > addCalendarDays(today, 7))) return false;
+    if (dueFilter === "later" && (!dueDate || dueDate <= addCalendarDays(today, 7))) return false;
     if (dueFilter === "none" && dueDate) return false;
     return true;
   }).sort((a, b) => {
@@ -168,16 +166,16 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
     if (sort === "priority") return priorityRank(a.frontmatter.priority) - priorityRank(b.frontmatter.priority) || title();
     if (sort === "updated") return String(b.frontmatter.updated_at).localeCompare(String(a.frontmatter.updated_at)) || title();
     if (sort === "title") return title();
-    const due = () => (taskDueDate(a) || "9999").localeCompare(taskDueDate(b) || "9999");
+    const due = () => (taskDueDate(a, displayTimeZone) || "9999").localeCompare(taskDueDate(b, displayTimeZone) || "9999");
     if (sort === "due") return due() || title();
     if (listView === "waiting") return String(a.frontmatter.waiting_since ?? a.frontmatter.updated_at).localeCompare(String(b.frontmatter.waiting_since ?? b.frontmatter.updated_at)) || title();
     if (listView === "others") {
       const owner = (task: LifeObject) => labels.get(String(task.frontmatter.owner_person_id))?.name ?? String(task.frontmatter.owner_person_id);
       return owner(a).localeCompare(owner(b)) || due() || title();
     }
-    const urgency = (task: LifeObject) => { const date = taskDueDate(task); return date && date < today ? 0 : date ? 1 : 2; };
+    const urgency = (task: LifeObject) => { const date = taskDueDate(task, displayTimeZone); return date && date < today ? 0 : date ? 1 : 2; };
     return urgency(a) - urgency(b) || due() || priorityRank(a.frontmatter.priority) - priorityRank(b.frontmatter.priority) || title();
-  }), [tasks, listView, selfId, query, status, priority, project, dueFilter, sort, today, labels]);
+  }), [tasks, listView, selfId, query, status, priority, project, dueFilter, sort, today, labels, displayTimeZone]);
 
   const leaveThen = async (action: () => void | Promise<unknown>) => { if (await requestLeave()) await action(); };
   const startNew = () => void leaveThen(() => { const next = blankTaskDraft(selfId); setCreating(true); setDraft(next); setBaseline(next); setSaved(false); });
@@ -206,7 +204,7 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}><input type="search" aria-label="Search tasks" placeholder="Search tasks…" value={query} onChange={(event) => setQuery(event.target.value)} /><select aria-label="Sort tasks" value={sort} onChange={(event) => setSort(event.target.value as TaskSort)}><option value="default">Default order</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Title</option><option value="updated">Recently updated</option></select></WorkspaceFilterBar>
       {advanced && <div className="task-advanced-filters"><label>Status<select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Active statuses</option>{taskStatuses.map((value) => <option key={value}>{value}</option>)}</select></label><label>Priority<select aria-label="Filter by priority" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Any priority</option>{taskPriorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Project<select aria-label="Filter by project" value={project} onChange={(event) => setProject(event.target.value)}><option value="">Any project</option>{projects.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label>Due<select aria-label="Filter by due period" value={dueFilter} onChange={(event) => setDueFilter(event.target.value as DueFilter)}><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="next7">Next 7 days</option><option value="later">Later</option><option value="none">No due date</option></select></label><button onClick={clearFilters}>Clear filters</button></div>}
       {completionNotice && <div className="task-completion-notice" role="status">Task completed: {completionNotice.title}. <button disabled={busy || readOnly} onClick={() => { const task = tasksRef.current.find((candidate) => candidate.frontmatter.id === completionNotice.id); if (task) void completeTask(task, false); }}>Undo</button></div>}
-      <div className="task-rows">{visible.map((task) => { const done = task.frontmatter.status === "Done"; return <div className={task.frontmatter.id === selectedId ? "task-row selected" : "task-row"} key={task.frontmatter.id}><input type="checkbox" aria-label={`${done ? "Reopen" : "Complete"} ${task.frontmatter.title}`} checked={done} disabled={busy || readOnly} onChange={(event) => { const complete = event.target.checked; void leaveThen(() => completeTask(task, complete)); }} /><button aria-label={`Open task: ${task.frontmatter.title}`} onClick={() => void leaveThen(() => { rememberListPosition(); onOpen(task.frontmatter.id); })}><strong>{String(task.frontmatter.title)}</strong><small>{[task.frontmatter.priority, projects.find((item) => item.id === task.frontmatter.primary_project_id)?.title, taskDueDate(task) && `due ${taskDueDate(task)}`].filter(Boolean).join(" · ") || String(task.frontmatter.status)}</small></button><span>{String(task.frontmatter.status)}</span></div>; })}{!visible.length && <p className="workspace-empty">No tasks match these filters.</p>}</div>
+      <div className="task-rows">{visible.map((task) => { const done = task.frontmatter.status === "Done"; const dueDate = taskDueDate(task, displayTimeZone); return <div className={task.frontmatter.id === selectedId ? "task-row selected" : "task-row"} key={task.frontmatter.id}><input type="checkbox" aria-label={`${done ? "Reopen" : "Complete"} ${task.frontmatter.title}`} checked={done} disabled={busy || readOnly} onChange={(event) => { const complete = event.target.checked; void leaveThen(() => completeTask(task, complete)); }} /><button aria-label={`Open task: ${task.frontmatter.title}`} onClick={() => void leaveThen(() => { rememberListPosition(); onOpen(task.frontmatter.id); })}><strong>{String(task.frontmatter.title)}</strong><small>{[task.frontmatter.priority, projects.find((item) => item.id === task.frontmatter.primary_project_id)?.title, dueDate && `due ${dueDate}`].filter(Boolean).join(" · ") || String(task.frontmatter.status)}</small></button><span>{String(task.frontmatter.status)}</span></div>; })}{!visible.length && <p className="workspace-empty">No tasks match these filters.</p>}</div>
     </section>
     <section className="task-detail-pane" aria-label="Task detail" hidden={narrow && !selected && !creating}>
       {!selected && !creating ? <div className="workspace-empty"><h3>Select a task</h3><p>Choose a row to inspect and edit it.</p></div> : <>
