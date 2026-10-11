@@ -580,12 +580,15 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .note-filter-grid input[type="date"] { width: 100%; border: 1px solid var(--color-border-strong); border-radius: 8px; padding: .55rem .65rem; background: var(--color-surface); color: var(--color-text); font: inherit; }
 
 /* PB-026: breadcrumbs */
-.breadcrumbs { margin-bottom: 14px; font-size: 13px; }
+.breadcrumbs { margin-bottom: var(--space-3); color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .breadcrumbs ol { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .breadcrumbs li { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
 .breadcrumbs li + li::before { content: "›" / ""; opacity: 0.6; flex: none; }
 .breadcrumbs a, .breadcrumbs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
-.breadcrumbs li:last-child span { max-width: 60ch; font-weight: 600; }
+.breadcrumbs li:last-child span { max-width: 60ch; color: var(--color-text); font-weight: 600; }
+/* #114: crumbs are quiet secondary links: muted at rest and once visited, underlined on hover and keyboard focus. */
+.breadcrumbs a, .breadcrumbs a:visited { border-radius: var(--radius-sm); color: var(--color-text-muted); text-decoration: none; }
+.breadcrumbs a:hover, .breadcrumbs a:focus-visible { color: var(--color-link); text-decoration: underline; text-underline-offset: 3px; }
 
 /* PB-029: Copy link button and its "Copied" feedback */
 .copy-link { display: inline-flex; align-items: center; gap: 6px; }
