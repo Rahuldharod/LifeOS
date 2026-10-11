@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -30,5 +30,59 @@ describe("entity CRUD", () => {
     await application.deleteEntity(updated.frontmatter.id, updated.contentHash);
     expect(application.entities("task")).toHaveLength(0);
     expect((await application.health()).status).toBe("healthy");
+  });
+
+  it("persists task completion and waiting lifecycle metadata", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-task-lifecycle-"));
+    roots.push(root);
+    const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), undefined, undefined, "task-lifecycle-test");
+    await application.rebuildIndex();
+
+    const self = await application.createEntity("person", { title: "Test User", given_name: "Test", is_self: true });
+    const colleague = await application.createEntity("person", { title: "Sam Example", given_name: "Sam" });
+    const created = await application.createEntity("task", { title: "Confirm launch", status: "Inbox", owner_person_id: self.frontmatter.id });
+    const waiting = await application.updateEntity(created.frontmatter.id, { status: "Waiting", waiting_for_person_id: colleague.frontmatter.id }, created.contentHash);
+
+    expect(waiting.frontmatter).toMatchObject({ status: "Waiting", waiting_for_person_id: colleague.frontmatter.id });
+    expect(waiting.frontmatter.waiting_since).toEqual(expect.any(String));
+
+    const completed = await application.updateEntity(waiting.frontmatter.id, { status: "Done" }, waiting.contentHash);
+    expect(completed.frontmatter).toMatchObject({ status: "Done", reopen_status: "Waiting" });
+    expect(completed.frontmatter.waiting_since).toBeUndefined();
+    expect(completed.frontmatter.completed_at).toEqual(expect.any(String));
+
+    const reopened = await application.updateEntity(completed.frontmatter.id, { status: "Next" }, completed.contentHash);
+    expect(reopened.frontmatter).toMatchObject({ status: "Waiting", waiting_for_person_id: colleague.frontmatter.id });
+    expect(reopened.frontmatter.reopen_status).toBeUndefined();
+    expect(reopened.frontmatter.waiting_since).toEqual(expect.any(String));
+    expect(reopened.frontmatter.completed_at).toBeUndefined();
+
+  });
+
+  it("reopens a legacy completed task as Next", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-task-legacy-reopen-"));
+    roots.push(root);
+    await mkdir(path.join(root, "tasks"), { recursive: true });
+    await writeFile(path.join(root, "tasks/legacy.md"), `---
+id: 01995d60-7baf-7c21-9c96-9c5d2f6a32ac
+type: task
+schema_version: 1
+revision: 1
+title: Legacy completion
+created_at: 2026-10-01T08:00:00.000Z
+updated_at: 2026-10-01T08:00:00.000Z
+updated_by_device: old-device
+status: Done
+owner_person_id: 01995d3e-912b-7357-8aa6-9816c1ad90a5
+completed_at: 2026-10-01T09:00:00.000Z
+---
+# Legacy completion
+`);
+    const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), undefined, undefined, "task-legacy-test");
+    await application.rebuildIndex();
+    const legacy = application.object("01995d60-7baf-7c21-9c96-9c5d2f6a32ac");
+    const reopened = await application.updateEntity(legacy.frontmatter.id, { status: "Next" }, legacy.contentHash);
+    expect(reopened.frontmatter.status).toBe("Next");
+    expect(reopened.frontmatter.completed_at).toBeUndefined();
   });
 });

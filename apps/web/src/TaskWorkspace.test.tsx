@@ -13,7 +13,7 @@ const object = (id: string, title: string, fields: Record<string, unknown> = {})
 });
 
 let root: Root | undefined;
-afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; root = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; window.history.replaceState({}, "", "/"); sessionStorage.clear(); root = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function click(name: string) {
   const control = [...document.querySelectorAll("button, input")].find((item) => item.textContent?.trim() === name || item.getAttribute("aria-label") === name) as HTMLElement;
@@ -29,17 +29,92 @@ describe("TaskWorkspace", () => {
   it("filters the task list and keeps completion separate from opening detail", async () => {
     const open = vi.fn(); const complete = vi.fn(async () => true);
     root = createRoot(document.body.appendChild(document.createElement("div")));
-    await act(async () => root!.render(<TaskWorkspace tasks={[object("mine", "Prepare proposal", { priority: "High", due_on: "2026-10-11" }), object("waiting", "Confirm venue", { status: "Waiting", owner_person_id: "other", waiting_for_person_id: "sam" })]} linkables={[]} labels={new Map()} projects={[]} selfId="self" selectedId="mine" today="2026-10-11" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={open} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={complete} onRestored={async () => undefined} />));
+    await act(async () => root!.render(<TaskWorkspace tasks={[object("mine", "Prepare proposal", { priority: "High", due_on: "2026-10-11" }), object("waiting", "Confirm venue", { status: "Waiting", waiting_for_person_id: "sam" }), object("theirs", "Their task", { owner_person_id: "other" })]} linkables={[]} labels={new Map()} projects={[]} selfId="self" selectedId="mine" today="2026-10-11" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={open} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={complete} onRestored={async () => undefined} />));
 
     expect(document.body.textContent).toContain("Prepare proposal");
-    expect(document.body.textContent).not.toContain("Confirm venue");
     await click("Waiting on others");
     expect(document.body.textContent).toContain("Confirm venue");
-    await click("All");
+    await click("Other people's tasks");
+    expect(document.body.textContent).toContain("Their task");
+    expect(document.body.textContent).not.toContain("Confirm venue");
+    await click("Waiting on others");
     await click("Open task: Confirm venue");
     expect(open).toHaveBeenCalledWith("waiting");
+    await click("My Tasks");
     await click("Complete Prepare proposal");
     expect(complete).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "mine" }) }), true);
+  });
+
+  it("hides finished work by default and reveals it through the status filter", async () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    const tasks = [object("active", "Active work"), object("done", "Finished work", { status: "Done", completed_at: "2026-10-10T08:00:00Z" }), object("cancelled", "Cancelled work", { status: "Cancelled", cancelled_at: "2026-10-10T08:00:00Z" })];
+    await act(async () => root!.render(<TaskWorkspace tasks={tasks} linkables={tasks} labels={new Map()} projects={[]} selfId="self" today="2026-10-11" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={async () => true} onRestored={async () => undefined} />));
+    expect(document.body.textContent).toContain("Active work");
+    expect(document.body.textContent).not.toContain("Finished work");
+    await click("Advanced");
+    await choose("Filter by status", "Done");
+    expect(document.body.textContent).toContain("Finished work");
+    expect(document.body.textContent).not.toContain("Active work");
+  });
+
+  it("offers exact due periods and stores view, filters and sort in the URL", async () => {
+    window.history.replaceState({}, "", "/tasks?taskView=others&taskDue=later&taskSort=title");
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    const tasks = [object("soon", "Soon", { owner_person_id: "other", due_on: "2026-10-15" }), object("later", "Later", { owner_person_id: "other", due_on: "2026-10-20" })];
+    await act(async () => root!.render(<TaskWorkspace tasks={tasks} linkables={tasks} labels={new Map()} projects={[]} selfId="self" today="2026-10-11" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={async () => true} onRestored={async () => undefined} />));
+    expect(document.body.textContent).toContain("Later");
+    expect(document.body.textContent).not.toContain("Soon");
+    const due = document.querySelector("select[aria-label='Filter by due period']") as HTMLSelectElement;
+    expect([...due.options].map((option) => option.textContent)).toEqual(["Any time", "Overdue", "Today", "Next 7 days", "Later", "No due date"]);
+    await choose("Filter by due period", "next7");
+    expect(window.location.search).toContain("taskDue=next7");
+    expect(document.body.textContent).toContain("Soon");
+  });
+
+  it("offers one-step Undo after completing any visible task", async () => {
+    const complete = vi.fn(async () => true);
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    const task = object("theirs", "Delegated item", { owner_person_id: "other" });
+    await act(async () => root!.render(<TaskWorkspace tasks={[task]} linkables={[task]} labels={new Map()} projects={[]} selfId="self" today="2026-10-11" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={complete} onRestored={async () => undefined} />));
+    await click("Other people's tasks");
+    await click("Complete Delegated item");
+    expect(document.querySelector("[role='status']")?.textContent).toContain("Task completed");
+    await click("Undo");
+    expect(complete).toHaveBeenLastCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "theirs" }) }), false);
+  });
+
+  it("uses the approved default order for each task view", async () => {
+    const tasks = [
+      object("later", "Mine later", { due_on: "2026-10-13", priority: "High" }),
+      object("overdue-low", "Mine overdue low", { due_on: "2026-10-10", priority: "Low" }),
+      object("overdue-high", "Mine overdue high", { due_on: "2026-10-10", priority: "High" }),
+      object("waiting-new", "Waiting newer", { status: "Waiting", waiting_for_person_id: "sam", waiting_since: "2026-10-09T08:00:00Z" }),
+      object("waiting-old", "Waiting older", { status: "Waiting", waiting_for_person_id: "sam", waiting_since: "2026-10-01T08:00:00Z" }),
+      object("zoe", "Zoe item", { owner_person_id: "zoe", due_on: "2026-10-12" }),
+      object("anna", "Anna item", { owner_person_id: "anna", due_on: "2026-10-20" })
+    ];
+    const labels = new Map([
+      ["zoe", { id: "zoe", name: "Zoe", label: "Zoe", isExternal: false, externalSource: "stored" as const }],
+      ["anna", { id: "anna", name: "Anna", label: "Anna", isExternal: false, externalSource: "stored" as const }]
+    ]);
+    const rowTitles = () => [...document.querySelectorAll(".task-row strong")].map((node) => node.textContent);
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<TaskWorkspace tasks={tasks} linkables={tasks} labels={labels} projects={[]} selfId="self" today="2026-10-11" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => true} onDelete={async () => true} onComplete={async () => true} onRestored={async () => undefined} />));
+    expect(rowTitles().slice(0, 3)).toEqual(["Mine overdue high", "Mine overdue low", "Mine later"]);
+    await click("Waiting on others");
+    expect(rowTitles()).toEqual(["Waiting older", "Waiting newer"]);
+    await click("Other people's tasks");
+    expect(rowTitles()).toEqual(["Anna item", "Zoe item"]);
+  });
+
+  it("keeps failed-save input and explains that it can be retried", async () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<TaskWorkspace tasks={[object("mine", "Original")]} linkables={[]} labels={new Map()} projects={[]} selfId="self" selectedId="mine" today="2026-10-11" guard={createStructuredEditorGuard()} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={async () => false} onDelete={async () => true} onComplete={async () => true} onRestored={async () => undefined} />));
+    const title = document.querySelector("input[aria-label='Task title']") as HTMLInputElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(title, "Unsaved title"); title.dispatchEvent(new Event("input", { bubbles: true })); });
+    await click("Save");
+    expect((document.querySelector("input[aria-label='Task title']") as HTMLInputElement).value).toBe("Unsaved title");
+    expect(document.querySelector("[role='alert']")?.textContent).toContain("still here");
   });
 
   it("opens Advanced filters and New Task in the shared detail form", async () => {
@@ -61,6 +136,7 @@ describe("TaskWorkspace", () => {
     await act(async () => root!.render(<TaskWorkspace tasks={[object("mine", "Prepare proposal")]} linkables={[]} labels={new Map()} projects={[]} selfId="self" selectedId="mine" today="2026-10-11" guard={guard} busy={false} readOnly={false} run={async () => true} onOpen={vi.fn()} onCloseDetail={vi.fn()} onCreate={async () => undefined} onSave={save} onDelete={async () => true} onComplete={async () => true} onRestored={async () => undefined} />));
     const title = document.querySelector("input[aria-label='Task title']") as HTMLInputElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(title, "Changed"); title.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(window.dispatchEvent(new Event("beforeunload", { cancelable: true }))).toBe(false);
     let result: boolean | undefined;
     await act(async () => { void guard.saveNow().then((value) => { result = value; }); });
     expect(document.querySelector("[role='dialog']")?.textContent).toMatch(/SaveDiscardStay/);
