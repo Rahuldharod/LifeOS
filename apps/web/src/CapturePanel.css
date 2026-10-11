@@ -1,0 +1,10 @@
+.capture-panel { display: grid; gap: var(--space-5); }
+.capture-panel label { display: grid; gap: var(--space-2); color: var(--color-text-muted); font-size: .875rem; font-weight: 650; }
+.capture-task-field textarea { min-height: 9rem; resize: vertical; font: inherit; }
+.capture-primary-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.capture-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.capture-message, .capture-error, .capture-hint { margin: 0; }
+.capture-message { padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-quiet); }
+.capture-error { color: var(--color-error); }
+.capture-hint { color: var(--color-text-muted); font-size: .8125rem; }
+@media (max-width: 42rem) { .capture-details { grid-template-columns: minmax(0, 1fr); } }

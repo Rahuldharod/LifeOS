@@ -20,6 +20,10 @@ describe("routes (PB-027)", () => {
     expect(parseRoute("/notes")).toEqual({ view: "Notes", noteTab: "open" });
     expect(parseRoute(`/tasks/${NOTE}`)).toEqual({ view: "Tasks", id: NOTE });
     expect(parseRoute(`/inbox/${NOTE}`)).toEqual({ view: "Inbox", id: NOTE });
+    expect(parseRoute("/settings/settings-self-emails")).toEqual({ view: "Settings", id: "settings-self-emails" });
+    // #154: a published Knowledge Note has a direct link, so narrow list → detail survives reload and bookmarks.
+    expect(parseRoute("/knowledge/knowledge-1")).toEqual({ view: "Knowledge", id: "knowledge-1" });
+    expect(routePath({ view: "Knowledge", id: "knowledge-1" })).toBe("/knowledge/knowledge-1");
   });
 
   it("puts the day and the meeting in a calendar path", () => {
@@ -29,7 +33,7 @@ describe("routes (PB-027)", () => {
   });
 
   it("round-trips every shape it builds", () => {
-    for (const path of ["/today", "/notes", "/notes/deleted", `/notes/${NOTE}`, `/notes/deleted/${NOTE}`, "/calendar", "/calendar/2026-01-31", `/calendar/2026-01-31/${MEETING}`, `/people/${NOTE}`, "/knowledge", "/system"]) {
+    for (const path of ["/today", "/notes", "/notes/deleted", `/notes/${NOTE}`, `/notes/deleted/${NOTE}`, "/calendar", "/calendar/2026-01-31", `/calendar/2026-01-31/${MEETING}`, `/people/${NOTE}`, "/knowledge", "/system", "/settings/settings-self-emails"]) {
       expect(routePath(parseRoute(path)!)).toBe(path);
     }
   });
@@ -39,7 +43,7 @@ describe("routes (PB-027)", () => {
   });
 
   it("drops an id on tabs that have no open item, and a calendar day that is not a date", () => {
-    expect(parseRoute(`/settings/${NOTE}`)).toEqual({ view: "Settings" });
+    expect(parseRoute(`/system/${NOTE}`)).toEqual({ view: "System" });
     expect(parseRoute("/calendar/yesterday/x")).toEqual({ view: "Calendar" });
   });
 

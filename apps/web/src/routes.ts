@@ -16,7 +16,7 @@ export type Route = { view: View; id?: string; date?: string; noteTab?: "open" |
 const slugs = Object.fromEntries(views.map((view) => [view, view.toLowerCase().replace(/ /g, "-")])) as Record<View, string>;
 const viewsBySlug = new Map(views.map((view) => [slugs[view], view]));
 /** Tabs whose path may name one open item. */
-const itemViews = new Set<View>(["Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Inbox"]);
+const itemViews = new Set<View>(["Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Inbox", "Knowledge", "Settings"]);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The route a path names, or undefined for `/` and paths that are not a LifeOS tab. */

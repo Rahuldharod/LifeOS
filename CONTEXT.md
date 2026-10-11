@@ -122,7 +122,77 @@ _Avoid_: New contact, pending person
 **Display label**:
 How a Person is shown everywhere: first name, or full name when another live person shares the first name, plus " - ext" for an External person.
 
+### Interface language
+
+**Reference data**:
+Projects, Clients, Products and People: records maintained in Settings and reached contextually from the work they describe.
+_Avoid_: Entities, master data
+
+**Global Search**:
+The search available from every workspace for live Tasks, Calendar events and Notes. It includes restricted records and excludes archived and deleted records; when a Calendar event has a Meeting Note, only the Meeting Note appears.
+_Avoid_: Universal search, vault search
+
+**Global Capture**:
+The task-only capture available from every workspace without leaving the current page. It extends Quick Capture with optional task context but does not infer other object types.
+_Avoid_: Quick Capture (the Today entry point), smart capture
+
+**My Tasks**:
+The default Tasks view: live tasks owned by the Self person. It shows unfinished work unless the user explicitly filters for Done or Cancelled tasks.
+_Avoid_: Tasks linked to me, my linked tasks
+
+**Waiting on others**:
+The Tasks view containing the user's own Waiting tasks that identify another person in `waiting_for_person_id`.
+_Avoid_: Waiting On, delegated tasks
+
+**Other people's tasks**:
+The Tasks view containing live tasks owned by anyone other than the Self person. It shows unfinished work unless the user explicitly filters for Done or Cancelled tasks.
+_Avoid_: All tasks, delegated tasks
+
+**Task owner**:
+The Person responsible for a Task. Ownership determines its Tasks view, not permission: the sole LifeOS user may edit or complete any Task.
+_Avoid_: Assignee, task user
+
+**Reopen status**:
+The unfinished status a Task held immediately before completion, retained so Undo or reopening can restore it. A legacy completed Task without one reopens as Next.
+_Avoid_: Previous status, undo status
+
+**Waiting since**:
+The instant a Task most recently entered Waiting, used to surface the oldest waits first. A legacy Waiting Task without it falls back to its last-updated time.
+_Avoid_: Waiting age, updated time
+
 ### Meetings and enrichment
+
+**Calendar event**:
+An occurrence supplied by a connected calendar. Opening one is a read-only preview and creates no LifeOS object.
+_Avoid_: Meeting object, appointment
+
+**Meeting record**:
+The internal LifeOS object created on the first edit of a Calendar event, anchoring its Meeting Note, enrichment and event identity. The interface continues to present the Calendar event rather than exposing this implementation record as a separate destination.
+_Avoid_: Calendar event, meeting page
+
+**Meeting Note**:
+A Note linked to a Meeting record and initiated from a Calendar event. It can be edited from the Calendar event workspace or opened independently in Notes.
+_Avoid_: Meeting, calendar note
+
+**Recurring series**:
+The Calendar occurrences that share one provider recurrence identity. Each occurrence keeps its own Meeting record while the series shares one Recurring Meeting Note.
+_Avoid_: Repeated meeting, recurring Meeting record
+
+**Recurring Meeting Note**:
+The single Meeting Note shared by a Recurring series. Its occurrence sections are ordered newest first, and its Sensitivity applies to every linked occurrence.
+_Avoid_: Series document, recurring document
+
+**Occurrence section**:
+The independently identifiable part of a Recurring Meeting Note for one Calendar occurrence, containing that occurrence's event snapshot and user notes. Opening a new occurrence previews a section; the section becomes authoritative only on the first edit.
+_Avoid_: Weekly note, meeting block
+
+**Materials block**:
+The app-managed part of an occurrence section that lists external Sources found for that occurrence. The Agent proposes the Sources through an Inbox Draft; LifeOS updates the block without merging external content into the user's prose.
+_Avoid_: Attachments, Agent notes
+
+**External meeting notes**:
+A document outside LifeOS containing notes for a Calendar occurrence, such as Google or Gemini notes. It is linked as a Source and may inform proposals, but its full content is not copied into the Meeting Note.
+_Avoid_: Meeting Note, imported notes
 
 **Enrichment state**:
 Where a meeting is in Enrichment: none, requested, enriched, partial or gave up. The meeting page shows it in text as **Not requested**, **Requested**, **Enriched**, **Partial** or **Gave up**, with the material still missing or found unavailable.

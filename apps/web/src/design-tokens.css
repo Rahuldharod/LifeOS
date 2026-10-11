@@ -1,0 +1,111 @@
+:root {
+  /*
+   * Ocean light theme (#154). Components use these role names, never palette values. Only the light theme ships;
+   * a future dark theme redefines the same roles after its own prototype and contrast check.
+   */
+  /* Neutrals and surfaces. */
+  --color-canvas: #f6f1e8;
+  --color-surface: #ffffff;
+  --color-surface-quiet: #eae4d8;
+  --color-surface-raised: #fbf8f2;
+  --color-text: #0b1f33;
+  --color-text-muted: #53636a;
+  --color-text-inverse: #ffffff;
+  --color-border: #d8d1c4;
+  --color-border-strong: #7b8587;
+
+  /* Core responsibilities: deep blue structure, ocean blue action, teal selection, warm editorial accent. */
+  --color-primary: #123e5a;
+  --color-primary-hover: #2a718e;
+  --color-primary-active: #0b293d;
+  --color-link: #123e5a;
+  --color-selection: #2e6f73;
+  --color-selection-surface: #dfecec;
+  --color-accent: #2e6f73;
+  --color-accent-warm: #8e522f;
+  --color-focus: #2e6f73;
+  --color-focus-on-dark: #ffffff;
+
+  /* Disabled is explicit and readable, never global opacity. */
+  --color-disabled-surface: #eae4d8;
+  --color-disabled-border: #d8d1c4;
+  --color-disabled-text: #53636a;
+
+  /* Semantic Deep tints: text, fill and border. Always paired with visible text and, where useful, an icon. */
+  --color-success: #163c2d;
+  --color-success-surface: #c9ded2;
+  --color-success-border: #4f8069;
+  --color-error: #681f28;
+  --color-error-surface: #ebcac9;
+  --color-error-border: #a94d55;
+  --color-warning: #583316;
+  --color-warning-surface: #e9d0b5;
+  --color-warning-border: #a66a32;
+  --color-info: #123e5a;
+  --color-info-surface: #c9dde2;
+  --color-info-border: #3e7480;
+  /* Solid semantic colour only for a consequence that carries it: the final destructive confirmation. */
+  --color-danger: #681f28;
+  --color-danger-hover: #84303a;
+
+  /* Navigation. */
+  --color-sidebar: #0b1f33;
+  --color-sidebar-hover: #17324a;
+  --color-sidebar-active: #2e6f73;
+  --color-sidebar-text: #ffffff;
+  --color-sidebar-muted: #c9d3da;
+  --color-sidebar-divider: #2a4257;
+  --color-scrim: rgb(11 31 51 / 0.58);
+
+  /* Typography: system sans; supporting text never below 13px. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-size-xs: 0.8125rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-editor: 1.0625rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+  --line-height-tight: 1.2;
+  --line-height-body: 1.55;
+  --line-height-editor: 1.65;
+
+  /* Geometry: the established 4–48px steps, 6/8/14px radii and a pill only for compact status. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.875rem;
+  --radius-pill: 999px;
+  --border-thin: 1px;
+  --border-strong: 2px;
+  --target-min: 40px;
+
+  /* Elevation: restrained on surfaces, stronger only for overlays. */
+  --shadow-surface: 0 1px 2px rgb(11 31 51 / 0.05);
+  --shadow-raised: 0 4px 12px rgb(11 31 51 / 0.14);
+  --shadow-overlay: 0 1rem 3rem rgb(11 31 51 / 0.24);
+  --focus-ring: 0 0 0 2px var(--color-surface), 0 0 0 5px var(--color-focus);
+  --focus-ring-on-dark: 0 0 0 2px var(--color-sidebar), 0 0 0 5px var(--color-focus-on-dark);
+  --motion-fast: 120ms;
+
+  /* Layout measures (#154). Band boundaries live in workspaceLayout.ts, which sets data-band on the shell. */
+  --canvas-max: 1880px;
+  --measure-reading: 75ch;
+  --measure-form: 900px;
+  --measure-editor: 1200px;
+  --sidebar-width: 240px;
+  --sidebar-width-collapsed: 76px;
+  --shell-gutter: var(--space-6);
+}
+
+/* Coarse pointers get a larger minimum target. */
+@media (pointer: coarse) {
+  :root { --target-min: 44px; }
+}

@@ -1,23 +1,81 @@
-import { uuidV7, type LifeOSObject } from "@lifeos/domain";
+import { uuidV7, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { markdownFileName, type AppContext } from "./context.js";
+import { checkEntityLinks } from "./entity-links.js";
+import { operationKinds, type Operation } from "./ports.js";
 import { proposeReviewItem, recordAgentRun, seededRun } from "./review-items.js";
-import { isLive, replayRoles } from "./support.js";
+import { isLive, OneAtATime, replayableId, replayRoles } from "./support.js";
+
+export type QuickCaptureInput = {
+  primaryProjectId?: string;
+  dueOn?: string;
+  ownerPersonId?: string;
+  sensitivity?: "normal" | "restricted";
+  /** Browser-local retry key. Reusing it returns the task already created by this capture. */
+  requestId?: string;
+};
+
+type PreparedCapture = { relativePath: string; frontmatter: ObjectEnvelope; body: string };
 
 /** Quick capture, pasted-text sources and the knowledge notes proposed from them. */
 export class CaptureModule {
   constructor(private readonly ctx: AppContext) {}
+  private readonly captures = new OneAtATime();
 
-  async quickCapture(title: string) {
+  quickCapture(text: string, details: QuickCaptureInput = {}) {
+    const requestId = details.requestId?.trim();
+    if (details.requestId !== undefined && !requestId) throw new Error("Capture request ID is required");
+    return this.captures.run(requestId ?? uuidV7(), () => this.quickCaptureOnce(text, { ...details, requestId }));
+  }
+
+  private async quickCaptureOnce(text: string, details: QuickCaptureInput) {
     const { ctx } = this;
-    const clean = title.trim();
+    if (details.requestId) {
+      const completed = ctx.findAudits("task.quick-captured", { request_id: details.requestId })[0];
+      if (completed) return ctx.required(String(completed.frontmatter.object_id), "task");
+      const pending = (await ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.quickCapture && operation.payload.requestId === details.requestId);
+      if (pending) return this.recoverCapture(pending);
+    }
+    const clean = text.trim();
     if (!clean) throw new Error("Capture text is required");
+    const [title = clean, ...bodyLines] = clean.split(/\r?\n/);
     const now = new Date().toISOString();
-    const owner = await ctx.ensureSelfPerson(now);
-    const id = uuidV7();
-    const task = await ctx.objects.write({ relativePath: `tasks/${markdownFileName(clean, id, now)}`, frontmatter: { ...ctx.envelope(id, "task", clean, now), status: "Inbox", owner_person_id: owner.frontmatter.id, source_ids: [] }, body: `# ${clean}\n` });
-    await ctx.writeAudit("task.quick-captured", id, now, {});
+    const selected = Object.fromEntries(Object.entries({
+      owner_person_id: details.ownerPersonId,
+      primary_project_id: details.primaryProjectId,
+      due_on: details.dueOn,
+      sensitivity: details.sensitivity
+    }).filter(([, value]) => value !== undefined));
+    checkEntityLinks(ctx, "task", selected);
+    selected.owner_person_id ??= (await ctx.ensureSelfPerson(now)).frontmatter.id;
+    const operationId = uuidV7();
+    const id = replayableId(operationId, replayRoles.main, now);
+    const body = `# ${title}\n${bodyLines.length ? `\n${bodyLines.join("\n")}\n` : ""}`;
+    const prepared: PreparedCapture = { relativePath: `tasks/${markdownFileName(title, id, now)}`, frontmatter: { ...ctx.envelope(id, "task", title, now), status: "Inbox", source_ids: [], ...selected }, body };
+    validateFrontmatter(prepared.frontmatter);
+    const payload = { task: prepared, ...(details.requestId ? { requestId: details.requestId } : {}) };
+    const operation = await ctx.objects.prepareOperation?.(operationKinds.quickCapture, payload, operationId) ?? { id: operationId, kind: operationKinds.quickCapture, payload };
+    return this.finishCapture(operation);
+  }
+
+  /** Startup recovery for a capture interrupted after its task or audit write. */
+  async recoverCapture(operation: Operation) {
+    await this.ctx.rebuildIndex();
+    return this.finishCapture(operation);
+  }
+
+  private async finishCapture(operation: Operation) {
+    const { ctx } = this;
+    const task = operation.payload.task as PreparedCapture | undefined;
+    if (!task?.frontmatter || task.frontmatter.type !== "task") throw new Error(`Invalid ${operationKinds.quickCapture} operation ${operation.id}`);
+    const id = task.frontmatter.id;
+    const written = await ctx.replaying([id], async () => ctx.index.get(id) ?? ctx.objects.write(task));
+    await ctx.writeAuditOnce("task.quick-captured", id, String(task.frontmatter.created_at), {
+      operation_id: operation.id,
+      ...(typeof operation.payload.requestId === "string" ? { request_id: operation.payload.requestId } : {})
+    }, { matchOn: ["operation_id"] });
+    await ctx.objects.completeOperation?.(operation.id);
     await ctx.rebuildIndex();
-    return task;
+    return written;
   }
 
   knowledge(query = "") {

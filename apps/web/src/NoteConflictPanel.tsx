@@ -1,7 +1,9 @@
 // Side-by-side conflict resolution for the Notes view (PB-002). Chosen after prototyping three
 // directions (inline banner, this split panel, a blocking modal) — see the
 // prototype/pb-002-conflict-ui branch for the other two and why this one won.
-import React from "react";
+import React, { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { diffNoteLines, type LineDiff } from "./noteDraft.js";
 
 const mark = (kind: LineDiff["kind"]) => (kind === "added" ? "+" : kind === "removed" ? "−" : " ");
@@ -36,31 +38,35 @@ export type NoteConflictPanelProps = {
 
 /**
  * Full-width side-by-side comparison, replacing the editor while a note's Markdown file and the
- * browser draft disagree. User-resizable (native CSS `resize`, like a `<textarea>`): the default
+ * browser draft disagree. Readable Markdown is the default; exact line changes are optional.
+ * User-resizable (native CSS `resize`, like a `<textarea>`): the default
  * width matches the space next to the note list, and the max bound leaves room for the sidebar
  * and note list so widening it can never force the whole page to scroll sideways. Each column
  * scrolls its own diff independently, with its "Keep ... version" button sticky to the bottom of
  * that scroll area, so it's always in view without scrolling past the diff to find it.
  */
 export function NoteConflictPanel({ noteTitle, draftText, diskText, disabled, onKeepBrowserVersion, onKeepDiskVersion }: NoteConflictPanelProps) {
+  const [precise, setPrecise] = useState(false);
+  useEffect(() => { setPrecise(false); }, [noteTitle, draftText, diskText]);
   const lines = diffNoteLines(diskText, draftText);
   return (
     <div className="note-conflict-panel">
       <div className="note-conflict-header">
         <b>“{noteTitle}” has two versions.</b>
         <span>Something changed this file outside LifeOS while you had unsaved edits. Nothing has been overwritten — compare the two below, then pick one.</span>
-        <DiffLegend />
+        <button className="note-conflict-mode" aria-pressed={precise} onClick={() => setPrecise((value) => !value)}>{precise ? "Show readable versions" : "Show precise changes"}</button>
+        {precise && <DiffLegend />}
       </div>
       <div className="note-conflict-columns">
         <div className="note-conflict-column">
           <div className="note-conflict-column-heading">Your browser draft <em>(unsaved)</em></div>
-          <pre className="note-conflict-text"><DiffLines lines={lines} only="added" /></pre>
+          {precise ? <pre className="note-conflict-text"><DiffLines lines={lines} only="added" /></pre> : <div className="note-conflict-rendered"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draftText || "_Empty note._"}</ReactMarkdown></div>}
           <div className="note-conflict-column-footer"><button className="primary" disabled={disabled} onClick={onKeepBrowserVersion}>Keep browser version</button></div>
         </div>
         <div className="note-conflict-column">
-          <div className="note-conflict-column-heading">On disk <em>(current file)</em></div>
-          <pre className="note-conflict-text"><DiffLines lines={lines} only="removed" /></pre>
-          <div className="note-conflict-column-footer"><button disabled={disabled} onClick={onKeepDiskVersion}>Keep disk version</button></div>
+          <div className="note-conflict-column-heading">Current file <em>(on disk)</em></div>
+          {precise ? <pre className="note-conflict-text"><DiffLines lines={lines} only="removed" /></pre> : <div className="note-conflict-rendered"><ReactMarkdown remarkPlugins={[remarkGfm]}>{diskText || "_Empty note._"}</ReactMarkdown></div>}
+          <div className="note-conflict-column-footer"><button disabled={disabled} onClick={onKeepDiskVersion}>Keep current file</button></div>
         </div>
       </div>
     </div>

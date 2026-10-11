@@ -2,7 +2,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import { useBlocker, useLocation, useNavigate } from "react-router";
 import { needsSaveBeforeLeaving, saveBeforeLeaving, settleBlockedNavigation, type GuardedEditor } from "./navigationGuard.js";
 
-export const leaveFailedMessage = "Save or resolve the note you are editing, then try again.";
+export const leaveFailedMessage = "Save, discard, or resolve the work you are editing, then try again.";
 
 export type GuardedNavigation = {
   /** Saves the open notes, then moves to `path`; false (and nothing moves) when the save fails. */

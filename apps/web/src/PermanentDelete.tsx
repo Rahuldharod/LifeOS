@@ -44,7 +44,7 @@ export function PermanentDeleteDialog({ title, check, busy, onConfirm, onCancel,
       </div>}
       <div className="actions">
         <button type="button" onClick={onCancel}>{blocked ? "Close" : "Cancel"}</button>
-        {!blocked && <button type="button" className="danger" disabled={busy} onClick={onConfirm}>Delete permanently</button>}
+        {!blocked && <button type="button" className="danger-confirm" disabled={busy} onClick={onConfirm}>Delete permanently</button>}
       </div>
     </div>
   </div>;

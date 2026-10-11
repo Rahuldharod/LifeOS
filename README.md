@@ -151,6 +151,13 @@ corepack pnpm test --exclude '.claude/**'
 
 The `--exclude` stops Vitest from also running the copies of the tests inside agent worktrees under `.claude/`. CI runs plain `pnpm test`, because a fresh checkout has no `.claude/` folder.
 
+Browser tests (#154) check real layout, responsive bands, overflow, focus and button states in Chromium. They build the web app, then start the real server on port 4319 with a temporary synthetic data folder; they never touch the stable app, `.dev-data/` or your data root.
+
+```bash
+corepack pnpm exec playwright install chromium   # once per Mac
+corepack pnpm test:browser
+```
+
 ### First-time settings
 
 Open **Settings** after the first start and fill these cards. Each saves on its own and shows **Saved**.

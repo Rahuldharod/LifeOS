@@ -101,7 +101,7 @@ export interface Endpoints {
   // Tasks, capture, knowledge, rollups
   "GET /api/v1/tasks": { response: W.LifeObject[] };
   "PATCH /api/v1/tasks/:id": { body: { changes: Record<string, unknown>; expectedHash: string }; response: W.LifeObject };
-  "POST /api/v1/capture": { body: { text: string }; response: W.LifeObject };
+  "POST /api/v1/capture": { body: { text: string; primaryProjectId?: string; dueOn?: string; ownerPersonId?: string; sensitivity?: "normal" | "restricted"; requestId?: string }; response: W.LifeObject };
   "GET /api/v1/knowledge": { query: { q?: string }; response: W.LifeObject[] };
   "POST /api/v1/sources/text": { body: { title: string; text: string }; response: unknown };
   "GET /api/v1/rollups/:type": { params: { type: "client" | "product" | "person" }; response: W.EntityRollup[] };

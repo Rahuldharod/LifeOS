@@ -1,37 +1,33 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider, useLocation } from "react-router";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
+import "./design-tokens.css";
 import "./styles.css";
 import { isConflictedDraft } from "./noteDraft.js";
-import { ConflictBadge, NoteConflictPanel } from "./NoteConflictPanel.js";
+import { NoteConflictPanel } from "./NoteConflictPanel.js";
 import { api, ApiError, useServerConnection } from "./api.js";
 import { clearCachedDraft, readCachedDraft, readCachedPendingDraft } from "./draftStorage.js";
 import { useCalendar } from "./useCalendar.js";
 import { useWorkspaceData } from "./useWorkspaceData.js";
 import { useNoteDraftController, type NoteDraftController } from "./useNoteDraftController.js";
-import { groupByDay } from "./noteGroups.js";
-import { useSplitPane } from "./splitPane.js";
 import { EditorFrame } from "./EditorFrame.js";
 import { NoteHeader, PENDING_NOTE_HASH } from "./NoteHeader.js";
-import { EnvelopeBadges, LockBadge } from "./EnvelopeBadges.js";
-import { areaOptions, isRestricted } from "./envelope.js";
+import { isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
 import { MarkdownEditor, ModeSwitch, type EditorOwner } from "./MarkdownEditor.js";
 import { MarkdownPreview } from "./MarkdownPreview.js";
 import { withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
 import { useLifeosLinks } from "./useLifeosLinks.js";
-import { dateInTimeZone, dayRange } from "./zonedTime.js";
+import { addCalendarDays, dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
-import { NoteFiltersPanel } from "./NoteFiltersPanel.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
-import { externalChoiceOf, externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice } from "./personLabels.js";
+import { externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice } from "./personLabels.js";
 import { PersonName } from "./PersonName.js";
 import { MeetingEnrichment } from "./MeetingEnrichment.js";
-import { PersonReviewControl } from "./PersonReview.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { CopyLink } from "./CopyLink.js";
@@ -39,40 +35,40 @@ import { awaitingAdoptionLabel } from "./todayPanels.js";
 import { LinkResolutionCard, type LinkCardActions } from "./LinkResolutionCard.js";
 import { acceptLink, acceptToast, createLinkTarget } from "./linkResolution.js";
 import { reviewInFlight } from "./reviewInFlight.js";
-import { displayTimeZone as storedDisplayTimeZone, formatDate, formatTime } from "./dateFormat.js";
-import { contextLinkFields, entityLinkFields } from "@lifeos/shared";
-import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
-import { PageHeader, Summary, objectRow } from "./pageParts.js";
+import { displayTimeZone as storedDisplayTimeZone, formatDate } from "./dateFormat.js";
+import { contextLinkFields } from "@lifeos/shared";
+import { PageHeader, Summary } from "./pageParts.js";
 import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
+import { createSettingsEditorGuard, type SettingsSection } from "./SettingsWorkspace.js";
+import { ReferenceDataSettings } from "./ReferenceDataSettings.js";
+import { parseReferenceSettingsId, referenceCardIdFromRoute, referenceRouteInSettings, referenceSettingsCardId, referenceSettingsId, type ReferenceEntityType } from "./referenceSettingsRoutes.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
-import { KnowledgeSourceForm, sourcePreservedToast } from "./KnowledgeSourceForm.js";
-import { LeaseBanner, takeoverCaution } from "./LeaseBanner.js";
+import { takeoverCaution } from "./LeaseBanner.js";
+import { AppStatusBanners } from "./ConnectionDeviceSettings.js";
 import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { BackupWarning } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { PermanentDeleteButton } from "./PermanentDelete.js";
-import { CalendarOfflineBanner } from "./CalendarOffline.js";
+import { CalendarWorkspace } from "./CalendarWorkspace.js";
 import { parseRoute, routePath, routeTarget, type Route, type View } from "./routes.js";
 import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
+import { ApplicationShell } from "./ApplicationShell.js";
+import { GlobalSearchOverlay } from "./GlobalSearchOverlay.js";
+import { recordRecentSearchId } from "./globalSearch.js";
+import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
+import { OverlayDialog } from "./OverlayDialog.js";
+import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
+import { NotesWorkspace } from "./NotesWorkspace.js";
+import { InboxWorkspace } from "./InboxWorkspace.js";
+import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
-import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
+import type { AppliedPatch, BackupVerification, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
-
-function formatEventTime(value: string, timeZone: string) {
-  return new Date(value).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" });
-}
-
-function formatGap(milliseconds: number) {
-  const minutes = Math.round(milliseconds / 60_000);
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return hours ? `${hours}h${remainder ? ` ${remainder}m` : ""} free` : `${minutes}m free`;
-}
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -195,7 +191,8 @@ function ReviewCard({ review, busy, onAccept, onReject, onSave, evidence, choice
 function App() {
   // PB-027: the URL says which tab and which item are open.
   const location = useLocation();
-  const route = parseRoute(location.pathname);
+  const parsedRoute = parseRoute(location.pathname);
+  const route = parsedRoute ? referenceRouteInSettings(parsedRoute) : undefined;
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
@@ -209,10 +206,9 @@ function App() {
   const [noteResults, setNoteResults] = useState<LifeObject[]>();
   const [selectedDeletedId, setSelectedDeletedId] = useState<string>();
   const [highlightId, setHighlightId] = useState<string>();
-  const [notesMode, setNotesMode] = useState<"visual" | "write" | "preview">("visual");
   const [capture, setCapture] = useState("");
-  const [sourceTitle, setSourceTitle] = useState("");
-  const [sourceText, setSourceText] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
@@ -225,6 +221,10 @@ function App() {
   const calendar = useCalendar({ selectedDate, displayTimeZone, onFailure: setMessage, onGoogleStatusStale: refreshGoogleConnection });
   const [editorMode, setEditorMode] = useState<"visual" | "write" | "preview">("visual");
   const [busy, setBusy] = useState(false);
+  const taskEditorGuard = useRef(createStructuredEditorGuard()).current;
+  const decisionEditorGuard = useRef(createStructuredEditorGuard()).current;
+  const openPointEditorGuard = useRef(createStructuredEditorGuard()).current;
+  const settingsEditorGuard = useRef(createSettingsEditorGuard()).current;
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
@@ -269,8 +269,6 @@ function App() {
   // when a first edit turns the preview into a persisted workspace.
   const [editorSession, setEditorSession] = useState(0);
   const server = useServerConnection();
-  const notesSplit = useSplitPane("lifeos.split.notes");
-  const calendarSplit = useSplitPane("lifeos.split.calendar");
   const notesController = useNoteDraftController({
     note: selectedNote,
     readOnly,
@@ -331,7 +329,7 @@ function App() {
   // until the same save succeeds (useGuardedNavigation).
   const locationRef = useRef(location);
   locationRef.current = location;
-  const guarded = useGuardedNavigation({ editors: [notesController, meetingController], readOnly, onLeaveFailed: setMessage });
+  const guarded = useGuardedNavigation({ editors: [notesController, meetingController, taskEditorGuard, decisionEditorGuard, openPointEditorGuard, settingsEditorGuard], readOnly, onLeaveFailed: setMessage });
   const leaveEditors = guarded.leave;
   // While a held Back/Forward saves, nothing else may change the URL: a first save over a calendar
   // event would otherwise replace the URL with the new meeting's and release the held navigation.
@@ -374,6 +372,11 @@ function App() {
   useEffect(() => {
     let remembered: string | null = null;
     try {
+      if (route && parsedRoute && routePath(route) !== routePath(parsedRoute)) {
+        localStorage.setItem(lastPathKey, routePath(route));
+        followRoute(route, { replace: true });
+        return;
+      }
       if (route) { localStorage.setItem(lastPathKey, location.pathname); return; }
       remembered = localStorage.getItem(lastPathKey);
     } catch { /* storage unavailable: fall back to Today */ }
@@ -436,7 +439,8 @@ function App() {
     const note = notes.find((candidate) => candidate.frontmatter.id === id);
     if (!note) { notesController.reset(); setSelectedNoteId(undefined); return; }
     const opened = notesController.open(note, readCachedDraft(note));
-    setSelectedNoteId(note.frontmatter.id); setNotesMode("visual");
+    if (note.frontmatter.type === "knowledge-note") recordRecentSearchId(note.frontmatter.id);
+    setSelectedNoteId(note.frontmatter.id);
     if (opened.conflict) setMessage("Recovered a browser draft, but the Markdown file also changed. Review before saving.");
   }, [location.pathname, collectionsLoaded, notes, deletedNotes]);
 
@@ -469,6 +473,7 @@ function App() {
   useEffect(() => {
     if (!collectionsLoaded || !route || route.view === "Notes" || route.view === "Calendar") return;
     setHighlightId(route.id);
+    if (route.view === "Tasks" && route.id && tasks.some((task) => task.frontmatter.id === route.id)) recordRecentSearchId(route.id);
   }, [location.pathname, collectionsLoaded]);
 
   async function run(action: () => Promise<void>, success: string) {
@@ -589,10 +594,54 @@ function App() {
     setLastVerification(await api("POST /api/v1/backups/:id/verify", { params: { id: backupId } }));
   }, "Backup restoration drill completed");
 
+  const createAndVerifyBackup = async (): Promise<BackupVerification> => {
+    setBusy(true);
+    try {
+      const created = await api("POST /api/v1/backups");
+      const verification = await api("POST /api/v1/backups/:id/verify", { params: { id: created.backupId } });
+      setLastVerification(verification);
+      await refresh();
+      setMessage("Snapshot created and restoration drill passed");
+      return verification;
+    } finally { setBusy(false); }
+  };
+
+  const verifyBackupForSettings = async (backupId: string): Promise<BackupVerification> => {
+    setBusy(true);
+    try {
+      const verification = await api("POST /api/v1/backups/:id/verify", { params: { id: backupId } });
+      setLastVerification(verification);
+      setMessage("Backup restoration drill completed");
+      return verification;
+    } finally { setBusy(false); }
+  };
+
+  const takeOverSessionForSettings = async () => {
+    setBusy(true);
+    try {
+      await api("POST /api/v1/session/take-over");
+      await refresh();
+      setMessage("This device now holds the advisory write lease");
+    } finally { setBusy(false); }
+  };
+
   const submitCapture = () => run(async () => {
     await api("POST /api/v1/capture", { body: { text: capture } });
     setCapture(""); await refresh();
   }, "Captured as an Inbox task");
+
+  const saveGlobalCapture = async (request: CaptureRequest) => {
+    setBusy(true);
+    try {
+      const task = await api("POST /api/v1/capture", { body: request });
+      await refresh();
+      setMessage("Task captured");
+      return task;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Task capture failed");
+      throw error;
+    } finally { setBusy(false); }
+  };
 
   const adoptDrafts = async () => {
     setBusy(true);
@@ -654,10 +703,10 @@ function App() {
     await refresh();
   }, `Undid the change to ${patch.title}`);
 
-  const ingestSource = () => run(async () => {
-    await api("POST /api/v1/sources/text", { body: { title: sourceTitle, text: sourceText } });
-    setSourceTitle(""); setSourceText(""); await refresh();
-  }, sourcePreservedToast);
+  const preserveSource = async (title: string, text: string) => {
+    await api("POST /api/v1/sources/text", { body: { title, text } });
+    await refresh();
+  };
 
   const connectGoogle = () => run(async () => {
     const response = await api("GET /api/v1/connections/google/start");
@@ -682,10 +731,24 @@ function App() {
     await refreshTodayPanels();
   }, "Calendar reloaded");
 
-  const createEntity = (type: EntityType, fields: Record<string, unknown>) => run(async () => {
-    await api("POST /api/v1/entities/:type", { params: { type }, body: { fields } });
-    await refresh();
-  }, `${type} created`);
+  const createReferenceEntity = async (type: ReferenceEntityType, fields: Record<string, unknown>) => {
+    let created: LifeObject | undefined;
+    const ok = await run(async () => {
+      created = await api("POST /api/v1/entities/:type", { params: { type }, body: { fields } });
+      await refresh();
+    }, `${type} created`);
+    return ok ? created : undefined;
+  };
+
+  const createTask = async (fields: Record<string, unknown>) => {
+    let created: LifeObject | undefined;
+    const ok = await run(async () => {
+      created = await api("POST /api/v1/entities/:type", { params: { type: "task" }, body: { fields } });
+      await refresh();
+    }, "task created");
+    if (ok && created) followRoute({ view: "Tasks", id: created.frontmatter.id }, { replace: true });
+    return ok ? created : undefined;
+  };
 
   const updateEntity = (object: LifeObject, fields: Record<string, unknown>) => run(async () => {
     await api("PATCH /api/v1/entities/by-id/:id", { params: { id: object.frontmatter.id }, body: { fields, expectedHash: object.contentHash } });
@@ -805,14 +868,14 @@ function App() {
   };
 
   // PB-007: `lifeos://` links, from both editors, the copy-link feature and the Decisions/Open Points pages.
+  // Reference records (projects, clients, products, people) open inside Settings (#140).
   const { openLifeosLink } = useLifeosLinks({
-    leaveEditors, refreshObjectLinks, refreshNoteLists, followRoute, onMessage: setMessage, selectedDate, displayTimeZone,
+    leaveEditors, refreshObjectLinks, refreshNoteLists, followRoute: (next) => followRoute(referenceRouteInSettings(next)), onMessage: setMessage, selectedDate, displayTimeZone,
     onNoteOpened: () => setNoteQuery(""), onHighlight: setHighlightId
   });
   /** #76: opens Settings and moves focus to the given card once it has rendered. */
   const openSettingsCard = async (cardId: string) => {
-    if (!(await go({ view: "Settings" }))) return;
-    window.setTimeout(() => { const card = document.getElementById(cardId); card?.scrollIntoView({ block: "center", behavior: "smooth" }); card?.focus({ preventScroll: true }); }, 80);
+    await go({ view: "Settings", id: cardId });
   };
   useEffect(() => {
     if (!highlightId) return;
@@ -862,77 +925,55 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
-  const navigation: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "System"];
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
 
-  return <main>
-    <aside>
-      <h1>LifeOS</h1>
-      <nav className="nav-main">
-        {navigation.map((item) => <button className={item === view ? "active" : ""} key={item} onClick={() => void go(tabRoute(item))}>{item}{item === "Inbox" && pendingReviews.length > 0 ? <em>{pendingReviews.length}</em> : null}</button>)}
-      </nav>
-      <div className="nav-footer">
-        <div className="nav-actions">
-          <button className={`settings-link ${view === "Settings" ? "active" : ""}`} onClick={() => void go({ view: "Settings" })}>Settings</button>
-        </div>
-        <p className="connection"><i className={readOnly ? "warning-dot" : ""} /> {readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}</p>
-      </div>
-    </aside>
-
-    <section className={[(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined}>
+  return <ApplicationShell
+    activeView={view}
+    pendingReviewCount={pendingReviews.length}
+    status={readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}
+    readOnly={readOnly}
+    onNavigate={(item) => void go(tabRoute(item))}
+    onSearch={() => setSearchOpen(true)}
+    onCapture={() => setCaptureOpen(true)}
+  >
+      <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
+      <OverlayDialog open={captureOpen} label="Global Capture" onClose={() => setCaptureOpen(false)}>
+        <header className="global-search-header"><div><span>GLOBAL CAPTURE</span><h2>Capture a task</h2></div><button type="button" aria-label="Close Capture" onClick={() => setCaptureOpen(false)}>×</button></header>
+        <CapturePanel projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))} owners={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: entity.frontmatter.title }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} busy={busy} readOnly={readOnly} onSave={saveGlobalCapture} onViewTask={(id) => { setCaptureOpen(false); void go({ view: "Tasks", id }); }} />
+      </OverlayDialog>
       <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
-      <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />
+      <AppStatusBanners session={health?.session} idleMinutes={health?.idleReleaseMinutes} offline={calendar.offline} busy={busy} timeZone={displayTimeZone} onTakeOver={takeOverSessionForSettings} onRetryCalendar={async () => { await retryCalendar(); }} />
       {missingItem && <article className="lease-warning" role="status"><span>NOT FOUND</span><p>{missingItem} Showing the {view === "Calendar" ? "day" : "list"} instead.</p></article>}
-      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={calendar.events.length} capture={capture} busy={busy} readOnly={readOnly} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => void go({ view: "Inbox" })} onOpenSettingsCard={openSettingsCard} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
+      {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={calendar.events.length} capture={capture} busy={busy} readOnly={readOnly} loading={!collectionsLoaded} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => void go({ view: "Inbox" })} onOpenSettingsCard={openSettingsCard} onCompleteTask={(task) => updateEntity(task, { status: "Done" })} onOpenTasks={() => void go({ view: "Tasks" })} onOpenCalendar={() => void go(tabRoute("Calendar"))} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
 
       {view === "Calendar" && <>
         <PageHeader eyebrow="CALENDAR / MEETING" title="Meeting workspace" description="Capture in Markdown, review proposed commitments, and publish only what you confirm." />
         {googleConnection?.reason === "expired" && <article className="lease-warning" role="alert"><span>GOOGLE CALENDAR</span><h3>Reconnect Google Calendar</h3><p>Google no longer accepts the saved access, so events cannot sync. {googleConnection.lastSuccessfulSyncAt ? `Last successful sync: ${new Date(googleConnection.lastSuccessfulSyncAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone: displayTimeZone })}.` : "No successful sync recorded yet."}</p><button className="takeover" disabled={busy} onClick={connectGoogle}>Reconnect</button></article>}
         {googleConnection && !googleConnection.connected && googleConnection.reason !== "expired" && <article className="lease-warning"><span>GOOGLE CALENDAR</span><h3>{googleConnection.configured ? "Ready to connect" : "Configuration required"}</h3><p>{googleConnection.configured ? "Authorize read-only access to replace the mock calendar with your upcoming events." : "Add the Google Calendar OAuth client under Settings, then return here to connect."}</p>{googleConnection.configured ? <button className="takeover" disabled={busy} onClick={connectGoogle}>Connect Google Calendar</button> : <button onClick={() => void go({ view: "Settings" })}>Open Settings</button>}</article>}
         {googleConnection?.connected && <article className="connection-card"><span>GOOGLE CALENDAR CONNECTED</span><p className="muted">Read-only access is active. Each manual sync records a durable Sync Run.</p><button disabled={busy || readOnly} onClick={syncGoogle}>Sync now</button></article>}
-        <div className="meeting-layout split-layout" style={calendarSplit.style}>
-          <article className="event-list">
-            <div className="event-list-heading"><span>DAY TIMELINE</span><button onClick={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}>Today</button></div>
-            <div className="calendar-controls">
-              <label><small>Date</small><input type="date" value={selectedDate} onChange={(event) => { if (event.target.value) void go(calendarRoute(event.target.value)); }} /></label>
-              <label><small>Calendar</small><select value={calendar.filter} onChange={(event) => calendar.setFilter(event.target.value)}>
-                <option value="all">All calendars</option>
-                {[...calendar.offered].sort((left, right) => left.name.localeCompare(right.name)).map((calendar) => <option value={calendar.id} key={calendar.id}>{calendar.name}</option>)}
-              </select></label>
-            </div>
-            <h3 className="timeline-date">{new Date(`${selectedDate}T12:00:00.000Z`).toLocaleDateString([], { dateStyle: "full", timeZone: displayTimeZone })}</h3>
-            <CalendarOfflineBanner offline={calendar.offline} timeZone={displayTimeZone} busy={busy} onRetry={() => void retryCalendar()} />
-            {calendar.error
-              ? <div className="timeline-empty timeline-error" role="alert"><b>Calendar could not be loaded</b><small>{calendar.error}</small></div>
-              : !calendar.filteredEvents.length && !calendar.offline && <div className="timeline-empty"><b>No events</b><small>This calendar is clear for the selected day.</small></div>}
-            <div className="timeline">
-              {calendar.allDayEvents.map((event) => <div className="timeline-row" key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
-                <span className="timeline-time">All day</span><span className="timeline-rail"><i style={{ background: event.calendarColor ?? "#5f8b7c" }} /></span>
-                <button className={`event${event.hasNote ? " has-note" : ""}`} disabled={busy} onClick={() => openEvent(event)}>
-                  <span className="event-title"><b>{event.title}</b>{event.hasNote && <span className="note-badge">✓ Note created</span>}</span>
-                  <small>{event.calendarName ?? "Calendar"}</small>
-                </button>
-              </div>)}
-              {calendar.timedEvents.map((event, index) => {
-                const previousEnd = index ? Math.max(...calendar.timedEvents.slice(0, index).map((candidate) => Date.parse(candidate.endsAt))) : undefined;
-                const gap = previousEnd === undefined ? 0 : Date.parse(event.startsAt) - previousEnd;
-                return <React.Fragment key={`${event.calendarId ?? "calendar"}:${event.externalId}`}>
-                  {gap > 60_000 && <div className="timeline-gap"><span /><span className="gap-rail">•••</span><small>{formatGap(gap)}</small></div>}
-                  <div className="timeline-row">
-                    <span className="timeline-time">{formatEventTime(event.startsAt, displayTimeZone)}</span><span className="timeline-rail"><i style={{ background: event.calendarColor ?? "#5f8b7c" }} /></span>
-                    <button className={`event${event.hasNote ? " has-note" : ""}`} disabled={busy} onClick={() => openEvent(event)}>
-                      <span className="event-title"><b>{event.title}</b>{event.hasNote && <span className="note-badge">✓ Note created</span>}</span>
-                      <small>{formatEventTime(event.startsAt, displayTimeZone)}–{formatEventTime(event.endsAt, displayTimeZone)} · {event.calendarName ?? "Calendar"}</small>
-                      <small>{event.attendees.length ? `${event.attendees.length} attendee${event.attendees.length === 1 ? "" : "s"}` : "No attendees"}</small>
-                    </button>
-                  </div>
-                </React.Fragment>;
-              })}
-            </div>
-          </article>
-          <div {...calendarSplit.dividerProps} />
-          <div className="meeting-main">
+        <CalendarWorkspace
+          selectedDate={selectedDate}
+          displayTimeZone={displayTimeZone}
+          events={calendar.filteredEvents}
+          offline={calendar.offline}
+          error={calendar.error}
+          loading={calendar.loading}
+          filter={calendar.filter}
+          offered={calendar.offered}
+          busy={busy}
+          readOnly={readOnly}
+          detailOpen={Boolean(workspace)}
+          detailKey={workspace?.meeting.frontmatter.id}
+          onPreviousDay={() => void go(calendarRoute(addCalendarDays(selectedDate, -1)))}
+          onToday={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}
+          onNextDay={() => void go(calendarRoute(addCalendarDays(selectedDate, 1)))}
+          onDateChange={(date) => void go(calendarRoute(date))}
+          onFilterChange={calendar.setFilter}
+          onRetry={() => void retryCalendar()}
+          onSelectEvent={(event) => void openEvent(event)}
+          onBack={() => void go({ view: "Calendar", date: selectedDate })}
+        >
             {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
                 <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3><CopyLink object={workspace.persisted !== false ? workspace.meeting : undefined} />{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
@@ -964,69 +1005,88 @@ function App() {
                 {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
               </article>
             </>}
-          </div>
-        </div>
+        </CalendarWorkspace>
       </>}
 
-      {view === "Notes" && <>
-        <PageHeader eyebrow="NOTES" title="Recent notes" description="Open the latest meeting and knowledge notes, edit the Markdown, and save changes back to the portable repository." />
-        <div className="notes-layout split-layout" style={notesSplit.style}>
-          <article className="notes-list">
-            <div className="notes-list-heading"><span>LATEST NOTES</span><small>{noteSearching ? `${visibleNotes.length} of ${tabNotes.length}` : `${tabNotes.length} total`}</small></div>
-            <div className="notes-tabs" role="tablist" aria-label="Notes">
-              <button role="tab" aria-selected={noteTab === "open"} className={noteTab === "open" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "open", id: selectedNoteId })}>Open <small>{notes.length}</small></button>
-              <button role="tab" aria-selected={noteTab === "deleted"} className={noteTab === "deleted" ? "selected" : ""} onClick={() => void go({ view: "Notes", noteTab: "deleted", id: selectedDeletedId })}>Deleted <small>{deletedNotes.length}</small></button>
-            </div>
-            <input className="notes-search" type="search" aria-label="Search notes" placeholder={noteTab === "open" ? "Search notes…" : "Search deleted notes…"} value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} />
-            <NoteFiltersPanel filters={noteFilters} onChange={setNoteFilters} tab={noteTab} projects={entityOptions(projects.map(({ project }) => project))} clients={entityOptions(clients.map(({ entity }) => entity))} products={entityOptions(products.map(({ entity }) => entity))} people={entityOptions(people.map(({ entity }) => entity))} />
-            {!visibleNotes.length && <p className="muted">{emptyNotesMessage(noteTab, noteQuery, noteFilters)}</p>}
-            {groupByDay(visibleNotes, (note) => noteTab === "open" ? note.frontmatter.updated_at : String(note.frontmatter.deleted_at), displayTimeZone).map((group) => <div className="note-day-group" key={group.key}><h4 className="note-day-label">{group.label}</h4>{group.items.map((note) => <button className={note.frontmatter.id === (noteTab === "open" ? selectedNoteId : selectedDeletedId) ? "note-list-item selected" : "note-list-item"} key={note.frontmatter.id} onClick={() => void go({ view: "Notes", noteTab, id: note.frontmatter.id })}>
-              <b>{note.frontmatter.title}<LockBadge frontmatter={note.frontmatter} />{noteTab === "open" && conflictedNoteIds.has(note.frontmatter.id) && <ConflictBadge />}</b><small>{note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note"} · {noteTab === "open" ? formatTime(note.frontmatter.updated_at) : `Deleted ${formatTime(String(note.frontmatter.deleted_at))}`}</small><span>{note.body.replace(/[#>*_`[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note"}</span>
-            </button>)}</div>)}
-          </article>
-          <div {...notesSplit.dividerProps} />
-          <div className="notes-main">
-            {noteTab === "deleted" ? (!selectedDeleted ? <article className="empty-state"><h3>Select a deleted note</h3><p>Deleted notes are kept on disk. Choose one to read it or restore it.</p></article> : <article className="editor-card">
+      {view === "Notes" && <NotesWorkspace
+        notes={visibleNotes}
+        openCount={notes.length}
+        deletedCount={deletedNotes.length}
+        tab={noteTab}
+        selectedId={noteTab === "open" ? selectedNoteId : selectedDeletedId}
+        query={noteQuery}
+        filters={noteFilters}
+        projects={entityOptions(projects.map(({ project }) => project))}
+        clients={entityOptions(clients.map(({ entity }) => entity))}
+        products={entityOptions(products.map(({ entity }) => entity))}
+        people={entityOptions(people.map(({ entity }) => entity))}
+        timeZone={displayTimeZone}
+        loading={!collectionsLoaded}
+        readOnly={readOnly}
+        conflictedNoteIds={conflictedNoteIds}
+        emptyMessage={emptyNotesMessage(noteTab, noteQuery, noteFilters)}
+        detailState={noteTab === "deleted" ? (selectedDeleted ? "deleted" : "empty") : selectedNote && notesController.conflict ? "conflict" : selectedNote ? "open" : "empty"}
+        onQueryChange={setNoteQuery}
+        onFiltersChange={setNoteFilters}
+        onTabChange={(tab) => void go({ view: "Notes", noteTab: tab, id: tab === "open" ? selectedNoteId : selectedDeletedId })}
+        onOpen={(id) => void go({ view: "Notes", noteTab, id })}
+        onBack={() => void go({ view: "Notes", noteTab })}
+        deletedDetail={!selectedDeleted ? null : <article className="editor-card">
               <div className="editor-heading"><div><span>DELETED {selectedDeleted.frontmatter.type.replace("-", " ").toUpperCase()}</span><h3>{selectedDeleted.frontmatter.title}</h3></div></div>
               <MarkdownPreview markdown={selectedDeleted.body} empty="_Empty note._" />
               <div className="editor-footer"><div className="save-state"><i className="dirty" />Deleted {formatDate(String(selectedDeleted.frontmatter.deleted_at))} · read-only</div><div className="actions"><PermanentDeleteButton key={selectedDeleted.frontmatter.id} note={selectedDeleted} disabled={busy || readOnly} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onDeleted={async (deleted) => { if (deleted) setSelectedDeletedId(undefined); await refresh(); }} /><button className="primary" disabled={busy || readOnly} onClick={() => restoreNote(selectedDeleted)}>Restore note</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedDeleted.frontmatter.created_at)} /><Meta label="Deleted" value={formatDate(String(selectedDeleted.frontmatter.deleted_at))} /><Meta label="Revision" value={String(selectedDeleted.frontmatter.revision)} /><Meta label="File" value={selectedDeleted.relativePath} /></div>
-            </article>) :
-            selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> :
-            !selectedNote ? <article className="empty-state"><h3>Select a note</h3><p>Choose a recent note to view or edit its Markdown.</p></article> : <EditorFrame>
-              <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><ModeSwitch mode={notesMode} onChange={setNotesMode} /><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
+            </article>}
+        conflictDetail={selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> : null}
+        renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
+              <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
               <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
               <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}
-          </div>
-        </div>
-      </>}
+      />}
 
-      {view === "Tasks" && <EntityCrudPage labels={labels} highlightId={highlightId} type="task" title="Tasks" objects={tasks} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
+      {view === "Tasks" && <TaskWorkspace tasks={withOpenedArchived(tasks, objectLinks as LinkedObject[], "task", route?.view === "Tasks" ? route.id : undefined) as LifeObject[]} linkables={objectLinks} labels={labels} projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: String(project.frontmatter.title) }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} selectedId={route?.view === "Tasks" ? route.id : undefined} today={dateInTimeZone(new Date(), displayTimeZone)} timeZone={displayTimeZone} guard={taskEditorGuard} busy={busy} readOnly={readOnly} run={run} onOpen={(id) => followRoute({ view: "Tasks", id })} onCloseDetail={() => followRoute({ view: "Tasks" })} onCreate={createTask} onSave={updateEntity} onDelete={deleteEntity} onComplete={(task, complete) => updateEntity(task, { status: complete ? "Done" : "Next" })} onRestored={refresh} />}
 
-      {view === "Projects" && <><PageHeader eyebrow="PROJECTS" title="Project roll-ups" description="Meetings and tasks are computed from stable relationships, not copied lists." />
-        <EntityCrudPage labels={labels} highlightId={highlightId} embedded type="project" title="Projects" objects={projects.map(({ project }) => project)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />
-        <div className="project-grid">{projects.map(({ project, tasks: projectTasks, meetings, decisions, openPoints, people: projectPeople }) => <article key={project.frontmatter.id}><span>PROJECT</span><h3>{project.frontmatter.title}</h3><p className="muted">{String(project.frontmatter.objective ?? "No objective")}</p><div className="project-stats"><b>{projectTasks.length}<small>tasks</small></b><b>{openPoints.filter((point) => point.frontmatter.status === "open").length}<small>open points</small></b><b>{decisions.length}<small>decisions</small></b><b>{meetings.length}<small>meetings</small></b></div><p className="muted">People: {projectPeople.length ? <PeopleList people={projectPeople} labels={labels} /> : "None linked"}</p></article>)}</div>
-        {!projects.length && <article className="empty-state"><h3>No projects yet</h3><p>Opening the mock calendar event will create its linked project context.</p></article>}
-      </>}
+      {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} guard={decisionEditorGuard} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
+      {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} guard={openPointEditorGuard} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
 
-      {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
-      {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
-
-      {view === "Clients" && <EntityCrudPage labels={labels} highlightId={highlightId} type="client" title="Clients" objects={clients.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
-      {view === "Products" && <EntityCrudPage labels={labels} highlightId={highlightId} type="product" title="Products" objects={products.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
-      {view === "People" && <EntityCrudPage labels={labels} onSetExternal={setPersonExternal} onConfirmReviewed={confirmPersonReviewed} highlightId={highlightId} type="person" title="People" objects={people.map(({ entity }) => entity)} linkables={objectLinks} busy={busy} readOnly={readOnly} onCreate={createEntity} onUpdate={updateEntity} onDelete={deleteEntity} run={run} onRestored={refresh} />}
-
-      {view === "Inbox" && <><PageHeader eyebrow="INBOX" title="Review proposals" description="Nothing becomes a commitment until you accept it." />
+      {view === "Inbox" && <>
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p>{awaitingAdoptionLabel(inboxDrafts)}</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
         {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
-        {!pendingReviews.length && <article className="empty-state"><h3>Inbox clear</h3><p>No proposals require your attention.</p></article>}
-        {pendingReviews.map((review) => <div key={review.frontmatter.id} id={`object-${review.frontmatter.id}`} className={review.frontmatter.id === highlightId ? "review-highlight highlighted" : "review-highlight"}><ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} /></div>)}
+        <InboxWorkspace
+          reviews={pendingReviews}
+          objects={objectLinks}
+          labels={labels}
+          choices={headerOptions}
+          selectedId={route?.view === "Inbox" ? route.id : undefined}
+          loading={!collectionsLoaded}
+          busy={busy}
+          readOnly={readOnly}
+          displayTimeZone={displayTimeZone}
+          onOpen={(id) => void go({ view: "Inbox", id })}
+          onBack={() => void go({ view: "Inbox" })}
+          onAccept={accept}
+          onReject={(review) => reject(review.frontmatter.id)}
+          onSave={(review, changes) => editReview(review.frontmatter.id, changes)}
+          linkActionsFor={linkActionsFor}
+        />
       </>}
 
-      {view === "Knowledge" && <><PageHeader eyebrow="KNOWLEDGE" title="Knowledge workspace" description="Preserve pasted source text. Claude proposes Knowledge Notes from it through the LifeOS skills; you review them in Inbox." /><KnowledgeSourceForm title={sourceTitle} text={sourceText} disabled={busy || readOnly} onTitleChange={setSourceTitle} onTextChange={setSourceText} onPreserve={ingestSource} /><ObjectList title="Published Knowledge Notes" objects={knowledge} empty="No Knowledge Notes have been accepted yet." /><p className="muted">Image and attachment handling remains intentionally low priority.</p></>}
+      {view === "Knowledge" && <KnowledgeWorkspace
+        notes={knowledge}
+        sources={objectLinks.filter((object): object is LifeObject => object.frontmatter.type === "source" && "body" in object)}
+        projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))}
+        people={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: personLabel(labels, entity).label }))}
+        selectedId={route?.view === "Knowledge" ? route.id : undefined}
+        loading={!collectionsLoaded}
+        readOnly={readOnly}
+        displayTimeZone={displayTimeZone}
+        onOpen={(id) => void go({ view: "Knowledge", id })}
+        onBack={() => void go({ view: "Knowledge" })}
+        onPreserve={preserveSource}
+      />}
 
       {view === "System" && <><PageHeader eyebrow="SYSTEM" title="Health and device handoff" description="Integrity checks and an advisory lease protect the Markdown root during sequential two-device use." />
         <div className="summary">
@@ -1049,9 +1109,37 @@ function App() {
         <article className="handoff"><span>SAFE HANDOFF</span><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol></article>
       </>}
 
-      {view === "Settings" && <SettingsPage displayTimeZone={displayTimeZone} onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); }} calendarCatalog={calendar.catalog} calendarCatalogLoaded={calendar.catalogLoaded} calendarPrefs={calendar.prefs} onLoadCalendars={calendar.loadCatalog} onSaveCalendarPrefs={calendar.savePrefs} connections={connections} onRetryConnections={retryConnections} busy={busy} readOnly={readOnly} onSaveGoogleSecrets={saveGoogleSecrets} onChanged={refresh} />}
-    </section>
-  </main>;
+      {view === "Settings" && <SettingsPage
+        displayTimeZone={displayTimeZone}
+        onDisplayTimeZoneChange={(zone) => { localStorage.setItem("lifeos.displayTimeZone", zone); setDisplayTimeZone(zone); return true; }}
+        calendarCatalog={calendar.catalog}
+        calendarCatalogLoaded={calendar.catalogLoaded}
+        calendarPrefs={calendar.prefs}
+        onLoadCalendars={calendar.loadCatalog}
+        onSaveCalendarPrefs={calendar.savePrefs}
+        connections={connections}
+        onRetryConnections={retryConnections}
+        busy={busy}
+        readOnly={readOnly}
+        onSaveGoogleSecrets={saveGoogleSecrets}
+        onChanged={refresh}
+        health={health}
+        backups={backups}
+        lastVerification={lastVerification}
+        onCreateAndVerifyBackup={createAndVerifyBackup}
+        onVerifyBackup={verifyBackupForSettings}
+        onTakeOverSession={takeOverSessionForSettings}
+        guard={settingsEditorGuard}
+        selectedCardId={referenceCardIdFromRoute(route?.view === "Settings" ? route.id : undefined)}
+        onOpenCard={(id) => followRoute({ view: "Settings", id })}
+        referenceSections={(Object.entries({ project: projects.map(({ project }) => project), client: clients.map(({ entity }) => entity), product: products.map(({ entity }) => entity), person: people.map(({ entity }) => entity) }) as Array<[ReferenceEntityType, LifeObject[]]>).map(([type, objects]): SettingsSection => {
+          const plural = type === "person" ? "people" : `${type}s`;
+          const label = plural[0]!.toUpperCase() + plural.slice(1);
+          const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} run={run} onRestored={refresh} /> }] };
+        })}
+      />}
+  </ApplicationShell>;
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
@@ -1065,45 +1153,5 @@ function PeopleMeta({ label, people, labels, empty }: { label: string; people: L
   const text = people.map((person) => personLabel(labels, person).label).join(", ") || empty;
   return <div className="meta"><small>{label}</small><b title={text}>{people.length ? <PeopleList people={people} labels={labels} /> : empty}</b></div>;
 }
-function ObjectList({ title, objects, empty }: { title: string; objects: LifeObject[]; empty: string }) {
-  return <article><span>{title.toUpperCase()}</span>{!objects.length && <p className="muted">{empty}</p>}{objects.map(objectRow)}</article>;
-}
-
-// Relationship fields are not listed here: they come from `entityLinkFields` (PB-010) and use EntityLinkPicker.
-const entityFields: Record<EntityType, Array<{ key: string; label: string; kind?: "select" | "date"; options?: string[] }>> = {
-  task: [{ key: "status", label: "Status", kind: "select", options: ["Inbox", "Next", "Waiting", "Done", "Cancelled"] }, { key: "priority", label: "Priority", kind: "select", options: ["", "High", "Medium", "Low"] }, { key: "due_on", label: "Due date", kind: "date" }, { key: "expected_output", label: "Expected output" }],
-  project: [{ key: "status", label: "Status" }, { key: "objective", label: "Objective" }, { key: "success_criteria", label: "Success criteria" }, { key: "target_end_on", label: "Target end", kind: "date" }],
-  client: [{ key: "status", label: "Status" }, { key: "summary", label: "Summary" }, { key: "website_url", label: "Website" }],
-  product: [{ key: "status", label: "Status" }, { key: "description", label: "Description" }],
-  person: [{ key: "given_name", label: "Given name" }, { key: "family_name", label: "Family name" }, { key: "organization_name", label: "Organization" }, { key: "job_title", label: "Job title" }, { key: "timezone", label: "Timezone" }]
-};
-
-// #30: every entity can carry an agreed Area and be marked restricted. A legacy Area shows as "None"
-// in the picker but is kept on save unless the user picks a new one (the server allows unchanged legacy values).
-const envelopeEntityFields = [{ key: "area", label: "Area", kind: "select" as const, options: ["", ...areaOptions] }, { key: "sensitivity", label: "Sensitivity", kind: "select" as const, options: ["normal", "restricted"] }];
-
-function EntityCrudPage({ type, title, objects: listed, linkables, labels, onSetExternal, onConfirmReviewed, busy, readOnly, embedded = false, highlightId, onCreate, onUpdate, onDelete, run, onRestored }: { run: (action: () => Promise<void>, success: string) => Promise<boolean>; onRestored: () => Promise<void>; type: EntityType; title: string; objects: LifeObject[]; linkables: Linkable[]; labels: Map<string, PersonLabel>; onSetExternal?: (object: LifeObject, choice: ExternalChoice) => void; onConfirmReviewed?: (object: LifeObject) => void; busy: boolean; readOnly: boolean; embedded?: boolean; highlightId?: string; onCreate: (type: EntityType, fields: Record<string, unknown>) => void; onUpdate: (object: LifeObject, fields: Record<string, unknown>) => void; onDelete: (object: LifeObject) => void }) {
-  // #118: the tab lists live objects; a link to an archived one still opens it here.
-  const objects = useMemo(() => withOpenedArchived(listed, linkables as LinkedObject[], type, highlightId) as LifeObject[], [listed, linkables, type, highlightId]);
-  const [newTitle, setNewTitle] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
-  useEffect(() => setDrafts(Object.fromEntries(objects.map((object) => [object.frontmatter.id, { ...object.frontmatter }]))), [objects]);
-  const setField = (id: string, key: string, value: unknown) => setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
-  const create = () => { onCreate(type, { title: newTitle }); setNewTitle(""); };
-  return <>{!embedded && <PageHeader eyebrow={type.toUpperCase()} title={title} description={`Create, inspect, edit, archive through history, and soft-delete ${title.toLowerCase()} stored as typed Markdown.`} />}<article className="crud-panel"><span>{embedded ? "MANAGE PROJECTS" : `MANAGE ${title.toUpperCase()}`}</span><div className="capture-row"><input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTitle.trim()) create(); }} placeholder={`New ${type} title`} /><button className="primary" disabled={busy || readOnly || !newTitle.trim()} onClick={create}>Create</button></div>{!objects.length && <p className="muted">No {title.toLowerCase()} yet.</p>}<div className="crud-list">{objects.map((object) => { const draft = drafts[object.frontmatter.id] ?? object.frontmatter; return <div className={object.frontmatter.id === highlightId ? "crud-card highlighted" : "crud-card"} id={`object-${object.frontmatter.id}`} key={object.frontmatter.id}><div className="crud-fields"><label><small>Title</small><input value={String(draft.title ?? "")} onChange={(event) => setField(object.frontmatter.id, "title", event.target.value)} /></label>{[...entityFields[type], ...entityLinkFields[type], ...envelopeEntityFields].map((field) => "target" in field ? <EntityLinkPicker key={field.key} field={field} value={draft[field.key]} objects={linkables} labels={labels} selfId={object.frontmatter.id} disabled={busy || readOnly} onChange={(value) => setField(object.frontmatter.id, field.key, value)} /> : <label key={field.key}><small>{field.label}</small>{field.kind === "select" ? <select value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)}>{field.options!.map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select> : <input type={field.kind === "date" ? "date" : "text"} value={String(draft[field.key] ?? "")} onChange={(event) => setField(object.frontmatter.id, field.key, event.target.value || undefined)} />}</label>)}</div><div className="crud-actions">{type === "person" && <PersonExternalControl person={object} labels={labels} disabled={busy || readOnly} onChange={onSetExternal} />}{type === "person" && onConfirmReviewed && <PersonReviewControl person={object} disabled={busy || readOnly} onConfirm={() => onConfirmReviewed(object)} />}<EnvelopeBadges frontmatter={object.frontmatter} />{Boolean(object.frontmatter.archived_at) && <small className="archived-tag">Archived</small>}<small>Revision {object.frontmatter.revision} · {formatDate(object.frontmatter.updated_at)}</small><button disabled={busy || readOnly} onClick={() => onUpdate(object, draft)}>Save changes</button><button className="danger" disabled={busy || readOnly || object.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${object.frontmatter.title}? The Markdown file will be retained.`)) onDelete(object); }}>Delete</button><CopyLink object={object} /><HistoryLink objectId={object.frontmatter.id} title={object.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={onRestored} /></div></div>; })}</div></article></>;
-}
-
-/** #39: the person's badge label, and the External choice (Auto follows the email domain). Saves on change. */
-function PersonExternalControl({ person, labels, disabled, onChange }: { person: LifeObject; labels: Map<string, PersonLabel>; disabled: boolean; onChange?: (object: LifeObject, choice: ExternalChoice) => void }) {
-  const label = personLabel(labels, person);
-  const isSelf = person.frontmatter.is_self === true;
-  const derived = labels.get(person.frontmatter.id)?.isExternal ? "external" : "internal";
-  return <span className="person-external"><small>Shown as</small><b><PersonName {...label} /></b>{!isSelf && onChange && <label><small>External</small><select value={externalChoiceOf(person.frontmatter)} disabled={disabled} onChange={(event) => onChange(person, event.target.value as ExternalChoice)}>
-    <option value="auto">Auto (by email domain{externalChoiceOf(person.frontmatter) === "auto" ? `: ${derived}` : ""})</option><option value="external">External</option><option value="internal">Internal</option>
-  </select></label>}</span>;
-}
-
-// PB-027: one catch-all route; App reads the path itself (routes.ts). A data router is needed for
-// useBlocker, which holds Back/Forward until the open note is saved.
 const router = createBrowserRouter([{ path: "*", element: <App /> }]);
 createRoot(document.getElementById("root")!).render(<React.StrictMode><RouterProvider router={router} /></React.StrictMode>);

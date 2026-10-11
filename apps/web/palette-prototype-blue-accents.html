@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- PROTOTYPE ONLY: three controlled accent-colour comparisons of G's editorial Today layout with H's expanded text navigation. Switch with ?variant=A|B|C. Synthetic content; no persistence. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LifeOS · blue accent comparison</title>
+  <style>
+    :root{--midnight:#201e43;--deep-blue:#134b70;--neutral:#eeeeee;--paper:#f8f6f4;--paper-deep:#f2efed;--white:#fff;--muted:#5f6373;--line:#dedee1;--accent:#5473a1;--accent-pale:#5473a118;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-synthesis:none}
+    body[data-variant="B"]{--accent:#2e77b1;--accent-pale:#2e77b118}
+    body[data-variant="C"]{--accent:#6b70ae;--accent-pale:#6b70ae18}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--midnight)}button{font:inherit;cursor:pointer}button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}h1,h2,h3,p{margin:0}h1{max-width:18ch;font-size:clamp(40px,4.7vw,70px);line-height:1.04;letter-spacing:-.06em;font-weight:760}h2{font-size:20px;letter-spacing:-.035em}p{line-height:1.5}.label{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.small{font-size:12px}.muted{color:var(--muted)}.row{display:flex;align-items:center;justify-content:space-between;gap:15px}.button{min-height:43px;padding:10px 17px;border:0;border-radius:8px;background:var(--deep-blue);color:var(--white);font-weight:750}.text-button{padding:5px 0;border:0;background:transparent;color:var(--deep-blue);font-size:12px;font-weight:780;text-decoration:underline;text-underline-offset:3px}.pill{padding:6px 10px;border-radius:99px;background:var(--accent-pale);color:var(--deep-blue);font-size:11px;font-weight:780}.shell{display:grid;grid-template-columns:213px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;display:flex;flex-direction:column;height:100vh;padding:31px 17px;background:var(--paper-deep);border-right:1px solid var(--line)}.brand{margin-bottom:36px;font-size:28px;font-weight:820;letter-spacing:-.065em}.sidebar nav{display:grid;gap:5px}.nav-item{display:flex;align-items:center;gap:11px;width:100%;min-height:42px;padding:9px 12px;border:0;border-left:4px solid transparent;border-radius:7px;background:transparent;color:var(--midnight);text-align:left;font-size:13px}.nav-item .icon{width:16px;text-align:center;font-size:15px;color:var(--deep-blue)}.nav-item.selected{border-left-color:var(--accent);background:var(--white);color:var(--deep-blue);font-weight:800;box-shadow:0 2px 8px #201e430d}.sidebar .settings{margin-top:auto}.sidebar .divider{height:1px;margin:13px 0;background:var(--line)}.main{min-width:0;padding:43px clamp(28px,5.1vw,82px) 125px}.eyebrow{display:block;margin-bottom:14px;color:var(--deep-blue)}.heading{display:flex;align-items:start;justify-content:space-between;gap:24px;padding-bottom:31px;border-bottom:3px solid var(--accent)}.heading p{max-width:57ch;margin-top:14px;color:var(--muted)}.heading .button{flex:none}.content{display:grid;grid-template-columns:minmax(0,1.38fr) minmax(285px,.72fr);gap:68px;padding-top:32px}.section-heading{display:flex;align-items:center;justify-content:space-between;gap:13px;margin-bottom:15px}.task-list,.meeting-list{margin:0;padding:0;list-style:none}.task-list li{display:flex;align-items:start;gap:16px;padding:24px 0;border-top:1px solid var(--line)}.task-list li:first-child{border-top:0}.task-list .check{flex:none;width:23px;height:23px;margin-top:2px;border:2px solid var(--accent);border-radius:6px;background:transparent}.task-list strong,.task-list small{display:block}.task-list strong{font-size:19px;letter-spacing:-.025em}.task-list small{margin-top:6px;color:var(--muted);font-size:12px}.aside{padding-left:27px;border-left:1px solid var(--line)}.meeting-list li{display:grid;grid-template-columns:55px minmax(0,1fr);gap:13px;padding:21px 0;border-top:1px solid var(--line)}.meeting-list li:first-child{border-top:0}.meeting-list time{color:var(--deep-blue);font-size:13px;font-weight:850}.meeting-list strong,.meeting-list small{display:block}.meeting-list strong{font-size:13px}.meeting-list small{margin-top:5px;color:var(--muted);font-size:12px}.inbox{margin-top:24px;padding:21px;background:var(--neutral);border-left:4px solid var(--accent)}.inbox h2{margin:9px 0}.palette{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:34px}.palette span{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px}.palette i{display:inline-block;width:17px;height:17px;border:1px solid #201e432d;border-radius:5px}.palette .changed{font-weight:800;color:var(--midnight)}.prototype{position:fixed;z-index:9;top:12px;right:14px;padding:7px 10px;border-radius:99px;background:var(--midnight);color:var(--white);box-shadow:0 5px 18px #201e4330;font-size:10px;font-weight:800;letter-spacing:.06em}.switcher{position:fixed;z-index:10;bottom:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;max-width:calc(100vw - 24px);padding:7px 10px;border-radius:99px;background:var(--midnight);color:var(--white);box-shadow:0 9px 30px #201e4360;font-size:12px;white-space:nowrap}.switcher button{min-width:36px;height:36px;border:0;border-radius:20px;background:var(--deep-blue);color:var(--white);font-weight:800}.switcher button.current{background:var(--white);color:var(--midnight)}.switcher button.arrow{min-width:38px;background:var(--accent);font-size:21px}.switcher .current-name{max-width:175px;padding:0 8px;overflow:hidden;text-overflow:ellipsis}.switcher .divider{width:1px;height:23px;background:#ffffff55}.switcher button:focus-visible{outline-color:var(--white)}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    /* The full-text navigation stays dark in all three comparisons. Only --accent changes. */
+    .sidebar{background:var(--midnight);color:var(--white);border-right:0}
+    .sidebar .brand{color:var(--white)}
+    .sidebar .nav-item{color:var(--white)}
+    .sidebar .nav-item .icon{color:var(--white)}
+    .sidebar .nav-item.selected{border-left-color:var(--white);background:var(--accent);color:var(--white);box-shadow:none}
+    .sidebar .divider{background:#ffffff40}
+    .sidebar .nav-divider{height:1px;margin:15px 9px 11px;background:#ffffff40}
+    @media(max-width:1010px){.content{grid-template-columns:1fr;gap:28px}.aside{padding:0;border-left:0}}
+    @media(max-width:700px){.shell{display:block}.sidebar{position:static;height:auto;padding:17px 18px}.brand{margin-bottom:10px;font-size:23px}.sidebar nav{display:flex;gap:4px;overflow:auto}.sidebar .nav-divider{flex:none;width:1px;height:28px;margin:7px 5px}.nav-item{width:auto;white-space:nowrap}.sidebar .settings{display:none}.main{padding:30px 21px 100px}.heading{display:block}.heading .button{margin-top:18px}.prototype{display:none}.switcher .current-name{display:none}}
+  </style>
+</head>
+<body data-variant="A">
+  <div class="prototype">PROTOTYPE · EXAMPLE CONTENT · NO SAVING</div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">LifeOS</div>
+      <nav aria-label="Main navigation">
+        <button class="nav-item selected">Today</button>
+        <button class="nav-item">Calendar</button>
+        <button class="nav-item">Tasks</button>
+        <button class="nav-item">Notes</button>
+        <button class="nav-item">Inbox</button>
+        <div class="nav-divider" role="separator" aria-label="More workspaces"></div>
+        <button class="nav-item">Decisions</button>
+        <button class="nav-item">Open Points</button>
+        <button class="nav-item">Knowledge</button>
+      </nav>
+      <div class="settings"><div class="divider"></div><button class="nav-item">Settings</button></div>
+    </aside>
+    <main class="main">
+      <header class="heading"><div><span class="label eyebrow">Today · design G + open navigation</span><h1>Begin with the next useful step.</h1><p>Everything important, with a little warmth and less visual noise.</p></div><button class="button">+ Capture</button></header>
+      <div class="content">
+        <section><div class="section-heading"><h2>What matters</h2><span class="pill">3 priorities</span></div><ul class="task-list"><li><button class="check" aria-label="Preview complete Prepare meeting notes"></button><span><strong>Prepare meeting notes</strong><small>Project check-in · Today</small></span></li><li><button class="check" aria-label="Preview complete Review household budget"></button><span><strong>Review household budget</strong><small>Household · Tomorrow</small></span></li><li><button class="check" aria-label="Preview complete Plan weekend hike"></button><span><strong>Plan weekend hike</strong><small>Personal · This week</small></span></li></ul><button class="text-button">View all tasks →</button></section>
+        <aside class="aside"><div class="section-heading"><h2>Coming up</h2><button class="text-button">Calendar →</button></div><ul class="meeting-list"><li><time>10:30</time><span><strong>Project check-in</strong><small>Notes ready · 30 min</small></span></li><li><time>14:00</time><span><strong>Call with Alex</strong><small>1 open point · 45 min</small></span></li></ul><div class="inbox"><span class="label">Inbox</span><h2>3 things need a decision.</h2><p class="small muted">They can wait until after your first meeting.</p></div></aside>
+      </div>
+      <div class="palette" aria-label="Colour palette"><span><i style="background:#201e43"></i>#201E43</span><span><i style="background:#134b70"></i>#134B70</span><span><i id="accent-swatch"></i><b class="changed" id="accent-value"></b></span><span><i style="background:#eeeeee"></i>#EEEEEE</span><span><i style="background:#f8f6f4"></i>warm off-white</span></div>
+    </main>
+  </div>
+  <div class="switcher" aria-label="Accent comparison switcher"><button class="arrow" id="previous" aria-label="Previous accent">←</button><span class="current-name" id="current-name"></span><span class="divider"></span><button data-choice="A">A</button><button data-choice="B">B</button><button data-choice="C">C</button><button class="arrow" id="next" aria-label="Next accent">→</button></div>
+  <div id="state" class="sr-only" role="status" aria-live="polite"></div>
+  <script>
+    const variants=["A","B","C"];
+    const choices={A:{name:"Slate blue",hex:"#5473A1"},B:{name:"Clear blue",hex:"#2E77B1"},C:{name:"Soft indigo-blue",hex:"#6B70AE"}};
+    let variant=new URL(location.href).searchParams.get("variant")||"A";if(!variants.includes(variant))variant="A";
+    function render(){const choice=choices[variant];document.body.dataset.variant=variant;document.getElementById("current-name").textContent=`${variant} · ${choice.name}`;document.getElementById("accent-swatch").style.background=choice.hex;document.getElementById("accent-value").textContent=choice.hex;document.getElementById("state").textContent=`Showing ${variant}: ${choice.name}, accent ${choice.hex}`;document.querySelectorAll("[data-choice]").forEach(button=>{const active=button.dataset.choice===variant;button.classList.toggle("current",active);button.setAttribute("aria-current",active?"true":"false")})}
+    function choose(next){variant=next;const url=new URL(location.href);url.searchParams.set("variant",variant);history.replaceState(null,"",url);render()}
+    function cycle(step){choose(variants[(variants.indexOf(variant)+step+variants.length)%variants.length])}
+    document.getElementById("previous").addEventListener("click",()=>cycle(-1));document.getElementById("next").addEventListener("click",()=>cycle(1));document.querySelectorAll("[data-choice]").forEach(button=>button.addEventListener("click",()=>choose(button.dataset.choice)));document.addEventListener("keydown",event=>{if((event.key==="ArrowLeft"||event.key==="ArrowRight")&&!event.target.closest("input,textarea,select,[contenteditable]")){event.preventDefault();cycle(event.key==="ArrowRight"?1:-1)}});render();
+  </script>
+</body>
+</html>

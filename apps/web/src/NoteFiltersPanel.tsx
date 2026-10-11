@@ -7,25 +7,29 @@ type Option = { id: string; title: string };
 type Props = {
   filters: NoteFilterState; onChange: (filters: NoteFilterState) => void; tab: "open" | "deleted";
   projects: Option[]; clients: Option[]; products: Option[]; people: Option[];
+  advanced?: boolean; onToggleAdvanced?: () => void;
 };
 
 const typeOptions = Object.entries(noteTypeLabels).map(([id, title]) => ({ id, title }));
 
-export function NoteFiltersPanel({ filters, onChange, tab, projects, clients, products, people }: Props) {
+export function NoteFiltersPanel({ filters, onChange, tab, projects, clients, products, people, advanced = true, onToggleAdvanced }: Props) {
   const set = (patch: Partial<NoteFilterState>) => onChange({ ...filters, ...patch });
   const count = activeNoteFilterCount(filters);
-  const dateLabel = tab === "open" ? "Last edited" : "Deleted";
+  const dateLabel = tab === "open" ? "Updated" : "Deleted";
   return <div className="note-filters" role="group" aria-label="Filter notes">
-    <div className="note-filters-head"><small>FILTERS{count ? ` · ${count} active` : ""}</small><button disabled={!count} onClick={() => onChange(noNoteFilters)}>Clear filters</button></div>
-    <div className="note-filter-grid">
+    <div className="note-filter-common">
       <SearchSelect multi label="Type" options={typeOptions} value={filters.types} onChange={(types) => set({ types })} placeholder="Any type" />
+      {onToggleAdvanced && <button aria-expanded={advanced} onClick={onToggleAdvanced}>Advanced{count ? ` · ${count}` : ""}</button>}
+    </div>
+    {advanced && <div className="note-filter-grid">
       <SearchSelect label="Project" options={projects} value={filters.projectId} onChange={(projectId) => set({ projectId })} placeholder="Any project" />
       <SearchSelect label="Client" options={clients} value={filters.clientId} onChange={(clientId) => set({ clientId })} placeholder="Any client" />
       <SearchSelect label="Product" options={products} value={filters.productId} onChange={(productId) => set({ productId })} placeholder="Any product" />
       <SearchSelect label="Person" options={people} value={filters.personId} onChange={(personId) => set({ personId })} placeholder="Anyone" />
       <label><small>{dateLabel} from</small><input type="date" value={filters.fromDay} max={filters.toDay || undefined} onChange={(event) => set({ fromDay: event.target.value })} /></label>
       <label><small>{dateLabel} to</small><input type="date" value={filters.toDay} min={filters.fromDay || undefined} onChange={(event) => set({ toDay: event.target.value })} /></label>
-    </div>
+      <button disabled={!count} onClick={() => onChange(noNoteFilters)}>Clear filters</button>
+    </div>}
   </div>;
 }
 

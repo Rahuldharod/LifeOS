@@ -21,7 +21,8 @@ describe("PermanentDeleteDialog (PB-030)", () => {
     expect(text(html)).toContain("Delete “Old sync notes” permanently?");
     expect(text(html)).toContain("cannot be undone from the app");
     expect(text(html)).toContain("Backups still hold it");
-    expect(html).toMatch(/<button type="button" class="danger"[^>]*>Delete permanently<\/button>/);
+    // #154: the final destructive confirmation is the only place the solid error treatment appears.
+    expect(html).toMatch(/<button type="button" class="danger-confirm"[^>]*>Delete permanently<\/button>/);
   });
 
   it("lists body links as a warning and still offers the delete", () => {

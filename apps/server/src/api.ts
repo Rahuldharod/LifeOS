@@ -285,7 +285,10 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   route(server, "PUT /api/v1/settings/daily-focus", async (request) => application.saveFocusSettings({ maxMustDos: request.body?.maxMustDos }, request.body?.expectedHash));
   route(server, "GET /api/v1/tasks", async () => application.tasks());
   route(server, "PATCH /api/v1/tasks/:id", async (request) => application.updateTask(request.params.id, request.body.changes, request.body.expectedHash));
-  route(server, "POST /api/v1/capture", async (request) => application.quickCapture(request.body.text));
+  route(server, "POST /api/v1/capture", async (request) => {
+    const { text, primaryProjectId, dueOn, ownerPersonId, sensitivity, requestId } = request.body;
+    return application.quickCapture(text, { primaryProjectId, dueOn, ownerPersonId, sensitivity, requestId });
+  });
   route(server, "GET /api/v1/knowledge", async (request) => application.knowledge(request.query.q));
   route(server, "POST /api/v1/sources/text", async (request) => application.ingestTextSource(request.body.title, request.body.text));
   route(server, "GET /api/v1/rollups/:type", async (request) => application.rollups(request.params.type));
