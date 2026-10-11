@@ -13,7 +13,7 @@ const object = (id: string, type: string, title: string, fields: Record<string, 
 });
 
 const notes = [
-  object("knowledge-one", "knowledge-note", "Portable loyalty research", { area: "learning", source_ids: ["source-one"], primary_project_id: "project-one", people_ids: ["person-one"] }),
+  object("knowledge-one", "knowledge-note", "Portable loyalty research", { area: "learning", source_ids: ["source-one"], related_object_ids: ["project-one", "person-one"] }),
   object("knowledge-two", "knowledge-note", "Household maintenance", { area: "maintenance", source_ids: ["source-two"], created_at: "2026-09-01T08:00:00Z" })
 ];
 const sources = [
@@ -22,7 +22,7 @@ const sources = [
 ];
 const base = {
   notes, sources, projects: [{ id: "project-one", title: "Loyalty launch" }], people: [{ id: "person-one", title: "Sam Example" }],
-  selectedId: "knowledge-one", loading: false, readOnly: false, error: null,
+  selectedId: "knowledge-one", loading: false, readOnly: false, error: null, displayTimeZone: "Europe/Paris",
   onOpen: vi.fn(), onBack: vi.fn(), onPreserve: vi.fn(async () => undefined)
 };
 
@@ -42,6 +42,11 @@ async function click(name: string) {
 async function input(label: string, value: string) {
   const control = document.querySelector(`[aria-label='${label}']`) as HTMLInputElement | HTMLTextAreaElement;
   await act(async () => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+
+async function change(label: string, value: string) {
+  const control = document.querySelector(`[aria-label='${label}']`) as HTMLSelectElement | HTMLInputElement;
+  await act(async () => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), "value")!.set!.call(control, value); control.dispatchEvent(new Event("change", { bubbles: true })); });
 }
 
 describe("KnowledgeWorkspace", () => {
@@ -69,6 +74,31 @@ describe("KnowledgeWorkspace", () => {
     await input("Search knowledge", "household");
     expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).toContain("Household maintenance");
     expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).not.toContain("Portable loyalty research");
+  });
+
+  it("filters projects and people through canonical related_object_ids", async () => {
+    await render({ selectedId: undefined });
+    await click("Advanced");
+    await change("Filter by project", "project-one");
+    expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).toContain("Portable loyalty research");
+    expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).not.toContain("Household maintenance");
+    await change("Filter by project", "");
+    await change("Filter by person", "person-one");
+    expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).toContain("Portable loyalty research");
+    expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).not.toContain("Household maintenance");
+  });
+
+  it("uses the display timezone for published days and day filters", async () => {
+    const nearMidnight = object("knowledge-midnight", "knowledge-note", "Midnight research", {
+      source_ids: ["source-one"],
+      created_at: "2026-10-01T23:30:00.000Z"
+    });
+    await render({ notes: [nearMidnight], selectedId: undefined, displayTimeZone: "Pacific/Auckland" });
+    expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).toContain("Published 2026-10-02");
+    await click("Advanced");
+    await change("Published from", "2026-10-02");
+    await change("Published to", "2026-10-02");
+    expect(document.querySelector("[aria-label='Knowledge list']")?.textContent).toContain("Midnight research");
   });
 
   it("opens Preserve Source as a focused panel and reports durable completion", async () => {
