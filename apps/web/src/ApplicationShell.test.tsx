@@ -96,4 +96,17 @@ describe("ApplicationShell", () => {
     expect(onNavigate).not.toHaveBeenCalled();
     expect(location.pathname).toBe("/notes/example");
   });
+
+  it("opens Capture with Cmd/Ctrl+Shift+C from every routed workspace without navigating", () => {
+    const onNavigate = vi.fn(); const onCapture = vi.fn();
+    history.replaceState(null, "", "/calendar/2026-10-11");
+    for (const activeView of views) {
+      act(() => root!.render(<ApplicationShell activeView={activeView} status="Ready" onNavigate={onNavigate} onSearch={vi.fn()} onCapture={onCapture}><p>{activeView}</p></ApplicationShell>));
+      act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })));
+    }
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "C", metaKey: true, shiftKey: true, bubbles: true, cancelable: true })));
+    expect(onCapture).toHaveBeenCalledTimes(views.length + 1);
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(location.pathname).toBe("/calendar/2026-10-11");
+  });
 });

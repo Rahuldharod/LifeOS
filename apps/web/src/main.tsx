@@ -64,6 +64,8 @@ import { Breadcrumbs } from "./Breadcrumbs.js";
 import { ApplicationShell } from "./ApplicationShell.js";
 import { GlobalSearchOverlay } from "./GlobalSearchOverlay.js";
 import { recordRecentSearchId } from "./globalSearch.js";
+import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
+import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { buildTrail } from "./trail.js";
 import type { AppliedPatch, BackupVerification, CalendarEvent, EntityType, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
@@ -320,6 +322,7 @@ function App() {
   const [notesMode, setNotesMode] = useState<"visual" | "write" | "preview">("visual");
   const [capture, setCapture] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceText, setSourceText] = useState("");
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
@@ -709,6 +712,19 @@ function App() {
     await api("POST /api/v1/capture", { body: { text: capture } });
     setCapture(""); await refresh();
   }, "Captured as an Inbox task");
+
+  const saveGlobalCapture = async (request: CaptureRequest) => {
+    setBusy(true);
+    try {
+      const task = await api("POST /api/v1/capture", { body: request });
+      await refresh();
+      setMessage("Task captured");
+      return task;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Task capture failed");
+      throw error;
+    } finally { setBusy(false); }
+  };
 
   const adoptDrafts = async () => {
     setBusy(true);
@@ -1175,9 +1191,13 @@ function App() {
     contentClassName={contentClassName}
     onNavigate={(item) => void go(tabRoute(item))}
     onSearch={() => setSearchOpen(true)}
-    onCapture={() => undefined}
+    onCapture={() => setCaptureOpen(true)}
   >
       <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
+      <OverlayDialog open={captureOpen} label="Global Capture" onClose={() => setCaptureOpen(false)}>
+        <header className="global-search-header"><div><span>GLOBAL CAPTURE</span><h2>Capture a task</h2></div><button type="button" aria-label="Close Capture" onClick={() => setCaptureOpen(false)}>×</button></header>
+        <CapturePanel projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))} owners={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: entity.frontmatter.title }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} busy={busy} readOnly={readOnly} onSave={saveGlobalCapture} onViewTask={(id) => { setCaptureOpen(false); void go({ view: "Tasks", id }); }} />
+      </OverlayDialog>
       <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
       <LeaseBanner session={health?.session} idleMinutes={health?.idleReleaseMinutes} busy={busy} onTakeBack={takeOverSession} />

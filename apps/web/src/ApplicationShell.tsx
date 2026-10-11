@@ -54,11 +54,14 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
         onSearch();
+      } else if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        onCapture();
       }
     };
     document.addEventListener("keydown", keydown);
     return () => document.removeEventListener("keydown", keydown);
-  }, [onSearch]);
+  }, [onSearch, onCapture]);
   const setNavigationCollapsed = (next: boolean) => {
     setCollapsed(next);
     try { localStorage.setItem(navigationCollapsedKey, String(next)); } catch { /* browser storage unavailable */ }

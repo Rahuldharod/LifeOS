@@ -63,7 +63,7 @@ export function CapturePanel({ projects, owners, selfId = "", busy = false, read
 
   return <form className="capture-panel" onSubmit={submit}>
     <label className="capture-task-field">Task
-      <textarea autoFocus rows={5} value={draft.text} onChange={(event) => update("text", event.target.value)} onKeyDown={taskKeyDown} placeholder="What needs to be done?" />
+      <textarea data-overlay-autofocus autoFocus rows={5} value={draft.text} onChange={(event) => update("text", event.target.value)} onKeyDown={taskKeyDown} placeholder="What needs to be done?" />
     </label>
     <div className="capture-primary-actions">
       <button type="button" aria-expanded={draft.detailsOpen} onClick={() => update("detailsOpen", !draft.detailsOpen)}>Optional details</button>
