@@ -62,7 +62,7 @@ describe("skill pack versions (ADR 0020)", () => {
     expect(await call("GET /api/v1/settings/claude-skills")).toEqual({ expected: currentSkillPack, oldestAccepted: currentSkillPack - 1 });
   });
 
-  it("stamps every example in the skills pack with the pack this LifeOS expects", async () => {
+  it("stamps every example in the skills pack and the contract with the pack this LifeOS expects", async () => {
     const skillsRoot = path.join(process.cwd(), "skills");
     for (const folder of await readdir(skillsRoot, { withFileTypes: true })) {
       if (!folder.isDirectory()) continue;
@@ -70,6 +70,11 @@ describe("skill pack versions (ADR 0020)", () => {
       const metadata = (parse(text.split("---")[1] ?? "") as { metadata?: Record<string, unknown> }).metadata;
       expect(metadata?.skill_pack, folder.name).toBe(currentSkillPack);
       for (const block of text.matchAll(/^lifeos_(?:draft|patch): 1\n(.*)$/gm)) expect(block[1], `${folder.name}: ${block[0]}`).toBe(`skill_pack: ${currentSkillPack}`);
+    }
+    const contractRoot = path.join(process.cwd(), "contract");
+    for (const name of await readdir(contractRoot)) {
+      const text = await readFile(path.join(contractRoot, name), "utf8");
+      for (const block of text.matchAll(/^lifeos_(?:draft|patch): 1\n(.*)$/gm)) expect(block[1], `contract/${name}: ${block[0]}`).toBe(`skill_pack: ${currentSkillPack}`);
     }
   });
 });

@@ -85,7 +85,12 @@ Only when every check passes: tell Claude your real data root, and keep the dev 
 
 ## When the skills change
 
-The examples in each `SKILL.md` are tested against the real LifeOS code (`tests/integration/skill-fixtures.test.ts`). After any change, re-zip and re-upload the changed skill, then repeat checks 1, 5 and 9.
+The skills are thin (ADR 0020): formats and examples live in the repository's `contract/` folder, which LifeOS writes into `_agent/contract/` each time it starts. The examples are tested against the real LifeOS code (`tests/integration/skill-fixtures.test.ts`).
+
+- A change to `contract/` reaches Claude with the next LifeOS update. Nothing to re-upload.
+- A change to a `SKILL.md` needs a re-zip and re-upload of that skill.
+
+After either, repeat checks 1, 5 and 9.
 
 ## Part 7: Morning routine (`lifeos-morning`, #51)
 
@@ -146,7 +151,7 @@ Before the run, in the dev app: create 3 tasks you own (one overdue, one due tod
 
 Record the result in the Part 6 table, then point the routine at your real data root.
 
-The brief examples in `lifeos-morning/SKILL.md` are CI fixtures: each is adopted by the real LifeOS code and put through the skill's self-check (`tests/integration/skill-fixtures.test.ts`, section #51).
+The brief examples in `contract/morning.md` are CI fixtures: each is adopted by the real LifeOS code and put through the skill's self-check (`tests/integration/skill-fixtures.test.ts`, section #51).
 
 ## Part 8: Enrichment skill (`lifeos-enrichment`, #50)
 
