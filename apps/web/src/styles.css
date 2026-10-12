@@ -454,6 +454,9 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 .person-external { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .person-external label { display: inline-flex; align-items: center; gap: 4px; }
 .internal-domains-setting { margin-bottom: 18px; }
+/* ADR 0020: each plugin command on its own line, its Copy button always at the end of that line. */
+.claude-skills-command { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.claude-skills-command code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* #48: Today live panels and Today settings */
 .show-more { margin-top: 8px; }
 .waiting-group { padding-top: 10px; }

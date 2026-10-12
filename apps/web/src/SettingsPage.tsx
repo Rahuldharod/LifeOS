@@ -180,9 +180,9 @@ function claudeSkillsSummary(status?: ClaudeSkillsStatus | "unavailable") {
   return status.lastSeen.outdated ? "Out of date" : "Up to date";
 }
 
-/** ADR 0020: which skill pack wrote the latest draft, so the user knows when to reinstall their Claude skills. */
+/** ADR 0020: whether the installed Claude skills match this LifeOS, and how to install or update them. */
 function ClaudeSkillsCard({ status, displayTimeZone }: { status?: ClaudeSkillsStatus | "unavailable"; displayTimeZone: string }) {
-  const intro = <p className="muted">Claude writes into LifeOS with the LifeOS skills you installed in Claude. Each draft says which skill pack wrote it.</p>;
+  const intro = <p className="muted">Claude writes into LifeOS with the LifeOS skills you install in Claude. Formats come from LifeOS itself, so you only reinstall when this card says so.</p>;
   if (!status) return <article className="claude-skills-setting"><span>CLAUDE</span><h3>Claude skills</h3>{intro}<p className="muted">Loading…</p></article>;
   if (status === "unavailable") return <article className="claude-skills-setting"><span>CLAUDE</span><h3>Claude skills</h3>{intro}<p className="calendar-error" role="alert">Could not read the skills status. Reopen Settings to try again.</p></article>;
   const { lastSeen } = status;
@@ -190,9 +190,27 @@ function ClaudeSkillsCard({ status, displayTimeZone }: { status?: ClaudeSkillsSt
   return <article className="claude-skills-setting"><span>CLAUDE</span><h3>Claude skills</h3>{intro}
     <p>This LifeOS expects skill pack {status.expected}{status.oldestAccepted < status.expected ? ` and still accepts pack ${status.oldestAccepted}` : ""}.</p>
     {!lastSeen ? <p className="muted" role="status">No draft from Claude yet.</p>
-      : lastSeen.outdated ? <p className="calendar-error" role="alert">Your latest draft ({at}) came from skill pack {lastSeen.skillPack}. Reinstall your LifeOS skills in Claude so they match this LifeOS.</p>
+      : lastSeen.outdated ? <p className="calendar-error" role="alert">Your latest draft ({at}) came from skill pack {lastSeen.skillPack}. Reinstall your LifeOS skills below so they match this LifeOS.</p>
       : <p className="muted" role="status">Up to date: your latest draft ({at}) came from skill pack {lastSeen.skillPack}.</p>}
+    <h4>Claude chat and phone</h4>
+    <p className="muted">Download each skill, then in Claude open Settings → Capabilities, turn on code execution, and choose Upload skill under Skills. Upload one zip at a time. Skills sync to the Claude phone app.</p>
+    {status.skills.length ? <ul className="settings-reference-list">{status.skills.map((skill) => <li key={skill.name}><a href={`/api/v1/settings/claude-skills/${encodeURIComponent(skill.name)}/zip`} download={`${skill.name}.zip`}>Download {skill.name}</a>{skill.version ? <span className="muted"> · version {skill.version}</span> : null}</li>)}</ul> : <p className="muted">This LifeOS ships no skills.</p>}
+    <h4>Claude Code</h4>
+    {status.plugin ? <>
+      <p className="muted">Run these in Claude Code once. Then turn on auto-update for the marketplace under /plugin → Marketplaces, so new versions arrive on their own. The repository must be one your GitHub account can read.</p>
+      <CopyCommand command={`/plugin marketplace add ${status.plugin.marketplace}`} />
+      <CopyCommand command={`/plugin install ${status.plugin.install}`} />
+    </> : <p className="muted">This LifeOS build names no plugin repository, so use the zips above.</p>}
   </article>;
+}
+
+function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(command); setCopied(true); }
+    catch { setCopied(false); }
+  };
+  return <div className="claude-skills-command"><code>{command}</code><button type="button" onClick={() => void copy()} aria-label={`Copy ${command}`}>{copied ? "Copied" : "Copy"}</button></div>;
 }
 
 function ReferenceDataCard({ label, names }: { label: string; names: string[] }) {

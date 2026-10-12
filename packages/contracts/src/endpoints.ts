@@ -7,7 +7,7 @@
 // `response: unknown` marks an answer the browser does not read; `unknown` forces whoever starts to read it to
 // give it a shape here first.
 //
-// Not listed: the OAuth callback (answers HTML), `GET /api/v1/assets/*` (image bytes) and the web app fallback.
+// Not listed: the OAuth callback (answers HTML), `GET /api/v1/assets/*` (image bytes), `GET /api/v1/settings/claude-skills/:name/zip` (zip bytes) and the web app fallback.
 import type * as W from "./wire.js";
 
 type Range = { from?: string; to?: string };

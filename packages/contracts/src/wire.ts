@@ -132,7 +132,13 @@ export type InternalDomains = { domains: string[]; contentHash?: string };
 export type SelfEmails = { emails: string[]; contentHash?: string };
 
 /** ADR 0020: the skill pack this LifeOS expects and the one that wrote the latest draft. */
-export type ClaudeSkillsStatus = { expected: number; oldestAccepted: number; lastSeen?: { skillPack: number; at: string; draft: string; outdated: boolean } };
+export type ClaudeSkillsStatus = {
+  expected: number; oldestAccepted: number; lastSeen?: { skillPack: number; at: string; draft: string; outdated: boolean };
+  /** The skills this LifeOS ships, each downloadable as a zip for Claude chat and the phone. */
+  skills: Array<{ name: string; version?: string }>;
+  /** The Claude Code plugin, when the repository is known: `/plugin marketplace add <marketplace>`, then `/plugin install <install>`. */
+  plugin?: { marketplace: string; install: string };
+};
 
 /** A message for the user, e.g. after writing a Work Order. */
 export type Message = { message: string };

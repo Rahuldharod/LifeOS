@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,11 +29,16 @@ describe("app-written contract (ADR 0020)", () => {
   it("writes the bundled contract into _agent/contract/ through the real API and lists it in the overview", async () => {
     const { root, start } = await testApi();
     await start();
-    const written = path.join(root, "_agent", "contract", "index.md");
-    await expect.poll(() => stat(written).then(() => true, () => false), { timeout: 10_000 }).toBe(true);
-    expect(await readFile(written, "utf8")).toBe(await readFile(path.join(bundledContractRoot, "index.md"), "utf8"));
+    // The writer writes the files one by one, so wait until every bundled file is there.
+    const bundled = await readdir(bundledContractRoot);
+    const allWritten = () => Promise.all(bundled.map((name) => stat(path.join(root, "_agent", "contract", name)))).then(() => true, () => false);
+    await expect.poll(allWritten, { timeout: 10_000 }).toBe(true);
     const overview = await readFile(path.join(root, "_agent", "overview.md"), "utf8");
-    expect(overview).toContain("## Contract\n\n- contract_version: 1\n- `_agent/contract/index.md`");
+    expect(overview).toContain("## Contract\n\n- contract_version: 1\n");
+    for (const name of await readdir(bundledContractRoot)) {
+      expect(overview).toContain(`- \`_agent/contract/${name}\``);
+      expect(await readFile(path.join(root, "_agent", "contract", name), "utf8"), name).toBe(await readFile(path.join(bundledContractRoot, name), "utf8"));
+    }
   });
 
   it("leaves an unchanged contract file alone, so a synced folder uploads nothing", async () => {
@@ -68,6 +73,36 @@ describe("app-written contract (ADR 0020)", () => {
     const writer = new FilesystemAgentIndexWriter(root);
     for (const name of ["contract/../escape.md", "other/x.md", "contract/nested/x.md", "contract/.hidden.md"]) {
       await expect(writer.write([{ name, content: contract() }]), name).rejects.toThrow("Invalid Agent Index file name");
+    }
+  });
+
+  // The thin skills (3b-ii): each one that writes reads the contract first, names only files LifeOS ships, refuses
+  // without them, and keeps its own safety rules, which the contract can never loosen.
+  const writingSkills = { "lifeos-object-contract": ["object-contract.md"], "lifeos-capture": ["capture.md", "object-contract.md"], "lifeos-enrichment": ["enrichment.md", "object-contract.md"], "lifeos-morning": ["morning.md", "object-contract.md"] };
+  const skill = (folder: string) => readFile(path.join(process.cwd(), "skills", folder, "SKILL.md"), "utf8");
+
+  it.each(Object.entries(writingSkills))("%s reads the contract first and names only shipped contract files", async (folder, expected) => {
+    const text = await skill(folder);
+    expect(text).toContain("## Read the contract first");
+    expect(text).toContain("If `_agent/contract/` or the file is missing, write nothing.");
+    expect(text).toContain("The rules in this skill always win.");
+    const shipped = new Set(await readdir(bundledContractRoot));
+    const named = [...new Set([...text.matchAll(/`_agent\/contract\/([\w-]+\.md)`/g)].map((match) => match[1]!))];
+    expect(named.sort()).toEqual([...expected].sort());
+    for (const name of named) expect(shipped.has(name), name).toBe(true);
+  });
+
+  it("keeps the safety rules in the installed skills, not in the contract", async () => {
+    expect(await skill("lifeos-object-contract")).toContain("## Restricted rule");
+    expect(await skill("lifeos-object-contract")).toContain("Write nothing anywhere else.");
+    expect(await skill("lifeos-enrichment")).toContain("## Policy gate: read this first");
+    expect(await skill("lifeos-enrichment")).toContain("## Skip these meetings");
+    expect(await skill("lifeos-morning")).toContain("## What this routine never does");
+    expect(await skill("lifeos-morning")).toContain("## Self-check before writing");
+    for (const name of await readdir(bundledContractRoot)) {
+      const text = await readFile(path.join(bundledContractRoot, name), "utf8");
+      expect(text, name).not.toContain("client_meeting_content");
+      expect(text, name).not.toContain("## Restricted rule");
     }
   });
 });

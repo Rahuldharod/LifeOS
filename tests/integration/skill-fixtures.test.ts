@@ -19,7 +19,10 @@ import { materialSourceTypes } from "../../packages/application/src/meeting-mate
  * adopting as documented, or when an example has no fixture comment, so skill text and code cannot drift.
  */
 
-const skillsRoot = path.join(process.cwd(), "skills"); // vitest runs from the repository root
+const repoRoot = process.cwd(); // vitest runs from the repository root
+const skillsRoot = path.join(repoRoot, "skills");
+/** ADR 0020: the formats and examples the thin skills read from `_agent/contract/`; their examples are fixtures too. */
+const contractRoot = path.join(repoRoot, "contract");
 
 interface Expectation {
   /** Also the file name the example is dropped under (`<name>.md`). */
@@ -51,12 +54,12 @@ const isExample = (block: string) => /^lifeos_(draft|patch):/m.test(block);
 
 /** Read synchronously: the fixtures must be known when the tests are collected. */
 function loadSkills() {
-  const files = markdownFiles(skillsRoot);
+  const files = [...markdownFiles(skillsRoot), ...markdownFiles(contractRoot)];
   const fixtures: Fixture[] = [];
   const unannotated: string[] = [];
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    const relative = path.relative(skillsRoot, file);
+    const relative = path.relative(repoRoot, file);
     const examples = [...text.matchAll(fence)].map((match) => match[1]!).filter(isExample);
     const found = [...text.matchAll(annotated)].map((match) => ({ file: relative, expect: JSON.parse(match[1]!) as Expectation, content: `${match[2]!}\n` }));
     fixtures.push(...found);
@@ -188,7 +191,7 @@ describe("skills pack stays in step with the code (#49)", () => {
   });
 
   it("the Object Contract names every draft kind, origin and auto-applied task field the code accepts", async () => {
-    const contract = await read("lifeos-object-contract/SKILL.md");
+    const contract = await readFile(path.join(contractRoot, "object-contract.md"), "utf8");
     for (const value of [...draftKinds, ...draftOrigins, ...autoAppliedTaskFields]) expect(contract, value).toContain(`\`${value}\``);
   });
 
@@ -201,16 +204,17 @@ describe("skills pack stays in step with the code (#49)", () => {
   it("never uses a real email domain in the skills pack", async () => {
     for (const file of skills.files) {
       const domains = [...(await readFile(file, "utf8")).matchAll(/[\w.+-]+@([\w-]+(?:\.[\w-]+)+)/g)].map((match) => match[1]);
-      expect(domains.filter((domain) => !/(^|\.)example\.(com|org|net)$/.test(domain!)), path.relative(skillsRoot, file)).toEqual([]);
+      expect(domains.filter((domain) => !/(^|\.)example\.(com|org|net)$/.test(domain!)), path.relative(repoRoot, file)).toEqual([]);
     }
   });
 });
 
 describe("enrichment skill stays in step with the code (#50)", () => {
   const enrichment = () => readFile(path.join(skillsRoot, "lifeos-enrichment/SKILL.md"), "utf8");
+  const enrichmentContract = () => readFile(path.join(contractRoot, "enrichment.md"), "utf8");
 
   it("names every kind of material and every source type meeting-material adoption accepts", async () => {
-    const skill = await enrichment();
+    const skill = await enrichmentContract();
     for (const value of [...expectedMaterial, ...materialSourceTypes]) expect(skill, value).toContain(`\`${value}\``);
   });
 
@@ -226,7 +230,7 @@ describe("enrichment skill stays in step with the code (#50)", () => {
     const sourceKeys = entries.flatMap((entry) => (entry.existing_sources as Array<Record<string, unknown>>).flatMap(Object.keys));
     const keys = new Set([...Object.keys(order), ...entries.flatMap(Object.keys), ...sourceKeys]);
     expect(keys).toContain("note_path");
-    const skill = await enrichment();
+    const skill = await enrichmentContract();
     for (const key of keys) expect(skill, key).toContain(`\`${key}\``);
     expect(skill).toContain("`_inbox/requests/`");
   });
@@ -241,7 +245,7 @@ describe("enrichment skill stays in step with the code (#50)", () => {
   });
 
   it("has an example for each outcome the skill teaches", () => {
-    const material = skills.fixtures.filter((fixture) => fixture.file.startsWith("lifeos-enrichment/"));
+    const material = skills.fixtures.filter((fixture) => fixture.file === "contract/enrichment.md");
     expect(material.map((fixture) => fixture.expect.meeting?.enrichment_state).filter(Boolean)).toEqual(expect.arrayContaining(["enriched", "partial"]));
     expect(material.some((fixture) => fixture.expect.outcome === "failed" && fixture.expect.error?.includes("restricted"))).toBe(true);
     expect(material.flatMap((fixture) => fixture.expect.proposals ?? []).map((proposal) => proposal.missed_in_notes)).toEqual(expect.arrayContaining([true, false]));
@@ -263,6 +267,7 @@ interface MorningExpectation extends Expectation {
 }
 
 const morningSkill = "lifeos-morning/SKILL.md";
+const morningContract = "contract/morning.md";
 const morningFixtures = skills.fixtures.filter((fixture) => frontmatterOf(fixture.content).kind === "daily-focus");
 const morningNow = (fields: Record<string, unknown>) => new Date(String(fields.generated_at));
 
@@ -352,8 +357,8 @@ describe("morning routine skill (#51)", () => {
     expect((front.metadata as Record<string, unknown>).version).toBe((frontmatterOf(await readFile(path.join(skillsRoot, "lifeos-object-contract/SKILL.md"), "utf8")).metadata as Record<string, unknown>).version);
   });
 
-  it("documents passing briefs and a restricted counter-example, all from the morning skill", () => {
-    expect(morningFixtures.every((fixture) => fixture.file === morningSkill)).toBe(true);
+  it("documents passing briefs and a restricted counter-example, all in the morning contract", () => {
+    expect(morningFixtures.every((fixture) => fixture.file === morningContract)).toBe(true);
     expect(morningFixtures.filter((fixture) => (fixture.expect as MorningExpectation).selfCheck !== "fail").length).toBeGreaterThanOrEqual(2);
     expect(morningFixtures.filter((fixture) => (fixture.expect as MorningExpectation).selfCheck === "fail")).toHaveLength(1);
   });
@@ -386,7 +391,7 @@ describe("morning routine skill (#51)", () => {
   });
 
   it("the Slack DM example is 5 lines that match its brief and name nothing restricted", async () => {
-    const text = await readFile(path.join(skillsRoot, morningSkill), "utf8");
+    const text = await readFile(path.join(repoRoot, morningContract), "utf8");
     const dms = [...text.matchAll(/<!--\s*slack-dm:\s*(\{[\s\S]*?\})\s*-->\s*\n```[\w-]*\n([\s\S]*?)\n```/g)].map((match) => ({ ...(JSON.parse(match[1]!) as { brief: string }), lines: match[2]!.split("\n") }));
     expect(dms.length).toBeGreaterThan(0);
     for (const dm of dms) {

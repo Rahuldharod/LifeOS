@@ -1,0 +1,14 @@
+{
+  "name": "lifeos-skills",
+  "owner": {
+    "name": "LifeOS"
+  },
+  "description": "The LifeOS skills pack for Claude Code.",
+  "plugins": [
+    {
+      "name": "lifeos",
+      "source": ".",
+      "description": "LifeOS skills for Claude Code: capture, ask, morning routine and meeting enrichment. Formats come from the contract LifeOS writes in _agent/contract/."
+    }
+  ]
+}
