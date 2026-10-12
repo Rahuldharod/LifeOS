@@ -64,3 +64,48 @@ test("an image in a Note shows in Visual and survives an edit round trip", async
   expect(saved).toContain(image);
   expect(saved.match(/!\[/g)).toHaveLength(1);
 });
+
+test("one keystroke followed at once by the switch to Markdown is not lost", async ({ page, request }) => {
+  await seed(request);
+  await page.goto(`/calendar/2026-05-12/${solo("04").meeting}`);
+  const editor = page.locator("[contenteditable='true']").first();
+  await expect(editor.getByRole("heading", { name: "Solo heading" })).toBeVisible();
+  await editor.focus();
+  await page.keyboard.press(END_OF_DOCUMENT);
+  await page.keyboard.type("Q");
+  // No wait: the editor reports changes after a short delay, so only closing the editor can carry this keystroke.
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await expect(page.getByPlaceholder("Capture meeting notes")).toHaveValue(/Last line .*Q/);
+});
+
+test("focusing a Note the Visual editor would re-format and switching mode without typing does not rewrite the file", async ({ page, request }) => {
+  await seed(request);
+  const before = await noteBody(request, solo("07").note);
+  const writes: string[] = [];
+  page.on("request", (call) => { if (call.method() !== "GET" && /\/api\/v1\/objects\/[^/]+\/body/.test(call.url())) writes.push(call.url()); });
+  await page.goto(`/calendar/2026-05-12/${solo("07").meeting}`);
+  const editor = page.locator("[contenteditable='true']").first();
+  await expect(editor.getByRole("heading", { name: "Solo normal" })).toBeVisible();
+  await editor.focus();
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await expect(page.getByPlaceholder("Capture meeting notes")).toHaveValue(before);
+  await page.waitForTimeout(3500); // longer than the 1.8 s autosave
+  expect(writes).toEqual([]);
+  expect(await noteBody(request, solo("07").note)).toBe(before);
+});
+
+test("typing in one Note and switching to another in the Notes list leaves the other Note untouched", async ({ page, request }) => {
+  await seed(request);
+  const other = await noteBody(request, solo("05").note);
+  await page.goto(`/notes/${solo("04").note}`);
+  const editor = page.locator("[contenteditable='true']").first();
+  await expect(editor.getByRole("heading", { name: "Solo heading" })).toBeVisible();
+  await editor.focus();
+  await page.keyboard.press(END_OF_DOCUMENT);
+  await page.keyboard.type("Q");
+  await page.getByText("Solo notes 05", { exact: true }).first().click();
+  await expect(page.locator("[contenteditable='true']").first().getByRole("heading", { name: "Solo summary" })).toBeVisible();
+  await page.waitForTimeout(3500);
+  expect(await noteBody(request, solo("05").note)).toBe(other);
+  await expect(page.locator("[contenteditable='true']").first()).not.toContainText("Q");
+});

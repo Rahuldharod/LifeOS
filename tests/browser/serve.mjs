@@ -141,7 +141,7 @@ const seedLedger = async ({ name, noteId, meetings, own, ownNoteId, sharedBody }
 await seedLedger({ name: "ledger", noteId: "91000000-0000-4000-8000-000000000001", meetings: ["92000000-0000-4000-8000-000000000001", "92000000-0000-4000-8000-000000000002"], own: "92000000-0000-4000-8000-000000000003", ownNoteId: "91000000-0000-4000-8000-000000000003", sharedBody: "Ledger shared words.\n" });
 await seedLedger({ name: "modeledger", noteId: "93000000-0000-4000-8000-000000000001", meetings: ["94000000-0000-4000-8000-000000000001", "94000000-0000-4000-8000-000000000002"], own: "94000000-0000-4000-8000-000000000003", sharedBody: "# Shared heading\n\n- shared item\n" });
 // #183 single (non-recurring) meetings whose Note ends in an HTML comment, to reach the plain Visual editor's end-of-note typing.
-for (const [month, body] of [["04", "# Solo heading\n\nLast line <!-- keep me -->\n"], ["05", "# Solo summary\n\nBody text.\n\n<!-- lifeos:summary:end -->\n"], ["06", "# Solo image\n\nBefore the image.\n"]]) {
+for (const [month, body] of [["04", "# Solo heading\n\nLast line <!-- keep me -->\n"], ["05", "# Solo summary\n\nBody text.\n\n<!-- lifeos:summary:end -->\n"], ["06", "# Solo image\n\nBefore the image.\n"], ["07", "# Solo normal\n\n* star one\n* star two\n\nSnake_case and 2 * 3.\n"]]) {
   const meetingId = `61000000-0000-4000-8000-0000000000${month}`;
   const noteId = `62000000-0000-4000-8000-0000000000${month}`;
   await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Solo ${month}`), status: "scheduled", starts_at: "2026-05-12T08:00:00.000Z", ends_at: "2026-05-12T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [] });
