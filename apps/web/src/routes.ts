@@ -16,7 +16,7 @@ export type Route = { view: View; id?: string; date?: string; noteTab?: "open" |
 const slugs = Object.fromEntries(views.map((view) => [view, view.toLowerCase().replace(/ /g, "-")])) as Record<View, string>;
 const viewsBySlug = new Map(views.map((view) => [slugs[view], view]));
 /** Tabs whose path may name one open item. */
-const itemViews = new Set<View>(["Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Inbox", "Settings"]);
+const itemViews = new Set<View>(["Tasks", "Decisions", "Open Points", "Projects", "Clients", "Products", "People", "Knowledge", "Inbox", "Settings"]);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The route a path names, or undefined for `/` and paths that are not a LifeOS tab. */
@@ -65,7 +65,11 @@ export function routeTarget(route: Route, data: RouteData): RouteTarget {
   const has = (list: LinkedObject[]) => list.some((object) => object.frontmatter.id === id);
   if (route.view === "Notes") {
     const [here, there] = route.noteTab === "deleted" ? [data.deletedNotes, data.notes] : [data.notes, data.deletedNotes];
-    const current = here.find((object) => object.frontmatter.id === id);
+    // Archived legacy meeting Notes are deliberately absent from both Notes tabs, but their
+    // durable redirect must still make old bookmarks land on the shared occurrence section.
+    const current = here.find((object) => object.frontmatter.id === id)
+      ?? data.objects.find((object) => object.frontmatter.id === id && Boolean(object.frontmatter.archived_at)
+        && (object.frontmatter.type === "meeting-note" || object.frontmatter.type === "knowledge-note"));
     if (current) {
       const target = current.frontmatter.redirect_to_note_id;
       if (typeof target !== "string") return { kind: "ok" };
@@ -77,6 +81,12 @@ export function routeTarget(route: Route, data: RouteData): RouteTarget {
     return { kind: "missing", message: "That note no longer exists." };
   }
   if (route.view === "Inbox") return data.pendingReviewIds.includes(id) ? { kind: "ok" } : { kind: "missing", message: "That proposal is no longer waiting in the Inbox." };
+  if (route.view === "Knowledge") {
+    const note = data.objects.find((object) => object.frontmatter.id === id);
+    return note?.frontmatter.type === "knowledge-note" && !note.frontmatter.deleted_at && !note.frontmatter.archived_at
+      ? { kind: "ok" }
+      : { kind: "missing", message: "That Knowledge Note no longer exists." };
+  }
   const target = resolveLifeosLink(`lifeos://object/${id}`, data.objects);
   if (route.view === "Calendar") {
     if (target.kind !== "meeting") return { kind: "missing", message: "That meeting no longer exists." };

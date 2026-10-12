@@ -60,7 +60,7 @@ import { useGuardedNavigation } from "./useGuardedNavigation.js";
 import { Breadcrumbs } from "./Breadcrumbs.js";
 import { ApplicationShell } from "./ApplicationShell.js";
 import { GlobalSearchOverlay } from "./GlobalSearchOverlay.js";
-import { recordRecentSearchId } from "./globalSearch.js";
+import { calendarSearchRange, recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
@@ -72,7 +72,7 @@ import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
-import type { AppliedPatch, BackupVerification, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
+import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -298,6 +298,7 @@ function App() {
   const route = parsedRoute ? referenceRouteInSettings(parsedRoute) : undefined;
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
+  const [dismissedMigration, setDismissedMigration] = useState<string>();
   const [selectedNoteWorkspace, setSelectedNoteWorkspace] = useState<Workspace>();
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   // PB-025: Open/Deleted tabs and keyword search over the notes list.
@@ -312,6 +313,7 @@ function App() {
   const [highlightId, setHighlightId] = useState<string>();
   const [capture, setCapture] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchCalendar, setSearchCalendar] = useState<CalendarDay & { unavailable?: true }>({ events: [] });
   const [captureOpen, setCaptureOpen] = useState(false);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
@@ -463,6 +465,12 @@ function App() {
     followRoute(next, options);
     return true;
   };
+  function openSearch() {
+    setSearchOpen(true);
+    void api("GET /api/v1/calendar/day", { query: calendarSearchRange() })
+      .then(setSearchCalendar)
+      .catch(() => setSearchCalendar({ events: [], unavailable: true }));
+  }
   /** The tab's own page, keeping the note or meeting it last had open. */
   const tabRoute = (target: View): Route => target === "Notes" ? { view: "Notes", noteTab: "open", id: selectedNoteId }
     : target === "Calendar" ? { view: "Calendar", date: selectedDate, id: workspace && workspace.persisted !== false ? workspace.meeting.frontmatter.id : undefined }
@@ -1238,6 +1246,20 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
+  async function confirmRecurringMigration() {
+    if (!workspace?.recurringMigration?.requiresConfirmation) return;
+    setBusy(true);
+    try {
+      await api("POST /api/v1/meetings/:id/recurring-migration", {
+        params: { id: workspace.meeting.frontmatter.id },
+        body: { expectedHashes: Object.fromEntries(workspace.recurringMigration.candidates.map((candidate) => [candidate.noteId, candidate.contentHash])) }
+      });
+      await refreshWorkspace(workspace.meeting.frontmatter.id);
+      setMessage("Recurring Note migration completed");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not migrate these Notes"); }
+    finally { setBusy(false); }
+  }
+
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
   const renderOccurrenceProposal = (review: LifeObject) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />;
   const contentClassName = [(view === "Notes" && notesController.conflict) || (view === "Calendar" && meetingController.conflict) ? "comparing-conflict" : "", view === "Notes" || view === "Calendar" ? "fit-view" : ""].filter(Boolean).join(" ") || undefined;
@@ -1249,10 +1271,10 @@ function App() {
     readOnly={readOnly}
     contentClassName={contentClassName}
     onNavigate={(item) => void go(tabRoute(item))}
-    onSearch={() => setSearchOpen(true)}
+    onSearch={openSearch}
     onCapture={() => setCaptureOpen(true)}
   >
-      <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
+      <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} calendar={searchCalendar.events} calendarOffline={searchCalendar.offline} calendarUnavailable={searchCalendar.unavailable} timeZone={displayTimeZone} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
       <OverlayDialog open={captureOpen} label="Global Capture" onClose={() => setCaptureOpen(false)}>
         <header className="global-search-header"><div><span>GLOBAL CAPTURE</span><h2>Capture a task</h2></div><button type="button" aria-label="Close Capture" onClick={() => setCaptureOpen(false)}>×</button></header>
         <CapturePanel projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))} owners={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: entity.frontmatter.title }))} selfId={people.find(({ entity }) => entity.frontmatter.is_self === true)?.entity.frontmatter.id} busy={busy} readOnly={readOnly} onSave={saveGlobalCapture} onViewTask={(id) => { setCaptureOpen(false); void go({ view: "Tasks", id }); }} />
@@ -1280,6 +1302,7 @@ function App() {
           busy={busy}
           readOnly={readOnly}
           detailOpen={Boolean(workspace)}
+          detailKey={workspace?.meeting.frontmatter.id}
           onPreviousDay={() => void go(calendarRoute(addCalendarDays(selectedDate, -1)))}
           onToday={() => void go(calendarRoute(dateInTimeZone(new Date(), displayTimeZone)))}
           onNextDay={() => void go(calendarRoute(addCalendarDays(selectedDate, 1)))}
@@ -1287,11 +1310,11 @@ function App() {
           onFilterChange={calendar.setFilter}
           onRetry={() => void retryCalendar()}
           onSelectEvent={(event) => void openEvent(event)}
-          onBack={() => void go({ view: "Calendar", date: selectedDate })}
+          onBack={() => { void go({ view: "Calendar", date: selectedDate }).then((left) => { if (left) { setWorkspace(undefined); previewTarget.current = undefined; meetingController.reset(); } }); }}
         >
             {!workspace ? <article className="empty-state"><h3>Select a meeting</h3><p>Open an event to resume its canonical note or start a new one. Nothing is saved until you edit.</p></article> : <>
               <article className="meeting-header">
-                <div><span>MEETING</span><h3>{workspace.meeting.frontmatter.title}</h3><CopyLink object={workspace.persisted !== false ? workspace.meeting : undefined} />{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
+                <div><span>MEETING</span><h3 data-detail-heading tabIndex={-1}>{workspace.meeting.frontmatter.title}</h3><CopyLink object={workspace.persisted !== false ? workspace.meeting : undefined} />{workspace.persisted !== false && <HistoryLink objectId={workspace.meeting.frontmatter.id} title={workspace.meeting.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} />}{/* #86: the meeting itself can be restricted; a restricted note restricts it too (#63). A preview has no file yet. */}{workspace.persisted !== false && <SensitivityToggle object={workspace.meeting} noun="meeting" restrictedByNote={Boolean(workspace.note && isRestricted(workspace.note.frontmatter))} disabled={busy || readOnly} run={run} onChanged={async () => { await fetchLatestWorkspace(); }} note={workspace.note && isRestricted(workspace.note.frontmatter) && !isRestricted(workspace.meeting.frontmatter) ? "Its note is restricted, so this meeting is kept away from Agents and Work Orders too." : undefined} />}</div>
                 <div className="context-grid">
                   <Meta label="When" value={workspace.meeting.frontmatter.is_all_day === true ? `${String(workspace.meeting.frontmatter.starts_at).slice(0, 10)} · All day` : formatDate(workspace.meeting.frontmatter.starts_at)} />
                   <Meta label="Project" value={workspace.context.project?.frontmatter.title ?? "Not linked"} />
@@ -1301,6 +1324,12 @@ function App() {
                 </div>
                 {workspace.persisted !== false && <MeetingEnrichment title={workspace.meeting.frontmatter.title} frontmatter={workspace.meeting.frontmatter} disabled={busy || readOnly} onGiveUp={() => void giveUpMeetingEnrichment(workspace.meeting)} />}
               </article>
+              {workspace.recurringMigration?.requiresConfirmation && dismissedMigration !== workspace.meeting.frontmatter.id && <article className="lease-warning" aria-label="Recurring Note migration review">
+                <span>REVIEW REQUIRED</span><h3>{workspace.recurringMigration.candidates.length === 1 ? "Adopt existing Note into this recurring series?" : `Merge ${workspace.recurringMigration.candidates.length} existing Notes into this recurring series?`}</h3>
+                <p>Nothing changes until you confirm. Each original body will be kept in its dated occurrence section, and old links will redirect there.</p>
+                {workspace.recurringMigration.candidates.map((candidate) => <details key={candidate.noteId}><summary>{candidate.title} · {formatDate(candidate.startsAt)}</summary><pre>{candidate.body}</pre></details>)}
+                <button className="takeover" disabled={busy || readOnly} onClick={() => void confirmRecurringMigration()}>Confirm migration</button> <button disabled={busy} onClick={() => setDismissedMigration(workspace.meeting.frontmatter.id)}>Keep notes separate</button>
+              </article>}
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <EditorFrame>
                 {workspace.note
@@ -1451,7 +1480,7 @@ function App() {
         sources={objectLinks.filter((object): object is LifeObject => object.frontmatter.type === "source" && "body" in object)}
         projects={projects.map(({ project }) => ({ id: project.frontmatter.id, title: project.frontmatter.title }))}
         people={people.map(({ entity }) => ({ id: entity.frontmatter.id, title: personLabel(labels, entity).label }))}
-        selectedId={route?.view === "Knowledge" ? route.id : undefined}
+        selectedId={route?.view === "Knowledge" && routeProblem?.kind !== "missing" ? route.id : undefined}
         loading={!collectionsLoaded}
         readOnly={readOnly}
         displayTimeZone={displayTimeZone}

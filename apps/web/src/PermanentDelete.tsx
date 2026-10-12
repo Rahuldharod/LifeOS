@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import type { PurgeCheck, PurgeReference } from "@lifeos/contracts";
 import { api, ApiError, type Api } from "./api.js";
+import { OverlayDialog } from "./OverlayDialog.js";
 
 type PurgeNoteTarget = { frontmatter: { id: string; title: string }; contentHash: string };
 
@@ -29,9 +30,11 @@ export function PermanentDeleteDialog({ title, check, busy, onConfirm, onCancel,
   onCancel: () => void;
   onOpen: (id: string) => void;
 }) {
+  const [confirmation, setConfirmation] = useState("");
   const blocked = check.blockers.length > 0;
-  return <div className="purge-overlay">
-    <div className="purge-dialog" role="dialog" aria-modal="true" aria-labelledby="purge-title">
+  const confirmed = confirmation === title;
+  return <OverlayDialog open label={`Delete ${title} permanently`} onClose={onCancel}>
+    <div className="purge-dialog">
       <h3 id="purge-title">Delete “{title}” permanently?</h3>
       <p>The Markdown file and its saved versions are removed. This <b>cannot be undone from the app</b>. Backups still hold it.</p>
       {blocked && <div className="purge-blockers">
@@ -44,10 +47,11 @@ export function PermanentDeleteDialog({ title, check, busy, onConfirm, onCancel,
       </div>}
       <div className="actions">
         <button type="button" onClick={onCancel}>{blocked ? "Close" : "Cancel"}</button>
-        {!blocked && <button type="button" className="danger" disabled={busy} onClick={onConfirm}>Delete permanently</button>}
+        {!blocked && <label className="purge-confirmation">Type “{title}” to confirm.<input data-overlay-autofocus autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>}
+        {!blocked && <button type="button" className="danger-confirm" disabled={busy || !confirmed} onClick={onConfirm}>Delete permanently</button>}
       </div>
     </div>
-  </div>;
+  </OverlayDialog>;
 }
 
 /** The Deleted tab's button and its confirmation pop-up. */

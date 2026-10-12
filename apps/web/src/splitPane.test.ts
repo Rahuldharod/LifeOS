@@ -1,11 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { clampSplitWidth } from "./splitPane.js";
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it } from "vitest";
+import { readStoredWidth, splitStorageKey } from "./splitPane.js";
 
-describe("split pane width (PB-024)", () => {
-  it("keeps a dragged width between 260px and 60% of the layout", () => {
-    expect(clampSplitWidth(400, 1600)).toBe(400);
-    expect(clampSplitWidth(100, 1600)).toBe(260);
-    expect(clampSplitWidth(1400, 1600)).toBe(960);
-    expect(clampSplitWidth(300, 300)).toBe(260); // never below the minimum, even on a tiny layout
+describe("remembered list width (PB-024, #154)", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is remembered per workspace and keeps the earlier Notes and Calendar keys", () => {
+    expect(splitStorageKey("notes")).toBe("lifeos.notesSplitWidth");
+    expect(splitStorageKey("calendar")).toBe("lifeos.split.calendar");
+    expect(splitStorageKey("tasks")).toBe("lifeos.split.tasks");
+  });
+
+  it("clamps a stored width into the workspace's bounds and ignores junk", () => {
+    localStorage.setItem("lifeos.split.tasks", "900");
+    expect(readStoredWidth("tasks")).toBe(640);
+    localStorage.setItem("lifeos.split.calendar", "100");
+    expect(readStoredWidth("calendar")).toBe(320);
+    localStorage.setItem("lifeos.notesSplitWidth", "wide");
+    expect(readStoredWidth("notes")).toBeUndefined();
+    expect(readStoredWidth("inbox")).toBeUndefined();
   });
 });

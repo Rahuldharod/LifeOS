@@ -51,6 +51,7 @@ export const operationKinds = {
   rejectReview: "reject-review",
   createMeeting: "create-meeting",
   linkRecurringSeries: "link-recurring-series",
+  migrateRecurringNotes: "migrate-recurring-notes",
   supersedeDecision: "supersede-decision",
   resolveOpenPoint: "resolve-open-point",
   applyPatch: "apply-patch",

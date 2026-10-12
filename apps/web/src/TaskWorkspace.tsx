@@ -5,9 +5,9 @@ import { CopyLink } from "./CopyLink.js";
 import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { areaOptions } from "./envelope.js";
 import { HistoryLink } from "./HistoryPanel.js";
+import { OverlayDialog } from "./OverlayDialog.js";
 import { createStructuredEditorGuard, ListDetailWorkspace, RecordHeader, StickyRecordActions, WorkspaceFilterBar, type StructuredEditorGuard } from "./WorkspacePatterns.js";
 import { addCalendarDays, dateInTimeZone } from "./zonedTime.js";
-import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 
 export { createStructuredEditorGuard };
 export type { StructuredEditorGuard };
@@ -82,7 +82,6 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
   const listPane = useRef<HTMLElement | null>(null);
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
   const displayTimeZone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const narrow = useNarrowWorkspace();
   const dirty = !sameTaskDraft(draft, baseline);
   const dirtyRef = useRef(dirty); dirtyRef.current = dirty;
 
@@ -186,16 +185,14 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
   };
   const rememberListPosition = () => sessionStorage.setItem("lifeos.tasks.scroll", JSON.stringify({ pane: listPane.current?.scrollTop ?? 0, page: window.scrollY }));
 
-  return <ListDetailWorkspace detailOpen={Boolean(selected || creating)}>
-    <section ref={listPane} className="task-list-pane" aria-label="Tasks list" hidden={narrow && Boolean(selected || creating)}>
+  return <ListDetailWorkspace workspace="tasks" detailOpen={Boolean(selected || creating)} selectedKey={creating ? "new" : selected?.frontmatter.id} listRef={listPane} listLabel="Tasks list" detailLabel="Task detail" list={<>
       <header className="workspace-heading"><div><span>TASKS · {visible.length}</span><h2>Tasks</h2><p className="muted">Commitments grouped for action.</p></div><button className="primary" disabled={busy || readOnly} onClick={startNew}>New Task</button></header>
       <div className="workspace-tabs" role="group" aria-label="Task views">{[["mine", "My Tasks"], ["waiting", "Waiting on others"], ["others", "Other people's tasks"]].map(([key, label]) => <button key={key} className={listView === key ? "selected" : ""} aria-pressed={listView === key} onClick={() => setListView(key as TaskListView)}>{label}</button>)}</div>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}><input type="search" aria-label="Search tasks" placeholder="Search tasks…" value={query} onChange={(event) => setQuery(event.target.value)} /><select aria-label="Sort tasks" value={sort} onChange={(event) => setSort(event.target.value as TaskSort)}><option value="default">Default order</option><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Title</option><option value="updated">Recently updated</option></select></WorkspaceFilterBar>
       {advanced && <div className="task-advanced-filters"><label>Status<select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Active statuses</option>{taskStatuses.map((value) => <option key={value}>{value}</option>)}</select></label><label>Priority<select aria-label="Filter by priority" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Any priority</option>{taskPriorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Project<select aria-label="Filter by project" value={project} onChange={(event) => setProject(event.target.value)}><option value="">Any project</option>{projects.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label>Due<select aria-label="Filter by due period" value={dueFilter} onChange={(event) => setDueFilter(event.target.value as DueFilter)}><option value="">Any time</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="next7">Next 7 days</option><option value="later">Later</option><option value="none">No due date</option></select></label><button onClick={clearFilters}>Clear filters</button></div>}
       {completionNotice && <div className="task-completion-notice" role="status">Task completed: {completionNotice.title}. <button disabled={busy || readOnly} onClick={() => { const task = tasksRef.current.find((candidate) => candidate.frontmatter.id === completionNotice.id); if (task) void completeTask(task, false); }}>Undo</button></div>}
       <div className="task-rows">{visible.map((task) => { const done = task.frontmatter.status === "Done"; const dueDate = taskDueDate(task, displayTimeZone); return <div className={task.frontmatter.id === selectedId ? "task-row selected" : "task-row"} key={task.frontmatter.id}><input type="checkbox" aria-label={`${done ? "Reopen" : "Complete"} ${task.frontmatter.title}`} checked={done} disabled={busy || readOnly} onChange={(event) => { const complete = event.target.checked; void leaveThen(() => completeTask(task, complete)); }} /><button aria-label={`Open task: ${task.frontmatter.title}`} onClick={() => void leaveThen(() => { rememberListPosition(); onOpen(task.frontmatter.id); })}><strong>{String(task.frontmatter.title)}</strong><small>{[task.frontmatter.priority, projects.find((item) => item.id === task.frontmatter.primary_project_id)?.title, dueDate && `due ${dueDate}`].filter(Boolean).join(" · ") || String(task.frontmatter.status)}</small></button><span>{String(task.frontmatter.status)}</span></div>; })}{!visible.length && <p className="workspace-empty">No tasks match these filters.</p>}</div>
-    </section>
-    <section className="task-detail-pane" aria-label="Task detail" hidden={narrow && !selected && !creating}>
+    </>} detail={<>
       {!selected && !creating ? <div className="workspace-empty"><h3>Select a task</h3><p>Choose a row to inspect and edit it.</p></div> : <>
         <RecordHeader eyebrow={creating ? "NEW TASK" : "TASK"} title={draft.title || "Untitled task"} description="Click the checkbox to complete; click the row to open." onBack={() => void leaveThen(onCloseDetail)} />
         <div className="task-form"><label className="wide">Title<input aria-label="Task title" value={draft.title} disabled={busy || readOnly} onChange={(event) => updateDraft("title", event.target.value)} /></label><label>Status<select value={draft.status} disabled={busy || readOnly} onChange={(event) => updateDraft("status", event.target.value as TaskStatus)}>{taskStatuses.map((value) => <option key={value}>{value}</option>)}</select></label><label>Priority<select value={draft.priority} disabled={busy || readOnly} onChange={(event) => updateDraft("priority", event.target.value as TaskPriority)}><option value="">None</option>{taskPriorities.map((value) => <option key={value}>{value}</option>)}</select></label><label>Due date<input type="date" value={draft.due_on} disabled={busy || readOnly} onChange={(event) => updateDraft("due_on", event.target.value)} /></label>
@@ -205,7 +202,7 @@ export function TaskWorkspace({ tasks, linkables, labels, projects, selfId, sele
         {saveError && <p className="field-error" role="alert">{saveError}</p>}
         <StickyRecordActions status={creating && !dirty ? "Not saved yet" : dirty ? "Unsaved changes" : saved ? "Saved" : "No changes"} busy={busy} saveDisabled={busy || readOnly || !dirty || !draft.title.trim()} onCancel={() => { setDraft(baseline); setSaved(false); setSaveError(""); if (creating) { setCreating(false); onCloseDetail(); } }} onSave={() => void save()} />
       </>}
-    </section>
-    {decision && <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="leave-task-title" className="leave-dialog"><h3 id="leave-task-title">Save changes before leaving?</h3><p>Your task has unsaved changes.</p><div><button className="primary" onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></section></div>}
+    </>}>
+    <OverlayDialog open={Boolean(decision)} label="Save changes before leaving" onClose={() => void finishDecision("stay")}><section className="leave-dialog"><h3>Save changes before leaving?</h3><p>Your task has unsaved changes.</p><div><button className="primary" onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></section></OverlayDialog>
   </ListDetailWorkspace>;
 }

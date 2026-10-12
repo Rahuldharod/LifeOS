@@ -1,6 +1,9 @@
 import React, { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { GuardedEditor } from "./navigationGuard.js";
+import { OverlayDialog } from "./OverlayDialog.js";
+import { useListDetailReturn } from "./useListDetailReturn.js";
 import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
+import { listClamps } from "./workspaceLayout.js";
 import "./SettingsWorkspace.css";
 
 export type SettingsCardDraft = { dirty: boolean; save: () => Promise<boolean>; discard: () => void };
@@ -77,17 +80,19 @@ export function SettingsWorkspace({ sections, selectedCardId, loading = false, f
   const matches = normalisedQuery ? sections.flatMap((section) => section.cards.map((card) => ({ section, card }))).filter(({ section, card }) =>
     [section.group, section.label, card.label, card.safeStatus, ...(card.safeNames ?? [])].filter(Boolean).some((value) => String(value).toLocaleLowerCase().includes(normalisedQuery))) : [];
 
-  return <DraftContext.Provider value={registration}><div className={`settings-workspace${selected ? " section-open" : ""}`} data-version={version}>
-    <aside className="settings-rail" aria-label="Settings sections" hidden={narrow && Boolean(selected)}>
+  const ref = useListDetailReturn(selected?.id);
+  const railStyle = { "--list-min": `${listClamps.settings.min}px`, "--list-max": `${listClamps.settings.max}px` } as React.CSSProperties;
+  return <DraftContext.Provider value={registration}><div ref={ref} className={`settings-workspace pane-workspace${selected ? " section-open detail-open" : ""}`} data-workspace="settings" style={railStyle} data-version={version}>
+    <aside className="settings-rail" data-pane="list" aria-label="Settings sections" hidden={narrow && Boolean(selected)}>
       <header><span>SETTINGS</span><h2>Settings</h2><p>Preferences save one card at a time.</p></header>
       <input type="search" aria-label="Search settings" placeholder="Search settings…" value={query} onChange={(event) => setQuery(event.target.value)} />
       {normalisedQuery ? <div className="settings-search-results" aria-label="Settings search results">{matches.length ? matches.map(({ section, card }) => <button key={card.id} onClick={() => void choose(section.id, card.id)}><strong>{card.label}</strong><small>{[section.group, card.safeStatus].filter(Boolean).join(" · ")}</small></button>) : <p>No settings found.</p>}</div> : <nav>{["My LifeOS", "Connections", "Data & devices", "Reference data"].map((group) => <div key={group}><span>{group}</span>{sections.filter((section) => section.group === group).map((section) => <button key={section.id} className={selected?.id === section.id ? "selected" : ""} aria-current={selected?.id === section.id ? "page" : undefined} onClick={() => void choose(section.id)}>{section.label}</button>)}</div>)}</nav>}
     </aside>
-    <main className="settings-section" aria-label="Settings section" hidden={narrow && !selected}>
+    <section className="settings-section" data-pane="detail" aria-label="Settings section" hidden={narrow && !selected}>
       <button className="settings-back" aria-label="Back to settings sections" onClick={() => void back()}>Back</button>
       {readOnly && <p className="settings-read-only">Read-only on this Mac. Synced settings cannot be changed until this device holds the write lease.</p>}
-      {loading ? <div className="settings-state" aria-busy="true">Loading settings…</div> : failure ? <div className="settings-state settings-failure" role="alert">{failure}</div> : selected ? <><header className="settings-section-heading"><span>{selected.group}</span><h2>{selected.label}</h2></header>{selected.cards.map((card) => <div id={card.id} tabIndex={-1} className="settings-card-slot" key={card.id}>{card.content}</div>)}</> : <div className="settings-state">Choose a Settings section.</div>}
-    </main>
-    {decision && <div className="settings-dialog-backdrop"><div role="dialog" aria-modal="true" aria-labelledby="settings-leave-title" className="settings-leave-dialog"><h3 id="settings-leave-title">Unsaved Settings changes</h3><p>{readOnly ? "This device lost write access. Discard the changes or stay on this card." : "Save or discard each changed card before leaving."}</p>{saveFailed && <p role="alert">A card could not be saved. Your input is still here.</p>}<div><button className="primary" disabled={readOnly} onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></div></div>}
+      {loading ? <div className="settings-state" aria-busy="true">Loading settings…</div> : failure ? <div className="settings-state settings-failure" role="alert">{failure}</div> : selected ? <><header className="settings-section-heading"><span>{selected.group}</span><h2 data-detail-heading tabIndex={-1}>{selected.label}</h2></header>{selected.cards.map((card) => <div id={card.id} tabIndex={-1} className="settings-card-slot" key={card.id}>{card.content}</div>)}</> : <div className="settings-state">Choose a Settings section.</div>}
+    </section>
+    <OverlayDialog open={Boolean(decision)} label="Unsaved Settings changes" onClose={() => void finishDecision("stay")}><div className="settings-leave-dialog"><h3>Unsaved Settings changes</h3><p>{readOnly ? "This device lost write access. Discard the changes or stay on this card." : "Save or discard each changed card before leaving."}</p>{saveFailed && <p role="alert">A card could not be saved. Your input is still here.</p>}<div><button className="primary" disabled={readOnly} onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></div></OverlayDialog>
   </div></DraftContext.Provider>;
 }
