@@ -164,7 +164,13 @@ export class PersonMergeModule {
     const proposal = review.frontmatter.proposed_fields as PersonMergeProposal;
     const operationId = String(review.frontmatter.operation_id);
     if (review.frontmatter.status === "accepted") {
-      await ctx.objects.completeOperation?.(operationId);
+      const open = (await ctx.objects.incompleteOperations?.())?.find((operation) => operation.id === operationId);
+      if (open) {
+        // #160: the crash came after the item was marked accepted and before its audit.
+        const plan = open.payload.plan as PlanEntry[] | undefined ?? [];
+        await ctx.writeAuditOnce("person.merged", proposal.keep_person_id, String(review.frontmatter.reviewed_at ?? new Date().toISOString()), { operation_id: operationId, review_id: review.frontmatter.id, merged_person_id: proposal.merge_person_id, changed_object_ids: plan.map((entry) => entry.id) }, { matchOn: ["operation_id"] });
+        await ctx.objects.completeOperation?.(operationId);
+      }
       return ctx.required(proposal.keep_person_id);
     }
     if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");

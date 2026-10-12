@@ -99,7 +99,11 @@ export class MeetingsModule {
         await ctx.objects.write({ relativePath: `meetings/${markdownFileName(`${event.title} notes`, recoveredNoteId, event.startsAt, event.timezone)}`, frontmatter: { ...ctx.envelope(recoveredNoteId, "meeting-note", `${event.title} notes`, now), meeting_id: existing.frontmatter.id, people_ids: context.people.map((person) => person.frontmatter.id), primary_client_id: context.client?.frontmatter.id, primary_product_id: context.product?.frontmatter.id, primary_project_id: context.project?.frontmatter.id }, body: recoveredBody });
       }
       await this.enrichMeetingContext(existing, context, now);
-      if (pendingOperation) await ctx.objects.completeOperation?.(pendingOperation.id);
+      if (pendingOperation) {
+        // #160: the crash may have come after the meeting or note and before the audit.
+        await ctx.writeAuditOnce("meeting.created", existing.frontmatter.id, now, { operation_id: pendingOperation.id, external_id: externalId }, { matchOn: ["operation_id"] });
+        await ctx.objects.completeOperation?.(pendingOperation.id);
+      }
       await ctx.rebuildIndex();
       return this.meetingWorkspace(existing.frontmatter.id);
     }

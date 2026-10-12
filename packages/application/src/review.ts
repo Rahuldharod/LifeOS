@@ -92,7 +92,12 @@ export class ReviewModule {
     if (review.frontmatter.review_type === "update") return this.acceptUpdate(review);
     if (review.frontmatter.review_type === summaryReviewType) return acceptSummary(ctx, review);
     if (review.frontmatter.status === "accepted" && typeof review.frontmatter.resolved_object_id === "string") {
-      if (typeof review.frontmatter.operation_id === "string") await ctx.objects.completeOperation?.(review.frontmatter.operation_id);
+      const operationId = review.frontmatter.operation_id;
+      if (typeof operationId === "string" && (await ctx.objects.incompleteOperations?.())?.some((operation) => operation.id === operationId)) {
+        // #160: the crash came after the item was marked accepted and before its audit.
+        await ctx.writeAuditOnce("review.accepted", review.frontmatter.resolved_object_id, String(review.frontmatter.reviewed_at ?? new Date().toISOString()), { review_id: reviewId }, { matchOn: ["review_id"] });
+        await ctx.objects.completeOperation?.(operationId);
+      }
       return ctx.required(review.frontmatter.resolved_object_id);
     }
     if (review.frontmatter.status !== "pending") throw new Error("Review item is not pending");

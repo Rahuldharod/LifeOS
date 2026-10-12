@@ -106,10 +106,9 @@ export class DecisionsModule {
 
   /** Writes a decision built by `prepare`, unless a retry already wrote it. Used by "Resolve with decision" (#42). */
   async writePrepared(prepared: PreparedDecision, now: string, metadata: Record<string, unknown> = {}) {
-    const existing = this.ctx.index.get(prepared.frontmatter.id);
-    if (existing) return existing;
-    const created = await this.ctx.objects.write(prepared);
-    await this.ctx.writeAudit("decision.created", created.frontmatter.id, now, metadata);
+    const created = this.ctx.index.get(prepared.frontmatter.id) ?? await this.ctx.objects.write(prepared);
+    // Journalled callers replay this after a crash (ADR 0013): one decision.created per decision, even if the crash fell between the two writes.
+    await this.ctx.writeAuditOnce("decision.created", created.frontmatter.id, now, metadata, { matchOn: [] });
     return created;
   }
 

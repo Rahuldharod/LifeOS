@@ -7,10 +7,11 @@ import { LifeOSApplication, type CalendarConnector, type CalendarEvent, type Obj
 import type { LifeOSObject } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemInboxStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import { CrashingStore } from "./crash-store.js";
 
 // Issue #59: replayable adoption IDs are keyed by role (main object, source, summary, proposal, merge pair), not by
 // a call counter, so a replay that skips a step it already did never shifts a later ID onto an existing object.
-// Each multi-object handler is crashed after every one of its writes, then replayed: nothing is duplicated.
+// Each multi-object handler is crashed after every change it makes (shared helper, #160), then replayed: nothing is duplicated.
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -24,24 +25,6 @@ const calendarEvent: CalendarEvent = {
 class FakeCalendar implements CalendarConnector {
   readonly provider = "google";
   async listEvents(from: Date, to: Date) { return [calendarEvent].filter((event) => Date.parse(event.startsAt) < to.getTime() && Date.parse(event.endsAt) > from.getTime()); }
-}
-
-/** Counts object writes; when `crashAfter` is set, the write with that number lands on disk and then the "process dies". */
-function counting(store: ObjectStore, crashAfter?: number) {
-  const state = { writes: 0 };
-  const proxy = new Proxy(store, { get(object, property, receiver) {
-    const value = Reflect.get(object, property, receiver) as unknown;
-    if (property === "write") return async (input: Parameters<ObjectStore["write"]>[0]) => {
-      // After the crash the process is dead: nothing else reaches the disk.
-      if (crashAfter !== undefined && state.writes >= crashAfter) throw new Error("simulated crash: process already dead");
-      const written = await object.write(input);
-      state.writes += 1;
-      if (state.writes === crashAfter) throw new Error(`simulated crash after write ${state.writes}`);
-      return written;
-    };
-    return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(object) : value;
-  } });
-  return { proxy, state };
 }
 
 const open = async (root: string, objects: ObjectStore = new MarkdownObjectStore(root)) => {
@@ -120,41 +103,43 @@ async function fresh(scenario: Scenario) {
 /** Every write the clean run makes, and what it leaves on disk. */
 async function baseline(scenario: Scenario) {
   const root = await fresh(scenario);
-  const { proxy, state } = counting(new MarkdownObjectStore(root));
-  const batch = await (await open(root, proxy)).adoptDrafts();
+  const store = new CrashingStore(root);
+  store.arm();
+  const batch = await (await open(root, store)).adoptDrafts();
   expect(batch.drafts.map((draft) => draft.outcome)).toEqual(["adopted"]);
-  return { writes: state.writes, counts: countByType(await new MarkdownObjectStore(root).list()) };
+  return { changes: store.log, counts: countByType(await new MarkdownObjectStore(root).list()) };
 }
 
-describe("role-keyed replayable IDs: crash after every write, then replay", () => {
+describe("role-keyed replayable IDs: crash after every change, then replay", () => {
   for (const scenario of scenarios) {
     it(`${scenario.name}: no duplicate IDs, objects, Review Items or audits`, async () => {
       const clean = await baseline(scenario);
-      expect(clean.writes).toBeGreaterThan(2);
-      for (let crashAfter = 1; crashAfter <= clean.writes; crashAfter += 1) {
+      expect(clean.changes.length).toBeGreaterThan(2);
+      for (let crashAfter = 1; crashAfter <= clean.changes.length; crashAfter += 1) {
         const root = await fresh(scenario);
-        const { proxy } = counting(new MarkdownObjectStore(root), crashAfter);
+        const store = new CrashingStore(root);
+        store.arm(crashAfter);
         // A crash inside a handler is reported as "will retry"; anywhere else it rejects the batch. Either way the process dies here.
-        await (await open(root, proxy)).adoptDrafts().catch(() => undefined);
+        await (await open(root, store)).adoptDrafts().catch(() => undefined);
 
         const restarted = await open(root);
         const batch = await restarted.adoptDrafts();
-        expect(batch.drafts.filter((draft) => draft.outcome !== "adopted"), `crash after write ${crashAfter}: ${JSON.stringify(batch.drafts)}`).toEqual([]);
-        expect(await readdir(path.join(root, "_inbox/drafts")), `crash after write ${crashAfter}`).toEqual([]);
+        expect(batch.drafts.filter((draft) => draft.outcome !== "adopted"), `crash after change ${crashAfter}: ${JSON.stringify(batch.drafts)}`).toEqual([]);
+        expect(await readdir(path.join(root, "_inbox/drafts")), `crash after change ${crashAfter}`).toEqual([]);
 
         const objects = await new MarkdownObjectStore(root).list();
         const ids = objects.map((object) => object.frontmatter.id);
-        expect(ids.length - new Set(ids).size, `duplicate IDs after crash at write ${crashAfter}`).toBe(0);
-        expect(countByType(objects), `objects after crash at write ${crashAfter}`).toEqual(clean.counts);
+        expect(ids.length - new Set(ids).size, `duplicate IDs after crash at change ${crashAfter}`).toBe(0);
+        expect(countByType(objects), `objects after crash at change ${crashAfter}`).toEqual(clean.counts);
         // Audits are never doubled: one per action, object and draft.
         const audits = objects.filter((object) => object.frontmatter.type === "audit-event").map((audit) => {
           const metadata = audit.frontmatter.metadata as Record<string, unknown> | undefined;
           return `${String(audit.frontmatter.action)} ${String(audit.frontmatter.object_id)} ${String(metadata?.draft_key ?? "")}`;
         });
-        expect(audits.length - new Set(audits).size, `duplicate audits after crash at write ${crashAfter}: ${audits.join("\n")}`).toBe(0);
+        expect(audits.length - new Set(audits).size, `duplicate audits after crash at change ${crashAfter}: ${audits.join("\n")}`).toBe(0);
         // Every object the draft created is recorded against it, so a re-send is recognised.
         const adopted = new Set(objects.filter((object) => object.frontmatter.action === "draft.adopted").map((audit) => String(audit.frontmatter.object_id)));
-        for (const id of batch.drafts.flatMap((draft) => draft.objectIds)) expect(adopted.has(id), `${id} audited after crash at write ${crashAfter}`).toBe(true);
+        for (const id of batch.drafts.flatMap((draft) => draft.objectIds)) expect(adopted.has(id), `${id} audited after crash at change ${crashAfter}`).toBe(true);
         scenario.check?.(objects);
       }
     }, 60_000);
@@ -163,8 +148,12 @@ describe("role-keyed replayable IDs: crash after every write, then replay", () =
   it("GIVEN a person draft replayed after a crash before the merge suggestion THEN the merge Review Item is raised exactly once", async () => {
     const scenario = scenarios.find((candidate) => candidate.name.startsWith("a person draft"))!;
     const root = await fresh(scenario);
-    // Write 1 of the draft is the new person: the crash comes before the suggestion is written.
-    await (await open(root, counting(new MarkdownObjectStore(root), 1).proxy)).adoptDrafts().catch(() => undefined);
+    // The crash comes right after the new person lands, before the suggestion is written.
+    const personLands = (await baseline(scenario)).changes.indexOf('write person "Kim Lee"') + 1;
+    expect(personLands).toBeGreaterThan(0);
+    const crashing = new CrashingStore(root);
+    crashing.arm(personLands);
+    await (await open(root, crashing)).adoptDrafts().catch(() => undefined);
     const restarted = await open(root);
     const batch = await restarted.adoptDrafts();
     const merges = (await restarted.listObjects()).filter((object) => object.frontmatter.review_type === "person-merge");
