@@ -38,7 +38,7 @@ export function isRestricted(frontmatter: { sensitivity?: unknown } | Record<str
   return (frontmatter as { sensitivity?: unknown }).sensitivity === "restricted";
 }
 
-/** App-managed recurring-occurrence material markers shared by persistence and the browser editor. */
+/** Legacy only: app-managed Materials block markers of Legacy shared Notes. No new writes; removed by #178. */
 export const occurrenceMaterialsStart = (sectionId: string) => `<!-- lifeos:materials:start ${sectionId} -->`;
 export const occurrenceMaterialsEnd = (sectionId: string) => `<!-- lifeos:materials:end ${sectionId} -->`;
 
@@ -48,4 +48,25 @@ export function occurrenceMaterialsBlock(markdown: string, sectionId: string) {
   const from = markdown.indexOf(start);
   const to = from < 0 ? -1 : markdown.indexOf(end, from + start.length);
   return from >= 0 && to >= 0 ? markdown.slice(from, to + end.length) : "";
+}
+
+/** The Summary section of a meeting body is fenced by these markers (#66). */
+export const summaryStartMarker = "<!-- lifeos:summary:start -->";
+export const summaryEndMarker = "<!-- lifeos:summary:end -->";
+
+const isSummaryMarkerLine = (line: string, marker: string) => line.trim() === marker;
+
+/** The one parser of the summary fence: line index of the start marker (-1 if none) and of its end marker (-1 if none). */
+export function findSummaryFence(lines: string[]) {
+  const start = lines.findIndex((line) => isSummaryMarkerLine(line, summaryStartMarker));
+  const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && isSummaryMarkerLine(line, summaryEndMarker));
+  return { start, end };
+}
+
+/** The accepted summary text inside the markers, without its heading; empty when the body has no marked summary (#176). */
+export function acceptedSummaryText(body: string) {
+  const lines = body.split("\n");
+  const { start, end } = findSummaryFence(lines);
+  if (end < 0) return "";
+  return lines.slice(start + 1, end).join("\n").replace(/^\s*##\s+Summary\s*\n/i, "").trim();
 }

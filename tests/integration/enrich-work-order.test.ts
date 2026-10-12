@@ -93,34 +93,38 @@ describe("Enrich last 48h Work Order", () => {
     expect(await readFile(path.join(root, result.workOrder!), "utf8")).toContain("meeting-material");
   });
 
-  it("targets one stable occurrence section and says whether that section already exists (#151)", async () => {
+  it("names the recurring occurrence's own Meeting and Note, with no section id (#176)", async () => {
     const originalStart = hoursAgo(30);
     const recurring = event("series-occurrence", 30, { seriesId: "weekly-series", originalOccurrenceStartsAt: originalStart });
     const { root, application } = await vault([recurring]);
 
     const first = await application.requestEnrichment({ now });
     const firstEntry = ((await frontmatterOf(path.join(root, first.workOrder!))).meetings as Array<Record<string, unknown>>)[0]!;
-    expect(firstEntry).toMatchObject({
-      recurrence_occurrence_id: `google:work:weekly-series:${originalStart}`,
-      occurrence_section_id: expect.stringMatching(/^occurrence-/),
-      occurrence_section_exists: false,
-      optional_material: ["drive-doc"]
-    });
+    expect(firstEntry).toMatchObject({ recurrence_occurrence_id: `google:work:weekly-series:${originalStart}`, optional_material: ["drive-doc"] });
     expect(firstEntry.note_path).toBeUndefined();
+    expect(Object.keys(firstEntry).filter((key) => key.includes("section"))).toEqual([]);
 
-    // #172: a first edit now makes a plain per-occurrence Note, so the section a Work Order points at exists only in a Legacy shared Note.
-    const { items } = await seedLegacySharedNote(root, "google", [{ event: recurring, body: "Occurrence notes\n" }]);
-    await application.rebuildIndex();
-    const workspace = await application.meetingWorkspace(items[0]!.meetingId);
-    const sectionId = items[0]!.sectionId;
+    // Once the occurrence has its own Note (first edit), the entry names that Meeting and that Note.
+    const workspace = await application.createMeetingFromEvent(recurring.externalId, new Date(now.getTime() - 86_400_000 * 2), now, "work", "Own notes\n");
     const second = await application.requestEnrichment({ now: new Date(now.getTime() + 60_000) });
     const secondEntry = ((await frontmatterOf(path.join(root, second.workOrder!))).meetings as Array<Record<string, unknown>>)[0]!;
-    expect(secondEntry).toMatchObject({
-      meeting_id: workspace.meeting.frontmatter.id,
-      occurrence_section_id: sectionId,
-      occurrence_section_exists: true,
-      note_path: workspace.note!.relativePath
-    });
+    expect(secondEntry).toMatchObject({ meeting_id: workspace.meeting.frontmatter.id, note_path: workspace.note!.relativePath });
+    expect(Object.keys(secondEntry).filter((key) => key.includes("section"))).toEqual([]);
+    expect(await readFile(path.join(root, second.workOrder!), "utf8")).not.toContain("occurrence_section_id");
+  });
+
+  it("writes no Work Order entry for a Meeting inside a Legacy shared Note (#176, ADR 0021)", async () => {
+    const recurring = event("series-legacy", 30, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(30) });
+    const plain = event("plain-meeting", 20);
+    const { root, application } = await vault([recurring, plain]);
+    await seedLegacySharedNote(root, "google", [{ event: recurring, body: "Occurrence notes\n" }]);
+    await application.rebuildIndex();
+
+    const result = await application.requestEnrichment({ now });
+
+    expect(result.meetings.map((entry) => entry.calendarEventId)).toEqual(["plain-meeting"]);
+    const entries = (await frontmatterOf(path.join(root, result.workOrder!))).meetings as Array<Record<string, unknown>>;
+    expect(entries.map((entry) => entry.calendar_event_id)).toEqual(["plain-meeting"]);
   });
 
   it("marks selected meetings requested and keeps enriched and gave_up meetings out", async () => {

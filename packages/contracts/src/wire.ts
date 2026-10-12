@@ -50,6 +50,8 @@ export type SeriesView = SeriesViewPage & {
 };
 /** One page of earlier occurrences. `nextCursor` is present while more remain (opaque; pass it to "Load older"). */
 export type SeriesViewPage = { earlier: SeriesViewEarlier[]; nextCursor?: string };
+/** #176: what enrichment attached to one occurrence's own Meeting. */
+export type SeriesViewMaterials = { summary?: string; sources: Array<{ id: string; title: string; sourceType: string; url?: string }> };
 export type SeriesViewEarlier = {
   /** `legacy-shared`: one ADR 0019 Note linked to several Meetings, shown once. */
   kind: "occurrence" | "legacy-shared";
@@ -58,6 +60,8 @@ export type SeriesViewEarlier = {
   range: { startsAt: string; endsAt: string };
   /** The provider cancelled this occurrence; it is listed only because it has a Note. */
   cancelled: boolean;
+  /** #176: Sources linked to this occurrence's own Meeting and its accepted summary; absent when there are none, or the occurrence is restricted. */
+  materials?: SeriesViewMaterials;
 };
 export type OccurrenceWorkspaceItem = {
   sectionId: string;

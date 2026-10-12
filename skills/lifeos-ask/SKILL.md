@@ -2,7 +2,7 @@
 name: lifeos-ask
 description: Answers questions about the user's LifeOS - open tasks, what they owe or are waiting on, open points, recent decisions, projects, clients, people and meetings - by reading the LifeOS Agent Index in the _agent/ folder. Warns when the index is more than 24 hours old and never reads restricted files. Use when the user asks "what do I owe Joel?", "what's overdue?", "what did we decide about X?", "who is waiting on me?", or any question about their LifeOS data.
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
   skill_pack: 1
   agent_index_contract: 1
 ---

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LifeOSObject } from "@lifeos/domain";
-import { withOccurrenceMaterials, withSummarySection } from "./meeting-material.js";
+import { withSummarySection } from "./meeting-material.js";
 
 // #66: the Summary section of a meeting body has explicit boundaries, so a retry never appends it twice,
 // a newer summary leaves nothing of the older one behind, and the user's own text is never changed.
@@ -9,30 +8,6 @@ const start = "<!-- lifeos:summary:start -->";
 const end = "<!-- lifeos:summary:end -->";
 const userTop = "# Q3 sync\n\nMy agenda, written by hand.\n";
 const headed = "Vendor B chosen.\n\n## Risks\n\n- Budget\n\n# Appendix\n\nTimeline.";
-
-describe("withOccurrenceMaterials (#151)", () => {
-  const sections = [
-    { section_id: "occurrence-new", meeting_id: "meeting-new" },
-    { section_id: "occurrence-old", meeting_id: "meeting-old" }
-  ];
-  const body = "## Weekly — new\n<a id=\"occurrence-new\"></a>\n\nNew user prose\n\n## Weekly — old\n<a id=\"occurrence-old\"></a>\n\nOld user prose";
-  const source = {
-    frontmatter: {
-      id: "source-1", type: "source", schema_version: 1, revision: 1, title: "External notes",
-      created_at: "2026-10-11T09:00:00.000Z", updated_at: "2026-10-11T09:00:00.000Z", updated_by_device: "test",
-      url: "https://example.test/notes", retrieved_at: "2026-10-11T09:00:00.000Z", provider_revision: "rev-7"
-    },
-    body: "", relativePath: "sources/source-1.md", contentHash: "hash"
-  } as LifeOSObject;
-
-  it("writes and replaces only the target generated block", () => {
-    const written = withOccurrenceMaterials(body, sections, "occurrence-new", [source]);
-    expect(written).toContain("New user prose\n\n<!-- lifeos:materials:start occurrence-new -->");
-    expect(written).toContain("Old user prose");
-    expect(written).toContain("retrieved 2026-10-11T09:00:00.000Z, provider revision rev-7");
-    expect(withOccurrenceMaterials(written, sections, "occurrence-new", [source])).toBe(written);
-  });
-});
 
 describe("withSummarySection (#66)", () => {
   it("appends a marked section after the user's text", () => {

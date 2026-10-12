@@ -8,3 +8,6 @@
 .series-view-newer button, .series-view-load-older { justify-self: start; }
 .series-view-error { margin: 0; color: var(--color-error); }
 .series-note-editor { margin: 0 var(--space-4) var(--space-3); display: grid; gap: var(--space-2); }
+.series-view-materials { margin: 0 var(--space-4) var(--space-3); display: grid; gap: var(--space-2); overflow-wrap: anywhere; }
+.series-view-materials h4, .series-view-materials p, .series-view-materials ul { margin: 0; }
+.series-view-materials ul { padding-left: var(--space-4); }
