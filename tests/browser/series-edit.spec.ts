@@ -4,7 +4,7 @@ import { seed } from "./fixtures.js";
 // #173: earlier occurrences are edited in place. Real local API, no mocked saves (except the one deliberately
 // blocked request in the draft-reload test). Uses the "retro" / "audit" series from serve.mjs: 3 occurrences each
 // (Jan to Mar, one Note per occurrence) that only these tests change.
-const ids = (letter: "5" | "f" | "7" | "8" | "6", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
+const ids = (letter: "5" | "f" | "7" | "8" | "6" | "4", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
 const RETRO = (month: string) => ids("5", month);
 const AUDIT = (month: string) => ids("f", month);
 const GUARD = (month: string) => ids("7", month);
@@ -199,7 +199,7 @@ test("a Legacy shared Note block is edited through the UI and saved as one whole
 });
 
 // #183: every occurrence editor follows the Visual / Markdown switch. Uses the "modes" and "modeledger" seeds.
-const MODES = (month: string) => ids("6", month);
+const MODES = (month: string) => ids("4", month);
 // Control+End is not "end of document" on macOS; see visual-end-of-note.spec.ts.
 const END_OF_DOCUMENT = process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End";
 const MODE_LEDGER_OWN = "94000000-0000-4000-8000-000000000003";
