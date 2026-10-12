@@ -4,7 +4,7 @@ import { seed } from "./fixtures.js";
 // #173: earlier occurrences are edited in place. Real local API, no mocked saves (except the one deliberately
 // blocked request in the draft-reload test). Uses the "retro" / "audit" series from serve.mjs: 3 occurrences each
 // (Jan to Mar, one Note per occurrence) that only these tests change.
-const ids = (letter: "5" | "f" | "7" | "8", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
+const ids = (letter: "5" | "f" | "7" | "8" | "6" | "4", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
 const RETRO = (month: string) => ids("5", month);
 const AUDIT = (month: string) => ids("f", month);
 const GUARD = (month: string) => ids("7", month);
@@ -196,4 +196,71 @@ test("a Legacy shared Note block is edited through the UI and saved as one whole
   const stored = (await workspace(request, LEDGER.own)).seriesView.earlier[0] as unknown as { note: { body: string; frontmatter: { occurrence_sections: unknown[] } } };
   expect(stored.note.body).toBe("Ledger shared words.\n\n## Added\nWhole-body edit.\n");
   expect(stored.note.frontmatter.occurrence_sections).toHaveLength(2);
+});
+
+// #183: every occurrence editor follows the Visual / Markdown switch. Uses the "modes" and "modeledger" seeds.
+const MODES = (month: string) => ids("4", month);
+// Control+End is not "end of document" on macOS; see visual-end-of-note.spec.ts.
+const END_OF_DOCUMENT = process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End";
+const MODE_LEDGER_OWN = "94000000-0000-4000-8000-000000000003";
+
+test("the Visual / Markdown switch applies to the opened, earlier and Legacy shared Note editors at once", async ({ page, request }) => {
+  await seed(request);
+  await page.goto(`/calendar/2026-03-10/${MODES("03").meeting}`);
+  const entries = page.getByRole("region", { name: "Earlier occurrences" }).locator("details");
+  await entries.nth(0).locator("summary").click();
+  await entries.nth(1).locator("summary").click();
+
+  // Visual (the default): formatted headings and lists in every editor, no textarea.
+  await expect(page.getByRole("heading", { name: "Modes heading 03" })).toBeVisible();
+  for (const [index, month] of ["02", "01"].entries()) {
+    await expect(entries.nth(index).getByRole("heading", { name: `Modes heading ${month}` })).toBeVisible();
+    await expect(entries.nth(index).getByRole("listitem").first()).toContainText(`first item ${month}`);
+    await expect(entries.nth(index).getByRole("link", { name: "a link" })).toHaveAttribute("href", `https://example.com/${month}`);
+    await expect(entries.nth(index).locator("textarea")).toHaveCount(0);
+  }
+
+  // Unsaved typing in a Visual editor survives the switch, and Markdown then shows source everywhere.
+  const february = entries.nth(0).locator("[contenteditable='true']").first();
+  await february.focus();
+  await page.keyboard.press(END_OF_DOCUMENT);
+  await page.keyboard.type(" typed in visual");
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await expect(entries.nth(0).locator("textarea")).toHaveValue(/# Modes heading 02[\s\S]*typed in visual/);
+  await expect(entries.nth(1).locator("textarea")).toHaveValue(/^# Modes heading 01\n\n- first item 01/);
+  await expect(page.getByPlaceholder("Capture meeting notes")).toHaveValue(/^# Modes heading 03/);
+
+  // Back to Visual: formatted again.
+  await page.getByRole("button", { name: "Visual", exact: true }).click();
+  await expect(entries.nth(1).getByRole("heading", { name: "Modes heading 01" })).toBeVisible();
+
+  // Back in a Visual editor, typing continues in that same editor and reaches its own file.
+  const visualFebruary = entries.nth(0).locator("[contenteditable='true']").first();
+  await expect(visualFebruary).toContainText("typed in visual");
+  await visualFebruary.focus();
+  await page.keyboard.press(END_OF_DOCUMENT);
+  await page.keyboard.type(" and more");
+  await expect(visualFebruary).toBeFocused();
+  await expect(visualFebruary).toContainText("and more");
+  await expect.poll(async () => (await workspace(request, MODES("03").meeting)).seriesView.earlier[0]?.note.body, { timeout: 15000 }).toContain("and more");
+
+  // The typing reaches February's file only; the other files and what Visual did not touch are unchanged.
+  await expect.poll(async () => (await workspace(request, MODES("03").meeting)).seriesView.earlier[0]?.note.body, { timeout: 15000 }).toContain("typed in visual");
+  const stored = await workspace(request, MODES("03").meeting);
+  const [feb, jan] = stored.seriesView.earlier.map((entry) => entry.note.body);
+  expect(feb).toContain("<!-- keep me -->");
+  expect(feb).toContain("[a link](https://example.com/02)");
+  expect(jan).toBe("# Modes heading 01\n\n- first item 01\n- second item\n\n[a link](https://example.com/01) and <!-- keep me -->\n");
+  expect(stored.note.body).toBe("# Modes heading 03\n\n- first item 03\n- second item\n\n[a link](https://example.com/03) and <!-- keep me -->\n");
+});
+
+test("a Legacy shared Note block follows the Visual / Markdown switch", async ({ page, request }) => {
+  await seed(request);
+  await page.goto(`/calendar/2026-04-20/${MODE_LEDGER_OWN}`);
+  const shared = page.getByRole("region", { name: "Earlier occurrences" }).locator("details").nth(0);
+  await expect(shared.locator("summary")).toContainText("Shared Note");
+  await shared.locator("summary").click();
+  await expect(shared.getByRole("heading", { name: "Shared heading" })).toBeVisible();
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await expect(shared.locator("textarea")).toHaveValue("# Shared heading\n\n- shared item\n");
 });

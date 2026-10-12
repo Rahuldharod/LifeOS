@@ -107,31 +107,46 @@ await objectFile("meetings", prio.own, {
   ...stamped(prio.own, "meeting", "Weekly Prio"), status: "scheduled", starts_at: "2026-09-21T08:00:00.000Z", ends_at: "2026-09-21T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: prio.series, recurrence_occurrence_id: `${prio.series}:2026-09-21T08:00:00.000Z`, original_occurrence_starts_at: "2026-09-21T08:00:00.000Z"
 });
 await objectFile("meetings", prio.ownNote, { ...stamped(prio.ownNote, "meeting-note", "Weekly Prio notes 21 Sep"), meeting_id: prio.own }, "Own occurrence words.\n");
+// A Note's text: the "modes" series has formatting (heading, list, link, a comment Visual must keep); the others are plain.
+const noteBody = (name, month) => name === "modes" ? `# Modes heading ${month}\n\n- first item ${month}\n- second item\n\n[a link](https://example.com/${month}) and <!-- keep me -->\n` : `${name} words for 2026-${month}.\n`;
 // #173 edit-in-place: two small series (3 occurrences each, a Note per occurrence) that only the edit tests change,
 // so the read-only #179 tests above keep their text. "retro" is edited; "audit" is used for the conflict test.
 // "guard" tests the leave-page save, "typing" the caret while another Note saves, "ledger" a Legacy shared Note (below).
-for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"], ["6", "scroll"]]) {
+for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"], ["6", "scroll"], ["4", "modes"]]) {
   const series = `mock:mock-calendar:${name}`;
   for (const month of ["01", "02", "03"]) {
     const meetingId = `${letter}1000000-0000-4000-8000-0000000000${month}`;
     const noteId = `${letter}2000000-0000-4000-8000-0000000000${month}`;
     const startsAt = `2026-${month}-10T08:00:00.000Z`;
     await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Team ${name}`), status: "scheduled", starts_at: startsAt, ends_at: `2026-${month}-10T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: series, recurrence_occurrence_id: `${series}:${startsAt}`, original_occurrence_starts_at: startsAt });
-    await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Team ${name} notes ${month}`), meeting_id: meetingId, ...(name === "guard" && month === "01" ? { sensitivity: "restricted" } : {}) }, name === "scroll" && month === "02" ? `${Array.from({ length: 80 }, (_, line) => `scroll line ${line + 1} of a very long Note.`).join("\n")}\n` : `${name} words for 2026-${month}.\n`); // #184: "scroll" has a very long February Note
+    await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Team ${name} notes ${month}`), meeting_id: meetingId, ...(name === "guard" && month === "01" ? { sensitivity: "restricted" } : {}) }, name === "scroll" && month === "02" ? `${Array.from({ length: 80 }, (_, line) => `scroll line ${line + 1} of a very long Note.`).join("\n")}\n` : noteBody(name, month)); // #184: "scroll" has a very long February Note
   }
 }
-// "ledger": a Legacy shared Note covering two Meetings plus a later occurrence with its own Note (the edit test opens the later one).
-const ledger = { series: "mock:mock-calendar:ledger", note: "91000000-0000-4000-8000-000000000001", meetings: ["92000000-0000-4000-8000-000000000001", "92000000-0000-4000-8000-000000000002"], days: ["2026-04-06", "2026-04-13"], own: "92000000-0000-4000-8000-000000000003", ownNote: "91000000-0000-4000-8000-000000000003" };
-for (const [index, meetingId] of ledger.meetings.entries()) {
-  const startsAt = `${ledger.days[index]}T08:00:00.000Z`;
-  await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", "Team ledger"), status: "scheduled", starts_at: startsAt, ends_at: `${ledger.days[index]}T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: ledger.series, recurrence_occurrence_id: `${ledger.series}:${startsAt}`, original_occurrence_starts_at: startsAt });
+// "ledger" and "modeledger": a Legacy shared Note covering two Meetings plus a later occurrence (the tests open the later one).
+// "ledger" is edited by the edit tests; "modeledger" has formatted text and is only read by the Visual / Markdown mode test (#183).
+const seedLedger = async ({ name, noteId, meetings, own, ownNoteId, sharedBody }) => {
+  const series = `mock:mock-calendar:${name}`;
+  const days = ["2026-04-06", "2026-04-13"];
+  for (const [index, meetingId] of meetings.entries()) {
+    const startsAt = `${days[index]}T08:00:00.000Z`;
+    await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Team ${name}`), status: "scheduled", starts_at: startsAt, ends_at: `${days[index]}T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: series, recurrence_occurrence_id: `${series}:${startsAt}`, original_occurrence_starts_at: startsAt });
+  }
+  await objectFile("meetings", noteId, {
+    ...stamped(noteId, "meeting-note", `Team ${name} notes`), meeting_id: meetings[0], meeting_ids: meetings, recurrence_series_id: series,
+    occurrence_sections: meetings.map((meetingId, index) => ({ occurrence_id: `${series}:${days[index]}T08:00:00.000Z`, section_id: `occurrence-${days[index]}`, meeting_id: meetingId, original_starts_at: `${days[index]}T08:00:00.000Z`, starts_at: `${days[index]}T08:00:00.000Z` }))
+  }, sharedBody);
+  await objectFile("meetings", own, { ...stamped(own, "meeting", `Team ${name}`), status: "scheduled", starts_at: "2026-04-20T08:00:00.000Z", ends_at: "2026-04-20T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: series, recurrence_occurrence_id: `${series}:2026-04-20T08:00:00.000Z`, original_occurrence_starts_at: "2026-04-20T08:00:00.000Z" });
+  if (ownNoteId) await objectFile("meetings", ownNoteId, { ...stamped(ownNoteId, "meeting-note", `Team ${name} notes 20 Apr`), meeting_id: own }, "Ledger own words.\n");
+};
+await seedLedger({ name: "ledger", noteId: "91000000-0000-4000-8000-000000000001", meetings: ["92000000-0000-4000-8000-000000000001", "92000000-0000-4000-8000-000000000002"], own: "92000000-0000-4000-8000-000000000003", ownNoteId: "91000000-0000-4000-8000-000000000003", sharedBody: "Ledger shared words.\n" });
+await seedLedger({ name: "modeledger", noteId: "93000000-0000-4000-8000-000000000001", meetings: ["94000000-0000-4000-8000-000000000001", "94000000-0000-4000-8000-000000000002"], own: "94000000-0000-4000-8000-000000000003", sharedBody: "# Shared heading\n\n- shared item\n" });
+// #183 single (non-recurring) meetings whose Note ends in an HTML comment, to reach the plain Visual editor's end-of-note typing.
+for (const [month, body] of [["04", "# Solo heading\n\nLast line <!-- keep me -->\n"], ["05", "# Solo summary\n\nBody text.\n\n<!-- lifeos:summary:end -->\n"], ["06", "# Solo image\n\nBefore the image.\n"], ["07", "# Solo normal\n\n* star one\n* star two\n\nSnake_case and 2 * 3.\n"]]) {
+  const meetingId = `61000000-0000-4000-8000-0000000000${month}`;
+  const noteId = `62000000-0000-4000-8000-0000000000${month}`;
+  await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Solo ${month}`), status: "scheduled", starts_at: "2026-05-12T08:00:00.000Z", ends_at: "2026-05-12T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [] });
+  await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Solo notes ${month}`), meeting_id: meetingId }, body);
 }
-await objectFile("meetings", ledger.note, {
-  ...stamped(ledger.note, "meeting-note", "Team ledger notes"), meeting_id: ledger.meetings[0], meeting_ids: ledger.meetings, recurrence_series_id: ledger.series,
-  occurrence_sections: ledger.meetings.map((meetingId, index) => ({ occurrence_id: `${ledger.series}:${ledger.days[index]}T08:00:00.000Z`, section_id: `occurrence-${ledger.days[index]}`, meeting_id: meetingId, original_starts_at: `${ledger.days[index]}T08:00:00.000Z`, starts_at: `${ledger.days[index]}T08:00:00.000Z` }))
-}, "Ledger shared words.\n");
-await objectFile("meetings", ledger.own, { ...stamped(ledger.own, "meeting", "Team ledger"), status: "scheduled", starts_at: "2026-04-20T08:00:00.000Z", ends_at: "2026-04-20T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: ledger.series, recurrence_occurrence_id: `${ledger.series}:2026-04-20T08:00:00.000Z`, original_occurrence_starts_at: "2026-04-20T08:00:00.000Z" });
-await objectFile("meetings", ledger.ownNote, { ...stamped(ledger.ownNote, "meeting-note", "Team ledger notes 20 Apr"), meeting_id: ledger.own }, "Ledger own words.\n");
 await objectFile("review-items", recurring.review, {
   ...stamped(recurring.review, "review-item", "Send the synthetic agenda"), review_type: "create", target_object_type: "task", proposed_fields: { title: "Send the synthetic agenda", source_meeting_id: recurring.currentMeeting }, confidence_label: "High", status: "pending", operation_id: recurring.operation, source_meeting_id: recurring.currentMeeting, occurrence_section_id: recurring.currentSection
 }, "Synthetic proposal.\n");
