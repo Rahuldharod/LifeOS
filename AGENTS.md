@@ -47,8 +47,6 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - Write domain objects through application use cases and `ObjectStore`; do not bypass revision and expected-content-hash checks.
 - Preserve unknown Markdown frontmatter and body content during round trips.
 - External workflows must be idempotent. Meeting creation, review acceptance, and recovery must tolerate retries. Any step that writes more than one file follows the crash-recovery pattern in ADR 0013 and its helpers; do not hand-write another.
-- Store instants as ISO 8601 UTC. Preserve source timezone metadata and apply the user-selected timezone only when querying day boundaries or displaying values.
-- Managed image links must remain relative in persisted Markdown so the repository works on both devices.
 - While developing, do not read or write the real data root, and never edit its files to make a test pass. Tests use temporary roots and synthetic records; manual checks use `.dev-data/`.
 - Treat the advisory device lease as a guardrail, not the sole concurrency control. Background work that writes objects runs only while this device holds the lease (`holdsLease()`); after an idle release nothing reclaims it except the user's Take back (ADR 0015).
 - The server and maintenance scripts refuse to start unless the data root holds `.lifeos/schema.md` (ADR 0014). Do not add a default data path.
@@ -61,14 +59,15 @@ Use Corepack because a global `pnpm` installation is not assumed:
 corepack pnpm install
 corepack pnpm dev
 corepack pnpm typecheck
-corepack pnpm test --exclude '.claude/**'   # skip test copies inside agent worktrees
+corepack pnpm lint
+corepack pnpm test
 corepack pnpm build
 corepack pnpm test:browser                  # UI layout, focus and responsive behaviour (Playwright, synthetic data, port 4319)
 ```
 
 Two separate runtimes (ADR 0006):
 
-- **Development** (`pnpm dev`): UI `http://127.0.0.1:5174`, API `http://127.0.0.1:4311`, synthetic data in `.dev-data/`, mock calendar. Use this for all coding and manual testing.
+- **Development** (`pnpm dev`): UI `http://127.0.0.1:5174`, API `http://127.0.0.1:4311`, synthetic data in `.dev-data/`, mock calendar. Use this for all coding and manual testing; start it yourself to check UI changes in a browser.
 - **Stable app** (the user's daily LifeOS): `http://127.0.0.1:4310`, real data from `LIFEOS_DATA_ROOT`, managed with `pnpm start | stop | status | update-app` (see README). Never stop, restart or update it without asking the user; they may be mid-note. Never kill processes by name pattern: the stable server's command line looks like dev's.
 
 One-off maintenance: `pnpm reconcile-meetings` reports duplicate meetings; `--apply` (only with the user's OK, and with the stable app stopped) backs up, then archives extras.
@@ -78,7 +77,7 @@ One-off maintenance: `pnpm reconcile-meetings` reports duplicate meetings; `--ap
 1. Inspect the relevant port, use case, adapter, schema, and integration test before editing.
 2. Make the smallest change that preserves the architecture boundaries above.
 3. Add or update an integration test for persistence, connector, recovery, or cross-layer behavior.
-4. Run typecheck and the relevant tests; run the production build for UI, server, dependency, or bundling changes, and `test:browser` for UI layout or interaction changes.
+4. Run typecheck, lint and the relevant tests; run the production build for UI, server, dependency, or bundling changes. For UI changes, run `test:browser` and click through the change on the dev runtime before reporting done. The pre-push hook runs typecheck and lint; CI runs everything.
 5. Update documentation only when its stated contract changes:
    - setup or top-level capabilities: `README.md`;
    - boundaries or component responsibilities: architecture README;
@@ -94,18 +93,22 @@ Agent worktrees live under `.claude/worktrees/` (ignored by Git) and are tempora
 - Cleanup is automatic: the project hook in `.claude/settings.json` runs `node scripts/prune-worktrees.mjs --apply --quiet` at session end. It removes a worktree only when it has no uncommitted or untracked files, its commit is on GitHub, and nothing in it changed for 2 hours. It never uses `--force` and never deletes branches.
 - `corepack pnpm worktrees:prune` shows what would be removed (dry run); add `--apply` to remove. At session start the hook warns when there are more than 10.
 
-Do not create feature-by-feature documentation pages or duplicate implementation details that are already clear from tests and code.
-
 ## Definition of done
 
 - The requested behavior works through the real application boundary, not only in an isolated component.
 - Existing Markdown remains readable and round-trippable.
 - Failure and retry behavior is explicit for filesystem and external-service operations.
-- Typecheck and relevant integration tests pass.
+- Typecheck, lint and relevant integration tests pass; UI changes were seen working in a browser.
 - The production build passes when runtime code changed.
 - No real data, generated backups, or secrets appear in the Git diff.
 
 ## Agent skills
+
+A skill missing from your skill list is usually one only the user can start (`disable-model-invocation`, e.g. `implement`, `to-tickets`, `grill-with-docs`), not uninstalled. Ask the user to run `/mattpocock-skills:<name>`; never re-create its steps by hand or hand it to a subagent.
+
+### Review
+
+Reviewers check the diff against `CODING_STANDARDS.md` as well as the rules above.
 
 ### Issue tracker
 

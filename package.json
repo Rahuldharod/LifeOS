@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:browser": "pnpm --filter @lifeos/web build && playwright test",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fast local guardrail before code reaches GitHub; CI still runs the full suite.
+# Installed by `pnpm install` (the "prepare" script sets core.hooksPath). Skip once with `git push --no-verify`.
+set -e
+corepack pnpm typecheck
+corepack pnpm lint
