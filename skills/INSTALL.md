@@ -12,7 +12,16 @@ Five Claude skills: Object Contract, Capture, Ask, Morning and Enrichment. Insta
 
 **Rule for the whole dry-run: synthetic data only.** Never use the real `data/` folder until every check below passes.
 
-## Part 1: Make the zip files (Mac, 2 minutes)
+## Quickest way: LifeOS Settings
+
+Open LifeOS → **Settings → Claude skills**.
+
+- **Claude chat and phone:** download each skill's zip there, then upload it as in Part 2. Skip Part 1.
+- **Claude Code:** copy the two `/plugin` commands shown there into Claude Code. Your GitHub account must be able to read the repository. Turn on auto-update under `/plugin` → Marketplaces.
+
+The card also says whether your installed skills match this LifeOS.
+
+## Part 1: Make the zip files by hand (Mac, 2 minutes)
 
 1. Open Terminal in the code folder (`cd ~/Developer/lifeos_app`).
 2. Run:

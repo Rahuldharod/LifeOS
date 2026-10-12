@@ -59,7 +59,9 @@ describe("skill pack versions (ADR 0020)", () => {
   it("reports no draft yet on a fresh data root", async () => {
     const { start, call } = await testApi();
     await start();
-    expect(await call("GET /api/v1/settings/claude-skills")).toEqual({ expected: currentSkillPack, oldestAccepted: currentSkillPack - 1 });
+    const status = await call("GET /api/v1/settings/claude-skills");
+    expect(status).toMatchObject({ expected: currentSkillPack, oldestAccepted: currentSkillPack - 1 });
+    expect(status.lastSeen).toBeUndefined();
   });
 
   it("stamps every example in the skills pack and the contract with the pack this LifeOS expects", async () => {
