@@ -70,6 +70,22 @@ for (const [index, month] of monthly.months.entries()) {
   const noteId = `b1000000-0000-4000-8000-00000000000${index + 1}`;
   await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Monthly review notes ${month}`), meeting_id: meetingId }, `Monthly review words for 2026-${month}.\n`);
 }
+// #180 paging: eight weekly occurrences of one series, each with a Note; the 6th was cancelled (its Note is kept),
+// and a 9th was cancelled without a Note (hidden). Opening the 8th shows 4 earlier, then "Load older" adds the other 3.
+const weekly = { series: "mock:mock-calendar:weekly-sync", firstDay: 2 };
+for (let index = 1; index <= 9; index += 1) {
+  const meetingId = `e1000000-0000-4000-8000-00000000000${index}`;
+  const day = String(weekly.firstDay + (index - 1) * 7).padStart(2, "0");
+  const month = weekly.firstDay + (index - 1) * 7 > 31 ? "04" : "03";
+  const date = month === "04" ? `2026-04-${String(weekly.firstDay + (index - 1) * 7 - 31).padStart(2, "0")}` : `2026-03-${day}`;
+  const startsAt = `${date}T08:00:00.000Z`;
+  await objectFile("meetings", meetingId, {
+    ...stamped(meetingId, "meeting", "Weekly sync"), status: index === 6 || index === 9 ? "cancelled" : "scheduled", starts_at: startsAt, ends_at: `${date}T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: weekly.series, recurrence_occurrence_id: `${weekly.series}:${startsAt}`, original_occurrence_starts_at: startsAt
+  });
+  if (index === 9) continue;
+  const noteId = `e2000000-0000-4000-8000-00000000000${index}`;
+  await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Weekly sync notes ${index}`), meeting_id: meetingId }, `Weekly sync words ${index}.\n`);
+}
 // #179: a Legacy shared Note (one Note, two Meetings of the "weekly-prio" series) plus a later occurrence with its own Note.
 const prio = { series: "mock:mock-calendar:weekly-prio", note: "d1000000-0000-4000-8000-000000000001", own: "d1000000-0000-4000-8000-000000000002", ownNote: "d1000000-0000-4000-8000-000000000003", meetings: ["c1000000-0000-4000-8000-000000000001", "c1000000-0000-4000-8000-000000000002"], days: ["2026-09-07", "2026-09-14"] };
 for (const [index, meetingId] of prio.meetings.entries()) {

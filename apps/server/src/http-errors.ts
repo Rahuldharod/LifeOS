@@ -9,5 +9,7 @@ export function httpError(error: unknown): { statusCode: number; body: { error: 
   }
   // #77: the user clicked Deny on a Keychain prompt; the Connections card offers Retry.
   if (failure.name === "KeychainAccessDeniedError") return { statusCode: 403, body: { error: "Keychain access denied", reason: "keychain-denied" } };
+  // #180: a Series view cursor this server did not issue (malformed or tampered).
+  if (failure.name === "SeriesViewCursorError") return { statusCode: 400, body: { error: failure.message } };
   return { statusCode: failure.name === "ObjectConflictError" ? 409 : 400, body: { error: failure.message } };
 }

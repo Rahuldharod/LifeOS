@@ -52,6 +52,8 @@ describe("the API as a module", () => {
     expect(await answer(get("/api/v1/meetings/preview"))).toEqual(range);
     expect(await answer(send("POST", "/api/v1/meetings/from-event", { externalId: "e1", from: "2026-10-02T00:00:00Z", to: "2026-10-01T00:00:00Z" }))).toEqual(range);
 
+    expect(await answer(get("/api/v1/meetings/series-view"))).toEqual({ statusCode: 400, error: "cursor is required" });
+    expect(await answer(get("/api/v1/meetings/series-view?cursor=forged.cursor"))).toEqual({ statusCode: 400, error: "Invalid Series view cursor" });
     expect(await answer(get("/api/v1/today?date=10-10-2026"))).toEqual({ statusCode: 400, error: "date must be YYYY-MM-DD" });
     expect(await answer(get("/api/v1/today/panels?date=2026-10-1"))).toEqual({ statusCode: 400, error: "date must be YYYY-MM-DD" });
     expect(await answer(send("POST", "/api/v1/focus/replan", {}))).toEqual({ statusCode: 400, error: "date (YYYY-MM-DD) is required" });

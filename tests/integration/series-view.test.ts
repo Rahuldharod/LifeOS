@@ -20,7 +20,7 @@ class SyntheticCalendar implements CalendarConnector {
 }
 
 const SERIES = "synthetic:work:series-view";
-const day = (n: number) => `2026-09-${String(n).padStart(2, "0")}T08:00:00.000Z`;
+const day = (n: number) => new Date(Date.UTC(2026, 8, n, 8)).toISOString();
 const calendarEvent = (n: number, overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
   externalId: `event-${n}`, calendarId: "work", title: "Weekly planning", startsAt: day(n), endsAt: day(n).replace("T08", "T09"),
   timezone: "Europe/Paris", attendees: [], seriesId: "series-view", originalOccurrenceStartsAt: day(n), ...overrides
@@ -44,10 +44,10 @@ async function setup() {
     return id;
   };
   /** A stored occurrence: its Meeting and, when `note` is given, its own live Meeting Note (the ADR 0021 shape). */
-  const occurrence = async (n: number, note?: string, options: { title?: string; recurring?: boolean; restricted?: boolean; archivedMeeting?: boolean; deletedNote?: boolean; movedTo?: { startsAt: string; endsAt: string } } = {}) => {
-    const event = calendarEvent(n, { ...(options.movedTo ?? {}), ...(options.title ? { title: options.title } : {}), ...(options.recurring === false ? { seriesId: undefined, originalOccurrenceStartsAt: undefined } : {}) });
+  const occurrence = async (n: number, note?: string, options: { series?: string; cancelled?: boolean; previousSeries?: string; title?: string; recurring?: boolean; restricted?: boolean; archivedMeeting?: boolean; deletedNote?: boolean; movedTo?: { startsAt: string; endsAt: string } } = {}) => {
+    const event = calendarEvent(n, { ...(options.series ? { seriesId: options.series } : {}), ...(options.cancelled ? { status: "cancelled" as const } : {}), ...(options.previousSeries ? { previousSeriesId: options.previousSeries } : {}), ...(options.movedTo ?? {}), ...(options.title ? { title: options.title } : {}), ...(options.recurring === false ? { seriesId: undefined, originalOccurrenceStartsAt: undefined } : {}) });
     events.push(event);
-    const meetingId = await writeMeeting(n, event, options.recurring !== false, options.archivedMeeting ? { archived_at: "2026-09-02T08:00:00.000Z" } : {});
+    const meetingId = await writeMeeting(n, event, options.recurring !== false, { ...(options.archivedMeeting ? { archived_at: "2026-09-02T08:00:00.000Z" } : {}), ...(options.cancelled ? { status: "cancelled" } : {}), ...(options.previousSeries ? { previous_recurrence_series_id: `synthetic:work:${options.previousSeries}` } : {}) }, options.series ? `synthetic:work:${options.series}` : SERIES);
     let noteId: string | undefined;
     if (note !== undefined) {
       noteId = uuidV7();
@@ -264,5 +264,214 @@ describe("Series view (#179)", () => {
     await app.rebuildIndex();
 
     expect(bodies(await preview(app, 5))).toEqual(["week 3", "original week 2, moved to the 20th"]);
+  });
+});
+
+type Page = { earlier: Array<{ kind: string; cancelled?: boolean; note: { body: string } }>; nextCursor?: string };
+type Paged = { seriesView?: Page & { newer?: { meetingId: string; startsAt: string } } };
+const pageBodies = (page: Page) => page.earlier.map((entry) => entry.note.body.trim());
+/** Reads every further page the way "Load older" does. */
+async function loadAll(app: LifeOSApplication, first: Page) {
+  const pages = [pageBodies(first)];
+  let cursor = first.nextCursor;
+  while (cursor) {
+    const page = await app.seriesViewPage(cursor) as Page;
+    pages.push(pageBodies(page));
+    cursor = page.nextCursor;
+  }
+  return pages;
+}
+
+describe("Series view paging and splits (#180)", () => {
+  it("pages 4 earlier Notes at a time through a cursor until none remain", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    for (let n = 1; n <= 10; n += 1) await occurrence(n, `week ${n}\n`);
+    await occurrence(11); // no Note: never counted
+    unsaved(12);
+    await app.rebuildIndex();
+
+    const first = ((await preview(app, 12)) as Paged).seriesView!;
+
+    expect(await loadAll(app, first)).toEqual([["week 10", "week 9", "week 8", "week 7"], ["week 6", "week 5", "week 4", "week 3"], ["week 2", "week 1"]]);
+  });
+
+  it("has no cursor when everything fits in the first page", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    for (let n = 1; n <= 4; n += 1) await occurrence(n, `week ${n}\n`);
+    unsaved(6);
+    await app.rebuildIndex();
+
+    expect(((await preview(app, 6)) as Paged).seriesView!.nextCursor).toBeUndefined();
+  });
+
+  it("counts occurrences, not weeks: a monthly series pages the same way", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    for (let m = 0; m < 6; m += 1) await occurrence(1 + m * 30, `month ${m}\n`);
+    unsaved(1 + 6 * 30);
+    await app.rebuildIndex();
+
+    const first = ((await preview(app, 181)) as Paged).seriesView!;
+
+    expect(await loadAll(app, first)).toEqual([["month 5", "month 4", "month 3", "month 2"], ["month 1", "month 0"]]);
+  });
+
+  it("shows a Legacy shared Note once across pages", async () => {
+    const { app, occurrence, legacyShared, unsaved } = await setup();
+    await occurrence(1, "week 1\n");
+    await legacyShared([2, 3, 4], "shared legacy\n");
+    for (let n = 5; n <= 8; n += 1) await occurrence(n, `week ${n}\n`);
+    unsaved(10);
+    await app.rebuildIndex();
+
+    const pages = await loadAll(app, ((await preview(app, 10)) as Paged).seriesView!);
+
+    expect(pages).toEqual([["week 8", "week 7", "week 6", "week 5"], ["shared legacy", "week 1"]]);
+  });
+
+  it("does not write when paging", async () => {
+    const { app, root, occurrence, unsaved } = await setup();
+    for (let n = 1; n <= 6; n += 1) await occurrence(n, `week ${n}\n`);
+    unsaved(8);
+    await app.rebuildIndex();
+    const first = ((await preview(app, 8)) as Paged).seriesView!;
+    const before = await snapshot(root);
+
+    await app.seriesViewPage(first.nextCursor!);
+
+    expect(await snapshot(root)).toEqual(before);
+  });
+
+  it("rejects a malformed cursor", async () => {
+    const { app } = await setup();
+    await expect(app.seriesViewPage("not-a-cursor")).rejects.toThrow(/cursor/i);
+  });
+
+  it("flags newer occurrences with a Note and points at the latest, only when they exist", async () => {
+    const { app, occurrence } = await setup();
+    await occurrence(1, "week 1\n");
+    await occurrence(2, "week 2\n");
+    await occurrence(3, "week 3\n");
+    const latest = await occurrence(4, "week 4\n");
+    await occurrence(5); // newer but without a Note: ignored
+    await app.rebuildIndex();
+
+    const old = ((await preview(app, 2)) as Paged).seriesView!;
+    expect(old.newer).toEqual({ meetingId: latest.meetingId, startsAt: day(4), endsAt: day(4).replace("T08", "T09"), timezone: "Europe/Paris" });
+    expect(((await preview(app, 4)) as Paged).seriesView!.newer).toBeUndefined();
+    expect(((await preview(app, 5)) as Paged).seriesView!.newer).toBeUndefined();
+  });
+
+  it("continues into the previous series, after the current one, when the provider links them", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    await occurrence(1, "old 1\n", { series: "old-series" });
+    await occurrence(2, "old 2\n", { series: "old-series" });
+    await occurrence(3, "lookalike, unlinked\n", { series: "unrelated-series" });
+    await occurrence(6, "new 6\n", { series: "new-series", previousSeries: "old-series" });
+    unsaved(8, { seriesId: "new-series", previousSeriesId: "old-series" });
+    await app.rebuildIndex();
+
+    const first = ((await preview(app, 8)) as Paged).seriesView!;
+
+    expect(await loadAll(app, first)).toEqual([["new 6", "old 2", "old 1"]]);
+  });
+
+  it("follows the previous-series link of a stored occurrence and across pages", async () => {
+    const { app, occurrence } = await setup();
+    for (let n = 1; n <= 5; n += 1) await occurrence(n, `old ${n}\n`, { series: "old-series" });
+    for (let n = 6; n <= 8; n += 1) await occurrence(n, `new ${n}\n`, { series: "new-series", previousSeries: "old-series" });
+    await app.rebuildIndex();
+
+    const first = ((await preview(app, 8)) as Paged).seriesView!;
+
+    expect(await loadAll(app, first)).toEqual([["new 7", "new 6", "old 5", "old 4"], ["old 3", "old 2", "old 1"]]);
+  });
+
+  it("never joins series by title when no provider link exists", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    await occurrence(1, "old 1\n", { series: "old-series" });
+    unsaved(8, { seriesId: "new-series" });
+    await app.rebuildIndex();
+
+    expect(bodies(await preview(app, 8))).toEqual([]);
+  });
+
+  it("shows a cancelled occurrence marked cancelled when it has a Note, and hides it when it has none", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    await occurrence(1, "kept week\n");
+    await occurrence(2, "cancelled but noted\n", { cancelled: true });
+    await occurrence(3, undefined, { cancelled: true });
+    unsaved(5);
+    await app.rebuildIndex();
+
+    const { earlier } = ((await preview(app, 5)) as Paged).seriesView!;
+
+    expect(earlier.map((entry) => [entry.note.body.trim(), entry.cancelled])).toEqual([["cancelled but noted", true], ["kept week", false]]);
+  });
+});
+
+describe("Series view review fixes (#180)", () => {
+  it("points `newer` at a successor series after a split, and at the latest of all", async () => {
+    const { app, occurrence } = await setup();
+    await occurrence(1, "old 1\n", { series: "old-series" });
+    await occurrence(2, "old 2\n", { series: "old-series" });
+    await occurrence(6, "new 6\n", { series: "new-series", previousSeries: "old-series" });
+    const latest = await occurrence(7, "new 7\n", { series: "new-series", previousSeries: "old-series" });
+    await occurrence(9, undefined, { series: "new-series", previousSeries: "old-series" }); // no Note: ignored
+    await app.rebuildIndex();
+
+    expect(((await preview(app, 1)) as Paged).seriesView!.newer?.meetingId).toBe(latest.meetingId);
+    expect(((await preview(app, 7)) as Paged).seriesView!.newer).toBeUndefined();
+  });
+
+  it("does not treat an unlinked series as a successor", async () => {
+    const { app, occurrence } = await setup();
+    await occurrence(1, "old 1\n", { series: "old-series" });
+    await occurrence(6, "lookalike\n", { series: "other-series" });
+    await app.rebuildIndex();
+
+    expect(((await preview(app, 1)) as Paged).seriesView!.newer).toBeUndefined();
+  });
+
+  it("refuses a crafted cursor: invented, tampered or pointing at another series", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    for (let n = 1; n <= 6; n += 1) await occurrence(n, `week ${n}\n`);
+    for (let n = 11; n <= 12; n += 1) await occurrence(n, `foreign ${n}\n`, { series: "foreign-series" });
+    unsaved(8);
+    await app.rebuildIndex();
+    const genuine = ((await preview(app, 8)) as Paged).seriesView!.nextCursor!;
+    const [payload, ...rest] = genuine.split(".");
+    const decoded = JSON.parse(Buffer.from(payload!, "base64url").toString("utf8")) as Record<string, unknown>;
+    const forge = (changes: Record<string, unknown>) => Buffer.from(JSON.stringify({ ...decoded, ...changes })).toString("base64url");
+
+    await expect(app.seriesViewPage(`${forge({ seriesId: "synthetic:work:foreign-series" })}.${rest.join(".")}`)).rejects.toThrow(/cursor/i);
+    await expect(app.seriesViewPage(forge({ seriesId: "synthetic:work:foreign-series" }))).rejects.toThrow(/cursor/i);
+    await expect(app.seriesViewPage(`${forge({ seriesId: "synthetic:work:foreign-series" })}.AAAA`)).rejects.toThrow(/cursor/i);
+    expect((await app.seriesViewPage(genuine) as Page).earlier.length).toBeGreaterThan(0);
+  });
+
+  it("stores the provider's previous series on a Meeting created from an event", async () => {
+    const { app, unsaved } = await setup();
+    unsaved(8, { seriesId: "new-series", previousSeriesId: "old-series" });
+    await app.rebuildIndex();
+
+    const created = await app.createMeetingFromEvent("event-8", undefined, undefined, "work", "first words");
+
+    expect(created.meeting.frontmatter.previous_recurrence_series_id).toBe("synthetic:work:old-series");
+  });
+
+  it("adds the previous series to an existing Meeting on sync, and a second sync changes nothing", async () => {
+    const { app, root, occurrence } = await setup();
+    const stored = await occurrence(6, "new 6\n", { series: "new-series" });
+    stored.event.previousSeriesId = "old-series";
+    await app.rebuildIndex();
+    const file = path.join(root, `meetings/${stored.meetingId}.md`);
+    expect(await readFile(file, "utf8")).not.toContain("previous_recurrence_series_id");
+
+    await app.syncCalendar(new Date(day(1)), new Date(day(30)));
+    const afterFirst = await snapshot(root);
+    expect(await readFile(file, "utf8")).toContain("previous_recurrence_series_id: synthetic:work:old-series");
+
+    await app.syncCalendar(new Date(day(1)), new Date(day(30)));
+    expect(await snapshot(root)).toEqual(afterFirst);
   });
 });

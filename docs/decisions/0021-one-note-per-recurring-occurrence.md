@@ -18,7 +18,7 @@ Each occurrence already has its own Meeting record with the provider series iden
 Each Calendar occurrence has its own Meeting and, after the first edit, its own Meeting Note file. Occurrences are linked by the Meeting's `recurrence_series_id`, not by sharing a Note.
 
 - **Display.** Opening a recurring event in the Calendar shows that occurrence's Note plus the Notes of the 4 most recent earlier occurrences in the same series that have a Note, newest first, collapsed. "Earlier" is relative to the opened occurrence, not to today; a link says when newer occurrences exist. Older occurrences load on request. Opening writes nothing.
-- **Series splits.** When the provider reports a previous series (a "this and following" change), the series view continues into it.
+- **Series splits.** When the provider reports a previous series (a "this and following" change), the series view continues into it. A Meeting stores `previous_recurrence_series_id` from that provider link, set on create and by the Calendar sync backfill, and it is never inferred from titles, attendees or times.
 - **Cancelled occurrences** appear only when they have a Note, marked cancelled.
 - **Notes tab.** Opening a Meeting Note from the Notes tab shows only that Note, with a link to its series view.
 - **Editing.** Each displayed Note autosaves to its own file with its own expected-content-hash check and its own save status. Editing a past week never writes, pauses or blocks the current week's file, and the reverse. "Load older" adds 4 more occurrences at a time.
