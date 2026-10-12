@@ -1064,7 +1064,7 @@ function App() {
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </EditorFrame>}
-              {workspace.seriesView && <SeriesView view={workspace.seriesView} timeZone={displayTimeZone} />}
+              {workspace.seriesView && <SeriesView key={workspace.meeting.frontmatter.id} view={workspace.seriesView} timeZone={displayTimeZone} onOpenMeeting={(meetingId, date) => void go({ view: "Calendar", date, id: meetingId })} />}
               {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
               {!workspace.occurrences?.length && meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
               {!workspace.occurrences?.length && <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>

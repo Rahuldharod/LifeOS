@@ -43,14 +43,21 @@ export type Workspace = {
   seriesView?: SeriesView;
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
-/** Earlier occurrences of the opened occurrence's series that have a live Note, newest first, at most 4 (ADR 0021). */
-export type SeriesView = { earlier: SeriesViewEarlier[] };
+/** Earlier occurrences of the opened occurrence's series that have a live Note, newest first, 4 per page (ADR 0021). */
+export type SeriesView = SeriesViewPage & {
+  /** Present only when the opened occurrence is not the newest occurrence with a Note: the latest one to open instead (#180). */
+  newer?: { meetingId: string; startsAt: string; endsAt: string; timezone: string };
+};
+/** One page of earlier occurrences. `nextCursor` is present while more remain (opaque; pass it to "Load older"). */
+export type SeriesViewPage = { earlier: SeriesViewEarlier[]; nextCursor?: string };
 export type SeriesViewEarlier = {
   /** `legacy-shared`: one ADR 0019 Note linked to several Meetings, shown once. */
   kind: "occurrence" | "legacy-shared";
   note: LifeObject;
   /** The covered Meetings of this series: one occurrence's own time, or the span of a Legacy shared Note. */
   range: { startsAt: string; endsAt: string };
+  /** The provider cancelled this occurrence; it is listed only because it has a Note. */
+  cancelled: boolean;
 };
 export type OccurrenceWorkspaceItem = {
   sectionId: string;

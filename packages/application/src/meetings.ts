@@ -52,6 +52,20 @@ function userNoteText(body: string) {
 /** ADR 0021: how many earlier occurrences with a live Note the Series view shows. */
 export const SERIES_VIEW_EARLIER_LIMIT = 4;
 
+/** What a Series view page needs to continue: the opened occurrence, plus the last entry already shown. */
+type SeriesCursorBase = { s: string; p?: string; o: number; m: string; n?: string; a?: number; i?: string };
+type SeriesViewPayload = { earlier: Array<{ kind: "occurrence" | "legacy-shared"; note: LifeOSObject; range: { startsAt: string; endsAt: string }; cancelled: boolean }>; nextCursor?: string; newer?: { meetingId: string; startsAt: string; endsAt: string; timezone: string } };
+const encodeSeriesCursor = (cursor: SeriesCursorBase) => Buffer.from(JSON.stringify(cursor)).toString("base64url");
+function decodeSeriesCursor(value: string): SeriesCursorBase {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
+    const text = (key: string) => typeof parsed[key] === "string" && parsed[key] !== "";
+    const number = (key: string) => typeof parsed[key] === "number" && Number.isFinite(parsed[key]);
+    if (!text("s") || !text("m") || !number("o") || (parsed.p !== undefined && !text("p")) || (parsed.n !== undefined && !text("n")) || (parsed.a !== undefined && !number("a")) || (parsed.i !== undefined && !text("i"))) throw new Error("shape");
+    return parsed as SeriesCursorBase;
+  } catch { throw new Error("Invalid Series view cursor"); }
+}
+
 /** Canonical meetings for calendar events: creation, preview, workspace and duplicate reconciliation. */
 export class MeetingsModule {
   /** Meeting creation runs one call at a time per calendar event id (PB-004, ADR 0013). */
@@ -411,6 +425,7 @@ export class MeetingsModule {
         ...(event.joinUrl ? { join_url: event.joinUrl } : {}),
         ...(event.seriesId && event.originalOccurrenceStartsAt ? {
           recurrence_series_id: this.seriesKey(event),
+          ...(event.previousSeriesId ? { previous_recurrence_series_id: this.seriesKey(event, event.previousSeriesId) } : {}),
           ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
           recurrence_occurrence_id: this.occurrenceId(event),
           original_occurrence_starts_at: event.originalOccurrenceStartsAt
@@ -505,6 +520,7 @@ export class MeetingsModule {
         ...(event.location ? { location: event.location } : {}),
         ...(event.joinUrl ? { join_url: event.joinUrl } : {}),
         ...(seriesId ? { recurrence_series_id: seriesId } : {}),
+        ...(seriesId && event.previousSeriesId ? { previous_recurrence_series_id: this.seriesKey(event, event.previousSeriesId) } : {}),
         ...(seriesId && event.originalOccurrenceStartsAt ? {
           ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
           recurrence_occurrence_id: this.occurrenceId(event),
@@ -565,34 +581,78 @@ export class MeetingsModule {
 
   /**
    * ADR 0021 Series view: the live Notes of the earlier occurrences in the opened occurrence's provider
-   * series, newest first; `undefined` for a Meeting with no provider series. Pure read. Membership is the
-   * Meeting's `recurrence_series_id` only; titles, attendees and times are never compared. "Earlier" is
-   * relative to the opened occurrence's original start (its start when the provider gave no original).
-   * A Legacy shared Note (one Note, several Meetings) is listed once, at its newest earlier Meeting.
+   * series, newest first, 4 per page; `undefined` for a Meeting with no provider series. Pure read.
+   * Membership is the Meeting's `recurrence_series_id`, continued into the provider's previous series
+   * (`previous_recurrence_series_id`, a "this and following" split) and nothing else; titles, attendees
+   * and times are never compared. "Earlier" is relative to the opened occurrence's original start (its
+   * start when the provider gave no original). A Legacy shared Note is listed once, at its newest earlier
+   * Meeting. `newer` points at the latest occurrence with a Note when the opened one is not it (#180).
    */
-  private seriesView(opened: LifeOSObject) {
-    const { index } = this.ctx;
+  private seriesView(opened: LifeOSObject): SeriesViewPayload | undefined {
     const seriesId = opened.frontmatter.recurrence_series_id;
     if (typeof seriesId !== "string") return undefined;
-    const anchorOf = (meeting: LifeOSObject) => Date.parse(String(meeting.frontmatter.original_occurrence_starts_at ?? meeting.frontmatter.starts_at));
-    const openedAnchor = anchorOf(opened);
-    const openedNoteId = this.noteFor(opened.frontmatter.id)?.frontmatter.id;
+    const base: SeriesCursorBase = {
+      s: seriesId,
+      ...(typeof opened.frontmatter.previous_recurrence_series_id === "string" ? { p: opened.frontmatter.previous_recurrence_series_id } : {}),
+      o: this.seriesAnchor(opened),
+      m: opened.frontmatter.id,
+      ...(this.noteFor(opened.frontmatter.id) ? { n: this.noteFor(opened.frontmatter.id)!.frontmatter.id } : {})
+    };
+    const newer = this.newerSeriesOccurrence(base);
+    return { ...this.seriesViewPageFor(base), ...(newer ? { newer } : {}) };
+  }
+
+  /** "Load older": the page after `cursor`. The cursor is self-contained, so it also serves a not-yet-stored occurrence. */
+  async seriesViewPage(cursor: string) {
+    return this.seriesViewPageFor(decodeSeriesCursor(cursor));
+  }
+
+  private seriesAnchor(meeting: LifeOSObject) {
+    return Date.parse(String(meeting.frontmatter.original_occurrence_starts_at ?? meeting.frontmatter.starts_at));
+  }
+
+  private seriesChain(base: SeriesCursorBase) {
+    const { index } = this.ctx;
+    const chain = [base.s];
+    let next = base.p;
+    while (next && !chain.includes(next)) {
+      chain.push(next);
+      const current: string = next;
+      const carrier = index.all().find((meeting) => meeting.frontmatter.type === "meeting" && isLive(meeting) && meeting.frontmatter.recurrence_series_id === current && typeof meeting.frontmatter.previous_recurrence_series_id === "string");
+      next = carrier ? String(carrier.frontmatter.previous_recurrence_series_id) : undefined;
+    }
+    return chain;
+  }
+
+  private newerSeriesOccurrence(base: SeriesCursorBase) {
+    let latest: LifeOSObject | undefined;
+    for (const meeting of this.ctx.index.all()) {
+      if (meeting.frontmatter.type !== "meeting" || !isLive(meeting) || meeting.frontmatter.recurrence_series_id !== base.s || meeting.frontmatter.id === base.m) continue;
+      if (this.seriesAnchor(meeting) <= base.o || !this.noteFor(meeting.frontmatter.id)) continue;
+      if (!latest || this.seriesAnchor(meeting) > this.seriesAnchor(latest)) latest = meeting;
+    }
+    return latest ? { meetingId: latest.frontmatter.id, startsAt: String(latest.frontmatter.starts_at), endsAt: String(latest.frontmatter.ends_at), timezone: String(latest.frontmatter.timezone) } : undefined;
+  }
+
+  private seriesViewPageFor(base: SeriesCursorBase) {
+    const { index } = this.ctx;
+    const chain = new Set(this.seriesChain(base));
     const liveSeriesMeeting = (candidate: LifeOSObject | undefined): candidate is LifeOSObject =>
-      candidate?.frontmatter.type === "meeting" && isLive(candidate) && candidate.frontmatter.recurrence_series_id === seriesId;
+      candidate?.frontmatter.type === "meeting" && isLive(candidate) && typeof candidate.frontmatter.recurrence_series_id === "string" && chain.has(candidate.frontmatter.recurrence_series_id);
     const notes = new Map<string, LifeOSObject>();
     for (const meeting of index.all()) {
-      if (!liveSeriesMeeting(meeting) || meeting.frontmatter.id === opened.frontmatter.id) continue;
+      if (!liveSeriesMeeting(meeting) || meeting.frontmatter.id === base.m) continue;
       const note = this.noteFor(meeting.frontmatter.id);
-      if (note && note.frontmatter.id !== openedNoteId) notes.set(note.frontmatter.id, note);
+      if (note && note.frontmatter.id !== base.n) notes.set(note.frontmatter.id, note);
     }
     const entries = [...notes.values()].flatMap((note) => {
       const linkedIds = Array.isArray(note.frontmatter.meeting_ids) ? note.frontmatter.meeting_ids.filter((id): id is string => typeof id === "string") : [];
       const legacyShared = linkedIds.length > 1 || Array.isArray(note.frontmatter.occurrence_sections);
       const linkedMeetings = (legacyShared ? linkedIds : [String(note.frontmatter.meeting_id)]).map((id) => index.get(id)).filter(liveSeriesMeeting);
-      const earlierMeetings = linkedMeetings.filter((meeting) => meeting.frontmatter.id !== opened.frontmatter.id && anchorOf(meeting) < openedAnchor);
+      const earlierMeetings = linkedMeetings.filter((meeting) => meeting.frontmatter.id !== base.m && this.seriesAnchor(meeting) < base.o);
       if (!earlierMeetings.length) return [];
-      const newestEarlierAnchor = Math.max(...earlierMeetings.map(anchorOf));
-      const byAnchor = [...linkedMeetings].sort((left, right) => anchorOf(left) - anchorOf(right));
+      const newestEarlierAnchor = Math.max(...earlierMeetings.map((meeting) => this.seriesAnchor(meeting)));
+      const byAnchor = [...linkedMeetings].sort((left, right) => this.seriesAnchor(left) - this.seriesAnchor(right));
       const first = byAnchor[0]!;
       const last = byAnchor[byAnchor.length - 1]!;
       return [{
@@ -600,12 +660,20 @@ export class MeetingsModule {
         entry: {
           kind: legacyShared ? "legacy-shared" as const : "occurrence" as const,
           note,
-          range: { startsAt: String(first.frontmatter.starts_at), endsAt: String(last.frontmatter.ends_at) }
+          range: { startsAt: String(first.frontmatter.starts_at), endsAt: String(last.frontmatter.ends_at) },
+          cancelled: !legacyShared && first.frontmatter.status === "cancelled"
         }
       }];
     });
     entries.sort((left, right) => right.newestEarlierAnchor - left.newestEarlierAnchor || left.entry.note.frontmatter.id.localeCompare(right.entry.note.frontmatter.id));
-    return { earlier: entries.slice(0, SERIES_VIEW_EARLIER_LIMIT).map(({ entry }) => entry) };
+    const remaining = base.a === undefined || base.i === undefined ? entries : entries.filter(({ newestEarlierAnchor, entry }) => newestEarlierAnchor < base.a! || (newestEarlierAnchor === base.a && entry.note.frontmatter.id > base.i!));
+    const page = remaining.slice(0, SERIES_VIEW_EARLIER_LIMIT);
+    const lastShown = page[page.length - 1];
+    const more = remaining.length > page.length && lastShown;
+    return {
+      earlier: page.map(({ entry }) => entry),
+      ...(more ? { nextCursor: encodeSeriesCursor({ ...base, a: lastShown.newestEarlierAnchor, i: lastShown.entry.note.frontmatter.id }) } : {})
+    };
   }
 
   private occurrenceItems(note: LifeOSObject) {
@@ -812,11 +880,14 @@ export class MeetingsModule {
     if ((stored.seriesId !== undefined && stored.seriesId !== seriesId)
       || (stored.occurrenceId !== undefined && stored.occurrenceId !== occurrenceId)
       || (stored.originalStartsAt !== undefined && stored.originalStartsAt !== event.originalOccurrenceStartsAt)) return meeting;
-    if (stored.seriesId === seriesId && stored.occurrenceId === occurrenceId && stored.originalStartsAt === event.originalOccurrenceStartsAt) return meeting;
+    const previousSeriesId = event.previousSeriesId ? this.seriesKey(event, event.previousSeriesId) : undefined;
+    const missingPrevious = previousSeriesId !== undefined && meeting.frontmatter.previous_recurrence_series_id === undefined;
+    if (stored.seriesId === seriesId && stored.occurrenceId === occurrenceId && stored.originalStartsAt === event.originalOccurrenceStartsAt && !missingPrevious) return meeting;
     return this.ctx.update(meeting, {
       ...(stored.seriesId === undefined ? { recurrence_series_id: seriesId } : {}),
       ...(stored.occurrenceId === undefined ? { recurrence_occurrence_id: occurrenceId } : {}),
       ...(stored.originalStartsAt === undefined ? { original_occurrence_starts_at: event.originalOccurrenceStartsAt } : {}),
+      ...(missingPrevious ? { previous_recurrence_series_id: previousSeriesId } : {}),
       ...(meeting.frontmatter.recurrence_series_uid === undefined && event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {})
     }, { expectedHash: meeting.contentHash, now });
   }

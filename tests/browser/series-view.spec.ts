@@ -56,3 +56,39 @@ test("a Legacy shared Note appears once as a read-only block labelled with its d
   await expect(series.getByText("Legacy shared Prio words.")).toBeVisible();
   await expect(series.locator("textarea, input")).toHaveCount(0);
 });
+
+// #180: eight weekly occurrences with a Note (the 6th cancelled), a 9th cancelled without a Note.
+const WEEKLY = (n: number) => `e1000000-0000-4000-8000-00000000000${n}`;
+
+test("Load older adds 4 occurrences at a time until none remain, and marks a cancelled occurrence", async ({ page, request }) => {
+  await seed(request);
+  await page.goto(`/calendar/2026-04-20/${WEEKLY(8)}`);
+  const series = page.getByRole("region", { name: "Earlier occurrences" });
+  const entries = series.locator("details");
+  await expect(entries).toHaveCount(4);
+  await expect(entries.nth(0).locator("summary")).toContainText("April 13, 2026");
+  await expect(entries.nth(1).locator("summary")).toContainText("April 6, 2026");
+  await expect(entries.nth(1).locator("summary")).toContainText("Cancelled");
+  await expect(entries.nth(0).locator("summary")).not.toContainText("Cancelled");
+  // The cancelled occurrence without a Note (April 27) is hidden; no newer Note exists, so no link either.
+  await expect(series).not.toContainText("April 27, 2026");
+  await expect(series.getByText("Newer occurrences exist")).toHaveCount(0);
+
+  await series.getByRole("button", { name: "Load older" }).click();
+  await expect(entries).toHaveCount(7);
+  await expect(entries.nth(6).locator("summary")).toContainText("March 2, 2026");
+  await expect(series.getByRole("button", { name: "Load older" })).toHaveCount(0);
+});
+
+test("opening an older occurrence offers a link to the newest one with a Note", async ({ page, request }) => {
+  await seed(request);
+  await page.goto(`/calendar/2026-03-30/${WEEKLY(5)}`);
+  const series = page.getByRole("region", { name: "Earlier occurrences" });
+  await expect(series.locator("details")).toHaveCount(4);
+  await expect(series.getByRole("button", { name: "Load older" })).toHaveCount(0);
+  await series.getByRole("button", { name: /Open the latest/ }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/calendar/2026-04-20/${WEEKLY(8)}$`));
+  await expect(series.locator("details").first().locator("summary")).toContainText("April 13, 2026");
+  await expect(series.getByText("Newer occurrences exist")).toHaveCount(0);
+});
