@@ -57,6 +57,19 @@ await objectFile("meetings", recurring.note, {
 await objectFile("sources", recurring.source, {
   ...stamped(recurring.source, "source", "Synthetic planning transcript"), source_type: "meet-transcript", captured_at: "2026-10-12T08:35:00.000Z", ingestion_status: "processed", meeting_id: recurring.currentMeeting, url: "https://drive.example.com/docs/weekly-planning", retrieved_at: "2026-10-12T08:35:00.000Z"
 }, "Synthetic transcript content.\n");
+// #179 Series view: six monthly occurrences of one provider series, each with its own Note except
+// June, which has none and must be skipped. Opening September shows the 4 Notes before it.
+const monthly = { series: "mock:mock-calendar:monthly-review", months: ["04", "05", "06", "07", "08", "09"] };
+for (const [index, month] of monthly.months.entries()) {
+  const meetingId = `a1000000-0000-4000-8000-00000000000${index + 1}`;
+  const startsAt = `2026-${month}-07T08:00:00.000Z`;
+  await objectFile("meetings", meetingId, {
+    ...stamped(meetingId, "meeting", "Monthly review"), status: "scheduled", starts_at: startsAt, ends_at: `2026-${month}-07T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: monthly.series, recurrence_occurrence_id: `${monthly.series}:${startsAt}`, original_occurrence_starts_at: startsAt
+  });
+  if (month === "06") continue;
+  const noteId = `b1000000-0000-4000-8000-00000000000${index + 1}`;
+  await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Monthly review notes ${month}`), meeting_id: meetingId }, `Monthly review words for 2026-${month}.\n`);
+}
 await objectFile("review-items", recurring.review, {
   ...stamped(recurring.review, "review-item", "Send the synthetic agenda"), review_type: "create", target_object_type: "task", proposed_fields: { title: "Send the synthetic agenda", source_meeting_id: recurring.currentMeeting }, confidence_label: "High", status: "pending", operation_id: recurring.operation, source_meeting_id: recurring.currentMeeting, occurrence_section_id: recurring.currentSection
 }, "Synthetic proposal.\n");

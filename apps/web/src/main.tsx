@@ -62,6 +62,7 @@ import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { adoptCreatedOccurrenceDraft, RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
+import { SeriesView } from "./SeriesView.js";
 import { meetingSummary } from "./meetingSummary.js";
 import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
@@ -1062,6 +1063,7 @@ function App() {
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </EditorFrame>}
+              {workspace.seriesView && <SeriesView view={workspace.seriesView} timeZone={displayTimeZone} hideNoteId={recurringDisplayNote?.frontmatter.id} />}
               {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
               {!workspace.occurrences?.length && meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
               {!workspace.occurrences?.length && <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>

@@ -379,7 +379,8 @@ describe("recurring meeting notes (#147)", () => {
       persisted: false,
       note: undefined,
       seriesNotePreview: { body: expect.stringContaining("Last week's details") },
-      pendingOccurrence: { originalStartsAt: currentEvent.originalOccurrenceStartsAt }
+      pendingOccurrence: { originalStartsAt: currentEvent.originalOccurrenceStartsAt },
+      seriesView: { earlier: [{ kind: "legacy-shared", note: { body: expect.stringContaining("Last week's details") } }] }
     });
     expect(await app.listObjects()).toEqual(before);
 

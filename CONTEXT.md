@@ -179,7 +179,7 @@ The Calendar occurrences that share one provider recurrence identity. Each occur
 _Avoid_: Repeated meeting, recurring Meeting record
 
 **Series view**:
-What opening a recurring occurrence shows: its own Meeting Note plus the Notes of the 5 most recent earlier occurrences, newest first, each saved to its own file. Each Note keeps its own Sensitivity.
+What opening a recurring occurrence shows: its own Meeting Note plus the Notes of the 4 most recent earlier occurrences, newest first, each saved to its own file. Each Note keeps its own Sensitivity.
 _Avoid_: Series document, recurring document
 
 **Legacy shared Note**:

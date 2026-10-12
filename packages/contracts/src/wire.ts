@@ -43,7 +43,24 @@ export type Workspace = {
   seriesNotePreview?: LifeObject;
   /** The unsaved occurrence displayed above `seriesNotePreview`; materialized only on the first edit. */
   pendingOccurrence?: OccurrenceWorkspaceItem;
+  /** Present on every recurring occurrence (new or stored): the read-only history of the same provider series (ADR 0021). */
+  seriesView?: SeriesView;
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
+};
+/** Earlier occurrences of the opened occurrence's series that have a live Note, newest first, at most 4 (ADR 0021). */
+export type SeriesView = { earlier: SeriesViewEarlier[] };
+export type SeriesViewEarlier = {
+  /** `legacy-shared`: one ADR 0019 Note linked to several Meetings, shown once. */
+  kind: "occurrence" | "legacy-shared";
+  note: LifeObject;
+  /** The Meetings this Note covers (one for an occurrence). */
+  meetingIds: string[];
+  /** Start of the newest covered Meeting; this is the Note's position in the list. */
+  startsAt: string;
+  endsAt: string;
+  /** Date range of the covered Meetings (equal to startsAt for a single occurrence). */
+  rangeStartsAt: string;
+  rangeEndsAt: string;
 };
 export type OccurrenceWorkspaceItem = {
   sectionId: string;
