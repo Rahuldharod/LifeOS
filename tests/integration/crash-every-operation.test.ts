@@ -161,10 +161,28 @@ const scenarios: Record<OperationKind, Scenario> = {
     retry: (application, { externalId }) => application.createMeetingFromEvent(externalId!)
   },
   [operationKinds.linkRecurringSeries]: {
+    // #172: new occurrences no longer create series Notes, so Legacy shared Notes (ADR 0019) are seeded straight into
+    // the vault. Opening the predecessor's occurrence still repairs the successor's link, and an old journal of this
+    // kind must keep recovering.
     calendar: recurrenceCalendar,
-    setup: async (_root, application) => {
-      const successor = await application.createMeetingFromEvent("series-after");
-      return { externalId: "series-before", successorNoteId: successor.note!.frontmatter.id };
+    setup: async (root, application) => {
+      const timestamp = "2026-10-11T12:00:00.000Z";
+      const legacy = async (n: { externalId: string; seriesId: string; startsAt: string; previousSeriesId?: string }) => {
+        const meetingId = uuidV7();
+        const noteId = uuidV7();
+        const seriesKey = `fake:work:${n.seriesId}`;
+        const stamp = { schema_version: 1, revision: 1, created_at: timestamp, updated_at: timestamp, updated_by_device: "test" };
+        const meeting = { id: meetingId, type: "meeting", ...stamp, title: "Weekly planning", origin: "calendar", status: "scheduled", starts_at: n.startsAt, ends_at: n.startsAt, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: seriesKey, recurrence_occurrence_id: `${seriesKey}:${n.startsAt}`, original_occurrence_starts_at: n.startsAt, external_refs: [{ provider: "fake", external_id: n.externalId, calendar_id: "work", series_id: n.seriesId, original_occurrence_starts_at: n.startsAt }] };
+        const note = { id: noteId, type: "meeting-note", ...stamp, title: "Weekly planning notes", origin: "app", meeting_id: meetingId, meeting_ids: [meetingId], recurrence_series_id: seriesKey, recurrence_series_uid: "provider-weekly-planning", occurrence_sections: [{ occurrence_id: `${seriesKey}:${n.startsAt}`, section_id: `s-${n.seriesId}`, meeting_id: meetingId, original_starts_at: n.startsAt, starts_at: n.startsAt }], ...(n.previousSeriesId ? { previous_recurrence_series_id: `fake:work:${n.previousSeriesId}`, previous_recurrence_series_source: "provider" } : {}) };
+        await writeFile(path.join(root, "meetings", `${meetingId}.md`), `---\n${stringify(meeting).trimEnd()}\n---\n# Weekly planning\n`);
+        await writeFile(path.join(root, "meetings", `${noteId}-note.md`), `---\n${stringify(note).trimEnd()}\n---\nlegacy ${n.seriesId}\n`);
+        return noteId;
+      };
+      await mkdir(path.join(root, "meetings"), { recursive: true });
+      await legacy({ externalId: "series-before", seriesId: "series-a", startsAt: "2026-10-05T08:00:00.000Z" });
+      const successorNoteId = await legacy({ externalId: "series-after", seriesId: "series-b", previousSeriesId: "series-a", startsAt: "2026-10-12T08:00:00.000Z" });
+      await application.rebuildIndex();
+      return { externalId: "series-before", successorNoteId };
     },
     act: (application, { externalId }) => application.createMeetingFromEvent(externalId!),
     retry: (application, { externalId }) => application.createMeetingFromEvent(externalId!),

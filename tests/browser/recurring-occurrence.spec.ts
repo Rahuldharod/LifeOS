@@ -70,58 +70,42 @@ test("a new recurring occurrence shows the plain pending editor and its shared h
 
 // Incident 2026-10-12: after the first edit created the occurrence inside the shared Note, the browser kept only the
 // typed text as its draft and the next autosave replaced every occurrence section with it.
-test("the first edit on a new occurrence never shrinks the shared recurring Note", async ({ page, request }) => {
+// #172: the first edit now creates only this occurrence's own Meeting and Note. This test runs against the real local API
+// (nothing about creation or saving is mocked): the seeded "weekly-prio" series has a Legacy shared Note and an earlier
+// per-occurrence Note, and the mock calendar reports a new 28 September occurrence of it (see serve.mjs).
+test("the first edit on a new occurrence creates only its own Note and no save ever touches another occurrence's Note", async ({ page, request }) => {
   await seed(request);
-  const stored = await (await request.get(`/api/v1/meetings/${RECURRING_NOTE.currentMeetingId}/workspace`)).json();
-  const startsAt = "2026-10-19T08:00:00.000Z";
-  const sectionId = "occurrence-2026-10-19t08-00-00-000z";
-  const event = { externalId: "weekly-planning-next", calendarId: "mock-calendar", calendarName: "LifeOS Demo", title: "Weekly planning", startsAt, endsAt: "2026-10-19T08:30:00.000Z", timezone: "Europe/Paris", seriesId: "weekly-planning", originalOccurrenceStartsAt: startsAt, attendees: [] };
-  const meetingId = "77777777-7777-4777-8777-777777777777";
-  const fields = { ...stored.meeting.frontmatter, title: event.title, starts_at: startsAt, ends_at: event.endsAt, recurrence_occurrence_id: `mock:mock-calendar:weekly-planning:${startsAt}`, original_occurrence_starts_at: startsAt };
-  const preview = { ...stored.meeting, body: "", relativePath: "", contentHash: "", frontmatter: { ...fields, id: `preview:${event.externalId}` } };
-  const pendingOccurrence = { sectionId, occurrenceId: fields.recurrence_occurrence_id, originalStartsAt: startsAt, meeting: preview, reviews: [], sources: [], context: { people: [] } };
-  const legacyRange = { startsAt: "2026-10-05T08:00:00.000Z", endsAt: "2026-10-12T08:30:00.000Z" };
-  const saved: string[] = [];
-  await page.route("**/api/v1/calendar/day?*", (route) => route.fulfill({ json: { events: [event] } }));
-  await page.route("**/api/v1/meetings/preview?*", (route) => route.fulfill({ json: { persisted: false, meeting: preview, reviews: [], tasks: [], seriesView: { earlier: [{ kind: "legacy-shared", note: stored.note, range: legacyRange }] }, context: { people: [] } } }));
-  // The server wraps the first edit in a new section of the shared Note, as `createMeetingFromEvent` does.
-  await page.route("**/api/v1/meetings/from-event", async (route) => {
-    const { body } = route.request().postDataJSON() as { body: string };
-    const meeting = { ...stored.meeting, frontmatter: { ...fields, id: meetingId } };
-    const note = { ...stored.note, contentHash: "created-hash", body: `## Weekly planning — ${startsAt}\n<a id="${sectionId}"></a>\n\n${body}\n\n${stored.note.body}`, frontmatter: { ...stored.note.frontmatter, occurrence_sections: [{ section_id: sectionId, meeting_id: meetingId }, ...stored.note.frontmatter.occurrence_sections] } };
-    const created = { persisted: true, meeting, note, reviews: [], tasks: [], occurrences: [{ ...pendingOccurrence, meeting }, ...stored.occurrences], context: { people: [] } };
-    await page.route(`**/api/v1/meetings/${meetingId}/workspace`, (workspace) => workspace.fulfill({ json: created }));
-    await route.fulfill({ json: created });
-  });
-  await page.route("**/api/v1/objects/*/body", async (route) => {
-    const { body } = route.request().postDataJSON() as { body: string };
-    saved.push(body);
-    await route.fulfill({ json: { ...stored.note, body, contentHash: `saved-${saved.length}` } });
-  });
+  type NoteRow = { frontmatter: { id: string }; body: string; contentHash: string };
+  const readNotes = async () => new Map(((await (await request.get("/api/v1/notes")).json()) as NoteRow[]).map((note) => [note.frontmatter.id, note] as const));
+  const before = await readNotes();
+  const legacyId = "d1000000-0000-4000-8000-000000000001";
+  expect(before.get(legacyId)?.body).toBe("Legacy shared Prio words.\n");
 
-  await page.goto("/calendar/2026-10-19");
-  await page.getByRole("button", { name: "Open event: Weekly planning" }).click();
-  // The real first-edit path: typing in the plain pending editor creates the occurrence, which the server merges into the shared Note.
+  await page.goto("/calendar/2026-09-28");
+  await page.getByRole("button", { name: "Open event: Weekly Prio" }).click();
+  const series = page.getByRole("region", { name: "Earlier occurrences" });
+  await expect(series.locator("details")).toHaveCount(2);
+
   await page.getByRole("button", { name: "Markdown" }).click();
-  await page.getByPlaceholder(/Capture meeting notes/).fill("This week");
+  const editor = page.getByPlaceholder(/Capture meeting notes/);
+  await editor.fill("This week");
   await page.waitForResponse("**/api/v1/meetings/from-event");
-  const workspace = page.getByRole("region", { name: "Recurring meeting occurrences" });
-  await expect(workspace.getByRole("textbox", { name: `Notes for ${sectionId}` })).toHaveValue("This week");
   // Longer than one autosave interval: the incident's destructive save landed 1.8 s after creation.
   await page.waitForTimeout(2500);
-  await workspace.getByRole("textbox", { name: `Notes for ${sectionId}` }).pressSequentially("!");
-  await expect.poll(() => saved.length, { timeout: 5000 }).toBeGreaterThan(0);
+  await editor.pressSequentially("!");
+  await expect.poll(async () => [...(await readNotes()).values()].filter((note) => !before.has(note.frontmatter.id)).map((note) => note.body), { timeout: 8000 }).toEqual(["This week!"]);
+  await page.waitForTimeout(2500);
 
-  for (const body of saved) {
-    expect(body).toContain(`<a id="${RECURRING_NOTE.currentSectionId}"></a>`);
-    expect(body).toContain(`<a id="${RECURRING_NOTE.olderSectionId}"></a>`);
+  const after = await readNotes();
+  // Exactly one new Note; every Note that existed before is byte-identical (same hash, same body).
+  expect([...after.keys()].filter((id) => !before.has(id))).toHaveLength(1);
+  for (const [id, note] of before) {
+    expect(after.get(id)?.contentHash, `Note ${id} must not change`).toBe(note.contentHash);
+    expect(after.get(id)?.body).toBe(note.body);
   }
-  expect(saved.at(-1)).toContain("This week!");
-  const olderNotes = await workspace.locator(`textarea[aria-label="Notes for ${RECURRING_NOTE.olderSectionId}"]`).inputValue();
-  expect(olderNotes).not.toBe("");
-  expect(stored.note.body).toContain(olderNotes);
-
-  // Typing at the end of a section keeps its spaces; only the separator between sections is app-managed.
-  await workspace.getByRole("textbox", { name: `Notes for ${sectionId}` }).pressSequentially(" and more");
-  await expect(workspace.getByRole("textbox", { name: `Notes for ${sectionId}` })).toHaveValue("This week! and more");
+  // The Series view still shows the earlier occurrences after creation.
+  await expect(page.getByRole("region", { name: "Earlier occurrences" }).locator("details")).toHaveCount(2);
+  const summaries = page.getByRole("region", { name: "Earlier occurrences" }).locator("summary");
+  await expect(summaries.nth(0)).toContainText("September 21, 2026");
+  await expect(summaries.nth(1)).toContainText("Shared Note");
 });

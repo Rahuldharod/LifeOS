@@ -144,7 +144,7 @@ export class MeetingMaterialModule {
       await ctx.rebuildIndex();
     }
 
-    if (occurrence && (sourceIds.length || summary || proposals.length)) {
+    if (occurrence && (sourceIds.length || summary || proposals.length) && this.meetings?.hasLegacySharedSection(ctx.required(meetingId, "meeting"))) {
       const materialized = await this.meetings?.ensureOccurrenceSectionForEnrichment(ctx.required(meetingId, "meeting"), lookup.from, lookup.to, lookup.calendarId, run.newId(roles.meetingNote));
       if (!materialized?.note) throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} could not be materialized`]);
       await ctx.rebuildIndex();

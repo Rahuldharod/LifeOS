@@ -6,6 +6,7 @@ import { LifeOSApplication, type CalendarConnector, type CalendarEvent } from "@
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { globalSearchResults } from "../../apps/web/src/globalSearch.js";
+import { seedLegacySharedNote } from "./legacy-shared-note.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -30,8 +31,10 @@ describe("Global Search Calendar integration (#152)", () => {
     const app = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), new SyntheticCalendar([older, newer, plain]), undefined, "search-test");
     await app.rebuildIndex();
     const from = new Date("2026-07-13T12:00:00.000Z"); const to = new Date("2027-10-11T12:00:00.000Z");
-    const oldWorkspace = await app.createMeetingFromEvent(older.externalId, from, to, older.calendarId, "Older customer decision\n");
-    await app.createMeetingFromEvent(newer.externalId, from, to, newer.calendarId, "Newer customer decision\n");
+    // #172: new occurrences get their own Notes, so the shared Note whose sections search deep-links to is a Legacy shared Note.
+    const { items } = await seedLegacySharedNote(root, "synthetic", [{ event: older, body: "Older customer decision\n" }, { event: newer, body: "Newer customer decision\n" }]);
+    await app.rebuildIndex();
+    const oldWorkspace = await app.meetingWorkspace(items.find((item) => item.event === older)!.meetingId);
     const calendar = await app.listCalendarEvents(from, to);
     const note = app.notes()[0]!;
 

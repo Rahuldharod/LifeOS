@@ -110,6 +110,15 @@ for (const [name, content] of Object.entries(files)) {
   await utimes(file, old, old);
 }
 
+// #172: recurring occurrences the mock calendar reports, so real-API browser tests can open a NEW occurrence of a seeded series.
+// "weekly-prio" has a Legacy shared Note plus a later per-occurrence Note; "monthly-review" has only per-occurrence Notes.
+const mockEvents = path.join(backupRoot, "mock-events.json");
+const mockEvent = (externalId, title, seriesId, day) => ({ externalId, calendarId: "mock-calendar", calendarName: "LifeOS Demo", title, startsAt: `${day}T08:00:00.000Z`, endsAt: `${day}T09:00:00.000Z`, timezone: "Europe/Paris", attendees: [], seriesId, originalOccurrenceStartsAt: `${day}T08:00:00.000Z` });
+await writeFile(mockEvents, JSON.stringify([
+  mockEvent("mock-weekly-prio-next", "Weekly Prio", "weekly-prio", "2026-09-28"),
+  mockEvent("mock-monthly-review-next", "Monthly review", "monthly-review", "2026-10-07")
+]));
+
 const server = spawn(process.execPath, ["--import", "tsx", "src/main.ts"], {
   cwd: path.join(repo, "apps/server"),
   stdio: "inherit",
@@ -121,6 +130,7 @@ const server = spawn(process.execPath, ["--import", "tsx", "src/main.ts"], {
     LIFEOS_BACKUP_ROOT: backupRoot,
     LIFEOS_DEVICE_ID: "browser-test",
     LIFEOS_CALENDAR: "mock",
+    LIFEOS_MOCK_EVENTS: mockEvents,
     LIFEOS_WEB_ROOT: webRoot
   }
 });

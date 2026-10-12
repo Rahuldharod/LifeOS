@@ -66,13 +66,10 @@ export type NoteDraftControllerOptions = {
   /** Creates the note on the server from the first real edit (see `openPending`). Must be
    * idempotent server-side, since a failed attempt is retried with the same draft. */
   createNote?: (body: string) => Promise<DraftControllerNote | undefined>;
-  /** Adapts a pending draft after creation when the server wraps it in a larger canonical body,
-   * such as one occurrence section inside a recurring Meeting Note. */
-  adoptCreatedDraft?: (created: DraftControllerNote, activeDraft: string, submittedDraft: string) => string;
   autosaveDelayMs?: number;
 };
 
-export function useNoteDraftController({ note, readOnly, busy, onMessage, onSaved, fetchLatest, createNote, adoptCreatedDraft, autosaveDelayMs = 1800 }: NoteDraftControllerOptions): NoteDraftController {
+export function useNoteDraftController({ note, readOnly, busy, onMessage, onSaved, fetchLatest, createNote, autosaveDelayMs = 1800 }: NoteDraftControllerOptions): NoteDraftController {
   const [draft, setDraftState] = useState("");
   const [base, setBase] = useState<NoteDraftBase>();
   const [conflict, setConflict] = useState(false);
@@ -151,8 +148,8 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
       pendingKeyRef.current = undefined; setPendingKey(undefined);
       setBase(noteDraftBase(created));
       clearCachedDraft(key);
-      const adoptedDraft = adoptCreatedDraft?.(created, activeDraft.current, bodyToSave)
-        ?? (activeDraft.current === bodyToSave ? created.body : activeDraft.current);
+      // Every occurrence has its own Note (ADR 0021), so the created body is exactly what was submitted.
+      const adoptedDraft = activeDraft.current === bodyToSave ? created.body : activeDraft.current;
       activeDraft.current = adoptedDraft;
       setDraftState(adoptedDraft);
       if (adoptedDraft !== created.body) cacheDraft(created.frontmatter.id, adoptedDraft, created.contentHash);

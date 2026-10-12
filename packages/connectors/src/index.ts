@@ -4,10 +4,20 @@ import { createHash, randomBytes } from "node:crypto";
 
 export class MockCalendarConnector implements CalendarConnector {
   readonly provider = "mock";
+  /**
+   * `fixedEvents` are returned unchanged whenever they overlap the requested window. Dev mode passes none, so its
+   * behaviour is unchanged; the browser-test server passes recurring events so real-API tests can open a new
+   * occurrence of a seeded series (#172).
+   */
+  constructor(private readonly fixedEvents: CalendarEvent[] = []) {}
   async listCalendars(): Promise<CalendarSummary[]> {
     return [{ id: "mock-calendar", name: "LifeOS Demo", color: "#5f8b7c" }];
   }
   async listEvents(from: Date, to: Date) {
+    const fixed = this.fixedEvents.filter((event) => Date.parse(event.startsAt) < to.getTime() && Date.parse(event.endsAt) > from.getTime());
+    return [...fixed, ...this.relativeEvents(from, to)];
+  }
+  private relativeEvents(from: Date, to: Date): CalendarEvent[] {
     const startsAt = new Date(Math.max(from.getTime(), Date.now() + 3_600_000));
     return startsAt < to ? [{
       externalId: "mock-weekly-review",

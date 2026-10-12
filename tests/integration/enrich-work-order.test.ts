@@ -7,6 +7,7 @@ import { LifeOSApplication, type CalendarConnector, type CalendarEvent } from "@
 import { uuidV7 } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemInboxStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
+import { seedLegacySharedNote } from "./legacy-shared-note.js";
 
 // Issue #44 (PRD "Enrichment Work Orders"): "Enrich last 48h" writes one Work Order to `_inbox/requests/`
 // and moves each selected meeting's `enrichment_state` to `requested`.
@@ -107,8 +108,11 @@ describe("Enrich last 48h Work Order", () => {
     });
     expect(firstEntry.note_path).toBeUndefined();
 
-    const workspace = await application.createMeetingFromEvent(recurring.externalId, range.from, range.to, "work", "Occurrence notes\n");
-    const sectionId = (workspace.note!.frontmatter.occurrence_sections as Array<{ section_id: string }>)[0]!.section_id;
+    // #172: a first edit now makes a plain per-occurrence Note, so the section a Work Order points at exists only in a Legacy shared Note.
+    const { items } = await seedLegacySharedNote(root, "google", [{ event: recurring, body: "Occurrence notes\n" }]);
+    await application.rebuildIndex();
+    const workspace = await application.meetingWorkspace(items[0]!.meetingId);
+    const sectionId = items[0]!.sectionId;
     const second = await application.requestEnrichment({ now: new Date(now.getTime() + 60_000) });
     const secondEntry = ((await frontmatterOf(path.join(root, second.workOrder!))).meetings as Array<Record<string, unknown>>)[0]!;
     expect(secondEntry).toMatchObject({
@@ -190,7 +194,9 @@ describe("Enrich last 48h Work Order", () => {
     const firstEvent = event("series-first", 30, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(30) });
     const secondEvent = event("series-second", 3, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(3) });
     const { root, application } = await vault([firstEvent, secondEvent]);
-    const first = await application.createMeetingFromEvent(firstEvent.externalId, range.from, range.to, "work", "First occurrence\n");
+    const { items } = await seedLegacySharedNote(root, "google", [{ event: firstEvent, body: "First occurrence\n" }]);
+    await application.rebuildIndex();
+    const first = await application.meetingWorkspace(items[0]!.meetingId);
     await application.setSensitivity(first.note!.frontmatter.id, "restricted", first.note!.contentHash);
 
     const result = await application.requestEnrichment({ now });

@@ -40,19 +40,6 @@ export function replaceOccurrenceNotes(markdown: string, occurrences: Occurrence
   return `${before}${section}${range.last ? "\n" : "\n\n"}${after}`;
 }
 
-/**
- * A pending editor holds only the new occurrence's text. After the server attaches that occurrence
- * to the shared Note, expand the browser draft to the canonical body without losing history or
- * keystrokes made while creation was in flight.
- */
-export function adoptCreatedOccurrenceDraft(createdBody: string, occurrences: OccurrenceWorkspaceItem[], meetingId: string, activeDraft: string) {
-  const occurrence = occurrences.find((item) => item.meeting.frontmatter.id === meetingId);
-  // Without the new occurrence the typed text cannot be placed, and it must never stand in for the
-  // whole shared body (the 2026-10-12 overwrite). The editor is disabled while creating, so the
-  // created body already holds what was typed.
-  return occurrence ? replaceOccurrenceNotes(createdBody, occurrences, occurrence.sectionId, activeDraft) : createdBody;
-}
-
 function day(value: string, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
