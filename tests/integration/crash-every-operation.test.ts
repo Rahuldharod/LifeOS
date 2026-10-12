@@ -6,7 +6,7 @@ import { stringify } from "yaml";
 import { MockAiProvider } from "@lifeos/ai";
 import { LifeOSApplication, operationKinds, type CalendarConnector, type CalendarEvent, type OperationKind } from "@lifeos/application";
 import { MockCalendarConnector } from "@lifeos/connectors";
-import type { LifeOSObject } from "@lifeos/domain";
+import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemInboxStore } from "@lifeos/object-store-markdown";
 import { CrashingStore } from "./crash-store.js";
@@ -85,6 +85,41 @@ const decideAgain = (decision: "accept" | "reject") => async (application: LifeO
   await (decision === "accept" ? application.acceptReviewItem(reviewId!) : application.rejectReviewItem(reviewId!));
 };
 
+function recurrenceCalendar() {
+  const calendar = new FakeCalendar();
+  const event = (input: { externalId: string; seriesId: string; startsAt: string; previousSeriesId?: string }): CalendarEvent => ({
+    externalId: input.externalId,
+    calendarId: "work",
+    title: "Weekly planning",
+    startsAt: input.startsAt,
+    endsAt: new Date(Date.parse(input.startsAt) + 1_800_000).toISOString(),
+    timezone: "Europe/Paris",
+    attendees: [],
+    seriesId: input.seriesId,
+    seriesUid: "provider-weekly-planning",
+    previousSeriesId: input.previousSeriesId,
+    originalOccurrenceStartsAt: input.startsAt
+  });
+  calendar.events = [
+    event({ externalId: "series-before", seriesId: "series-a", startsAt: "2026-10-05T08:00:00.000Z" }),
+    event({ externalId: "series-after", seriesId: "series-b", previousSeriesId: "series-a", startsAt: "2026-10-12T08:00:00.000Z" })
+  ];
+  return calendar;
+}
+
+async function legacyRecurringNote(root: string, application: LifeOSApplication) {
+  const meetingId = uuidV7();
+  const noteId = uuidV7();
+  const timestamp = "2026-10-11T12:00:00.000Z";
+  const startsAt = "2026-10-12T08:00:00.000Z";
+  const seriesId = "synthetic:work:weekly-planning";
+  await mkdir(path.join(root, "meetings"), { recursive: true });
+  await writeFile(path.join(root, "meetings", `${meetingId}.md`), `---\n${stringify({ id: meetingId, type: "meeting", schema_version: 1, revision: 1, title: "Weekly planning", created_at: timestamp, updated_at: timestamp, updated_by_device: "test", origin: "calendar", status: "scheduled", starts_at: startsAt, ends_at: "2026-10-12T08:30:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: seriesId, recurrence_occurrence_id: `${seriesId}:${startsAt}`, original_occurrence_starts_at: startsAt }).trimEnd()}\n---\n# Weekly planning\n`);
+  await writeFile(path.join(root, "meetings", `${noteId}-note.md`), `---\n${stringify({ id: noteId, type: "meeting-note", schema_version: 1, revision: 1, title: "Weekly planning notes", created_at: timestamp, updated_at: timestamp, updated_by_device: "test", origin: "app", meeting_id: meetingId }).trimEnd()}\n---\nLegacy notes survive migration.\n`);
+  await application.rebuildIndex();
+  return { meetingId, noteId, noteHash: application.object(noteId).contentHash };
+}
+
 /**
  * One scenario per kind. Typed over every `OperationKind`, so a new kind does not compile until it has one; the test
  * below also fails at run time if the journal names a kind this table misses.
@@ -124,6 +159,25 @@ const scenarios: Record<OperationKind, Scenario> = {
     act: (application, { externalId }) => application.createMeetingFromEvent(externalId!),
     // Opening the event again is how the user (or the next calendar sync) finishes a meeting that was never journalled.
     retry: (application, { externalId }) => application.createMeetingFromEvent(externalId!)
+  },
+  [operationKinds.linkRecurringSeries]: {
+    calendar: recurrenceCalendar,
+    setup: async (_root, application) => {
+      const successor = await application.createMeetingFromEvent("series-after");
+      return { externalId: "series-before", successorNoteId: successor.note!.frontmatter.id };
+    },
+    act: (application, { externalId }) => application.createMeetingFromEvent(externalId!),
+    retry: (application, { externalId }) => application.createMeetingFromEvent(externalId!),
+    check: (objects, { successorNoteId }) => expect(objects.find((object) => object.frontmatter.id === successorNoteId)?.frontmatter.previous_series_note_id).toBeDefined()
+  },
+  [operationKinds.migrateRecurringNotes]: {
+    setup: legacyRecurringNote,
+    act: (application, { meetingId, noteId, noteHash }) => application.confirmRecurringMigration(meetingId!, { [noteId!]: noteHash! }),
+    retry: (application, { meetingId, noteId, noteHash }) => application.confirmRecurringMigration(meetingId!, { [noteId!]: noteHash! }),
+    check: (objects, { noteId }) => {
+      expect(objects.find((object) => object.frontmatter.id === noteId)?.frontmatter.archived_at).toBeDefined();
+      expect(objects.filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.recurrence_series_id)).toHaveLength(1);
+    }
   },
   [operationKinds.supersedeDecision]: {
     setup: async (_root, application) => {
@@ -240,6 +294,12 @@ describe("every journalled operation, crashed after each change it makes, recove
     it(`${kind}: same objects, every audit once, nothing left open`, async () => {
       const clean = await run(scenario);
       expect(clean.changes, "the clean run journals and writes").toBeGreaterThan(1);
+      if (kind === operationKinds.migrateRecurringNotes) {
+        expect(clean.log.indexOf("complete migrate-recurring-notes"), "migration closes before its audit").toBeLessThan(clean.log.indexOf("write audit meeting-note.migrated"));
+      }
+      if (kind === operationKinds.createMeeting) {
+        expect(clean.log.indexOf("complete create-meeting"), "meeting creation closes before its audit").toBeLessThan(clean.log.indexOf("write audit meeting.created"));
+      }
       scenario.check?.(clean.objects, clean.state);
       runsAccountedFor(clean.objects, `${kind}, clean run`);
 

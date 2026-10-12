@@ -30,7 +30,7 @@ async function setup(initial: string[]) {
   root = createRoot(document.createElement("div"));
   await act(async () => root!.render(<RouterProvider router={router} />));
   const settle = () => act(async () => { for (let tick = 0; tick < 5; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0)); });
-  return { editor, messages, router, nav: () => navigation!, settle, path: () => router.state.location.pathname };
+  return { editor, messages, router, nav: () => navigation!, settle, path: () => `${router.state.location.pathname}${router.state.location.hash}` };
 }
 
 describe("useGuardedNavigation (PB-027)", () => {
@@ -84,5 +84,12 @@ describe("useGuardedNavigation (PB-027)", () => {
     await page.settle();
     expect(page.editor.saved).toBe(0);
     expect(page.path()).toBe("/calendar/2026-10-09/m");
+  });
+
+  it("follows a section anchor on the current item", async () => {
+    const page = await setup(["/notes/a#occurrence-new"]);
+    act(() => page.nav().follow("/notes/a#occurrence-old", { replace: true }));
+    await page.settle();
+    expect(page.path()).toBe("/notes/a#occurrence-old");
   });
 });

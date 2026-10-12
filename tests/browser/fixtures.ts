@@ -5,6 +5,12 @@ import type { APIRequestContext } from "@playwright/test";
 import { routePath, type View } from "../../apps/web/src/routes.js";
 
 export type Seeded = { id: string; title: string };
+export const RECURRING_NOTE = {
+  id: "33333333-3333-4333-8333-333333333333",
+  title: "Weekly planning notes",
+  currentSectionId: "occurrence-2026-10-12t08-00-00-000z",
+  olderSectionId: "occurrence-2026-10-05t08-00-00-000z"
+} as const;
 export type SeedData = {
   tasks: Seeded[];
   /** The task with a very long title. */
@@ -18,6 +24,7 @@ export type SeedData = {
   longKnowledgeNote: Seeded;
   /** Pending Inbox review proposals (Review Item ids and the proposed titles). */
   reviewItems: Seeded[];
+  recurringNote: Seeded;
 };
 
 /** The path of a record's direct link, e.g. `recordUrl("Tasks", id)` is `/tasks/<id>`. Mirrors apps/web/src/routes.ts. */
@@ -106,5 +113,5 @@ async function readBack(get: <T>(url: string) => Promise<T>): Promise<SeedData> 
   const long = knowledgeNotes.find((note) => note.title === "Browser knowledge note 1");
   const longTitleTask = tasks.find((task) => task.title === LONG_TASK_TITLE);
   if (!long || !longTitleTask) throw new Error("Seed data is incomplete");
-  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems };
+  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems, recurringNote: RECURRING_NOTE };
 }

@@ -404,7 +404,7 @@ export function withOccurrenceMaterials(body: string, sections: Array<Record<str
   const startMarker = occurrenceMaterialsStart(sectionId);
   const endMarker = occurrenceMaterialsEnd(sectionId);
   const rows = sources.map((source) => {
-    const title = String(source.frontmatter.title).replace(/[\[\]]/g, "");
+    const title = String(source.frontmatter.title).replaceAll("[", "").replaceAll("]", "");
     const url = typeof source.frontmatter.url === "string" ? source.frontmatter.url : undefined;
     const details = [
       typeof source.frontmatter.retrieved_at === "string" ? `retrieved ${source.frontmatter.retrieved_at}` : undefined,

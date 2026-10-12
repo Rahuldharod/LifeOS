@@ -346,7 +346,7 @@ function App() {
   const routeAlreadyShown = useRef<string | undefined>(undefined);
   const followRoute = (next: Route, options: { replace?: boolean; shown?: boolean } = {}) => {
     const path = routePath(next);
-    if (path === locationRef.current.pathname) return;
+    if (path === `${locationRef.current.pathname}${locationRef.current.hash}`) return;
     if (options.shown) routeAlreadyShown.current = path;
     guarded.follow(path, options);
   };

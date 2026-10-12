@@ -98,7 +98,7 @@ describe("RecurringOccurrenceWorkspace", () => {
     root = createRoot(document.body.appendChild(document.createElement("div")));
     await act(async () => root!.render(<CalendarWorkspace {...props}>{occurrenceView()}</CalendarWorkspace>));
     const olderDetails = [...document.querySelectorAll("details")].find((item) => item.textContent?.includes("October 5"))!;
-    await act(async () => { olderDetails.open = true; olderDetails.dispatchEvent(new Event("toggle")); });
+    await act(async () => { (olderDetails.querySelector("summary") as HTMLElement).click(); });
     expect(olderDetails.classList.contains("selected")).toBe(true);
     const backButton = [...document.querySelectorAll("button")].find((button) => button.textContent === "Back to calendar") as HTMLButtonElement;
     await act(async () => backButton.click());

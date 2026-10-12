@@ -139,22 +139,26 @@ export class MeetingsModule {
   async confirmRecurringMigration(meetingId: string, expectedHashes: Record<string, string>) {
     const requested = this.recurringMigrationPreview(meetingId);
     if (!requested.seriesId) throw new Error("There are no credible existing Notes to migrate");
-    return this.meetingCreations.run(`migration:${requested.seriesId}`, async () => {
+    const seriesId = requested.seriesId;
+    return this.meetingCreations.run(`migration:${seriesId}`, async () => {
       // Re-read after entering the one-at-a-time scope: a simultaneous confirmation may have won.
-      const pending = (await this.ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.migrateRecurringNotes && operation.payload.seriesId === requested.seriesId);
+      const pending = (await this.ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.migrateRecurringNotes && operation.payload.seriesId === seriesId);
       // A durable journal always wins over a fresh preview: it may already have created the target
       // but still need redirects or archives after an interruption.
       if (pending) return this.runRecurringMigration(pending);
       const preview = this.recurringMigrationPreview(meetingId);
-      const existing = this.findSeriesNote(requested.seriesId);
-      if (!preview.candidates.length && existing) return existing;
+      const existing = this.findSeriesNote(seriesId);
+      if (!preview.candidates.length && existing) {
+        await this.writeRecurringMigrationAudit(existing, seriesId, String(existing.frontmatter.updated_at));
+        return existing;
+      }
       if (!preview.candidates.length) throw new Error("There are no credible existing Notes to migrate");
       for (const candidate of preview.candidates) {
         if (expectedHashes[candidate.noteId] !== candidate.contentHash) throw new ObjectConflictError(`Migration preview is stale for Note ${candidate.noteId}`);
       }
       const now = new Date().toISOString();
       const operation = await this.ctx.objects.prepareOperation?.(operationKinds.migrateRecurringNotes, {
-        seriesId: requested.seriesId,
+        seriesId,
         noteId: existing?.frontmatter.id ?? uuidV7(),
         title: `${this.ctx.required(meetingId, "meeting").frontmatter.title} notes`,
         now,
@@ -282,9 +286,21 @@ export class MeetingsModule {
       if (!source.frontmatter.archived_at) await this.ctx.update(source, { archived_at: now, archived_reason: `Migrated to Recurring Meeting Note ${noteId}` }, { expectedHash: source.contentHash, now });
     }
     await this.ctx.rebuildIndex();
-    await this.ctx.writeAuditOnce("meeting-note.migrated", noteId, now, { operation_id: operation.id, series_id: seriesId, source_note_ids: ordered.map((candidate) => candidate.noteId) }, { matchOn: ["operation_id"] });
     await this.ctx.objects.completeOperation?.(operation.id);
+    await this.writeRecurringMigrationAudit(target, seriesId, now, operation.id);
     return this.ctx.required(noteId, "meeting-note");
+  }
+
+  private async writeRecurringMigrationAudit(target: LifeOSObject, seriesId: string, now: string, operationId?: string) {
+    const sourceNoteIds = this.ctx.index.all()
+      .filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.redirect_to_note_id === target.frontmatter.id && object.frontmatter.archived_at)
+      .map((object) => object.frontmatter.id)
+      .sort();
+    await this.ctx.writeAuditOnce("meeting-note.migrated", target.frontmatter.id, now, {
+      ...(operationId ? { operation_id: operationId } : {}),
+      series_id: seriesId,
+      source_note_ids: sourceNoteIds
+    }, { matchOn: ["source_note_ids"] });
   }
 
   /** A replay must never archive text which was not copied into its recorded target section. */
@@ -423,11 +439,10 @@ export class MeetingsModule {
       }
       await this.enrichMeetingContext(existing, context, now);
       if (existingNote?.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(existingNote.frontmatter.recurrence_series_id), existingNote.frontmatter.id, now, undefined, existingNote);
-      if (pendingOperation) {
-        // #160: the crash may have come after the meeting or note and before the audit.
-        await ctx.writeAuditOnce("meeting.created", existing.frontmatter.id, now, { operation_id: pendingOperation.id, external_id: externalId }, { matchOn: ["operation_id"] });
-        await ctx.objects.completeOperation?.(pendingOperation.id);
-      }
+      if (pendingOperation) await ctx.objects.completeOperation?.(pendingOperation.id);
+      // #160: after the journal closes, a retry can still reconstruct a missing audit from the
+      // meeting. Action + object ID is the durable identity; operation_id is useful metadata only.
+      await this.writeCalendarMeetingCreatedAudit(existing, event, pendingOperation?.id);
       await ctx.rebuildIndex();
       await this.syncOccurrenceStatus(existing.frontmatter.id, event, now);
       return this.meetingWorkspace(existing.frontmatter.id);
@@ -441,10 +456,18 @@ export class MeetingsModule {
     const meeting = await this.writeMeeting(event, meetingId, context, now);
     const note = await this.attachOrCreateNote(event, meeting, noteId, noteBody, context, now);
     if (note.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(note.frontmatter.recurrence_series_id), note.frontmatter.id, now, undefined, note);
-    await ctx.writeAuditOnce("meeting.created", meetingId, now, { operation_id: operationId, external_id: externalId }, { matchOn: ["operation_id"] });
     await ctx.objects.completeOperation?.(operationId);
+    await this.writeCalendarMeetingCreatedAudit(meeting, event, operationId);
     await ctx.rebuildIndex();
     return this.meetingWorkspace(meetingId);
+  }
+
+  private async writeCalendarMeetingCreatedAudit(meeting: LifeOSObject, event: CalendarEvent, operationId?: string) {
+    await this.ctx.writeAuditOnce("meeting.created", meeting.frontmatter.id, String(meeting.frontmatter.created_at), {
+      ...(operationId ? { operation_id: operationId } : {}),
+      external_id: event.externalId,
+      ...(event.calendarId ? { calendar_id: event.calendarId } : {})
+    }, { matchOn: [] });
   }
 
   /**

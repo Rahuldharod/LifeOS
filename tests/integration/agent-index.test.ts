@@ -82,7 +82,7 @@ describe("Agent Index (#43)", () => {
   it("excludes every occurrence linked to one restricted recurring Note (#148)", async () => {
     const { root, application } = await vault();
     const first = await seed(root, "meetings", "meeting", "Private weekly one", { status: "scheduled", starts_at: at(-2), ends_at: at(-2 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [] });
-    const second = await seed(root, "meetings", "meeting", "Private weekly two", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:private" });
+    await seed(root, "meetings", "meeting", "Private weekly two", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:private" });
     await seed(root, "meetings", "meeting-note", "Private weekly notes", { meeting_id: first.id, meeting_ids: [first.id], recurrence_series_id: "google:work:private", sensitivity: "restricted" });
     await application.rebuildIndex();
 
