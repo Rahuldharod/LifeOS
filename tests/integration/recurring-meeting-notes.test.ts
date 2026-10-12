@@ -6,7 +6,6 @@ import { LifeOSApplication, type CalendarConnector, type CalendarEvent, type Cal
 import { uuidV7 } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
-import { seedLegacySharedNote } from "./legacy-shared-note.js";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
@@ -138,24 +137,6 @@ describe("recurring meeting notes (#147, #172)", () => {
     expect(oldSeries.note?.frontmatter.previous_series_note_id).toBeUndefined();
     expect(copy.meeting.frontmatter.recurrence_series_id).toBeUndefined();
     expect(copy.note?.body).toBe("plain body\n");
-  });
-
-  it("replays an interrupted predecessor link repair of a Legacy shared Note without duplicating work", async () => {
-    const before = event({ seriesId: "series-a", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
-    const after = event({ externalId: "occurrence-after-split", seriesId: "series-b", previousSeriesId: "series-a", originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z" });
-    const { app, store, root } = await setup([before, after]);
-    const oldSeries = await seedLegacySharedNote(root, "synthetic", [{ event: before, body: "Old series\n" }]);
-    const newSeries = await seedLegacySharedNote(root, "synthetic", [{ event: after, body: "New series\n" }], { previous_recurrence_series_id: "synthetic:work:series-a", previous_recurrence_series_source: "provider" });
-    const operationId = uuidV7();
-    await store.prepareOperation("link-recurring-series", { seriesId: "synthetic:work:series-a", noteId: oldSeries.noteId, now: "2026-10-11T10:00:00.000Z" }, operationId);
-    await app.rebuildIndex();
-
-    await app.recoverOperations();
-    await app.recoverOperations();
-    await app.rebuildIndex();
-
-    expect(app.object(newSeries.noteId).frontmatter.previous_series_note_id).toBe(oldSeries.noteId);
-    expect((await store.incompleteOperations()).find((operation) => operation.id === operationId)).toBeUndefined();
   });
 
   it("recovers a pending create-meeting from the captured occurrence into the occurrence's own Note and resolves additive legacy redirects", async () => {

@@ -8,7 +8,7 @@ import { LifeOSApplication, operationKinds, type CalendarConnector, type Calenda
 import { MockCalendarConnector } from "@lifeos/connectors";
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
-import { FilesystemInboxStore } from "@lifeos/object-store-markdown";
+import { FilesystemInboxStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { CrashingStore } from "./crash-store.js";
 
 // #160: every journalled operation kind (ADR 0013) is crashed after each change it makes, then the app restarts
@@ -161,9 +161,8 @@ const scenarios: Record<OperationKind, Scenario> = {
     retry: (application, { externalId }) => application.createMeetingFromEvent(externalId!)
   },
   [operationKinds.linkRecurringSeries]: {
-    // #172: new occurrences no longer create series Notes, so Legacy shared Notes (ADR 0019) are seeded straight into
-    // the vault. Opening the predecessor's occurrence still repairs the successor's link, and an old journal of this
-    // kind must keep recovering.
+    // #172: nothing journals this kind any more (series Notes are Legacy and never rewritten, ADR 0021), but an old journal of it
+    // must still recover. The vault holds two Legacy shared Notes and a pending journal; recovery closes it and leaves both Notes as they were.
     calendar: recurrenceCalendar,
     setup: async (root, application) => {
       const timestamp = "2026-10-11T12:00:00.000Z";
@@ -179,14 +178,15 @@ const scenarios: Record<OperationKind, Scenario> = {
         return noteId;
       };
       await mkdir(path.join(root, "meetings"), { recursive: true });
-      await legacy({ externalId: "series-before", seriesId: "series-a", startsAt: "2026-10-05T08:00:00.000Z" });
+      const predecessorNoteId = await legacy({ externalId: "series-before", seriesId: "series-a", startsAt: "2026-10-05T08:00:00.000Z" });
       const successorNoteId = await legacy({ externalId: "series-after", seriesId: "series-b", previousSeriesId: "series-a", startsAt: "2026-10-12T08:00:00.000Z" });
+      await new MarkdownObjectStore(root).prepareOperation(operationKinds.linkRecurringSeries, { seriesId: "fake:work:series-a", noteId: predecessorNoteId, now: timestamp }, uuidV7());
       await application.rebuildIndex();
       return { externalId: "series-before", successorNoteId };
     },
-    act: (application, { externalId }) => application.createMeetingFromEvent(externalId!),
+    act: async (application, { externalId }) => { await application.recoverOperations(); await application.createMeetingFromEvent(externalId!); },
     retry: (application, { externalId }) => application.createMeetingFromEvent(externalId!),
-    check: (objects, { successorNoteId }) => expect(objects.find((object) => object.frontmatter.id === successorNoteId)?.frontmatter.previous_series_note_id).toBeDefined()
+    check: (objects, { successorNoteId }) => expect(objects.find((object) => object.frontmatter.id === successorNoteId)?.frontmatter.previous_series_note_id).toBeUndefined()
   },
   [operationKinds.migrateRecurringNotes]: {
     setup: legacyRecurringNote,
