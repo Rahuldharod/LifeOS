@@ -22,12 +22,11 @@ for (const [label, width] of [["desktop", 1280], ["phone", 390]] as const) {
     await expect(series).not.toContainText("June 7, 2026");
     await expect(entries.nth(0).locator("summary")).toContainText(/\d{1,2}:\d{2}\s?[AP]M–\d{1,2}:\d{2}\s?[AP]M/);
 
-    // Collapsed by default, expandable, read-only.
+    // Collapsed by default and expandable.
     await expect(entries.nth(0)).not.toHaveAttribute("open", "");
     await expect(series.getByText("Monthly review words for 2026-08.")).toBeHidden();
     await entries.nth(0).locator("summary").click();
     await expect(series.getByText("Monthly review words for 2026-08.")).toBeVisible();
-    await expect(series.locator("textarea, input")).toHaveCount(0);
 
     // Nothing spills sideways at phone width.
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -44,7 +43,7 @@ test("opening an older occurrence shows only the Notes before it, not the latest
   await expect(entries.nth(2).locator("summary")).toContainText("April 7, 2026");
 });
 
-test("a Legacy shared Note appears once as a read-only block labelled with its date range", async ({ page, request }) => {
+test("a Legacy shared Note appears once as one block labelled with its date range", async ({ page, request }) => {
   await seed(request);
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto("/calendar/2026-09-21/d1000000-0000-4000-8000-000000000002");
@@ -54,7 +53,6 @@ test("a Legacy shared Note appears once as a read-only block labelled with its d
   await expect(series.locator("summary")).toContainText("Shared Note");
   await series.locator("summary").click();
   await expect(series.getByText("Legacy shared Prio words.")).toBeVisible();
-  await expect(series.locator("textarea, input")).toHaveCount(0);
 });
 
 // #180: eight weekly occurrences with a Note (the 6th cancelled), a 9th cancelled without a Note.

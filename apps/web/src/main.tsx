@@ -64,6 +64,8 @@ import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
 import { SeriesView } from "./SeriesView.js";
 import { noteSeriesRoute } from "./noteSeriesLink.js";
+import { SaveState } from "./SaveState.js";
+import { useSeriesEditorGuard } from "./seriesEditorGuard.js";
 import { meetingSummary } from "./meetingSummary.js";
 import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
@@ -226,6 +228,7 @@ function App() {
   const decisionEditorGuard = useRef(createStructuredEditorGuard()).current;
   const openPointEditorGuard = useRef(createStructuredEditorGuard()).current;
   const settingsEditorGuard = useRef(createSettingsEditorGuard()).current;
+  const seriesEditors = useSeriesEditorGuard();
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
   const seriesRoute = selectedNote ? noteSeriesRoute(selectedNote, objectLinks, displayTimeZone) : undefined;
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
@@ -334,7 +337,7 @@ function App() {
   // until the same save succeeds (useGuardedNavigation).
   const locationRef = useRef(location);
   locationRef.current = location;
-  const guarded = useGuardedNavigation({ editors: [notesController, meetingController, taskEditorGuard, decisionEditorGuard, openPointEditorGuard, settingsEditorGuard], readOnly, onLeaveFailed: setMessage });
+  const guarded = useGuardedNavigation({ editors: [notesController, meetingController, seriesEditors.guard, taskEditorGuard, decisionEditorGuard, openPointEditorGuard, settingsEditorGuard], readOnly, onLeaveFailed: setMessage });
   const leaveEditors = guarded.leave;
   // While a held Back/Forward saves, nothing else may change the URL: a first save over a calendar
   // event would otherwise replace the URL with the new meeting's and release the held navigation.
@@ -1048,12 +1051,12 @@ function App() {
                   onSelectSection={workspace.persisted === false ? undefined : (section) => followRoute({ view: "Calendar", date: selectedDate, id: workspace.meeting.frontmatter.id, section }, { replace: true })}
                 /> : <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraft} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage targetSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined} />}
                 <div className="editor-footer">
-                  <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.pending && !meetingController.dirty ? "Not saved yet · nothing is written until you edit" : meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>
+                  <SaveState dirty={meetingController.dirty} autoSaving={meetingController.autoSaving} pending={meetingController.pending} undoAvailable={meetingController.undoAvailable} undoDisabled={busy || readOnly} onUndo={() => withBusy(meetingController.undoKeepDiskVersion)} />
                   <MeetingNoteActions canDelete={Boolean(workspace.note)} deleteDisabled={busy || readOnly || meetingController.autoSaving} saveDisabled={!editorReady || busy || !meetingController.dirty || readOnly} onDelete={deleteMeetingNote} onSave={saveNote} />
                 </div>
                 {workspace.note && <div className="metadata-strip"><Meta label="Created" value={formatDate(workspace.note.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(workspace.note.frontmatter.updated_at)} /><Meta label="Revision" value={String(workspace.note.frontmatter.revision)} /><Meta label="File" value={workspace.note.relativePath} /></div>}
               </EditorFrame>}
-              {workspace.seriesView && <SeriesView key={workspace.meeting.frontmatter.id} view={workspace.seriesView} timeZone={displayTimeZone} onOpenMeeting={(meetingId, date) => void go({ view: "Calendar", date, id: meetingId })} />}
+              {workspace.seriesView && <SeriesView key={workspace.meeting.frontmatter.id} view={workspace.seriesView} timeZone={displayTimeZone} editor={{ mode: editorMode, readOnly, linkObjects: objectLinks, notify: setMessage, register: seriesEditors.register }} onOpenMeeting={(meetingId, date) => void go({ view: "Calendar", date, id: meetingId })} />}
               {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
               {!workspace.occurrences?.length && meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
               {!workspace.occurrences?.length && <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
@@ -1098,7 +1101,7 @@ function App() {
               <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
               {seriesRoute && <p className="series-link"><a href={routePath(seriesRoute)} onClick={(event) => { event.preventDefault(); followRoute(seriesRoute); }}>Show series</a></p>}
               <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} targetSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined} />
-              <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
+              <div className="editor-footer"><SaveState dirty={notesController.dirty} autoSaving={notesController.autoSaving} undoAvailable={notesController.undoAvailable} undoDisabled={busy || readOnly} onUndo={() => withBusy(notesController.undoKeepDiskVersion)} /><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}
       />}

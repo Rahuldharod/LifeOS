@@ -18,7 +18,7 @@ test("a recurring Note opens as one plain Note in the Notes tab and keeps narrow
   await expect(page.getByLabel("Notes list", { exact: true })).toBeVisible();
 });
 
-test("a new recurring occurrence shows the plain pending editor and its shared history as one read-only Series view block", async ({ page, request }) => {
+test("a new recurring occurrence shows the plain pending editor and its shared history as one Series view block", async ({ page, request }) => {
   await seed(request);
   const stored = await (await request.get(`/api/v1/meetings/${RECURRING_NOTE.currentMeetingId}/workspace`)).json();
   const startsAt = "2026-10-19T08:00:00.000Z";
@@ -44,7 +44,8 @@ test("a new recurring occurrence shows the plain pending editor and its shared h
   await expect(series.locator("details")).toHaveCount(1);
   await expect(series.locator("summary")).toContainText("Shared Note");
   await expect(series.locator("summary")).toContainText("October 5, 2026 to Monday, October 12, 2026");
-  await expect(series.locator("textarea")).toHaveCount(0);
+  await series.locator("summary").click();
+  await expect(series.locator("textarea")).toBeEditable(); // #173: the earlier Note is edited in place
 });
 
 // Incident 2026-10-12: after the first edit created the occurrence inside the shared Note, the browser kept only the
