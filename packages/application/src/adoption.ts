@@ -386,8 +386,9 @@ export class AdoptionModule {
     return { results, handled };
   }
 
+  /** Whether any audit names `runId`: adopted drafts, applied patches and raised Review Items all record their run (#160). */
   private ledgerHasRun(runId: string) {
-    return [...this.ledger().values()].some((entry) => entry.agentRunIds.has(runId));
+    return this.ctx.index.all().some((object) => object.frontmatter.type === "audit-event" && (object.frontmatter.metadata as Record<string, unknown> | undefined)?.agent_run_id === runId);
   }
 
   private async recoverDraft(operation: Operation, run: AdoptionRun): Promise<DraftResult | undefined> {
