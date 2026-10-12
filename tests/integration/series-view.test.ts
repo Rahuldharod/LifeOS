@@ -408,3 +408,70 @@ describe("Series view paging and splits (#180)", () => {
     expect(earlier.map((entry) => [entry.note.body.trim(), entry.cancelled])).toEqual([["cancelled but noted", true], ["kept week", false]]);
   });
 });
+
+describe("Series view review fixes (#180)", () => {
+  it("points `newer` at a successor series after a split, and at the latest of all", async () => {
+    const { app, occurrence } = await setup();
+    await occurrence(1, "old 1\n", { series: "old-series" });
+    await occurrence(2, "old 2\n", { series: "old-series" });
+    await occurrence(6, "new 6\n", { series: "new-series", previousSeries: "old-series" });
+    const latest = await occurrence(7, "new 7\n", { series: "new-series", previousSeries: "old-series" });
+    await occurrence(9, undefined, { series: "new-series", previousSeries: "old-series" }); // no Note: ignored
+    await app.rebuildIndex();
+
+    expect(((await preview(app, 1)) as Paged).seriesView!.newer?.meetingId).toBe(latest.meetingId);
+    expect(((await preview(app, 7)) as Paged).seriesView!.newer).toBeUndefined();
+  });
+
+  it("does not treat an unlinked series as a successor", async () => {
+    const { app, occurrence } = await setup();
+    await occurrence(1, "old 1\n", { series: "old-series" });
+    await occurrence(6, "lookalike\n", { series: "other-series" });
+    await app.rebuildIndex();
+
+    expect(((await preview(app, 1)) as Paged).seriesView!.newer).toBeUndefined();
+  });
+
+  it("refuses a crafted cursor: invented, tampered or pointing at another series", async () => {
+    const { app, occurrence, unsaved } = await setup();
+    for (let n = 1; n <= 6; n += 1) await occurrence(n, `week ${n}\n`);
+    for (let n = 11; n <= 12; n += 1) await occurrence(n, `foreign ${n}\n`, { series: "foreign-series" });
+    unsaved(8);
+    await app.rebuildIndex();
+    const genuine = ((await preview(app, 8)) as Paged).seriesView!.nextCursor!;
+    const [payload, ...rest] = genuine.split(".");
+    const decoded = JSON.parse(Buffer.from(payload!, "base64url").toString("utf8")) as Record<string, unknown>;
+    const forge = (changes: Record<string, unknown>) => Buffer.from(JSON.stringify({ ...decoded, ...changes })).toString("base64url");
+
+    await expect(app.seriesViewPage(`${forge({ seriesId: "synthetic:work:foreign-series" })}.${rest.join(".")}`)).rejects.toThrow(/cursor/i);
+    await expect(app.seriesViewPage(forge({ seriesId: "synthetic:work:foreign-series" }))).rejects.toThrow(/cursor/i);
+    await expect(app.seriesViewPage(`${forge({ seriesId: "synthetic:work:foreign-series" })}.AAAA`)).rejects.toThrow(/cursor/i);
+    expect((await app.seriesViewPage(genuine) as Page).earlier.length).toBeGreaterThan(0);
+  });
+
+  it("stores the provider's previous series on a Meeting created from an event", async () => {
+    const { app, unsaved } = await setup();
+    unsaved(8, { seriesId: "new-series", previousSeriesId: "old-series" });
+    await app.rebuildIndex();
+
+    const created = await app.createMeetingFromEvent("event-8", undefined, undefined, "work", "first words");
+
+    expect(created.meeting.frontmatter.previous_recurrence_series_id).toBe("synthetic:work:old-series");
+  });
+
+  it("adds the previous series to an existing Meeting on sync, and a second sync changes nothing", async () => {
+    const { app, root, occurrence } = await setup();
+    const stored = await occurrence(6, "new 6\n", { series: "new-series" });
+    stored.event.previousSeriesId = "old-series";
+    await app.rebuildIndex();
+    const file = path.join(root, `meetings/${stored.meetingId}.md`);
+    expect(await readFile(file, "utf8")).not.toContain("previous_recurrence_series_id");
+
+    await app.syncCalendar(new Date(day(1)), new Date(day(30)));
+    const afterFirst = await snapshot(root);
+    expect(await readFile(file, "utf8")).toContain("previous_recurrence_series_id: synthetic:work:old-series");
+
+    await app.syncCalendar(new Date(day(1)), new Date(day(30)));
+    expect(await snapshot(root)).toEqual(afterFirst);
+  });
+});
