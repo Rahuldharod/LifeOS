@@ -73,4 +73,24 @@ describe("Google Calendar connector", () => {
     expect(events.find((event) => event.externalId === "copied-event")).not.toHaveProperty("seriesId");
     expect(events.find((event) => event.externalId === "shared-instance")).not.toHaveProperty("previousSeriesId");
   });
+
+  it("reads one exact historical occurrence for a legacy recurrence backfill", async () => {
+    const secrets = new MemorySecretStore();
+    await secrets.set("google:default:tokens", JSON.stringify({ access_token: "access", expires_at: Date.now() + 3_600_000 }));
+    const connector = new GoogleCalendarConnector({ clientId: "client.apps.googleusercontent.com", redirectUri: "http://127.0.0.1/callback", secrets });
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      id: "weekly-prio-old", recurringEventId: "weekly-prio-series", iCalUID: "weekly-prio@example.com",
+      status: "confirmed", summary: "Weekly Prio",
+      originalStartTime: { dateTime: "2026-10-05T07:30:00+02:00" },
+      start: { dateTime: "2026-10-05T07:30:00+02:00" }, end: { dateTime: "2026-10-05T07:55:00+02:00" }
+    }), { status: 200 }));
+
+    expect((await connector.getEventsByReference([{ externalId: "weekly-prio-old", calendarId: "primary" }]))[0]).toMatchObject({
+      externalId: "weekly-prio-old",
+      calendarId: "primary",
+      seriesId: "weekly-prio-series",
+      originalOccurrenceStartsAt: "2026-10-05T05:30:00.000Z"
+    });
+    expect(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[0])).toContain("calendars/primary/events/weekly-prio-old");
+  });
 });

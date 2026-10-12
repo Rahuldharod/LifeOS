@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
-import { operationKinds, type CalendarEvent, type Operation } from "./ports.js";
+import { operationKinds, type CalendarEvent, type CalendarEventReference, type Operation } from "./ports.js";
 import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote, OneAtATime, resolveObjectRedirect } from "./support.js";
 
 type EventContext = { client?: LifeOSObject; product?: LifeOSObject; project?: LifeOSObject; people: LifeOSObject[] };
@@ -646,6 +646,40 @@ export class MeetingsModule {
         meetingId: meeting?.frontmatter.id,
         noteId: note?.frontmatter.id
       };
+    });
+  }
+
+  /**
+   * An explicit Calendar sync may safely add provider recurrence identity to Meetings created
+   * before recurring Notes existed. Matching stays on the immutable provider event reference;
+   * titles, attendees and times are never used to infer a series.
+   */
+  async backfillRecurringMeetingIdentity(event: CalendarEvent) {
+    if (!event.seriesId || !event.originalOccurrenceStartsAt) return false;
+    const now = new Date().toISOString();
+    const meeting = this.findMeetingForEvent(event.externalId, event.calendarId, event);
+    if (!meeting) return false;
+    const updated = await this.recordRecurrenceIdentity(meeting, event, now);
+    const changed = updated.contentHash !== meeting.contentHash;
+    if (changed) await this.ctx.rebuildIndex();
+    return changed;
+  }
+
+  /** Provider references for legacy per-occurrence Notes that still need an exact recurrence check. */
+  recurringIdentityBackfillReferences(): CalendarEventReference[] {
+    const candidateMeetingIds = new Set(this.ctx.index.all()
+      .filter((object) => object.frontmatter.type === "meeting-note" && isLive(object)
+        && typeof object.frontmatter.meeting_id === "string" && !object.frontmatter.recurrence_series_id)
+      .map((object) => String(object.frontmatter.meeting_id)));
+    return this.ctx.index.all().flatMap((meeting) => {
+      if (meeting.frontmatter.type !== "meeting" || !isLive(meeting)
+        || meeting.frontmatter.recurrence_series_id || !candidateMeetingIds.has(meeting.frontmatter.id)) return [];
+      const references = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs : [];
+      return references.flatMap((reference) => {
+        if (typeof reference !== "object" || reference === null) return [];
+        const { external_id: externalId, calendar_id: calendarId } = reference as { external_id?: unknown; calendar_id?: unknown };
+        return typeof externalId === "string" ? [{ externalId, ...(typeof calendarId === "string" ? { calendarId } : {}) }] : [];
+      });
     });
   }
 

@@ -81,9 +81,17 @@ export interface IndexStore {
   duplicatePaths?(id: string): string[] | undefined;
 }
 
+/** Immutable provider identity for one Calendar event, including its calendar when known. */
+export interface CalendarEventReference {
+  externalId: string;
+  calendarId?: string;
+}
+
 export interface CalendarConnector {
   readonly provider?: string;
   listEvents(from: Date, to: Date): Promise<CalendarEvent[]>;
+  /** Exact provider lookup used by an explicit sync to identify pre-upgrade Meeting records. */
+  getEventsByReference?(references: CalendarEventReference[]): Promise<CalendarEvent[]>;
   /** Every calendar the account can view, whether or not it has events in a given range. */
   listCalendars?(): Promise<CalendarSummary[]>;
 }

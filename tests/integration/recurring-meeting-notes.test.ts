@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LifeOSApplication, type CalendarConnector, type CalendarEvent } from "@lifeos/application";
+import { LifeOSApplication, type CalendarConnector, type CalendarEvent, type CalendarEventReference } from "@lifeos/application";
 import { uuidV7 } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
@@ -12,8 +12,17 @@ afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recur
 
 class SyntheticCalendar implements CalendarConnector {
   readonly provider = "synthetic";
-  constructor(readonly events: CalendarEvent[]) {}
+  readonly eventsById = new Map<string, CalendarEvent>();
+  constructor(readonly events: CalendarEvent[]) {
+    for (const event of events) this.eventsById.set(event.externalId, event);
+  }
   async listEvents() { return this.events; }
+  async getEventsByReference(references: CalendarEventReference[]) {
+    return references.flatMap(({ externalId, calendarId }) => {
+      const event = this.eventsById.get(externalId);
+      return event && (!calendarId || event.calendarId === calendarId) ? [event] : [];
+    });
+  }
 }
 
 const event = (overrides: Partial<CalendarEvent>): CalendarEvent => ({
@@ -310,5 +319,32 @@ describe("recurring meeting notes (#147)", () => {
     await app.createMeetingFromEvent(recurring.externalId);
 
     expect(await readFile(path.join(root, withUnknown.relativePath), "utf8")).toBe(before);
+  });
+
+  it("makes an exact pre-upgrade recurring Note available for reviewed migration after calendar sync", async () => {
+    const legacyEvent = event({ externalId: "weekly-prio", title: "Weekly Prio" });
+    const { app, calendar } = await setup([legacyEvent]);
+    const legacy = await app.createMeetingFromEvent(legacyEvent.externalId, undefined, undefined, legacyEvent.calendarId, "Last week's details\n");
+    calendar.eventsById.set(legacyEvent.externalId, event({
+      externalId: legacyEvent.externalId,
+      title: legacyEvent.title,
+      seriesId: "weekly-prio-series",
+      originalOccurrenceStartsAt: legacyEvent.startsAt
+    }));
+    calendar.events.splice(0, 1, event({
+      externalId: "weekly-prio-next",
+      title: legacyEvent.title,
+      startsAt: "2026-10-12T08:00:00.000Z",
+      endsAt: "2026-10-12T09:00:00.000Z",
+      seriesId: "weekly-prio-series",
+      originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z"
+    }));
+
+    await app.syncCalendar(new Date("2026-10-12T00:00:00.000Z"), new Date("2026-10-13T00:00:00.000Z"));
+
+    expect(app.recurringMigrationPreview(legacy.meeting.frontmatter.id)).toMatchObject({
+      requiresConfirmation: true,
+      candidates: [{ noteId: legacy.note!.frontmatter.id, body: "Last week's details\n" }]
+    });
   });
 });

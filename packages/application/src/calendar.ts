@@ -73,6 +73,11 @@ export class CalendarModule {
     const started = new Date().toISOString();
     try {
       const events = await calendar.listEvents(from, to);
+      await this.backfillRecurringMeetingIdentity(events);
+      if (calendar.getEventsByReference) {
+        const historical = await calendar.getEventsByReference(this.meetings.recurringIdentityBackfillReferences());
+        await this.backfillRecurringMeetingIdentity(historical);
+      }
       if (calendar.provider === "google") await this.writeSyncRun("succeeded", started, events.length);
       return this.meetings.withNoteLinks(events);
     } catch (error) {
@@ -80,6 +85,14 @@ export class CalendarModule {
       if (calendar.provider === "google") await this.writeSyncRun("failed", started, 0, error instanceof Error ? error.message : "Unknown error").catch(() => undefined);
       throw error;
     }
+  }
+
+  /**
+   * Each Meeting update is an independent guarded write. If sync stops between events, completed
+   * updates remain valid and the next sync derives and retries only the references still missing identity.
+   */
+  private async backfillRecurringMeetingIdentity(events: CalendarEvent[]) {
+    for (const event of events) await this.meetings.backfillRecurringMeetingIdentity(event);
   }
 
   /**

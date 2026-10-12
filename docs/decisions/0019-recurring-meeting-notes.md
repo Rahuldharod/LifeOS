@@ -21,5 +21,6 @@ Enrichment remains occurrence-scoped. Work Orders identify one occurrence sectio
 
 - Series-note creation, section creation, migration and generated-block updates are replay-safe multi-file operations under ADR 0013.
 - Existing per-occurrence Notes are never merged silently. A reviewed migration preserves their bodies, archives originals only after success and keeps old links resolvable to the matching new section.
+- An explicit Calendar sync may look up a pre-upgrade Meeting by its exact provider event reference and add missing recurrence identity. Each Meeting backfill is one independent, guarded write: completed updates remain valid after interruption, and the next sync retries references still missing identity. It never infers a series from title, attendees or time; the reviewed migration still requires confirmation before Note content changes.
 - A restricted shared Note excludes the whole series from Agent Indexes and Work Orders.
 - Calendar adapters must preserve series identity, occurrence identity, reschedules, cancellations and series splits rather than exposing only expanded event IDs.

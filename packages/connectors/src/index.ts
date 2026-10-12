@@ -1,4 +1,4 @@
-import type { CalendarConnector, CalendarSummary } from "@lifeos/application";
+import type { CalendarConnector, CalendarEvent, CalendarEventReference, CalendarSummary } from "@lifeos/application";
 import type { SecretStore } from "@lifeos/application";
 import { createHash, randomBytes } from "node:crypto";
 
@@ -113,6 +113,62 @@ export class GoogleCalendarConnector implements CalendarConnector {
     return { headers, calendars };
   }
 
+  // Raw Google Calendar JSON is deliberately translated in one place so range and exact-event
+  // reads preserve the same recurrence identity.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw Google Calendar JSON, mapped field by field below
+  private calendarEvent(event: Record<string, any>, calendar: Record<string, any>): CalendarEvent | undefined {
+    if (!event.id || (!event.start && !event.originalStartTime) || (!event.end && event.status !== "cancelled")) return undefined;
+    const start = event.start ?? event.originalStartTime;
+    const end = event.end ?? start;
+    const allDay = Boolean(start.date && !start.dateTime);
+    const rawStart = String(start.dateTime ?? `${start.date}T00:00:00.000Z`);
+    const rawEnd = String(end.dateTime ?? `${end.date}T00:00:00.000Z`);
+    const original = event.originalStartTime;
+    const originalRaw = original ? String(original.dateTime ?? `${original.date}T00:00:00.000Z`) : undefined;
+    const previousSeriesId = event.previousSeriesId ?? event.extendedProperties?.private?.lifeosPreviousSeriesId ?? event.extendedProperties?.shared?.lifeosPreviousSeriesId;
+    return {
+      externalId: String(event.id),
+      calendarId: String(calendar.id),
+      calendarName: String(calendar.summaryOverride ?? calendar.summary ?? calendar.id),
+      calendarColor: typeof calendar.backgroundColor === "string" ? calendar.backgroundColor : undefined,
+      title: String(event.summary ?? "Untitled event"),
+      startsAt: new Date(rawStart).toISOString(),
+      endsAt: new Date(rawEnd).toISOString(),
+      timezone: String(start.timeZone ?? end.timeZone ?? calendar.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
+      isAllDay: allDay,
+      ...(typeof event.recurringEventId === "string" ? { seriesId: event.recurringEventId } : {}),
+      ...(typeof event.recurringEventId === "string" && event.privateCopy !== true && typeof event.iCalUID === "string" ? { seriesUid: event.iCalUID } : {}),
+      ...(originalRaw ? { originalOccurrenceStartsAt: new Date(originalRaw).toISOString() } : {}),
+      ...(typeof previousSeriesId === "string" ? { previousSeriesId } : {}),
+      status: event.status === "cancelled" ? "cancelled" : "confirmed",
+      declined: Array.isArray(event.attendees) && event.attendees.some((attendee: Record<string, unknown>) => attendee.self === true && attendee.responseStatus === "declined"),
+      attendees: Array.isArray(event.attendees) ? event.attendees.map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : [],
+      ...(typeof event.location === "string" ? { location: event.location } : {}),
+      ...(typeof event.hangoutLink === "string" ? { joinUrl: event.hangoutLink } : typeof event.conferenceData?.entryPoints?.find((entry: Record<string, unknown>) => entry.entryPointType === "video")?.uri === "string" ? { joinUrl: event.conferenceData.entryPoints.find((entry: Record<string, unknown>) => entry.entryPointType === "video").uri } : {}),
+      attendeeDetails: Array.isArray(event.attendees) ? event.attendees.filter((attendee: Record<string, unknown>) => attendee.resource !== true).map((attendee: Record<string, unknown>) => ({
+        ...(typeof attendee.email === "string" ? { email: attendee.email } : {}),
+        ...(typeof attendee.displayName === "string" ? { displayName: attendee.displayName } : {}),
+        ...(attendee.self === true ? { self: true } : {})
+      })) : []
+    };
+  }
+
+  async getEventsByReference(references: CalendarEventReference[]) {
+    const available = references.filter((reference): reference is { externalId: string; calendarId: string } => Boolean(reference.calendarId));
+    if (!available.length) return [];
+    const accessToken = await this.accessToken();
+    const events = await Promise.all(available.map(async ({ externalId, calendarId }) => {
+      const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(externalId)}`, { headers: { authorization: `Bearer ${accessToken}` } });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw Google Calendar JSON, mapped by calendarEvent
+      const payload = await response.json() as Record<string, any>;
+      if (response.status === 401) throw this.failAuth(`Google rejected the Calendar access token: ${payload.error?.message ?? 401}`);
+      if (response.status === 404 || response.status === 410) return undefined;
+      if (!response.ok) throw new Error(`Google Calendar event request failed: ${payload.error?.message ?? response.status}`);
+      return this.calendarEvent(payload, { id: calendarId });
+    }));
+    return events.filter((event): event is CalendarEvent => Boolean(event));
+  }
+
   async listEvents(from: Date, to: Date) {
     const { headers, calendars } = await this.fetchCalendars();
     const eventGroups = await Promise.all(calendars.map(async (calendar) => {
@@ -121,41 +177,9 @@ export class GoogleCalendarConnector implements CalendarConnector {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw Google Calendar JSON, mapped field by field below
       const payload = await response.json() as { items?: Array<Record<string, any>>; error?: { message?: string } };
       if (!response.ok) throw new Error(`Google Calendar request failed for ${String(calendar.summary ?? calendar.id)}: ${payload.error?.message ?? response.status}`);
-      return (payload.items ?? []).filter((event) => event.id && (event.start || event.originalStartTime) && (event.end || event.status === "cancelled")).map((event) => {
-        const start = event.start ?? event.originalStartTime;
-        const end = event.end ?? start;
-        const allDay = Boolean(start.date && !start.dateTime);
-        const rawStart = String(start.dateTime ?? `${start.date}T00:00:00.000Z`);
-        const rawEnd = String(end.dateTime ?? `${end.date}T00:00:00.000Z`);
-        const original = event.originalStartTime;
-        const originalRaw = original ? String(original.dateTime ?? `${original.date}T00:00:00.000Z`) : undefined;
-        const previousSeriesId = event.previousSeriesId ?? event.extendedProperties?.private?.lifeosPreviousSeriesId ?? event.extendedProperties?.shared?.lifeosPreviousSeriesId;
-        return {
-          externalId: String(event.id),
-          calendarId: String(calendar.id),
-          calendarName: String(calendar.summaryOverride ?? calendar.summary ?? calendar.id),
-          calendarColor: typeof calendar.backgroundColor === "string" ? calendar.backgroundColor : undefined,
-          title: String(event.summary ?? "Untitled event"),
-          startsAt: new Date(rawStart).toISOString(),
-          endsAt: new Date(rawEnd).toISOString(),
-          timezone: String(start.timeZone ?? end.timeZone ?? calendar.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
-          isAllDay: allDay,
-          ...(typeof event.recurringEventId === "string" ? { seriesId: event.recurringEventId } : {}),
-          ...(typeof event.recurringEventId === "string" && event.privateCopy !== true && typeof event.iCalUID === "string" ? { seriesUid: event.iCalUID } : {}),
-          ...(originalRaw ? { originalOccurrenceStartsAt: new Date(originalRaw).toISOString() } : {}),
-          ...(typeof previousSeriesId === "string" ? { previousSeriesId } : {}),
-          status: event.status === "cancelled" ? "cancelled" as const : "confirmed" as const,
-          declined: Array.isArray(event.attendees) && event.attendees.some((attendee: Record<string, unknown>) => attendee.self === true && attendee.responseStatus === "declined"),
-          attendees: Array.isArray(event.attendees) ? event.attendees.map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : [],
-          ...(typeof event.location === "string" ? { location: event.location } : {}),
-          ...(typeof event.hangoutLink === "string" ? { joinUrl: event.hangoutLink } : typeof event.conferenceData?.entryPoints?.find((entry: Record<string, unknown>) => entry.entryPointType === "video")?.uri === "string" ? { joinUrl: event.conferenceData.entryPoints.find((entry: Record<string, unknown>) => entry.entryPointType === "video").uri } : {}),
-          // #38: emails for matching People. Rooms and other resources are not people.
-          attendeeDetails: Array.isArray(event.attendees) ? event.attendees.filter((attendee: Record<string, unknown>) => attendee.resource !== true).map((attendee: Record<string, unknown>) => ({
-            ...(typeof attendee.email === "string" ? { email: attendee.email } : {}),
-            ...(typeof attendee.displayName === "string" ? { displayName: attendee.displayName } : {}),
-            ...(attendee.self === true ? { self: true } : {})
-          })) : []
-        };
+      return (payload.items ?? []).flatMap((event) => {
+        const mapped = this.calendarEvent(event, calendar);
+        return mapped ? [mapped] : [];
       });
     }));
     const events = eventGroups.flat();

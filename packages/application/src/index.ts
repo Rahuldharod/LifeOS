@@ -28,7 +28,7 @@ export type { NoteFilters, ObjectReference, PurgeCheck } from "./notes.js";
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
-export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
+export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarEventReference, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
 export { inboxFolders, operationKinds } from "./ports.js";
 export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus, SkillPackStatus } from "./adoption.js";
 export { currentSkillPack, oldestAcceptedSkillPack } from "./skill-pack.js";
