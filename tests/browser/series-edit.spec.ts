@@ -4,8 +4,8 @@ import { seed } from "./fixtures.js";
 // #173: earlier occurrences are edited in place. Real local API, no mocked saves (except the one deliberately
 // blocked request in the draft-reload test). Uses the "retro" / "audit" series from serve.mjs: 3 occurrences each
 // (Jan to Mar, one Note per occurrence) that only these tests change.
-const ids = (letter: "e" | "f" | "7" | "8", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
-const RETRO = (month: string) => ids("e", month);
+const ids = (letter: "5" | "f" | "7" | "8", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
+const RETRO = (month: string) => ids("5", month);
 const AUDIT = (month: string) => ids("f", month);
 const GUARD = (month: string) => ids("7", month);
 const TYPING = (month: string) => ids("8", month);
@@ -110,6 +110,29 @@ test("a restricted earlier Note shows the Restricted marker and an unrestricted 
   await expect(entries).toHaveCount(2);
   await expect(entries.nth(0).locator("summary")).not.toContainText("Restricted"); // February
   await expect(entries.nth(1).locator("summary")).toContainText("Restricted"); // January, restricted in serve.mjs
+});
+
+test("an occurrence added by Load older is an editor too, and leaving the page saves it", async ({ page, request }) => {
+  await seed(request);
+  const url = "/calendar/2026-04-20/e1000000-0000-4000-8000-000000000008";
+  await page.goto(url);
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  const series = page.getByRole("region", { name: "Earlier occurrences" });
+  await series.getByRole("button", { name: "Load older" }).click();
+  const loaded = series.locator("details").nth(6);
+  await expect(loaded.locator("summary")).toContainText("March 2, 2026");
+  await loaded.locator("summary").click();
+  const original = await loaded.locator("textarea").inputValue();
+  await loaded.locator("textarea").fill(`${original}Edited after Load older.\n`);
+  // Straight away, inside the autosave delay: only the leave-page save can write it.
+  await page.locator("nav[aria-label='Primary']").getByRole("button", { name: "Tasks" }).click();
+  await expect(page).toHaveURL(/\/tasks/);
+  await page.goto(url);
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await page.getByRole("region", { name: "Earlier occurrences" }).getByRole("button", { name: "Load older" }).click();
+  const reopened = page.getByRole("region", { name: "Earlier occurrences" }).locator("details").nth(6);
+  await reopened.locator("summary").click();
+  await expect(reopened.locator("textarea")).toHaveValue(`${original}Edited after Load older.\n`);
 });
 
 test("typing keeps landing in the same editor, in order, while another Note's autosave is in flight", async ({ page, request }) => {
