@@ -348,7 +348,7 @@ describe("recurring meeting notes (#147)", () => {
     });
   });
 
-  it("previews migrated history on a new occurrence without writing until the first edit", async () => {
+  it("previews migrated history on a new occurrence (as a Series view block) without writing until the first edit", async () => {
     const legacyEvent = event({ externalId: "weekly-prio", title: "Weekly Prio" });
     const currentEvent = event({
       externalId: "weekly-prio-next",
@@ -378,8 +378,6 @@ describe("recurring meeting notes (#147)", () => {
     expect(current).toMatchObject({
       persisted: false,
       note: undefined,
-      seriesNotePreview: { body: expect.stringContaining("Last week's details") },
-      pendingOccurrence: { originalStartsAt: currentEvent.originalOccurrenceStartsAt },
       seriesView: { earlier: [{ kind: "legacy-shared", note: { body: expect.stringContaining("Last week's details") } }] }
     });
     expect(await app.listObjects()).toEqual(before);

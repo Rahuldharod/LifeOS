@@ -39,10 +39,6 @@ export type Workspace = {
   noteSectionId?: string;
   recurringMigration?: RecurringMigrationPreview;
   occurrences?: OccurrenceWorkspaceItem[];
-  /** Existing shared history shown while a new recurring occurrence is still a write-free preview. */
-  seriesNotePreview?: LifeObject;
-  /** The unsaved occurrence displayed above `seriesNotePreview`; materialized only on the first edit. */
-  pendingOccurrence?: OccurrenceWorkspaceItem;
   /** Present on every recurring occurrence (new or stored): the read-only history of the same provider series (ADR 0021). */
   seriesView?: SeriesView;
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
@@ -53,14 +49,8 @@ export type SeriesViewEarlier = {
   /** `legacy-shared`: one ADR 0019 Note linked to several Meetings, shown once. */
   kind: "occurrence" | "legacy-shared";
   note: LifeObject;
-  /** The Meetings this Note covers (one for an occurrence). */
-  meetingIds: string[];
-  /** Start of the newest covered Meeting; this is the Note's position in the list. */
-  startsAt: string;
-  endsAt: string;
-  /** Date range of the covered Meetings (equal to startsAt for a single occurrence). */
-  rangeStartsAt: string;
-  rangeEndsAt: string;
+  /** The covered Meetings of this series: one occurrence's own time, or the span of a Legacy shared Note. */
+  range: { startsAt: string; endsAt: string };
 };
 export type OccurrenceWorkspaceItem = {
   sectionId: string;

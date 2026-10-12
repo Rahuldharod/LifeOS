@@ -43,3 +43,16 @@ test("opening an older occurrence shows only the Notes before it, not the latest
   await expect(entries.nth(0).locator("summary")).toContainText("July 7, 2026");
   await expect(entries.nth(2).locator("summary")).toContainText("April 7, 2026");
 });
+
+test("a Legacy shared Note appears once as a read-only block labelled with its date range", async ({ page, request }) => {
+  await seed(request);
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto("/calendar/2026-09-21/d1000000-0000-4000-8000-000000000002");
+  const series = page.getByRole("region", { name: "Earlier occurrences" });
+  await expect(series.locator("details")).toHaveCount(1);
+  await expect(series.locator("summary")).toContainText("September 7, 2026 to Monday, September 14, 2026");
+  await expect(series.locator("summary")).toContainText("Shared Note");
+  await series.locator("summary").click();
+  await expect(series.getByText("Legacy shared Prio words.")).toBeVisible();
+  await expect(series.locator("textarea, input")).toHaveCount(0);
+});

@@ -9,20 +9,19 @@ const timeLabel = (value: string, timeZone: string) => new Date(value).toLocaleT
 /** ADR 0021: one label per earlier Note. A Legacy shared Note shows the date range of the Meetings it covers. */
 export function seriesViewLabel(entry: SeriesViewEarlier, timeZone: string) {
   if (entry.kind === "legacy-shared") {
-    const from = dateLabel(entry.rangeStartsAt, timeZone);
-    const to = dateLabel(entry.rangeEndsAt, timeZone);
+    const from = dateLabel(entry.range.startsAt, timeZone);
+    const to = dateLabel(entry.range.endsAt, timeZone);
     return { title: from === to ? from : `${from} to ${to}`, detail: "Shared Note" };
   }
-  return { title: dateLabel(entry.startsAt, timeZone), detail: `${timeLabel(entry.startsAt, timeZone)}–${timeLabel(entry.endsAt, timeZone)}` };
+  return { title: dateLabel(entry.range.startsAt, timeZone), detail: `${timeLabel(entry.range.startsAt, timeZone)}–${timeLabel(entry.range.endsAt, timeZone)}` };
 }
 
 /**
  * Read-only history of earlier occurrences with a live Note, collapsed by default (ADR 0021, #179).
  * Editing them in place is a later ticket, so this renders Markdown and offers no inputs.
- * `hideNoteId` drops a Note the page already shows elsewhere (the opened occurrence's own shared Note).
  */
-export function SeriesView({ view, timeZone, hideNoteId }: { view: SeriesViewData; timeZone: string; hideNoteId?: string }) {
-  const earlier = view.earlier.filter((entry) => entry.note.frontmatter.id !== hideNoteId);
+export function SeriesView({ view, timeZone }: { view: SeriesViewData; timeZone: string }) {
+  const { earlier } = view;
   if (!earlier.length) return null;
   return <section className="series-view" aria-label="Earlier occurrences">
     <h3>Earlier occurrences</h3>

@@ -5,6 +5,7 @@
 - Source: user decision of 2026-10-12, after the Weekly Prio overwrite incident
 - Supersedes: ADR 0019 (one shared Note per recurring series)
 - Extends: ADR 0010 (Sensitivity), ADR 0013 (crash recovery)
+- Amended 2026-10-12: 4 occurrences rather than weeks, so monthly and other non-weekly series show their last 4 meetings (user decision).
 
 ## Context
 

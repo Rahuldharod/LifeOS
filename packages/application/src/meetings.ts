@@ -493,7 +493,6 @@ export class MeetingsModule {
       people: this.people.previewAttendees(event, (title) => synthetic("person", title))
     };
     const seriesId = this.seriesKey(event);
-    const seriesNotePreview = seriesId ? this.findSeriesNote(seriesId) : undefined;
     const meeting: LifeOSObject = {
       frontmatter: {
         ...this.ctx.envelope(`preview:${externalId}`, "meeting", event.title, now, "calendar"),
@@ -505,8 +504,8 @@ export class MeetingsModule {
         attendee_snapshot: [...event.attendees],
         ...(event.location ? { location: event.location } : {}),
         ...(event.joinUrl ? { join_url: event.joinUrl } : {}),
+        ...(seriesId ? { recurrence_series_id: seriesId } : {}),
         ...(seriesId && event.originalOccurrenceStartsAt ? {
-          recurrence_series_id: seriesId,
           ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
           recurrence_occurrence_id: this.occurrenceId(event),
           original_occurrence_starts_at: event.originalOccurrenceStartsAt
@@ -514,25 +513,14 @@ export class MeetingsModule {
       },
       body: "", relativePath: "", contentHash: ""
     };
-    const occurrenceId = this.occurrenceId(event);
-    const pendingOccurrence = seriesNotePreview && occurrenceId && event.originalOccurrenceStartsAt ? {
-      sectionId: occurrenceSectionId(event.originalOccurrenceStartsAt),
-      occurrenceId,
-      originalStartsAt: event.originalOccurrenceStartsAt,
-      meeting,
-      reviews: [] as LifeOSObject[],
-      sources: [] as LifeOSObject[],
-      context: { people: context.people }
-    } : undefined;
+    const seriesView = this.seriesView(meeting);
     return {
       persisted: false as const,
       meeting,
       note: undefined,
       reviews: [] as LifeOSObject[],
       tasks: [] as LifeOSObject[],
-      ...(seriesNotePreview ? { seriesNotePreview, occurrences: this.occurrenceItems(seriesNotePreview) } : {}),
-      ...(pendingOccurrence ? { pendingOccurrence } : {}),
-      ...(seriesId ? { seriesView: this.seriesView(meeting) } : {}),
+      ...(seriesView ? { seriesView } : {}),
       context
     };
   }
@@ -555,6 +543,7 @@ export class MeetingsModule {
     const resolve = (value: unknown) => typeof value === "string" ? index.get(value) : undefined;
     const attendeeIds = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids : [];
     const occurrenceItems = note ? this.occurrenceItems(note) : [];
+    const seriesView = this.seriesView(meeting);
     return {
       persisted: true as const,
       meeting,
@@ -564,7 +553,7 @@ export class MeetingsModule {
       ...(redirect.sectionId ? { noteSectionId: redirect.sectionId } : {}),
       ...(note ? { recurringMigration: this.recurringMigrationPreview(resolvedMeetingId) } : {}),
       ...(occurrenceItems.length ? { occurrences: occurrenceItems } : {}),
-      ...(typeof meeting.frontmatter.recurrence_series_id === "string" ? { seriesView: this.seriesView(meeting) } : {}),
+      ...(seriesView ? { seriesView } : {}),
       context: {
         project: resolve(meeting.frontmatter.primary_project_id),
         client: resolve(meeting.frontmatter.primary_client_id),
@@ -576,46 +565,47 @@ export class MeetingsModule {
 
   /**
    * ADR 0021 Series view: the live Notes of the earlier occurrences in the opened occurrence's provider
-   * series, newest first. Pure read. Membership is the Meeting's `recurrence_series_id` only; titles,
-   * attendees and times are never compared. "Earlier" is relative to the opened occurrence's original
-   * start. A Legacy shared Note (one Note, several Meetings) is listed once at its newest Meeting.
+   * series, newest first; `undefined` for a Meeting with no provider series. Pure read. Membership is the
+   * Meeting's `recurrence_series_id` only; titles, attendees and times are never compared. "Earlier" is
+   * relative to the opened occurrence's original start (its start when the provider gave no original).
+   * A Legacy shared Note (one Note, several Meetings) is listed once, at its newest earlier Meeting.
    */
   private seriesView(opened: LifeOSObject) {
     const { index } = this.ctx;
     const seriesId = opened.frontmatter.recurrence_series_id;
-    if (typeof seriesId !== "string") return { earlier: [] };
-    const startOf = (meeting: LifeOSObject) => Date.parse(String(meeting.frontmatter.original_occurrence_starts_at ?? meeting.frontmatter.starts_at));
-    const openedStart = startOf(opened);
-    const openedNote = opened.frontmatter.id.startsWith("preview:") ? undefined : this.noteFor(opened.frontmatter.id);
-    const byNote = new Map<string, { note: LifeOSObject; meetings: LifeOSObject[] }>();
+    if (typeof seriesId !== "string") return undefined;
+    const anchorOf = (meeting: LifeOSObject) => Date.parse(String(meeting.frontmatter.original_occurrence_starts_at ?? meeting.frontmatter.starts_at));
+    const openedAnchor = anchorOf(opened);
+    const openedNoteId = this.noteFor(opened.frontmatter.id)?.frontmatter.id;
+    const liveSeriesMeeting = (candidate: LifeOSObject | undefined): candidate is LifeOSObject =>
+      candidate?.frontmatter.type === "meeting" && isLive(candidate) && candidate.frontmatter.recurrence_series_id === seriesId;
+    const notes = new Map<string, LifeOSObject>();
     for (const meeting of index.all()) {
-      if (meeting.frontmatter.type !== "meeting" || !isLive(meeting) || meeting.frontmatter.recurrence_series_id !== seriesId || meeting.frontmatter.id === opened.frontmatter.id) continue;
+      if (!liveSeriesMeeting(meeting) || meeting.frontmatter.id === opened.frontmatter.id) continue;
       const note = this.noteFor(meeting.frontmatter.id);
-      if (!note || note.frontmatter.id === openedNote?.frontmatter.id) continue;
-      const entry = byNote.get(note.frontmatter.id) ?? { note, meetings: [] };
-      entry.meetings.push(meeting);
-      byNote.set(note.frontmatter.id, entry);
+      if (note && note.frontmatter.id !== openedNoteId) notes.set(note.frontmatter.id, note);
     }
-    const earlier = [...byNote.values()].flatMap(({ note, meetings }) => {
+    const entries = [...notes.values()].flatMap((note) => {
       const linkedIds = Array.isArray(note.frontmatter.meeting_ids) ? note.frontmatter.meeting_ids.filter((id): id is string => typeof id === "string") : [];
       const legacyShared = linkedIds.length > 1 || Array.isArray(note.frontmatter.occurrence_sections);
-      const covered = legacyShared
-        ? linkedIds.map((id) => index.get(id)).filter((candidate): candidate is LifeOSObject => candidate?.frontmatter.type === "meeting" && isLive(candidate))
-        : meetings;
-      const covering = covered.length ? covered : meetings;
-      const newest = covering.reduce((best, candidate) => startOf(candidate) > startOf(best) ? candidate : best);
-      if (!(startOf(newest) < openedStart)) return [];
-      const oldest = covering.reduce((best, candidate) => startOf(candidate) < startOf(best) ? candidate : best);
+      const linkedMeetings = (legacyShared ? linkedIds : [String(note.frontmatter.meeting_id)]).map((id) => index.get(id)).filter(liveSeriesMeeting);
+      const earlierMeetings = linkedMeetings.filter((meeting) => meeting.frontmatter.id !== opened.frontmatter.id && anchorOf(meeting) < openedAnchor);
+      if (!earlierMeetings.length) return [];
+      const newestEarlierAnchor = Math.max(...earlierMeetings.map(anchorOf));
+      const byAnchor = [...linkedMeetings].sort((left, right) => anchorOf(left) - anchorOf(right));
+      const first = byAnchor[0]!;
+      const last = byAnchor[byAnchor.length - 1]!;
       return [{
-        kind: legacyShared ? "legacy-shared" as const : "occurrence" as const,
-        note,
-        meetingIds: covering.map((candidate) => candidate.frontmatter.id),
-        startsAt: String(newest.frontmatter.starts_at), endsAt: String(newest.frontmatter.ends_at),
-        rangeStartsAt: String(oldest.frontmatter.starts_at), rangeEndsAt: String(newest.frontmatter.ends_at),
-        position: startOf(newest)
+        newestEarlierAnchor,
+        entry: {
+          kind: legacyShared ? "legacy-shared" as const : "occurrence" as const,
+          note,
+          range: { startsAt: String(first.frontmatter.starts_at), endsAt: String(last.frontmatter.ends_at) }
+        }
       }];
-    }).sort((left, right) => right.position - left.position || left.note.frontmatter.id.localeCompare(right.note.frontmatter.id));
-    return { earlier: earlier.slice(0, SERIES_VIEW_EARLIER_LIMIT).map(({ position: _position, ...entry }) => entry) };
+    });
+    entries.sort((left, right) => right.newestEarlierAnchor - left.newestEarlierAnchor || left.entry.note.frontmatter.id.localeCompare(right.entry.note.frontmatter.id));
+    return { earlier: entries.slice(0, SERIES_VIEW_EARLIER_LIMIT).map(({ entry }) => entry) };
   }
 
   private occurrenceItems(note: LifeOSObject) {
