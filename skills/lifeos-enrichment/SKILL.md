@@ -2,7 +2,8 @@
 name: lifeos-enrichment
 description: Runs LifeOS enrichment after meetings. Reads the enrichment Work Order in _inbox/requests/, fetches Meet transcripts and recordings (calendar attachments and Drive), Gong calls (Gong connector) and Gong summary emails (Gmail), compares them with the user's meeting note, and writes one meeting-material Inbox Draft per meeting with sources, a summary and proposals flagged missed_in_notes. Skips restricted meetings, and refuses client meetings while the IT/legal policy gate is blocked. Use when the user says "run LifeOS enrichment", "enrich my meetings" or "process the Work Order".
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
+  skill_pack: 1
   draft_contract: 1
   work_order_contract: 1
   client_meeting_content: blocked
@@ -179,6 +180,7 @@ One `meeting-material` Inbox Draft per meeting, in `_inbox/drafts/`. File name `
 | Field | Value |
 | --- | --- |
 | `lifeos_draft` | `1` |
+| `skill_pack` | `1` |
 | `kind` | `meeting-material` |
 | `draft_key` | `enrich-` plus the `calendar_event_id`, plus the date and time of this run |
 | `origin` | `agent-extracted` (always) |
@@ -217,6 +219,7 @@ All material found for a meeting with no note yet. LifeOS creates the meeting, l
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: meeting-material
 draft_key: enrich-evt-example-pilot-review-2026-10-04-0830
 origin: agent-extracted
@@ -264,6 +267,7 @@ A meeting with the user's note. Only the transcript exists so far; the meeting w
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: meeting-material
 draft_key: enrich-evt-example-steering-2026-10-04-0840
 origin: agent-extracted
@@ -309,6 +313,7 @@ Nothing exists: you checked every place and found no material. Listing it all as
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: meeting-material
 draft_key: enrich-evt-example-steering-2026-10-04-0850
 origin: agent-extracted
@@ -325,6 +330,7 @@ Refused: every proposal must say whether the note already covers it.
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: meeting-material
 draft_key: enrich-evt-example-pilot-review-2026-10-04-0900
 origin: agent-extracted
@@ -347,6 +353,7 @@ Refused: the meeting's note is restricted. LifeOS never enriches a restricted me
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: meeting-material
 draft_key: enrich-evt-example-one-to-one-2026-10-04-0910
 origin: agent-extracted

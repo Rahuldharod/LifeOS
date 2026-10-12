@@ -2,7 +2,8 @@
 name: lifeos-capture
 description: Captures things into the user's LifeOS by writing Inbox Drafts and Patch Drafts - tasks, decisions, open points, knowledge notes, sources, and changes to existing items (mark done, new due date, add a note). Use when the user says "remind me to", "add a task", "note that we decided", "open point", "save this article", "mark it done", "move it to Friday", or asks to pull actions out of an email, transcript or document into LifeOS.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
+  skill_pack: 1
   draft_contract: 1
   patch_contract: 1
 ---
@@ -47,6 +48,7 @@ A dictated task, linked by name to a project and a person:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-0920-promo-calendar
 origin: user-dictated
@@ -66,6 +68,7 @@ Language rule: dictated in French, kept in French. A task waiting on someone:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-0940-relance-budget
 origin: user-dictated
@@ -84,6 +87,7 @@ A name LifeOS does not know is never guessed. The task is created, and a Review 
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-1005-autumn-brief
 origin: user-dictated
@@ -99,6 +103,7 @@ A private task, kept out of the Agent Index and the morning brief:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-1015-private-call
 origin: user-dictated
@@ -115,6 +120,7 @@ A dictated decision:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: decision
 draft_key: desktop-2026-10-04-1100-launch-date
 origin: user-dictated
@@ -133,6 +139,7 @@ A dictated open point:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: open-point
 draft_key: desktop-2026-10-04-1110-coupon-cap
 origin: user-dictated
@@ -149,6 +156,7 @@ An action you extracted from an email. It becomes a Review Item, with your confi
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: email-2026-10-04-1130-store-list
 origin: agent-extracted
@@ -170,6 +178,7 @@ A knowledge note from an article the user shared. The link becomes a Source:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: knowledge-note
 draft_key: phone-2026-10-04-1200-personalised-offers
 origin: user-dictated
@@ -188,6 +197,7 @@ An idea with no source. The body is kept as its own source:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: knowledge-note
 draft_key: phone-2026-10-04-1215-points-expiry-idea
 origin: user-dictated
@@ -204,6 +214,7 @@ A source to keep for later:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: source
 draft_key: phone-2026-10-04-1230-retail-media-podcast
 origin: user-dictated
@@ -224,6 +235,7 @@ Move a due date and raise the priority. Applies on its own:
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1300-sizing-deck-friday
 origin: user-dictated
 captured_at: 2026-10-04T13:00:00+02:00
@@ -241,6 +253,7 @@ Add a note to an item. Applies on its own:
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1310-pilot-stores-note
 origin: user-dictated
 captured_at: 2026-10-04T13:10:00+02:00
@@ -256,6 +269,7 @@ Renaming changes meaning, so it waits for the user's review:
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1320-rename-sizing-deck
 origin: user-dictated
 captured_at: 2026-10-04T13:20:00+02:00
@@ -272,6 +286,7 @@ Resolving an open point always waits for review. Say how it was settled in `reso
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: desktop-2026-10-04-1330-pilot-stores-resolved
 origin: user-dictated
 captured_at: 2026-10-04T13:30:00+02:00
@@ -289,6 +304,7 @@ A change you found in material, not one the user asked for, always waits for rev
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: email-2026-10-04-1340-sizing-deck-done
 origin: agent-extracted
 captured_at: 2026-10-04T13:40:00Z

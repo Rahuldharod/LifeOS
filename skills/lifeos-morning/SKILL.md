@@ -2,7 +2,8 @@
 name: lifeos-morning
 description: The LifeOS morning routine. On workday mornings it reads the LifeOS Agent Index, today's calendar and pending drafts, writes the Daily Focus brief as a daily-focus Inbox Draft (what the user owes, Top 3, waiting and decisions, meeting prep, day shape, defer candidates), then sends the user a read-only 5-line Slack DM. Never includes restricted items and does no inbox triage. Use when a scheduled routine runs "LifeOS morning", when the user asks for his Daily Focus, or when a replan Work Order says "run LifeOS replan".
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
+  skill_pack: 1
   draft_contract: 1
   agent_index_contract: 1
 ---
@@ -57,6 +58,7 @@ Front matter fields, as LifeOS checks them:
 
 | Field | What to put |
 | --- | --- |
+| `skill_pack` | `1` |
 | `kind` | `daily-focus` |
 | `origin` | `agent-extracted` |
 | `title` | `Daily Focus YYYY-MM-DD` |
@@ -129,6 +131,7 @@ A busy Monday (5.5 hours of meetings), so one task is offered for deferral:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: daily-focus
 draft_key: routine-2026-10-05-0600-daily-focus
 origin: agent-extracted
@@ -209,6 +212,7 @@ A light Tuesday with max must-dos set to 4 in Settings: four Top 3 items, no mee
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: daily-focus
 draft_key: routine-2026-10-06-0600-daily-focus
 origin: agent-extracted
@@ -265,6 +269,7 @@ Wrong: the Top 3 names a restricted task. LifeOS would still adopt it (Today hid
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: daily-focus
 draft_key: routine-2026-10-05-0605-daily-focus-wrong
 origin: agent-extracted

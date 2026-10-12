@@ -131,5 +131,8 @@ export type OpenPointDetail = { openPoint: LifeObject; resolutionDecision?: Life
 export type InternalDomains = { domains: string[]; contentHash?: string };
 export type SelfEmails = { emails: string[]; contentHash?: string };
 
+/** ADR 0020: the skill pack this LifeOS expects and the one that wrote the latest draft. */
+export type ClaudeSkillsStatus = { expected: number; oldestAccepted: number; lastSeen?: { skillPack: number; at: string; draft: string; outdated: boolean } };
+
 /** A message for the user, e.g. after writing a Work Order. */
 export type Message = { message: string };

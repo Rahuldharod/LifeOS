@@ -2,7 +2,8 @@
 name: lifeos-object-contract
 description: The rules for asking LifeOS to create or change anything. Defines the Inbox Draft and Patch Draft file formats, the draft kinds, how LifeOS routes them, the language rule, the restricted rule and the self-check. Use whenever you write a file into a LifeOS _inbox/ folder, or check what happened to one. The lifeos-capture skill follows these rules.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
+  skill_pack: 1
   draft_contract: 1
   patch_contract: 1
 ---
@@ -43,6 +44,7 @@ Required on every draft:
 | Field | Value |
 | --- | --- |
 | `lifeos_draft` | `1` |
+| `skill_pack` | `1`: the skill pack version in this skill's front matter |
 | `kind` | one of the kinds below |
 | `draft_key` | any unique text you choose, e.g. `phone-2026-10-04-0915-sizing-deck` |
 | `origin` | `user-dictated` or `agent-extracted` (see Routing) |
@@ -100,6 +102,7 @@ Extracted `task`, `decision`, `open-point` and `knowledge-note` drafts need:
 | Field | Value |
 | --- | --- |
 | `lifeos_patch` | `1` |
+| `skill_pack` | `1`, as for drafts |
 | `draft_key` | unique text, as for drafts |
 | `origin` | `user-dictated` or `agent-extracted` |
 | `captured_at` | when the user asked for the change |
@@ -148,7 +151,8 @@ After writing a file, check what happened. Never report success before this.
 | `duplicate` | processed | Already received earlier; nothing new. |
 | `failed` | failed | Not adopted. Read `errors` (each says `field: reason`), fix the draft and send it again. |
 
-3. No `.result.md` yet: say the draft is **pending adoption** and will be adopted when LifeOS next runs on the Mac. Do not send it again with different content.
+3. If the `.result.md` says your LifeOS skills are out of date, tell the user once: they should reinstall the LifeOS skills from LifeOS Settings → Claude skills.
+4. No `.result.md` yet: say the draft is **pending adoption** and will be adopted when LifeOS next runs on the Mac. Do not send it again with different content.
 
 `object_ids` can list more than the main object: Review Items for unknown names, or Sources created for a note.
 
@@ -162,6 +166,7 @@ A dictated task:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: desktop-2026-10-04-0915-sizing-deck-v2
 origin: user-dictated
@@ -181,6 +186,7 @@ A dictated person:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: person
 draft_key: desktop-2026-10-04-0930-ines-moreau
 origin: user-dictated
@@ -198,6 +204,7 @@ A dictated patch that applies on its own:
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1700-sizing-deck-done
 origin: user-dictated
 captured_at: 2026-10-04T17:00:00+02:00
@@ -214,6 +221,7 @@ Refused: `captured_at` has a time but no `Z` or offset, so the instant is ambigu
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-1010-book-room
 origin: user-dictated
@@ -228,6 +236,7 @@ Refused: an extracted draft must say how sure you are.
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: email-2026-10-04-1100-store-list
 origin: agent-extracted

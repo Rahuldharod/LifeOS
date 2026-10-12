@@ -64,6 +64,7 @@ export interface Endpoints {
   "GET /api/v1/settings/internal-domains": { response: W.InternalDomains };
   "PUT /api/v1/settings/internal-domains": { body: { domains: string[]; expectedHash?: string }; response: W.InternalDomains };
   "GET /api/v1/settings/self-emails": { response: W.SelfEmails };
+  "GET /api/v1/settings/claude-skills": { response: W.ClaudeSkillsStatus };
   "PUT /api/v1/settings/self-emails": { body: { emails: string[]; expectedHash?: string }; response: W.SelfEmails };
   "GET /api/v1/settings/today": { response: W.TodaySettings };
   "PUT /api/v1/settings/today": { body: { meetingHoursThreshold?: number; briefTime?: string; briefTimeZone?: string; briefDays?: W.Weekday[]; expectedHash?: string }; response: W.TodaySettings };
