@@ -78,7 +78,7 @@ const exampleEvent = (externalId: string, title: string, endedHoursAgo: number):
 });
 const exampleEvents = [
   exampleEvent("evt-example-pilot-review", "Pilot review", 3), // no meeting yet: adoption creates it
-  exampleEvent("evt-example-steering", "Spring promo steering", 26), // meeting with Rahul's note
+  exampleEvent("evt-example-steering", "Spring promo steering", 26), // meeting with the user's note
   exampleEvent("evt-example-one-to-one", "One-to-one with Joel", 5) // meeting whose note is restricted
 ];
 class ExampleCalendar implements CalendarConnector {
@@ -236,7 +236,7 @@ describe("enrichment skill stays in step with the code (#50)", () => {
     const gate = (frontmatterOf(skill).metadata as Record<string, unknown>).client_meeting_content;
     expect(["blocked", "approved"]).toContain(gate);
     // Opening the gate means recording the sign-off: the TBD line must go in the same change.
-    if (skill.includes("[TBD — Eagle Eye IT/legal sign-off on processing client meeting content]")) expect(gate).toBe("blocked");
+    if (skill.includes("[TBD — your organisation's IT/legal sign-off on processing client meeting content]")) expect(gate).toBe("blocked");
     expect(skill.indexOf("client_meeting_content")).toBeLessThan(skill.indexOf("## Steps"));
   });
 
@@ -480,7 +480,7 @@ describe("enrichment client gate (#93)", () => {
     if (fixture.expect.reason) expect(decision.reason).toContain(fixture.expect.reason);
   });
 
-  it("reads the internal domains from _agent/overview.md and tells Rahul why when none are set", async () => {
+  it("reads the internal domains from _agent/overview.md and tells the user why when none are set", async () => {
     const skill = await readFile(path.join(skillsRoot, enrichmentSkill), "utf8");
     const gate = skill.slice(0, skill.indexOf("## Steps"));
     expect(gate).toContain("`_agent/overview.md`");

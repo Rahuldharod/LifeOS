@@ -1,15 +1,16 @@
 ---
 name: lifeos-capture
-description: Captures things into Rahul's LifeOS by writing Inbox Drafts and Patch Drafts - tasks, decisions, open points, knowledge notes, sources, and changes to existing items (mark done, new due date, add a note). Use when Rahul says "remind me to", "add a task", "note that we decided", "open point", "save this article", "mark it done", "move it to Friday", or asks to pull actions out of an email, transcript or document into LifeOS.
+description: Captures things into the user's LifeOS by writing Inbox Drafts and Patch Drafts - tasks, decisions, open points, knowledge notes, sources, and changes to existing items (mark done, new due date, add a note). Use when the user says "remind me to", "add a task", "note that we decided", "open point", "save this article", "mark it done", "move it to Friday", or asks to pull actions out of an email, transcript or document into LifeOS.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
+  skill_pack: 1
   draft_contract: 1
   patch_contract: 1
 ---
 
 # LifeOS capture
 
-Turn what Rahul says, or what you find in material he gives you, into files in the LifeOS inbox. The LifeOS app adopts them. You never write object files yourself.
+Turn what the user says, or what you find in material they give you, into files in the LifeOS inbox. The LifeOS app adopts them. You never write object files yourself.
 
 The full rules are in the **lifeos-object-contract** skill. This skill is the everyday how-to, and every example here is tested against LifeOS.
 
@@ -20,16 +21,16 @@ The full rules are in the **lifeos-object-contract** skill. This skill is the ev
    - Something new → an Inbox Draft in `_inbox/drafts/`.
    - A change to something that exists → a Patch Draft in `_inbox/patches/`. Look it up in `_agent/tasks.md` (or the matching index file) and use its `id`.
 3. **Decide the origin.**
-   - Rahul said it himself → `origin: user-dictated`. It is created directly.
-   - You extracted it from an email, transcript, document or chat → `origin: agent-extracted`, with `confidence` and `evidence`. It becomes a Review Item for Rahul.
+   - The user said it themselves → `origin: user-dictated`. It is created directly.
+   - You extracted it from an email, transcript, document or chat → `origin: agent-extracted`, with `confidence` and `evidence`. It becomes a Review Item for the user.
 4. **Write one file per item.** Name it `YYYY-MM-DD-HHMM-short-slug.md`. Use a new `draft_key` per item, e.g. `phone-2026-10-04-0915-sizing-deck`.
 5. **Keep the source language.** French in, French out. Field names and fixed values (`Waiting`, `High`) stay in English.
-6. **Respect restricted.** Never read files marked `sensitivity: restricted`. If Rahul says an item is private, add `sensitivity: restricted`.
-7. **Self-check.** Read the `.result.md` in `_inbox/processed/` or `_inbox/failed/` and tell Rahul the outcome in one line. If there is none yet, say it is pending adoption.
+6. **Respect restricted.** Never read files marked `sensitivity: restricted`. If the user says an item is private, add `sensitivity: restricted`.
+7. **Self-check.** Read the `.result.md` in `_inbox/processed/` or `_inbox/failed/` and tell the user the outcome in one line. If there is none yet, say it is pending adoption.
 
 ## Choosing the kind
 
-| Rahul says or the material shows | Kind |
+| The user says or the material shows | Kind |
 | --- | --- |
 | something to do | `task` (`status: Waiting` plus `waiting_for` when someone else owes it) |
 | something agreed or chosen | `decision` |
@@ -47,6 +48,7 @@ A dictated task, linked by name to a project and a person:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-0920-promo-calendar
 origin: user-dictated
@@ -66,6 +68,7 @@ Language rule: dictated in French, kept in French. A task waiting on someone:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-0940-relance-budget
 origin: user-dictated
@@ -78,12 +81,13 @@ client: Example Grocer
 Elle doit confirmer le budget avant jeudi.
 ```
 
-A name LifeOS does not know is never guessed. The task is created, and a Review Item asks Rahul which project he meant:
+A name LifeOS does not know is never guessed. The task is created, and a Review Item asks the user which project they meant:
 
 <!-- fixture: {"name": "capture-task-unknown-project", "folder": "drafts", "outcome": "adopted", "creates": ["task", "review-item"], "fields": {"type": "task", "title": "Draft the autumn loyalty brief"}} -->
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-1005-autumn-brief
 origin: user-dictated
@@ -99,6 +103,7 @@ A private task, kept out of the Agent Index and the morning brief:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-1015-private-call
 origin: user-dictated
@@ -115,6 +120,7 @@ A dictated decision:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: decision
 draft_key: desktop-2026-10-04-1100-launch-date
 origin: user-dictated
@@ -133,6 +139,7 @@ A dictated open point:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: open-point
 draft_key: desktop-2026-10-04-1110-coupon-cap
 origin: user-dictated
@@ -149,6 +156,7 @@ An action you extracted from an email. It becomes a Review Item, with your confi
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: email-2026-10-04-1130-store-list
 origin: agent-extracted
@@ -164,12 +172,13 @@ evidence:
 Camille asked for the store list in her email of 4 October.
 ```
 
-A knowledge note from an article Rahul shared. The link becomes a Source:
+A knowledge note from an article the user shared. The link becomes a Source:
 
 <!-- fixture: {"name": "capture-knowledge-with-link", "folder": "drafts", "outcome": "adopted", "creates": ["knowledge-note", "source"], "fields": {"type": "knowledge-note"}} -->
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: knowledge-note
 draft_key: phone-2026-10-04-1200-personalised-offers
 origin: user-dictated
@@ -188,6 +197,7 @@ An idea with no source. The body is kept as its own source:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: knowledge-note
 draft_key: phone-2026-10-04-1215-points-expiry-idea
 origin: user-dictated
@@ -204,6 +214,7 @@ A source to keep for later:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: source
 draft_key: phone-2026-10-04-1230-retail-media-podcast
 origin: user-dictated
@@ -224,6 +235,7 @@ Move a due date and raise the priority. Applies on its own:
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1300-sizing-deck-friday
 origin: user-dictated
 captured_at: 2026-10-04T13:00:00+02:00
@@ -241,6 +253,7 @@ Add a note to an item. Applies on its own:
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1310-pilot-stores-note
 origin: user-dictated
 captured_at: 2026-10-04T13:10:00+02:00
@@ -250,12 +263,13 @@ append_note: Joel suggests starting with the 12 Lyon stores.
 ---
 ```
 
-Renaming changes meaning, so it waits for Rahul's review:
+Renaming changes meaning, so it waits for the user's review:
 
 <!-- fixture: {"name": "capture-patch-rename", "folder": "patches", "outcome": "review", "creates": ["review-item"], "fields": {"type": "review-item", "review_type": "update", "target_object_type": "task", "status": "pending"}} -->
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1320-rename-sizing-deck
 origin: user-dictated
 captured_at: 2026-10-04T13:20:00+02:00
@@ -272,6 +286,7 @@ Resolving an open point always waits for review. Say how it was settled in `reso
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: desktop-2026-10-04-1330-pilot-stores-resolved
 origin: user-dictated
 captured_at: 2026-10-04T13:30:00+02:00
@@ -283,12 +298,13 @@ set:
 ---
 ```
 
-A change you found in material, not one Rahul asked for, always waits for review:
+A change you found in material, not one the user asked for, always waits for review:
 
 <!-- fixture: {"name": "capture-patch-extracted", "folder": "patches", "outcome": "review", "creates": ["review-item"], "fields": {"type": "review-item", "review_type": "update"}} -->
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: email-2026-10-04-1340-sizing-deck-done
 origin: agent-extracted
 captured_at: 2026-10-04T13:40:00Z
@@ -301,7 +317,7 @@ set:
 
 ## Reporting back
 
-One line per item, in Rahul's language. For example:
+One line per item, in the user's language. For example:
 
 - "Added task *Send Camille the promo calendar*, due Friday 9 October."
 - "Sent to your review queue: *Share the pilot store list with Camille*."

@@ -1,4 +1,5 @@
 import { confidenceLabels, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { currentSkillPack, oldestAcceptedSkillPack, outdatedSkillPackNote, readSkillPack } from "./skill-pack.js";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import { adoptDailyFocus } from "./focus.js";
 import type { MeetingsModule } from "./meetings.js";
@@ -27,6 +28,8 @@ import { byIdentifier, contextLinkFields, inheritContextLinks, isLive, isStringL
  */
 
 export const draftContractVersion = 1;
+/** The skill pack this LifeOS expects, and the one that wrote the latest draft (absent until a draft is filed). */
+export interface SkillPackStatus { expected: number; oldestAccepted: number; lastSeen?: { skillPack: number; at: string; draft: string; outdated: boolean } }
 export const draftKinds = ["task", "decision", "open-point", "knowledge-note", "source", "person", "meeting-material", "daily-focus"] as const;
 export type DraftKind = typeof draftKinds[number];
 export const draftOrigins = ["user-dictated", "agent-extracted"] as const;
@@ -255,6 +258,21 @@ export class AdoptionModule {
       return { path: file.relativePath, reason: Array.isArray(errors) && errors.length ? errors.map(String).join("; ") : `no readable ${resultName(file.name)} sidecar` };
     }));
     return { awaiting: drafts.length + patches.length, drafts: drafts.length, patches: patches.length, failed: reasons };
+  }
+
+  /** Which skill pack wrote the most recent draft or patch, from the newest `.result.md` (ADR 0020). */
+  async skillPackStatus(): Promise<SkillPackStatus> {
+    const status: SkillPackStatus = { expected: currentSkillPack, oldestAccepted: oldestAcceptedSkillPack };
+    if (!this.inbox) return status;
+    const sidecars = (await Promise.all((["processed", "failed"] as const).map(async (folder) => (await this.inbox!.list(folder)).filter(isResult).map((file) => ({ folder, file })))))
+      .flat().sort((a, b) => b.file.modifiedAt - a.file.modifiedAt);
+    for (const { folder, file } of sidecars) {
+      const sidecar = (await this.inbox.read(folder, file.name).catch(() => undefined))?.frontmatter;
+      if (!sidecar) continue;
+      const seen = readSkillPack(sidecar.skill_pack).skillPack;
+      return { ...status, lastSeen: { skillPack: seen, at: typeof sidecar.processed_at === "string" ? sidecar.processed_at : new Date(file.modifiedAt).toISOString(), draft: String(sidecar.draft ?? file.relativePath), outdated: seen < currentSkillPack } };
+    }
+    return status;
   }
 
   /** System Health lines for failed drafts: they stay listed until the user removes or fixes them. */
@@ -513,6 +531,8 @@ export class AdoptionModule {
     if (version === undefined) return { issues: ["lifeos_draft: missing; a draft must start with lifeos_draft: 1"] };
     if (version !== draftContractVersion) return { issues: [`lifeos_draft: unsupported contract version ${String(version)} (this LifeOS reads version ${draftContractVersion})`] };
     const issues: string[] = [];
+    const skillPack = readSkillPack(fields.skill_pack);
+    if (skillPack.issue) issues.push(skillPack.issue);
     // U7: only the application generates Review Item operation IDs, so a draft can never pre-empt or replay one.
     if (fields.operation_id !== undefined) issues.push("operation_id: drafts must not carry an operation_id; LifeOS generates it at adoption");
     const kind = text(fields.kind);
@@ -542,13 +562,15 @@ export class AdoptionModule {
     const ids = result.objectIds.join(", ");
     const original = result.original;
     const pointer = original?.result ? ` The original result is ${original.result}.` : original?.agentRunId ? ` It was adopted by agent-run ${original.agentRunId}.` : "";
+    const skillPack = readSkillPack(document.frontmatter?.skill_pack).skillPack;
+    const note = outcome !== "failed" ? outdatedSkillPackNote(skillPack) : undefined;
     const heading = outcome === "adopted" ? `# Adopted\n\nCreated ${ids}.\n` : outcome === "applied" ? `# Applied\n\nChanged ${ids}. The change can be undone in LifeOS.\n` : outcome === "review" ? `# Waiting for review\n\nThis change needs a second look, so LifeOS raised Review Item ${ids}. Nothing changes until it is accepted in LifeOS.\n` : outcome === "duplicate" ? from === "patches" ? `# Already received\n\nThis patch was handled before (${ids}); nothing was changed again.\n` : `# Already adopted\n\nThis draft was adopted before as ${ids}; nothing new was created.${pointer}\n` : `# Not ${from === "patches" ? "applied" : "adopted"}\n\n${result.errors!.map((error) => `- ${error}`).join("\n")}\n\nFix the draft and send it again; this file is kept and never deleted automatically.\n`;
     await this.inbox!.writeDocument(folder, resultName(filed.name), {
-      lifeos_result: draftContractVersion, outcome, draft: draftPath, filed_as: filed.relativePath,
+      lifeos_result: draftContractVersion, outcome, draft: draftPath, filed_as: filed.relativePath, skill_pack: skillPack,
       ...(result.draftKey ? { draft_key: result.draftKey } : {}), content_hash: document.contentHash,
       object_ids: result.objectIds, errors: result.errors ?? [], processed_at: run.now, agent_run_id: run.id,
       ...(original?.result ? { original_result: original.result } : {}), ...(original?.agentRunId ? { original_agent_run_id: original.agentRunId } : {})
-    }, heading);
+    }, note ? `${heading}\n${note}\n` : heading);
     return { draft: draftPath, outcome, objectIds: result.objectIds, filedAs: filed.relativePath, ...(result.errors ? { reason: result.errors.join("; ") } : {}) };
   }
 

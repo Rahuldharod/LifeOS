@@ -2,20 +2,21 @@
 name: lifeos-object-contract
 description: The rules for asking LifeOS to create or change anything. Defines the Inbox Draft and Patch Draft file formats, the draft kinds, how LifeOS routes them, the language rule, the restricted rule and the self-check. Use whenever you write a file into a LifeOS _inbox/ folder, or check what happened to one. The lifeos-capture skill follows these rules.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
+  skill_pack: 1
   draft_contract: 1
   patch_contract: 1
 ---
 
 # LifeOS Object Contract (v1)
 
-LifeOS keeps Rahul's tasks, decisions, open points, notes and people as Markdown **objects** in a data root folder. Only the LifeOS app writes objects. You never create, edit, rename or delete an object file.
+LifeOS keeps the user's tasks, decisions, open points, notes and people as Markdown **objects** in a data root folder. Only the LifeOS app writes objects. You never create, edit, rename or delete an object file.
 
 To change LifeOS you write one small Markdown file into the inbox. The app **adopts** it: it checks it, gives it an ID, links names, files it, and writes a `.result.md` next to it saying what happened.
 
 ## The data root
 
-The data root is the folder that holds `_inbox/` and `_agent/`. If Rahul has not said which folder it is, ask once. Never guess between two folders.
+The data root is the folder that holds `_inbox/` and `_agent/`. If the user has not said which folder it is, ask once. Never guess between two folders.
 
 | Folder | Who writes | What |
 | --- | --- | --- |
@@ -43,11 +44,12 @@ Required on every draft:
 | Field | Value |
 | --- | --- |
 | `lifeos_draft` | `1` |
+| `skill_pack` | `1`: the skill pack version in this skill's front matter |
 | `kind` | one of the kinds below |
 | `draft_key` | any unique text you choose, e.g. `phone-2026-10-04-0915-sizing-deck` |
 | `origin` | `user-dictated` or `agent-extracted` (see Routing) |
 | `title` | the object's title, in the source language |
-| `captured_at` | when Rahul said it or the material was captured: ISO 8601 with `Z` or an offset, e.g. `2026-10-04T09:15:00+02:00`, or a plain date `2026-10-04` |
+| `captured_at` | when the user said it or the material was captured: ISO 8601 with `Z` or an offset, e.g. `2026-10-04T09:15:00+02:00`, or a plain date `2026-10-04` |
 
 Never include `operation_id`: LifeOS generates it. A draft carrying one is refused.
 
@@ -75,7 +77,7 @@ Write `project`, `client`, `product`, `owner`, `waiting_for` and `meeting` as on
 LifeOS matches names exactly, ignoring case and accents. It never guesses:
 
 - One match: linked.
-- No match, or several: a dictated object is still created, and LifeOS raises a `link-resolution` Review Item for Rahul to pick. On an extracted proposal the name is listed as unresolved.
+- No match, or several: a dictated object is still created, and LifeOS raises a `link-resolution` Review Item for the user to pick. On an extracted proposal the name is listed as unresolved.
 - Restricted objects are never matched by name, only by ID.
 
 Use the ID from the Agent Index when a name is ambiguous.
@@ -84,8 +86,8 @@ Use the ID from the Agent Index when a name is ambiguous.
 
 | `origin` | Use when | What LifeOS does |
 | --- | --- | --- |
-| `user-dictated` | Rahul told you this himself ("remind me to…", "note that we decided…") | Creates the object directly. A task gets status Inbox and owner Rahul unless named. |
-| `agent-extracted` | You found it in material: an email, transcript, document, chat | Raises a create-type **Review Item**. Nothing exists until Rahul accepts it. |
+| `user-dictated` | The user told you this themselves ("remind me to…", "note that we decided…") | Creates the object directly. A task gets status Inbox, with the user as owner unless someone else is named. |
+| `agent-extracted` | You found it in material: an email, transcript, document, chat | Raises a create-type **Review Item**. Nothing exists until the user accepts it. |
 
 Extracted `task`, `decision`, `open-point` and `knowledge-note` drafts need:
 
@@ -100,9 +102,10 @@ Extracted `task`, `decision`, `open-point` and `knowledge-note` drafts need:
 | Field | Value |
 | --- | --- |
 | `lifeos_patch` | `1` |
+| `skill_pack` | `1`, as for drafts |
 | `draft_key` | unique text, as for drafts |
 | `origin` | `user-dictated` or `agent-extracted` |
-| `captured_at` | when Rahul asked for the change |
+| `captured_at` | when the user asked for the change |
 | target | `id` (preferred, from the Agent Index), or the exact `title` plus `type` (`task`, `decision`, `open-point`…) |
 | `set` | field: value pairs to change. `null` clears a field |
 | `append_note` | text added at the end of the object's body |
@@ -111,8 +114,8 @@ Give `set`, `append_note` or both. In `set`, references use the names above (`ow
 
 What happens:
 
-- **Applies on its own** only when `user-dictated` and the target is a task changing `status`, `due_on`, `due_at`, `due_timezone`, `priority` or `waiting_for` (with status Waiting), or when it only appends a note. Rahul can undo it in LifeOS.
-- **Becomes an `update` Review Item** for everything else: titles, owners, decision text, any field on a decision, closing or resolving an open point, any `agent-extracted` patch, and any field Rahul changed after `captured_at` (conflict rule).
+- **Applies on its own** only when `user-dictated` and the target is a task changing `status`, `due_on`, `due_at`, `due_timezone`, `priority` or `waiting_for` (with status Waiting), or when it only appends a note. The user can undo it in LifeOS.
+- **Becomes an `update` Review Item** for everything else: titles, owners, decision text, any field on a decision, closing or resolving an open point, any `agent-extracted` patch, and any field the user changed after `captured_at` (conflict rule).
 
 ## Idempotency
 
@@ -130,7 +133,7 @@ Field names and fixed values stay exactly as written here, in English: `kind`, `
 
 - Never open, read, quote or summarise a file whose front matter says `sensitivity: restricted`. If you open one by accident, stop and do not use what you saw.
 - The Agent Index never lists restricted objects; it only counts them. Do not hunt for them.
-- When Rahul says something is private, add `sensitivity: restricted` to the draft.
+- When the user says something is private, add `sensitivity: restricted` to the draft.
 - This is a rule you follow, not a lock: the files sit in the same folder. Finance and health records are kept out of LifeOS altogether.
 
 ## Self-check: read the `.result.md`
@@ -140,15 +143,16 @@ After writing a file, check what happened. Never report success before this.
 1. Wait a few seconds, then look for `<file name>.result.md` in `_inbox/processed/` or `_inbox/failed/`. If the name was taken, LifeOS adds `-2`, `-3`; match on `draft_key`.
 2. Read its `outcome`:
 
-| `outcome` | Folder | Tell Rahul |
+| `outcome` | Folder | Tell the user |
 | --- | --- | --- |
 | `adopted` | processed | Created. Give the title and the first ID in `object_ids`. |
 | `applied` | processed | Changed, and it can be undone in LifeOS. |
-| `review` | processed | Waiting for his review in LifeOS; nothing changed yet. |
+| `review` | processed | Waiting for their review in LifeOS; nothing changed yet. |
 | `duplicate` | processed | Already received earlier; nothing new. |
 | `failed` | failed | Not adopted. Read `errors` (each says `field: reason`), fix the draft and send it again. |
 
-3. No `.result.md` yet: say the draft is **pending adoption** and will be adopted when LifeOS next runs on the Mac. Do not send it again with different content.
+3. If the `.result.md` says your LifeOS skills are out of date, tell the user once: they should reinstall the LifeOS skills from LifeOS Settings → Claude skills.
+4. No `.result.md` yet: say the draft is **pending adoption** and will be adopted when LifeOS next runs on the Mac. Do not send it again with different content.
 
 `object_ids` can list more than the main object: Review Items for unknown names, or Sources created for a note.
 
@@ -162,6 +166,7 @@ A dictated task:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: desktop-2026-10-04-0915-sizing-deck-v2
 origin: user-dictated
@@ -181,6 +186,7 @@ A dictated person:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: person
 draft_key: desktop-2026-10-04-0930-ines-moreau
 origin: user-dictated
@@ -198,6 +204,7 @@ A dictated patch that applies on its own:
 ```markdown
 ---
 lifeos_patch: 1
+skill_pack: 1
 draft_key: phone-2026-10-04-1700-sizing-deck-done
 origin: user-dictated
 captured_at: 2026-10-04T17:00:00+02:00
@@ -214,6 +221,7 @@ Refused: `captured_at` has a time but no `Z` or offset, so the instant is ambigu
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: phone-2026-10-04-1010-book-room
 origin: user-dictated
@@ -228,6 +236,7 @@ Refused: an extracted draft must say how sure you are.
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: task
 draft_key: email-2026-10-04-1100-store-list
 origin: agent-extracted

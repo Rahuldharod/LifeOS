@@ -1,15 +1,16 @@
 ---
 name: lifeos-morning
-description: The LifeOS morning routine. On workday mornings it reads the LifeOS Agent Index, today's calendar and pending drafts, writes the Daily Focus brief as a daily-focus Inbox Draft (what Rahul owes, Top 3, waiting and decisions, meeting prep, day shape, defer candidates), then sends Rahul a read-only 5-line Slack DM. Never includes restricted items and does no inbox triage. Use when a scheduled routine runs "LifeOS morning", when Rahul asks for his Daily Focus, or when a replan Work Order says "run LifeOS replan".
+description: The LifeOS morning routine. On workday mornings it reads the LifeOS Agent Index, today's calendar and pending drafts, writes the Daily Focus brief as a daily-focus Inbox Draft (what the user owes, Top 3, waiting and decisions, meeting prep, day shape, defer candidates), then sends the user a read-only 5-line Slack DM. Never includes restricted items and does no inbox triage. Use when a scheduled routine runs "LifeOS morning", when the user asks for his Daily Focus, or when a replan Work Order says "run LifeOS replan".
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
+  skill_pack: 1
   draft_contract: 1
   agent_index_contract: 1
 ---
 
 # LifeOS morning routine
 
-Each workday morning you write Rahul's **Daily Focus** brief into the LifeOS inbox, then send him a short Slack DM. LifeOS adopts the brief and shows it on its Today page, with live status on top.
+Each workday morning you write the user's **Daily Focus** brief into the LifeOS inbox, then send them a short Slack DM. LifeOS adopts the brief and shows it on its Today page, with live status on top.
 
 Follow the **lifeos-object-contract** skill for every file you write. Read the index the way the **lifeos-ask** skill does.
 
@@ -17,7 +18,7 @@ Follow the **lifeos-object-contract** skill for every file you write. Read the i
 
 - **No restricted items.** Never open, quote or count by name anything marked `sensitivity: restricted`. Use only objects listed in `_agent/`; restricted ones are never listed there.
 - **No inbox triage.** Do not read or summarise email, Slack or Jira. That stays in Steve's separate brief.
-- **No writes except one draft and one DM.** Never edit objects, `_agent/` files or settings. The DM goes to Rahul only, and it is read-only: no questions, no buttons, nothing to reply to.
+- **No writes except one draft and one DM.** Never edit objects, `_agent/` files or settings. The DM goes to the user only, and it is read-only: no questions, no buttons, nothing to reply to.
 - **No secrets.** Never put links with tokens, email bodies or passwords in the brief or the DM.
 
 ## When it runs
@@ -29,7 +30,7 @@ Follow the **lifeos-object-contract** skill for every file you write. Read the i
 | Days | Monday to Friday | `settings/today.md` → `brief_days` |
 | Max must-dos (Top 3 size) | 3 (1 to 5) | `settings/daily-focus.md` → `max_must_dos` |
 
-Rahul changes these in LifeOS **Settings**. Read only the front matter of these two files. If a file is missing, use the default.
+The user changes these in LifeOS **Settings**. Read only the front matter of these two files. If a file is missing, use the default.
 
 If today (in the brief time zone) is not one of the brief days, stop and send nothing.
 
@@ -57,24 +58,25 @@ Front matter fields, as LifeOS checks them:
 
 | Field | What to put |
 | --- | --- |
+| `skill_pack` | `1` |
 | `kind` | `daily-focus` |
 | `origin` | `agent-extracted` |
 | `title` | `Daily Focus YYYY-MM-DD` |
 | `draft_key` | `routine-YYYY-MM-DD-HHMM-daily-focus` (a new one each run) |
 | `captured_at`, `generated_at` | now, with the time-zone offset |
 | `focus_on` | today, `YYYY-MM-DD` |
-| `i_owe` | tasks Rahul owes: overdue, due today, and actions from yesterday's meetings. Each: `task_id`, `overdue` (true or false) |
+| `i_owe` | tasks the user owes: overdue, due today, and actions from yesterday's meetings. Each: `task_id`, `overdue` (true or false) |
 | `top3` | 1 up to **max must-dos** tasks (never more than 5). Each: `task_id`, `why_today` (required), `if_then` ("If it is 9:00, then I…": when, where, how long) |
 | `waiting_and_decisions` | aged waiting-on tasks, open points and recent decisions to act on. Each: `object_id`, `age_days` (whole days) |
-| `meeting_prep` | up to 3 of today's key meetings. Each: `meeting_id` (from `_agent/meetings.md`), `context`, `ask` (Rahul's ask) |
+| `meeting_prep` | up to 3 of today's key meetings. Each: `meeting_id` (from `_agent/meetings.md`), `context`, `ask` (the user's ask) |
 | `day_shape` | `meeting_hours` and `free_hours` for the working day, information only |
-| `defer_candidates` | 0 to 3 tasks to consider deferring, only when must-dos do not fit the free hours. Each: `task_id`, `reason`. Never a meeting. Never applied for him |
+| `defer_candidates` | 0 to 3 tasks to consider deferring, only when must-dos do not fit the free hours. Each: `task_id`, `reason`. Never a meeting. Never applied for them |
 
 Choosing the Top 3: what is overdue or due today first, then High priority, then what unblocks someone else. Size it to the free hours. Each `why_today` says why today and not tomorrow.
 
-Free hours: the working day is 09:00 to 18:00 in the brief time zone, minus meeting time. `[TBD — confirm Rahul's working hours]`
+Free hours: the working day is 09:00 to 18:00 in the brief time zone, minus meeting time. `[TBD — make working hours a LifeOS setting]`
 
-A newer brief for the same date replaces the older one in LifeOS. Rahul's pins, swaps and dismissals on Today are kept separately and survive a new brief.
+A newer brief for the same date replaces the older one in LifeOS. The user's pins, swaps and dismissals on Today are kept separately and survive a new brief.
 
 ## Self-check before writing
 
@@ -89,7 +91,7 @@ LifeOS itself accepts a brief that points at a restricted item: Today hides it a
 
 ## The Slack DM
 
-Send it to Rahul himself, as a direct message from the Slack connector. Exactly 5 lines:
+Send it to the user themselves, as a direct message from the Slack connector. Exactly 5 lines:
 
 1. `LifeOS · <weekday> <day> <month>`
 2. `Top 3: <title> · <title> · <title>` (titles from the index, the brief's Top 3 order)
@@ -101,7 +103,7 @@ Rules: nothing restricted, no other titles, no questions, no inbox items. If Sla
 
 ## Replan
 
-LifeOS **Refresh** writes a `replan` Work Order to `_inbox/requests/`. When Rahul says "run LifeOS replan", or a scheduled run finds one:
+LifeOS **Refresh** writes a `replan` Work Order to `_inbox/requests/`. When the user says "run LifeOS replan", or a scheduled run finds one:
 
 1. Follow its body. Use its `focus_on`.
 2. Write a new brief with a new `draft_key` and the current `generated_at`. The newer one wins.
@@ -110,14 +112,14 @@ LifeOS **Refresh** writes a `replan` Work Order to `_inbox/requests/`. When Rahu
 
 ## Running it on a schedule
 
-Rahul sets this up himself. Steps are in `skills/INSTALL.md`, Part 7.
+The user sets this up themselves. Steps are in `skills/INSTALL.md`, Part 7.
 
 | Option | When | Notes |
 | --- | --- | --- |
 | **Cloud routine (preferred)** | Runs even when the Mac is off | Needs the Drive connector to read `_agent/` and write `_inbox/drafts/`, plus Calendar and Slack. `[TBD — verify cloud routines can use Slack/Gong connectors]` `[TBD — verify a cloud routine can write files into Drive]` |
 | **Desktop scheduled task (fallback)** | Runs only when the Mac is awake and Claude desktop is open | Reads and writes the data root directly through the Filesystem extension |
 
-Schedule: workdays at 06:00 Europe/Paris. If the scheduler only takes UTC, 06:00 Paris is 04:00 UTC in summer (CEST) and 05:00 UTC in winter (CET): check after each clock change. When Rahul changes the brief time in Settings, he must change the schedule too; this skill cannot.
+Schedule: the brief time and days set in LifeOS Settings (default: workdays at 06:00 Europe/Paris). If the scheduler only takes UTC, convert it: for example 06:00 Paris is 04:00 UTC in summer (CEST) and 05:00 UTC in winter (CET): check after each clock change. When the user changes the brief time in Settings, they must change the schedule too; this skill cannot.
 
 ## Examples
 
@@ -129,6 +131,7 @@ A busy Monday (5.5 hours of meetings), so one task is offered for deferral:
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: daily-focus
 draft_key: routine-2026-10-05-0600-daily-focus
 origin: agent-extracted
@@ -209,6 +212,7 @@ A light Tuesday with max must-dos set to 4 in Settings: four Top 3 items, no mee
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: daily-focus
 draft_key: routine-2026-10-06-0600-daily-focus
 origin: agent-extracted
@@ -265,6 +269,7 @@ Wrong: the Top 3 names a restricted task. LifeOS would still adopt it (Today hid
 ```markdown
 ---
 lifeos_draft: 1
+skill_pack: 1
 kind: daily-focus
 draft_key: routine-2026-10-05-0605-daily-focus-wrong
 origin: agent-extracted

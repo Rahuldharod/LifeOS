@@ -132,6 +132,8 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!Array.isArray(domains)) return reply.status(400).send({ error: "domains must be a list" });
     return application.saveInternalDomains(domains, expectedHash);
   });
+  // ADR 0020: read-only; derived from the newest .result.md, so it reads no settings or secrets.
+  route(server, "GET /api/v1/settings/claude-skills", async () => application.skillPackStatus());
   // #54: the user's own addresses live in a synced setting, never in code.
   route(server, "GET /api/v1/settings/self-emails", async () => application.getSelfEmails());
   route(server, "PUT /api/v1/settings/self-emails", async (request, reply) => {

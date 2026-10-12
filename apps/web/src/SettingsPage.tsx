@@ -2,7 +2,7 @@
 // this page uses are loaded and saved here; App passes in what other pages share (timezone, calendars, connections).
 import React, { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api.js";
-import type { BackupSummary, BackupVerification, CalendarOption, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, SystemHealth, TodaySettings, Weekday } from "@lifeos/contracts";
+import type { BackupSummary, BackupVerification, CalendarOption, ClaudeSkillsStatus, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, SystemHealth, TodaySettings, Weekday } from "@lifeos/contracts";
 import type { ConnectionsState } from "./connections.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
@@ -47,9 +47,16 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [internalDomains, setInternalDomains] = useState<InternalDomains>();
   const [selfEmails, setSelfEmails] = useState<SelfEmails>();
+  const [claudeSkills, setClaudeSkills] = useState<ClaudeSkillsStatus | "unavailable">();
   const [focusSettings, setFocusSettings] = useState<FocusSettings>();
   const [loadFailed, setLoadFailed] = useState(false);
   const fallbackGuard = useRef(createSettingsEditorGuard());
+
+  // ADR 0020: informational only, so a failed read does not block the rest of Settings.
+  const loadClaudeSkills = async () => {
+    try { setClaudeSkills(await api("GET /api/v1/settings/claude-skills")); }
+    catch { setClaudeSkills("unavailable"); }
+  };
 
   const loadInternalDomains = async () => {
     try { setInternalDomains(await api("GET /api/v1/settings/internal-domains")); }
@@ -119,7 +126,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   };
 
   // Opening Settings reloads every setting it shows, since another device may have changed them.
-  useEffect(() => { void onLoadCalendars().catch(() => setLoadFailed(true)); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); }, []);
+  useEffect(() => { void onLoadCalendars().catch(() => setLoadFailed(true)); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); void loadClaudeSkills(); }, []);
 
   if ((import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV && new URLSearchParams(window.location.search).has("variant")) return <SettingsDesignPrototype />;
 
@@ -132,6 +139,9 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     { id: "identity", group: "My LifeOS", label: "Identity", cards: [
       { id: selfEmailsCardId, label: "My email addresses", content: <SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /> },
       { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> }
+    ] },
+    { id: "claude", group: "My LifeOS", label: "Claude skills", cards: [
+      { id: "settings-claude-skills", label: "Claude skills", safeStatus: claudeSkillsSummary(claudeSkills), content: <ClaudeSkillsCard status={claudeSkills} displayTimeZone={displayTimeZone} /> }
     ] },
     ...(onCreateAndVerifyBackup && onVerifyBackup && onTakeOverSession ? connectionDeviceSettingsSections({ calendarCatalog, calendarCatalogLoaded, calendarPrefs, connections, health, backups, lastVerification, busy, readOnly, displayTimeZone, onRetryConnections, onSaveGoogleSecrets, onSaveCalendarPrefs, onCreateAndVerifyBackup, onVerifyBackup, onTakeOverSession }) : []),
     ...(referenceSections ?? (["projects", "clients", "products", "people"] as const).map((kind): SettingsSection => ({ id: `reference-${kind}`, group: "Reference data", label: kind[0]!.toUpperCase() + kind.slice(1), cards: [{ id: `settings-reference-${kind}`, label: kind[0]!.toUpperCase() + kind.slice(1), safeNames: referenceData[kind] ?? [], content: <ReferenceDataCard label={kind} names={referenceData[kind] ?? []} /> }] })))
@@ -162,6 +172,27 @@ export function DisplayTimeZoneCard({ displayTimeZone, disabled, onSave }: { dis
   };
   useSettingsCardGuard("settings-display-timezone", { dirty, save, discard: () => { setValue(displayTimeZone); setStatus(undefined); } });
   return <article className="timezone-setting"><span>DISPLAY TIMEZONE</span><h3>{displayTimeZone}</h3><p className="muted">Timestamps remain portable UTC instants. LifeOS displays them in this device-specific IANA timezone, including daylight-saving changes.</p><div className="capture-row"><select aria-label="Display timezone" value={value} disabled={disabled} onChange={(event) => { setValue(event.target.value); setStatus(undefined); }}>{[...new Set([displayTimeZone, ...availableTimeZones])].map((zone) => <option key={zone}>{zone}</option>)}</select><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div><SaveStatus status={status} /></article>;
+}
+
+function claudeSkillsSummary(status?: ClaudeSkillsStatus | "unavailable") {
+  if (!status) return "Loading";
+  if (status === "unavailable" || !status.lastSeen) return `Pack ${status === "unavailable" ? "?" : status.expected}`;
+  return status.lastSeen.outdated ? "Out of date" : "Up to date";
+}
+
+/** ADR 0020: which skill pack wrote the latest draft, so the user knows when to reinstall their Claude skills. */
+function ClaudeSkillsCard({ status, displayTimeZone }: { status?: ClaudeSkillsStatus | "unavailable"; displayTimeZone: string }) {
+  const intro = <p className="muted">Claude writes into LifeOS with the LifeOS skills you installed in Claude. Each draft says which skill pack wrote it.</p>;
+  if (!status) return <article className="claude-skills-setting"><span>CLAUDE</span><h3>Claude skills</h3>{intro}<p className="muted">Loading…</p></article>;
+  if (status === "unavailable") return <article className="claude-skills-setting"><span>CLAUDE</span><h3>Claude skills</h3>{intro}<p className="calendar-error" role="alert">Could not read the skills status. Reopen Settings to try again.</p></article>;
+  const { lastSeen } = status;
+  const at = lastSeen ? new Date(lastSeen.at).toLocaleString(undefined, { timeZone: displayTimeZone, dateStyle: "medium", timeStyle: "short" }) : undefined;
+  return <article className="claude-skills-setting"><span>CLAUDE</span><h3>Claude skills</h3>{intro}
+    <p>This LifeOS expects skill pack {status.expected}{status.oldestAccepted < status.expected ? ` and still accepts pack ${status.oldestAccepted}` : ""}.</p>
+    {!lastSeen ? <p className="muted" role="status">No draft from Claude yet.</p>
+      : lastSeen.outdated ? <p className="calendar-error" role="alert">Your latest draft ({at}) came from skill pack {lastSeen.skillPack}. Reinstall your LifeOS skills in Claude so they match this LifeOS.</p>
+      : <p className="muted" role="status">Up to date: your latest draft ({at}) came from skill pack {lastSeen.skillPack}.</p>}
+  </article>;
 }
 
 function ReferenceDataCard({ label, names }: { label: string; names: string[] }) {

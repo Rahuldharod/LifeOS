@@ -210,7 +210,7 @@ export class AgentIndexModule {
     }
     const restrictedTotal = objects.filter(isRestricted).length;
     const overview = file("overview.md", "LifeOS Agent Index", restrictedTotal, [
-      ["Freshness", [`- Generated at ${generated}. If this is more than 24 hours old, tell Rahul the index may be stale.`]],
+      ["Freshness", [`- Generated at ${generated}. If this is more than 24 hours old, tell the user the index may be stale.`]],
       ["Inbox", [`- Pending adoption: ${inbox.awaiting} (see pending-adoption.md)`, `- Failed drafts: ${inbox.failed.length}`]],
       ["Files", [
         "- tasks.md: my open tasks, overdue / today / upcoming / no date", "- waiting-on.md: waiting on others, by person, with age", "- open-points.md: open points",
