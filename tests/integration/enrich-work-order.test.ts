@@ -190,23 +190,22 @@ describe("Enrich last 48h Work Order", () => {
     expect(application.object(noted.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
   });
 
-  it("excludes every occurrence governed by one restricted recurring Note (#148)", async () => {
+  it("excludes only the restricted occurrence; the others stay eligible for the Work Order (#175)", async () => {
     const firstEvent = event("series-first", 30, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(30) });
     const secondEvent = event("series-second", 3, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(3) });
     const { root, application } = await vault([firstEvent, secondEvent]);
-    const { items } = await seedLegacySharedNote(root, "google", [{ event: firstEvent, body: "First occurrence\n" }]);
-    await application.rebuildIndex();
-    const first = await application.meetingWorkspace(items[0]!.meetingId);
-    await application.setSensitivity(first.note!.frontmatter.id, "restricted", first.note!.contentHash);
+    const first = await application.createMeetingFromEvent(firstEvent.externalId, range.from, range.to, "work", "First occurrence\n");
+    const second = await application.createMeetingFromEvent(secondEvent.externalId, range.from, range.to, "work", "Second occurrence\n");
+    expect(second.note!.frontmatter.id).not.toBe(first.note!.frontmatter.id);
+    await application.setSensitivity(first.note!.frontmatter.id, "restricted", application.object(first.note!.frontmatter.id).contentHash);
 
     const result = await application.requestEnrichment({ now });
 
-    expect(result.meetings).toEqual([]);
-    expect(result.restrictedExcluded).toBe(2);
-    expect(result.workOrder).toBeUndefined();
-    expect(await requestFiles(root)).toEqual([]);
+    expect(result.restrictedExcluded).toBe(1);
+    expect(result.workOrder).toBeDefined();
+    expect(await requestFiles(root)).toHaveLength(1);
     expect(application.object(first.meeting.frontmatter.id).frontmatter.enrichment_state).toBeUndefined();
-    expect((await application.listObjects()).filter((object) => object.frontmatter.type === "meeting")).toHaveLength(1);
+    expect(application.object(second.meeting.frontmatter.id).frontmatter.enrichment_state).toBeDefined();
   });
 
   it("never lists the email of a restricted person (#63)", async () => {

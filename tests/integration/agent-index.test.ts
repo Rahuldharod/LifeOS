@@ -79,11 +79,12 @@ const populatedSelf = async (root: string) => (await readFile(path.join(root, "p
 const section = (content: string, heading: string) => content.split(heading)[1]?.split(/\n## /)[0] ?? "";
 
 describe("Agent Index (#43)", () => {
-  it("excludes every occurrence linked to one restricted recurring Note (#148)", async () => {
+  it("excludes every meeting a restricted legacy shared Note is linked to, and no other (#148, #175)", async () => {
     const { root, application } = await vault();
     const first = await seed(root, "meetings", "meeting", "Private weekly one", { status: "scheduled", starts_at: at(-2), ends_at: at(-2 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [] });
-    await seed(root, "meetings", "meeting", "Private weekly two", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:private" });
-    await seed(root, "meetings", "meeting-note", "Private weekly notes", { meeting_id: first.id, meeting_ids: [first.id], recurrence_series_id: "google:work:private", sensitivity: "restricted" });
+    const second = await seed(root, "meetings", "meeting", "Private weekly two", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:private" });
+    await seed(root, "meetings", "meeting", "Unlinked weekly three", { status: "scheduled", starts_at: at(-0.5), ends_at: at(-0.5 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:private" });
+    await seed(root, "meetings", "meeting-note", "Private weekly notes", { meeting_id: first.id, meeting_ids: [first.id, second.id], recurrence_series_id: "google:work:private", sensitivity: "restricted" });
     await application.rebuildIndex();
 
     await application.writeAgentIndex({ now });
@@ -92,6 +93,25 @@ describe("Agent Index (#43)", () => {
     expect(meetings).toContain("2 restricted not listed.");
     expect(meetings).not.toContain("Private weekly one");
     expect(meetings).not.toContain("Private weekly two");
+    expect(meetings).toContain("Unlinked weekly three");
+  });
+
+  it("excludes only the restricted occurrence's Note from a series, not the other occurrences (#175)", async () => {
+    const { root, application } = await vault();
+    const first = await seed(root, "meetings", "meeting", "Private occurrence", { status: "scheduled", starts_at: at(-2), ends_at: at(-2 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:weekly" });
+    const second = await seed(root, "meetings", "meeting", "Open occurrence", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:weekly" });
+    await seed(root, "meetings", "meeting-note", "Private occurrence notes", { meeting_id: first.id, meeting_ids: [first.id], recurrence_series_id: "google:work:weekly", sensitivity: "restricted" });
+    await seed(root, "meetings", "meeting-note", "Open occurrence notes", { meeting_id: second.id, meeting_ids: [second.id], recurrence_series_id: "google:work:weekly" });
+    await application.rebuildIndex();
+
+    await application.writeAgentIndex({ now });
+
+    const meetings = await read(root, "meetings.md");
+    expect(meetings).toContain("1 restricted not listed.");
+    expect(meetings).not.toContain("Private occurrence");
+    expect(meetings).toContain("Open occurrence");
+    expect(meetings).toContain("open-occurrence-notes");
+    expect(meetings).not.toContain("private-occurrence-notes");
   });
 
   it("writes every summary file, each stating its generation time, with ID, title, path and key fields", async () => {

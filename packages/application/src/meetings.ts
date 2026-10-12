@@ -916,13 +916,11 @@ export class MeetingsModule {
     return recurrenceSeriesKey(this.ctx.calendar?.provider ?? "calendar", { ...event, seriesId });
   }
 
-  /** One shared sensitivity covers stored and not-yet-materialized occurrences in the provider series. */
+  /** Sensitivity is per Note (#175): an event is restricted only through its own meeting or the Notes linked to it, never through the rest of its series. */
   isEventRestricted(event: CalendarEvent) {
     const meeting = this.findMeetingForEvent(event.externalId, event.calendarId, event);
     const notes = this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && !object.frontmatter.deleted_at);
-    if (isMeetingRestricted(meeting, notes)) return true;
-    const seriesId = this.seriesKey(event);
-    return Boolean(seriesId && notes.some((note) => note.frontmatter.recurrence_series_id === seriesId && isRestricted(note)));
+    return isMeetingRestricted(meeting, notes);
   }
 
   private occurrenceId(event: CalendarEvent) {
