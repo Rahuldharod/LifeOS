@@ -57,6 +57,35 @@ await objectFile("meetings", recurring.note, {
 await objectFile("sources", recurring.source, {
   ...stamped(recurring.source, "source", "Synthetic planning transcript"), source_type: "meet-transcript", captured_at: "2026-10-12T08:35:00.000Z", ingestion_status: "processed", meeting_id: recurring.currentMeeting, url: "https://drive.example.com/docs/weekly-planning", retrieved_at: "2026-10-12T08:35:00.000Z"
 }, "Synthetic transcript content.\n");
+// #179 Series view: six monthly occurrences of one provider series, each with its own Note except
+// June, which has none and must be skipped. Opening September shows the 4 Notes before it.
+const monthly = { series: "mock:mock-calendar:monthly-review", months: ["04", "05", "06", "07", "08", "09"] };
+for (const [index, month] of monthly.months.entries()) {
+  const meetingId = `a1000000-0000-4000-8000-00000000000${index + 1}`;
+  const startsAt = `2026-${month}-07T08:00:00.000Z`;
+  await objectFile("meetings", meetingId, {
+    ...stamped(meetingId, "meeting", "Monthly review"), status: "scheduled", starts_at: startsAt, ends_at: `2026-${month}-07T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: monthly.series, recurrence_occurrence_id: `${monthly.series}:${startsAt}`, original_occurrence_starts_at: startsAt
+  });
+  if (month === "06") continue;
+  const noteId = `b1000000-0000-4000-8000-00000000000${index + 1}`;
+  await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Monthly review notes ${month}`), meeting_id: meetingId }, `Monthly review words for 2026-${month}.\n`);
+}
+// #179: a Legacy shared Note (one Note, two Meetings of the "weekly-prio" series) plus a later occurrence with its own Note.
+const prio = { series: "mock:mock-calendar:weekly-prio", note: "d1000000-0000-4000-8000-000000000001", own: "d1000000-0000-4000-8000-000000000002", ownNote: "d1000000-0000-4000-8000-000000000003", meetings: ["c1000000-0000-4000-8000-000000000001", "c1000000-0000-4000-8000-000000000002"], days: ["2026-09-07", "2026-09-14"] };
+for (const [index, meetingId] of prio.meetings.entries()) {
+  const startsAt = `${prio.days[index]}T08:00:00.000Z`;
+  await objectFile("meetings", meetingId, {
+    ...stamped(meetingId, "meeting", "Weekly Prio"), status: "scheduled", starts_at: startsAt, ends_at: `${prio.days[index]}T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: prio.series, recurrence_occurrence_id: `${prio.series}:${startsAt}`, original_occurrence_starts_at: startsAt
+  });
+}
+await objectFile("meetings", prio.note, {
+  ...stamped(prio.note, "meeting-note", "Weekly Prio notes"), meeting_id: prio.meetings[0], meeting_ids: prio.meetings, recurrence_series_id: prio.series,
+  occurrence_sections: prio.meetings.map((meetingId, index) => ({ occurrence_id: `${prio.series}:${prio.days[index]}T08:00:00.000Z`, section_id: `occurrence-${prio.days[index]}`, meeting_id: meetingId, original_starts_at: `${prio.days[index]}T08:00:00.000Z`, starts_at: `${prio.days[index]}T08:00:00.000Z` }))
+}, "Legacy shared Prio words.\n");
+await objectFile("meetings", prio.own, {
+  ...stamped(prio.own, "meeting", "Weekly Prio"), status: "scheduled", starts_at: "2026-09-21T08:00:00.000Z", ends_at: "2026-09-21T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: prio.series, recurrence_occurrence_id: `${prio.series}:2026-09-21T08:00:00.000Z`, original_occurrence_starts_at: "2026-09-21T08:00:00.000Z"
+});
+await objectFile("meetings", prio.ownNote, { ...stamped(prio.ownNote, "meeting-note", "Weekly Prio notes 21 Sep"), meeting_id: prio.own }, "Own occurrence words.\n");
 await objectFile("review-items", recurring.review, {
   ...stamped(recurring.review, "review-item", "Send the synthetic agenda"), review_type: "create", target_object_type: "task", proposed_fields: { title: "Send the synthetic agenda", source_meeting_id: recurring.currentMeeting }, confidence_label: "High", status: "pending", operation_id: recurring.operation, source_meeting_id: recurring.currentMeeting, occurrence_section_id: recurring.currentSection
 }, "Synthetic proposal.\n");

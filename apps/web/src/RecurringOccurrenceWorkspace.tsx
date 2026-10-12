@@ -1,4 +1,4 @@
-import React, { type ReactNode, useEffect, useMemo, useState } from "react";
+import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { CalendarEvent, LifeObject, OccurrenceWorkspaceItem } from "@lifeos/contracts";
 import { occurrenceMaterialsBlock } from "@lifeos/shared";
 import { meetingSummary } from "./meetingSummary.js";
@@ -87,13 +87,16 @@ function eventDifferences(item: OccurrenceWorkspaceItem, current?: CalendarEvent
   return changed;
 }
 
-export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurrence, pendingNotes = "", selectedSectionId, timeZone, mode, currentEvent, seriesNotes = [], readOnly, linkDisabled = false, onBodyChange, onPendingNotesChange, onLinkPrevious, renderProposal, onSelectSection }: {
+export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurrence, pendingNotes = "", selectedSectionId, focusSectionId, onFocused, timeZone, mode, currentEvent, seriesNotes = [], readOnly, linkDisabled = false, onBodyChange, onPendingNotesChange, onLinkPrevious, renderProposal, onSelectSection }: {
   note: LifeObject;
   occurrences: OccurrenceWorkspaceItem[];
   /** An occurrence not yet written to Markdown. Stored history stays visible but read-only beside it. */
   pendingOccurrence?: OccurrenceWorkspaceItem;
   pendingNotes?: string;
   selectedSectionId?: string;
+  /** Puts the caret at the end of this section's notes once, so typing continues across the first-edit editor swap. */
+  focusSectionId?: string;
+  onFocused?: () => void;
   timeZone: string;
   mode: "calendar" | "notes";
   currentEvent?: CalendarEvent;
@@ -114,6 +117,15 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurre
   const remembered = typeof localStorage === "undefined" ? undefined : localStorage.getItem(storageKey) ?? undefined;
   const [selected, setSelected] = useState(selectedSectionId ?? remembered ?? fallback);
   const [previousNoteId, setPreviousNoteId] = useState("");
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!focusSectionId) return;
+    const area = root.current?.querySelector<HTMLTextAreaElement>(`textarea[aria-label="Notes for ${focusSectionId}"]`);
+    if (!area) return;
+    area.focus();
+    area.setSelectionRange(area.value.length, area.value.length);
+    onFocused?.();
+  }, [focusSectionId, onFocused]);
   const previous = seriesNotes.find((candidate) => candidate.frontmatter.id === note.frontmatter.previous_series_note_id);
   const linkable = seriesNotes.filter((candidate) => candidate.frontmatter.id !== note.frontmatter.id && typeof candidate.frontmatter.recurrence_series_id === "string");
   useEffect(() => {
@@ -121,7 +133,7 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurre
     else setSelected((current) => current && ordered.some((item) => item.sectionId === current) ? current : fallback);
   }, [selectedSectionId, fallback, ordered]);
 
-  return <section className="recurring-occurrence-workspace" aria-label="Recurring meeting occurrences">
+  return <section ref={root} className="recurring-occurrence-workspace" aria-label="Recurring meeting occurrences">
     {previous ? <p className="series-continuity">Previous recurring Note: <b>{previous.frontmatter.title}</b></p> : onLinkPrevious && linkable.length > 0 ? <div className="series-continuity">
       <label><span>Previous recurring Note</span><select aria-label="Previous recurring Note" value={previousNoteId} disabled={readOnly || linkDisabled} onChange={(event) => setPreviousNoteId(event.target.value)}><option value="">Choose a Note…</option>{linkable.map((candidate) => <option value={candidate.frontmatter.id} key={candidate.frontmatter.id}>{candidate.frontmatter.title}</option>)}</select></label>
       <button type="button" disabled={readOnly || linkDisabled || !previousNoteId} onClick={() => onLinkPrevious(previousNoteId)}>Link previous Note</button>

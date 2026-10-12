@@ -5,6 +5,7 @@
 - Source: user decision of 2026-10-12, after the Weekly Prio overwrite incident
 - Supersedes: ADR 0019 (one shared Note per recurring series)
 - Extends: ADR 0010 (Sensitivity), ADR 0013 (crash recovery)
+- Amended 2026-10-12: 4 occurrences rather than weeks, so monthly and other non-weekly series show their last 4 meetings (user decision).
 
 ## Context
 
@@ -16,11 +17,11 @@ Each occurrence already has its own Meeting record with the provider series iden
 
 Each Calendar occurrence has its own Meeting and, after the first edit, its own Meeting Note file. Occurrences are linked by the Meeting's `recurrence_series_id`, not by sharing a Note.
 
-- **Display.** Opening a recurring event in the Calendar shows that occurrence's Note plus the Notes of the 5 most recent earlier occurrences in the same series that have a Note, newest first, collapsed. "Earlier" is relative to the opened occurrence, not to today; a link says when newer occurrences exist. Older occurrences load on request. Opening writes nothing.
+- **Display.** Opening a recurring event in the Calendar shows that occurrence's Note plus the Notes of the 4 most recent earlier occurrences in the same series that have a Note, newest first, collapsed. "Earlier" is relative to the opened occurrence, not to today; a link says when newer occurrences exist. Older occurrences load on request. Opening writes nothing.
 - **Series splits.** When the provider reports a previous series (a "this and following" change), the series view continues into it.
 - **Cancelled occurrences** appear only when they have a Note, marked cancelled.
 - **Notes tab.** Opening a Meeting Note from the Notes tab shows only that Note, with a link to its series view.
-- **Editing.** Each displayed Note autosaves to its own file with its own expected-content-hash check and its own save status. Editing a past week never writes, pauses or blocks the current week's file, and the reverse. "Load older" adds 5 more occurrences at a time.
+- **Editing.** Each displayed Note autosaves to its own file with its own expected-content-hash check and its own save status. Editing a past week never writes, pauses or blocks the current week's file, and the reverse. "Load older" adds 4 more occurrences at a time.
 - **Deleting** a Note is offered only on that occurrence's own page, never in the series view.
 - **First edit** of a new occurrence creates only that occurrence's Meeting and Note.
 - **Sensitivity** applies to one Note only. Restricting one occurrence does not restrict the series; only that Note is withheld from Agent Indexes and Work Orders. The user still sees it in the series view, marked restricted.
