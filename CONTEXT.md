@@ -175,20 +175,16 @@ A Note linked to a Meeting record and initiated from a Calendar event. It can be
 _Avoid_: Meeting, calendar note
 
 **Recurring series**:
-The Calendar occurrences that share one provider recurrence identity. Each occurrence keeps its own Meeting record while the series shares one Recurring Meeting Note.
+The Calendar occurrences that share one provider recurrence identity. Each occurrence keeps its own Meeting record and its own Meeting Note; the series is shown together but never stored together (ADR 0021).
 _Avoid_: Repeated meeting, recurring Meeting record
 
-**Recurring Meeting Note**:
-The single Meeting Note shared by a Recurring series. Its occurrence sections are ordered newest first, and its Sensitivity applies to every linked occurrence.
+**Series view**:
+What opening a recurring occurrence shows: its own Meeting Note plus the Notes of the 5 most recent earlier occurrences, newest first, each saved to its own file. Each Note keeps its own Sensitivity.
 _Avoid_: Series document, recurring document
 
-**Occurrence section**:
-The independently identifiable part of a Recurring Meeting Note for one Calendar occurrence, containing that occurrence's event snapshot and user notes. Opening a new occurrence previews a section; the section becomes authoritative only on the first edit.
-_Avoid_: Weekly note, meeting block
-
-**Materials block**:
-The app-managed part of an occurrence section that lists external Sources found for that occurrence. The Agent proposes the Sources through an Inbox Draft; LifeOS updates the block without merging external content into the user's prose.
-_Avoid_: Attachments, Agent notes
+**Legacy shared Note**:
+A Meeting Note that merged several occurrences into sections under the superseded ADR 0019. It is kept as is and displayed for each Meeting in its `meeting_ids`; new occurrences get their own Notes.
+_Avoid_: Recurring Meeting Note (retired term)
 
 **External meeting notes**:
 A document outside LifeOS containing notes for a Calendar occurrence, such as Google or Gemini notes. It is linked as a Source and may inform proposals, but its full content is not copied into the Meeting Note.

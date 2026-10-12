@@ -32,9 +32,25 @@ describe("RecurringOccurrenceWorkspace", () => {
   });
 
   it("adopts the canonical body after first save without replacing prior occurrence history", () => {
-    const adopted = adoptCreatedOccurrenceDraft(markdown, [newer, older], newer.meeting.frontmatter.id, "This week's final notes", "This week's submitted notes");
+    const adopted = adoptCreatedOccurrenceDraft(markdown, [newer, older], newer.meeting.frontmatter.id, "This week's final notes");
     expect(occurrenceNotes(adopted, [newer, older], newer.sectionId)).toBe("This week's final notes");
     expect(occurrenceNotes(adopted, [newer, older], older.sectionId)).toBe("Older notes");
+  });
+
+  it("never adopts the typed text alone as the whole shared Note when the new occurrence is missing", () => {
+    const adopted = adoptCreatedOccurrenceDraft(markdown, [newer, older], "unknown-meeting", "Typed then more");
+    expect(occurrenceNotes(adopted, [newer, older], newer.sectionId)).toBe("Newer notes");
+    expect(occurrenceNotes(adopted, [newer, older], older.sectionId)).toBe("Older notes");
+  });
+
+  it("keeps a trailing space or line break while the user is typing in a section", () => {
+    for (const typed of ["Edited ", "Edited\n", "Edited history "]) {
+      for (const sectionId of [newer.sectionId, older.sectionId]) {
+        const changed = replaceOccurrenceNotes(markdown, [newer, older], sectionId, typed);
+        expect(occurrenceNotes(changed, [newer, older], sectionId)).toBe(typed);
+        expect(occurrenceNotes(changed, [newer, older], sectionId === newer.sectionId ? older.sectionId : newer.sectionId)).toBe(sectionId === newer.sectionId ? "Older notes" : "Newer notes");
+      }
+    }
   });
 
   it("shows shared history while only the unsaved occurrence is editable", async () => {

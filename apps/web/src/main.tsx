@@ -326,9 +326,9 @@ function App() {
       void refresh();
       return next.note;
     },
-    adoptCreatedDraft: (created, activeDraft, submittedDraft) => {
+    adoptCreatedDraft: (created, activeDraft) => {
       const next = createdWorkspace.current;
-      return adoptCreatedOccurrenceDraft(created.body, next?.occurrences ?? [], next?.meeting.frontmatter.id ?? "", activeDraft, submittedDraft);
+      return adoptCreatedOccurrenceDraft(created.body, next?.occurrences ?? [], next?.meeting.frontmatter.id ?? "", activeDraft);
     }
   });
 
