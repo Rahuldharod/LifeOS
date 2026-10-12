@@ -94,7 +94,7 @@ test("the first edit on a new occurrence creates only its own Note and no save e
 // It now opens like any occurrence: the whole Note is one editor block that follows the mode and saves whole-body. Real local API, nothing mocked.
 test("a stored occurrence of a Legacy shared Note opens as one editor block that follows Visual/Markdown and saves the whole body", async ({ page, request }) => {
   await seed(request);
-  const stored = { note: "a1000000-0000-4000-8000-000000000001", older: "a2000000-0000-4000-8000-000000000001" };
+  const stored = { note: "93000000-0000-4000-8000-000000000001", older: "94000000-0000-4000-8000-000000000001" };
   type Shared = { note: { body: string; contentHash: string; revision?: number; frontmatter: Record<string, unknown> } };
   const readNote = async () => (await (await request.get(`/api/v1/meetings/${stored.older}/workspace`)).json()) as Shared & Record<string, unknown>;
   const before = await readNote();
