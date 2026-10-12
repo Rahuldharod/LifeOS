@@ -1,6 +1,6 @@
 # ADR 0019: One note per recurring series, one meeting record per occurrence
 
-- Status: Accepted
+- Status: Superseded by ADR 0021 (2026-10-12)
 - Date: 2026-10-11
 - Source: design-system feature grilling; amended spec #127
 - Extends: ADR 0008 (Agent-first AI), ADR 0010 (Sensitivity), ADR 0013 (crash recovery), ADR 0018 (Review Item sensitivity)
