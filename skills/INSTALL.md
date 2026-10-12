@@ -154,8 +154,8 @@ The brief examples in `lifeos-morning/SKILL.md` are CI fixtures: each is adopted
 
 **Before first real use:**
 
-- **Policy gate:** `[TBD — Eagle Eye IT/legal sign-off on processing client meeting content]`. Until then the skill refuses client meetings. How to open the gate is at the top of `lifeos-enrichment/SKILL.md`.
-- **Gong:** connect the Gong connector in Claude (Rahul).
+- **Policy gate:** `[TBD — your organisation's IT/legal sign-off on processing client meeting content]`. Until then the skill refuses client meetings. How to open the gate is at the top of `lifeos-enrichment/SKILL.md`.
+- **Gong:** connect the Gong connector in Claude (the user does this).
 - **Dry-run:** every check below passes, on synthetic data only.
 
 ### E1: Install

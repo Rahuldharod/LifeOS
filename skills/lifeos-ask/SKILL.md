@@ -1,6 +1,6 @@
 ---
 name: lifeos-ask
-description: Answers questions about Rahul's LifeOS - open tasks, what he owes or is waiting on, open points, recent decisions, projects, clients, people and meetings - by reading the LifeOS Agent Index in the _agent/ folder. Warns when the index is more than 24 hours old and never reads restricted files. Use when Rahul asks "what do I owe Joel?", "what's overdue?", "what did we decide about X?", "who is waiting on me?", or any question about his LifeOS data.
+description: Answers questions about the user's LifeOS - open tasks, what they owe or are waiting on, open points, recent decisions, projects, clients, people and meetings - by reading the LifeOS Agent Index in the _agent/ folder. Warns when the index is more than 24 hours old and never reads restricted files. Use when the user asks "what do I owe Joel?", "what's overdue?", "what did we decide about X?", "who is waiting on me?", or any question about his LifeOS data.
 metadata:
   version: "1.0.0"
   agent_index_contract: 1
@@ -8,7 +8,7 @@ metadata:
 
 # LifeOS ask
 
-Answer Rahul's questions from the **Agent Index**: short summary files LifeOS writes into `_agent/` in the data root. Read the index first. Open an object file only when the answer needs detail the index does not have.
+Answer the user's questions from the **Agent Index**: short summary files LifeOS writes into `_agent/` in the data root. Read the index first. Open an object file only when the answer needs detail the index does not have.
 
 This skill only reads. To add or change something, use the **lifeos-capture** skill.
 
@@ -19,7 +19,7 @@ This skill only reads. To add or change something, use the **lifeos-capture** sk
 3. **Check freshness.** Every index file has `generated_at` in its front matter. Check today's date and time first. If `generated_at` is **more than 24 hours old**, start your answer with a warning, for example: "Heads-up: the LifeOS index was last updated 2 days ago, so this may be out of date. Open LifeOS on your Mac to refresh it." If `_agent/` is missing or empty, say LifeOS has not written its index yet, and stop.
 4. **Read the one file that answers the question** (table below). Each entry has the object's `id`, `path` and key fields.
 5. **Open an object only when needed**, at the `path` the index gives (relative to the data root). Before using it, check its front matter. If it says `sensitivity: restricted`, stop and do not use it.
-6. **Answer briefly**, in the language Rahul asked in. Lead with the answer, then a few bullets. Name items by title; add the ID only when Rahul needs it to act on the item.
+6. **Answer briefly**, in the language the user asked in. Lead with the answer, then a few bullets. Name items by title; add the ID only when the user needs it to act on the item.
 
 ## Which file answers what
 
@@ -48,7 +48,7 @@ This skill only reads. To add or change something, use the **lifeos-capture** sk
 
 ## Example
 
-Rahul: "What's overdue?"
+The user: "What's overdue?"
 
 You read `_agent/overview.md` (generated 40 minutes ago), then `_agent/tasks.md`, and answer:
 
