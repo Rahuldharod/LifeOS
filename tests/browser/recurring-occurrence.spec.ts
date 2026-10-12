@@ -89,3 +89,44 @@ test("the first edit on a new occurrence creates only its own Note and no save e
   await expect(summaries.nth(0)).toContainText("September 21, 2026");
   await expect(summaries.nth(1)).toContainText("Shared Note");
 });
+
+// #178: a stored occurrence whose own Note is a Legacy shared Note (ADR 0019) used to open a per-section workspace that ignored Visual/Markdown.
+// It now opens like any occurrence: the whole Note is one editor block that follows the mode and saves whole-body. Real local API, nothing mocked.
+test("a stored occurrence of a Legacy shared Note opens as one editor block that follows Visual/Markdown and saves the whole body", async ({ page, request }) => {
+  await seed(request);
+  const stored = { note: "a1000000-0000-4000-8000-000000000001", older: "a2000000-0000-4000-8000-000000000001" };
+  type Shared = { note: { body: string; contentHash: string; revision?: number; frontmatter: Record<string, unknown> } };
+  const readNote = async () => (await (await request.get(`/api/v1/meetings/${stored.older}/workspace`)).json()) as Shared & Record<string, unknown>;
+  const before = await readNote();
+  expect(before.note.frontmatter.id).toBe(stored.note);
+
+  await page.goto(`/calendar/2026-10-05/${stored.older}`);
+  await expect(page.locator(".recurring-occurrence-workspace, .occurrence-section")).toHaveCount(0);
+  await expect(page.getByText("Confirm migration")).toHaveCount(0);
+
+  // Visual mode (the default): one rich editor holding the whole Note.
+  const visual = page.locator("[contenteditable='true']").first();
+  await expect(visual).toContainText("Newer shared words.");
+  await expect(visual).toContainText("Older shared words.");
+  await expect(page.locator("[contenteditable='true']")).toHaveCount(1);
+  await expect(page.getByRole("textbox", { name: /Notes for/ })).toHaveCount(0);
+  // Opening wrote nothing.
+  expect((await readNote()).note.contentHash).toBe(before.note.contentHash);
+
+  // Markdown mode: one textarea with the whole body, anchors included.
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  const area = page.getByPlaceholder(/Capture meeting notes/);
+  await expect(area).toHaveValue(before.note.body);
+  const edited = before.note.body.replace("Older shared words.", "Older shared words, edited.");
+  await area.fill(edited);
+  await expect.poll(async () => (await readNote()).note.body, { timeout: 10000 }).toBe(edited);
+
+  const after = (await readNote()).note;
+  expect(after.frontmatter.occurrence_sections).toEqual(before.note.frontmatter.occurrence_sections);
+  expect(after.frontmatter.meeting_ids).toEqual(before.note.frontmatter.meeting_ids);
+  expect(after.frontmatter.future_field).toEqual({ keep: ["me"] });
+
+  // Back to Visual: the edit shows in the one rich editor.
+  await page.getByRole("button", { name: "Visual", exact: true }).click();
+  await expect(page.locator("[contenteditable='true']").first()).toContainText("Older shared words, edited.");
+});

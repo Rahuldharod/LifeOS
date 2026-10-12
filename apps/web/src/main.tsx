@@ -61,7 +61,6 @@ import { calendarSearchRange, recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
-import { RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
 import { SeriesView } from "./SeriesView.js";
 import { noteSeriesRoute } from "./noteSeriesLink.js";
 import { SaveState } from "./SaveState.js";
@@ -196,7 +195,6 @@ function App() {
   const route = parsedRoute ? referenceRouteInSettings(parsedRoute) : undefined;
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
-  const [dismissedMigration, setDismissedMigration] = useState<string>();
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   // PB-025: Open/Deleted tabs and keyword search over the notes list.
   const noteTab: "open" | "deleted" = route?.view === "Notes" && route.noteTab === "deleted" ? "deleted" : "open";
@@ -266,8 +264,6 @@ function App() {
   // views can never leak one editor's conflict flag into the other.
   // The calendar event whose note does not exist on disk yet, if the open workspace is a preview.
   const createdWorkspace = useRef<Workspace | undefined>(undefined);
-  /** The first edit of a new occurrence swaps the plain editor for the section editor; this keeps the caret in it. */
-  const [focusCreatedMeetingId, setFocusCreatedMeetingId] = useState<string>();
   // Title and relationship changes made before a calendar note exists. They wait here and are applied
   // right after the first edit creates the note (PB-006), so opening an event still writes nothing.
   const pendingDetails = useRef<Record<string, unknown>>({});
@@ -322,7 +318,6 @@ function App() {
         ? { ...event, hasNote: Boolean(next.note), meetingId: next.meeting.frontmatter.id, noteId: next.note?.frontmatter.id }
         : event));
       createdWorkspace.current = next;
-      setFocusCreatedMeetingId(next.meeting.frontmatter.id);
       void refresh();
       return next.note;
     }
@@ -868,12 +863,6 @@ function App() {
     calendar.updateEvents((current) => current.map((event) => event.noteId === noteId ? { ...event, hasNote: false, noteId: undefined } : event));
   });
 
-  const linkPreviousSeries = (note: LifeObject, previousNoteId: string, meetingId?: string) => run(async () => {
-    await api("POST /api/v1/notes/:id/previous-series", { params: { id: note.frontmatter.id }, body: { previousNoteId, expectedHash: note.contentHash } });
-    await refresh();
-    if (meetingId) await refreshWorkspace(meetingId);
-  }, "Previous recurring Note linked");
-
   const saveSelectedNote = async () => {
     if (!selectedNote) return false;
     setBusy(true);
@@ -946,22 +935,7 @@ function App() {
     try { await action(); } finally { setBusy(false); }
   }
 
-  async function confirmRecurringMigration() {
-    if (!workspace?.recurringMigration?.requiresConfirmation) return;
-    setBusy(true);
-    try {
-      await api("POST /api/v1/meetings/:id/recurring-migration", {
-        params: { id: workspace.meeting.frontmatter.id },
-        body: { expectedHashes: Object.fromEntries(workspace.recurringMigration.candidates.map((candidate) => [candidate.noteId, candidate.contentHash])) }
-      });
-      await refreshWorkspace(workspace.meeting.frontmatter.id);
-      setMessage("Recurring Note migration completed");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not migrate these Notes"); }
-    finally { setBusy(false); }
-  }
-
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
-  const renderOccurrenceProposal = (review: LifeObject) => <ReviewCard review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />;
 
   return <ApplicationShell
     activeView={view}
@@ -1022,34 +996,12 @@ function App() {
                 </div>
                 {workspace.persisted !== false && <MeetingEnrichment title={workspace.meeting.frontmatter.title} frontmatter={workspace.meeting.frontmatter} disabled={busy || readOnly} onGiveUp={() => void giveUpMeetingEnrichment(workspace.meeting)} />}
               </article>
-              {workspace.recurringMigration?.requiresConfirmation && dismissedMigration !== workspace.meeting.frontmatter.id && <article className="lease-warning" aria-label="Recurring Note migration review">
-                <span>REVIEW REQUIRED</span><h3>{workspace.recurringMigration.candidates.length === 1 ? "Adopt existing Note into this recurring series?" : `Merge ${workspace.recurringMigration.candidates.length} existing Notes into this recurring series?`}</h3>
-                <p>Nothing changes until you confirm. Each original body will be kept in its dated occurrence section, and old links will redirect there.</p>
-                {workspace.recurringMigration.candidates.map((candidate) => <details key={candidate.noteId}><summary>{candidate.title} · {formatDate(candidate.startsAt)}</summary><pre>{candidate.body}</pre></details>)}
-                <button className="takeover" disabled={busy || readOnly} onClick={() => void confirmRecurringMigration()}>Confirm migration</button> <button disabled={busy} onClick={() => setDismissedMigration(workspace.meeting.frontmatter.id)}>Keep notes separate</button>
-              </article>}
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <EditorFrame>
                 {workspace.note
                   ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><ModeSwitch mode={editorMode} onChange={setEditorMode} /><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
                   : <NoteHeader note={pendingHeaderNote(workspace)} kind={workspace.seriesView ? "NEW OCCURRENCE" : "NEW NOTE"} {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><ModeSwitch mode={editorMode} onChange={setEditorMode} /></NoteHeader>}
-                {workspace.note && workspace.occurrences?.length ? <RecurringOccurrenceWorkspace
-                  note={{ ...workspace.note, body: meetingController.draft }}
-                  occurrences={workspace.occurrences ?? []}
-                  selectedSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || workspace.occurrences?.find((item) => item.meeting.frontmatter.id === workspace.meeting.frontmatter.id)?.sectionId}
-                  focusSectionId={focusCreatedMeetingId === workspace.meeting.frontmatter.id ? workspace.occurrences.find((item) => item.meeting.frontmatter.id === workspace.meeting.frontmatter.id)?.sectionId : undefined}
-                  onFocused={() => setFocusCreatedMeetingId(undefined)}
-                  timeZone={displayTimeZone}
-                  mode="calendar"
-                  currentEvent={calendar.filteredEvents.find((event) => event.meetingId === workspace.meeting.frontmatter.id || event.originalOccurrenceStartsAt === workspace.meeting.frontmatter.original_occurrence_starts_at)}
-                  seriesNotes={notes}
-                  readOnly={busy || readOnly || meetingController.autoSaving}
-                  linkDisabled={meetingController.dirty || meetingController.autoSaving}
-                  onBodyChange={meetingController.setDraft}
-                  onLinkPrevious={(previousNoteId) => { void linkPreviousSeries(workspace.note!, previousNoteId, workspace.meeting.frontmatter.id); }}
-                  renderProposal={renderOccurrenceProposal}
-                  onSelectSection={workspace.persisted === false ? undefined : (section) => followRoute({ view: "Calendar", date: selectedDate, id: workspace.meeting.frontmatter.id, section }, { replace: true })}
-                /> : <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraft} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage targetSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined} />}
+                <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraft} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage />
                 <div className="editor-footer">
                   <SaveState dirty={meetingController.dirty} autoSaving={meetingController.autoSaving} pending={meetingController.pending} undoAvailable={meetingController.undoAvailable} undoDisabled={busy || readOnly} onUndo={() => withBusy(meetingController.undoKeepDiskVersion)} />
                   <MeetingNoteActions canDelete={Boolean(workspace.note)} deleteDisabled={busy || readOnly || meetingController.autoSaving} saveDisabled={!editorReady || busy || !meetingController.dirty || readOnly} onDelete={deleteMeetingNote} onSave={saveNote} />
@@ -1058,8 +1010,8 @@ function App() {
               </EditorFrame>}
               {workspace.seriesView && <SeriesView key={workspace.meeting.frontmatter.id} view={workspace.seriesView} timeZone={displayTimeZone} editor={{ mode: editorMode, readOnly, linkObjects: objectLinks, notify: setMessage, register: seriesEditors.register }} onOpenMeeting={(meetingId, date) => void go({ view: "Calendar", date, id: meetingId })} />}
               {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
-              {!workspace.occurrences?.length && meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
-              {!workspace.occurrences?.length && <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
+              {meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
+              {<article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
                 {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
               </article>}
@@ -1100,7 +1052,7 @@ function App() {
         renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
               <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
               {seriesRoute && <p className="series-link"><a href={routePath(seriesRoute)} onClick={(event) => { event.preventDefault(); followRoute(seriesRoute); }}>Show series</a></p>}
-              <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} targetSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined} />
+              <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
               <div className="editor-footer"><SaveState dirty={notesController.dirty} autoSaving={notesController.autoSaving} undoAvailable={notesController.undoAvailable} undoDisabled={busy || readOnly} onUndo={() => withBusy(notesController.undoKeepDiskVersion)} /><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}

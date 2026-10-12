@@ -4,14 +4,14 @@ import { stringify } from "yaml";
 import type { CalendarEvent } from "@lifeos/application";
 import { uuidV7 } from "@lifeos/domain";
 
-// The ADR 0019 id formats, spelled out so the fixture does not depend on the code that is about to be removed (#178).
+// The ADR 0019 id formats, spelled out the code that built them is gone (#178).
 const recurrenceSeriesKey = (provider: string, event: Pick<CalendarEvent, "calendarId" | "seriesId">) => event.seriesId ? `${provider}:${event.calendarId ?? "default"}:${event.seriesId}` : undefined;
 const recurrenceOccurrenceId = (provider: string, event: Pick<CalendarEvent, "calendarId" | "seriesId" | "originalOccurrenceStartsAt">) => `${recurrenceSeriesKey(provider, event)}:${event.originalOccurrenceStartsAt}`;
 const occurrenceSectionId = (original: string) => `occurrence-${original.replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "").toLowerCase()}`;
 
 /**
  * #172: creating a recurring occurrence no longer builds a shared Note (ADR 0021), but Legacy shared Notes (ADR 0019)
- * still exist in real vaults until the removal slice (#178). Tests that cover that stored shape write one straight
+ * still exist in real vaults and are displayed and saved as one Note. Tests that cover that stored shape write one straight
  * into the vault, exactly as ADR 0019 laid it out: one Note, `meeting_ids`, `occurrence_sections` and a section
  * heading plus anchor per occurrence, newest first. The caller rebuilds the index afterwards.
  */

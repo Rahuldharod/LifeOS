@@ -81,7 +81,7 @@ describe("routeTarget: a bookmarked id that is gone (PB-027)", () => {
     expect(routeTarget({ view: "Notes", noteTab: "deleted", id: NOTE }, data)).toEqual({ kind: "redirect", route: { view: "Notes", noteTab: "open", id: NOTE } });
   });
 
-  it("redirects legacy recurring Meeting and Note links to the shared occurrence section", () => {
+  it("redirects links of Notes archived by the removed ADR 0019 migration to the Note that took over", () => {
     const oldMeetingId = "0190a1b2-0000-7000-8000-000000000010";
     const currentMeetingId = "0190a1b2-0000-7000-8000-000000000011";
     const sharedNote = object("shared-note", "meeting-note");
@@ -93,9 +93,8 @@ describe("routeTarget: a bookmarked id that is gone (PB-027)", () => {
       // available through the all-object link collection used to resolve old bookmarks.
       objects: [...data.objects, object("old-note", "meeting-note", { archived_at: "2026-10-12T08:00:00Z", redirect_to_note_id: "shared-note", redirect_to_section_id: "occurrence-2026-10-05" }), currentMeeting, object(oldMeetingId, "meeting", { redirect_to_meeting_id: currentMeetingId, redirect_to_section_id: "occurrence-2026-10-05" })]
     };
-    expect(routeTarget({ view: "Notes", noteTab: "open", id: "old-note" }, redirected)).toEqual({ kind: "redirect", route: { view: "Notes", noteTab: "open", id: "shared-note", section: "occurrence-2026-10-05" } });
-    expect(routeTarget({ view: "Calendar", date: "2026-10-05", id: oldMeetingId }, redirected)).toEqual({ kind: "redirect", route: { view: "Calendar", date: "2026-10-05", id: currentMeetingId, section: "occurrence-2026-10-05" } });
-    expect(routePath({ view: "Notes", noteTab: "open", id: "shared-note", section: "occurrence-2026-10-05" })).toBe("/notes/shared-note#occurrence-2026-10-05");
+    expect(routeTarget({ view: "Notes", noteTab: "open", id: "old-note" }, redirected)).toEqual({ kind: "redirect", route: { view: "Notes", noteTab: "open", id: "shared-note" } });
+    expect(routeTarget({ view: "Calendar", date: "2026-10-05", id: oldMeetingId }, redirected)).toEqual({ kind: "redirect", route: { view: "Calendar", date: "2026-10-05", id: currentMeetingId } });
   });
 
   it("explains an unknown, deleted or wrong-tab id instead of opening it", () => {

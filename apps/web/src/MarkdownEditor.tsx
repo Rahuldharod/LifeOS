@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import type { LinkedObject } from "./lifeosLinks.js";
 import { storeManagedImage, suggestedImageAlt, type EditorOwner } from "./editorAssets.js";
 import { insertAtSelection, transformLines, wrapSelection, type Edit } from "./markdownEdit.js";
@@ -39,34 +39,19 @@ export type MarkdownEditorProps = {
   caretAfterInsert: boolean;
   /** The meeting editor refocuses the textarea after an image is inserted; the Notes editor does not. */
   refocusAfterImage: boolean;
-  /** Occurrence section opened by a recurring-meeting deep link. */
-  targetSectionId?: string;
 };
 
 /** One note editor in any of its three modes. Notes and the Calendar meeting workspace both render this;
  * the draft and its saving stay with the caller (useNoteDraftController). */
 export function MarkdownEditor(props: MarkdownEditorProps) {
-  const { mode, editorKey, draft, onChange, readOnly, busy, ready = true, owner, ensureOwner, linkObjects, setBusy, notify, onImageStored, placeholder, codeLanguagePrompt, caretAfterInsert, refocusAfterImage, targetSectionId } = props;
+  const { mode, editorKey, draft, onChange, readOnly, busy, ready = true, owner, ensureOwner, linkObjects, setBusy, notify, onImageStored, placeholder, codeLanguagePrompt, caretAfterInsert, refocusAfterImage } = props;
   const area = useRef<HTMLTextAreaElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (mode !== "write" || !targetSectionId) return;
-    const frame = requestAnimationFrame(() => {
-      const offset = draft.indexOf(`<a id="${targetSectionId}"></a>`);
-      if (area.current && offset >= 0) {
-        area.current.focus();
-        area.current.setSelectionRange(offset, offset);
-        area.current.scrollIntoView({ block: "center" });
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [draft, editorKey, mode, targetSectionId]);
-
   if (mode !== "write") {
     return mode === "visual" && ready
-      ? <VisualMarkdownEditor linkObjects={linkObjects} editorKey={editorKey} owner={owner} ensureOwner={ensureOwner} markdown={draft} readOnly={busy || readOnly} onChange={onChange} targetSectionId={targetSectionId} />
-      : <MarkdownPreview markdown={draft} empty="_Nothing to preview yet._" occurrenceAnchors />;
+      ? <VisualMarkdownEditor linkObjects={linkObjects} editorKey={editorKey} owner={owner} ensureOwner={ensureOwner} markdown={draft} readOnly={busy || readOnly} onChange={onChange} />
+      : <MarkdownPreview markdown={draft} empty="_Nothing to preview yet._" />;
   }
 
   const selection = () => ({ start: area.current?.selectionStart ?? draft.length, end: area.current?.selectionEnd ?? area.current?.selectionStart ?? draft.length });

@@ -6,7 +6,6 @@ import { LifeOSApplication, type CalendarConnector, type CalendarEvent, type Cal
 import { uuidV7 } from "@lifeos/domain";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
-import { occurrenceNotes, replaceOccurrenceNotes } from "../../apps/web/src/RecurringOccurrenceWorkspace.js";
 import { CrashingStore } from "./crash-store.js";
 import { seedLegacySharedNote } from "./legacy-shared-note.js";
 
@@ -40,6 +39,7 @@ async function setup(events: CalendarEvent[]) {
   return { root, app, calendar, store };
 }
 const read = (root: string, noteId: string) => readdir(path.join(root, "meetings")).then((files) => readFile(path.join(root, "meetings", files.find((file) => file.includes(noteId))!), "utf8"));
+const splitFile = (file: string): [string, string] => { const end = file.indexOf("\n---\n", 4); return [file.slice(0, end), file.slice(end + 5)]; };
 const window = { from: new Date("2026-09-01T00:00:00.000Z"), to: new Date("2026-10-01T00:00:00.000Z") };
 
 describe("a Legacy shared Note is never rewritten by the app on its own (#172, ADR 0021)", () => {
@@ -98,28 +98,83 @@ describe("a Legacy shared Note is never rewritten by the app on its own (#172, A
     expect(await read(root, successor.noteId)).toBe(successorBefore);
   });
 
-  it("opens a stored occurrence of a Legacy shared Note with its section workspace, and saving a section saves the whole Note", async () => {
+  it("still recovers an old pending migrate-recurring-notes journal (#178): closes it without writing any Note, even a half-done one", async () => {
     const one = occurrence(1);
     const two = occurrence(2);
-    const { root, app } = await setup([one, two]);
+    const { root, app, store } = await setup([one, two]);
     const legacy = await seedLegacySharedNote(root, "synthetic", [{ event: one, body: "first week\n" }, { event: two, body: "second week\n" }]);
+    const operationId = uuidV7();
+    const candidate = legacy.items[0]!;
+    // The shape the removed migration journalled; the plan names sources that no longer exist, so replaying it for real could only fail.
+    await store.prepareOperation("migrate-recurring-notes", {
+      seriesId: "synthetic:work:stays", noteId: legacy.noteId, title: "Weekly planning notes", now: "2026-10-11T10:00:00.000Z",
+      candidates: [{ noteId: uuidV7(), meetingId: candidate.meetingId, title: "Weekly planning", body: "gone\n", contentHash: "sha256:none", occurrenceId: candidate.occurrenceId, sectionId: candidate.sectionId, originalStartsAt: day(1), startsAt: day(1) }]
+    }, operationId);
+    await app.rebuildIndex();
+    const before = await read(root, legacy.noteId);
+    const filesBefore = (await readdir(path.join(root, "meetings"))).sort();
+    store.arm();
+
+    await app.recoverOperations();
+    await app.recoverOperations();
+
+    expect((await store.incompleteOperations()).find((operation) => operation.id === operationId)).toBeUndefined();
+    expect((await app.health()).diagnostics.filter((line) => line.startsWith("Recovery of"))).toEqual([]);
+    expect(store.log.filter((entry) => entry.startsWith("write "))).toEqual([]);
+    expect(await read(root, legacy.noteId)).toBe(before);
+    expect((await readdir(path.join(root, "meetings"))).sort()).toEqual(filesBefore);
+  });
+
+  it("opens a stored occurrence of a Legacy shared Note as one whole Note, writing nothing, and saving writes only that Note's body", async () => {
+    const one = occurrence(1);
+    const two = occurrence(2);
+    const { root, app, store } = await setup([one, two]);
+    const legacy = await seedLegacySharedNote(root, "synthetic", [{ event: one, body: "first week\n" }, { event: two, body: "second week\n" }], { future_field: { keep: ["me"] } });
     await app.rebuildIndex();
     const older = legacy.items.find((item) => item.event === one)!;
+    const fileBefore = await read(root, legacy.noteId);
+    store.arm();
 
     const workspace = await app.meetingWorkspace(older.meetingId);
+    expect(store.log, "opening writes nothing").toEqual([]);
     expect(workspace.note?.frontmatter.id).toBe(legacy.noteId);
-    const items = workspace.occurrences ?? [];
-    expect(items.map((item) => item.sectionId)).toEqual(legacy.items.map((item) => item.sectionId));
-    expect(occurrenceNotes(workspace.note!.body, items, older.sectionId).trim()).toBe("first week");
+    expect(workspace.note?.body).toBe(fileBefore.slice(fileBefore.indexOf("\n---\n") + 5));
+    // The ADR 0019 workspace fields are gone from the contract: the Note is the whole story.
+    expect(Object.keys(workspace)).not.toEqual(expect.arrayContaining(["occurrences"]));
+    expect(workspace).not.toHaveProperty("recurringMigration");
+    expect(workspace).not.toHaveProperty("noteSectionId");
 
-    const edited = replaceOccurrenceNotes(workspace.note!.body, items, older.sectionId, "first week, edited");
+    const edited = workspace.note!.body.replace("first week", "first week, edited");
     const saved = await app.updateBody(legacy.noteId, edited, workspace.note!.contentHash);
+    const fileAfter = await read(root, legacy.noteId);
 
-    expect(saved.body).toContain("first week, edited");
-    expect(saved.body).toContain("second week");
+    expect(saved.body).toBe(edited);
     expect(saved.frontmatter.occurrence_sections).toEqual(workspace.note!.frontmatter.occurrence_sections);
     expect(saved.frontmatter.meeting_ids).toEqual(workspace.note!.frontmatter.meeting_ids);
-    expect(await read(root, legacy.noteId)).toContain("first week, edited");
+    expect(saved.frontmatter.future_field).toEqual({ keep: ["me"] });
+    const [frontBefore, bodyBefore] = splitFile(fileBefore);
+    const [frontAfter, bodyAfter] = splitFile(fileAfter);
+    expect(bodyAfter).toBe(bodyBefore.replace("first week", "first week, edited"));
+    const stable = (front: string) => front.split("\n").filter((line) => !/^(revision|updated_at|updated_by_device):/.test(line)).sort();
+    expect(stable(frontAfter), "frontmatter keeps every line (sections, meeting_ids, unknown fields) but the revision stamp (key order may differ)").toEqual(stable(frontBefore));
+    expect(store.log.filter((entry) => entry.startsWith("write ")), "one file written").toHaveLength(1);
+  });
+
+  it("still resolves links to a Note archived by the removed migration (redirect_to_note_id / redirect_to_section_id)", async () => {
+    const one = occurrence(1);
+    const two = occurrence(2);
+    const { root, app, store } = await setup([one, two]);
+    const legacy = await seedLegacySharedNote(root, "synthetic", [{ event: one, body: "first week\n" }, { event: two, body: "second week\n" }]);
+    const archivedId = uuidV7();
+    const stamp = { schema_version: 1, revision: 2, created_at: "2026-10-01T08:00:00.000Z", updated_at: "2026-10-02T08:00:00.000Z", updated_by_device: "test" };
+    await store.write({
+      relativePath: `meetings/${archivedId}-note.md`,
+      frontmatter: { id: archivedId, type: "meeting-note", ...stamp, title: "Weekly planning notes", origin: "app", meeting_id: legacy.items[0]!.meetingId, archived_at: "2026-10-02T08:00:00.000Z", redirect_to_note_id: legacy.noteId, redirect_to_section_id: legacy.items[0]!.sectionId },
+      body: "first week\n"
+    });
+    await app.rebuildIndex();
+
+    expect(app.resolveObjectLink(archivedId)).toMatchObject({ object: { frontmatter: { id: legacy.noteId } }, redirectedFrom: [archivedId] });
   });
 });
 

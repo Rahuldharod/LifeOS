@@ -107,19 +107,6 @@ function recurrenceCalendar() {
   return calendar;
 }
 
-async function legacyRecurringNote(root: string, application: LifeOSApplication) {
-  const meetingId = uuidV7();
-  const noteId = uuidV7();
-  const timestamp = "2026-10-11T12:00:00.000Z";
-  const startsAt = "2026-10-12T08:00:00.000Z";
-  const seriesId = "synthetic:work:weekly-planning";
-  await mkdir(path.join(root, "meetings"), { recursive: true });
-  await writeFile(path.join(root, "meetings", `${meetingId}.md`), `---\n${stringify({ id: meetingId, type: "meeting", schema_version: 1, revision: 1, title: "Weekly planning", created_at: timestamp, updated_at: timestamp, updated_by_device: "test", origin: "calendar", status: "scheduled", starts_at: startsAt, ends_at: "2026-10-12T08:30:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: seriesId, recurrence_occurrence_id: `${seriesId}:${startsAt}`, original_occurrence_starts_at: startsAt }).trimEnd()}\n---\n# Weekly planning\n`);
-  await writeFile(path.join(root, "meetings", `${noteId}-note.md`), `---\n${stringify({ id: noteId, type: "meeting-note", schema_version: 1, revision: 1, title: "Weekly planning notes", created_at: timestamp, updated_at: timestamp, updated_by_device: "test", origin: "app", meeting_id: meetingId }).trimEnd()}\n---\nLegacy notes survive migration.\n`);
-  await application.rebuildIndex();
-  return { meetingId, noteId, noteHash: application.object(noteId).contentHash };
-}
-
 /**
  * One scenario per kind. Typed over every `OperationKind`, so a new kind does not compile until it has one; the test
  * below also fails at run time if the journal names a kind this table misses.
@@ -189,12 +176,34 @@ const scenarios: Record<OperationKind, Scenario> = {
     check: (objects, { successorNoteId }) => expect(objects.find((object) => object.frontmatter.id === successorNoteId)?.frontmatter.previous_series_note_id).toBeUndefined()
   },
   [operationKinds.migrateRecurringNotes]: {
-    setup: legacyRecurringNote,
-    act: (application, { meetingId, noteId, noteHash }) => application.confirmRecurringMigration(meetingId!, { [noteId!]: noteHash! }),
-    retry: (application, { meetingId, noteId, noteHash }) => application.confirmRecurringMigration(meetingId!, { [noteId!]: noteHash! }),
-    check: (objects, { noteId }) => {
-      expect(objects.find((object) => object.frontmatter.id === noteId)?.frontmatter.archived_at).toBeDefined();
-      expect(objects.filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.recurrence_series_id)).toHaveLength(1);
+    // #178: the reviewed migration is gone, but an old journal of it must still recover: recovery closes it and never writes a Note.
+    // The vault holds a Legacy shared Note and the journal an old build left behind; the "act" then opens an event so the run still makes changes to crash.
+    calendar: recurrenceCalendar,
+    setup: async (root, application) => {
+      const timestamp = "2026-10-11T12:00:00.000Z";
+      const stamp = { schema_version: 1, revision: 1, created_at: timestamp, updated_at: timestamp, updated_by_device: "test" };
+      const meetingId = uuidV7();
+      const noteId = uuidV7();
+      const seriesKey = "fake:work:series-a";
+      const startsAt = "2026-10-05T08:00:00.000Z";
+      const meeting = { id: meetingId, type: "meeting", ...stamp, title: "Weekly planning", origin: "calendar", status: "scheduled", starts_at: startsAt, ends_at: startsAt, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: seriesKey, recurrence_occurrence_id: `${seriesKey}:${startsAt}`, original_occurrence_starts_at: startsAt };
+      const section = { occurrence_id: `${seriesKey}:${startsAt}`, section_id: "occurrence-2026-10-05", meeting_id: meetingId, original_starts_at: startsAt, starts_at: startsAt };
+      const note = { id: noteId, type: "meeting-note", ...stamp, title: "Weekly planning notes", origin: "app", meeting_id: meetingId, meeting_ids: [meetingId], recurrence_series_id: seriesKey, occurrence_sections: [section] };
+      await mkdir(path.join(root, "meetings"), { recursive: true });
+      await writeFile(path.join(root, "meetings", `${meetingId}.md`), `---\n${stringify(meeting).trimEnd()}\n---\n# Weekly planning\n`);
+      await writeFile(path.join(root, "meetings", `${noteId}-note.md`), `---\n${stringify(note).trimEnd()}\n---\n## Weekly planning\n<a id="occurrence-2026-10-05"></a>\n\nlegacy\n`);
+      await new MarkdownObjectStore(root).prepareOperation(operationKinds.migrateRecurringNotes, {
+        seriesId: seriesKey, noteId, title: "Weekly planning notes", now: timestamp,
+        candidates: [{ noteId: uuidV7(), meetingId, title: "Weekly planning", body: "gone\n", contentHash: "sha256:none", occurrenceId: section.occurrence_id, sectionId: section.section_id, originalStartsAt: startsAt, startsAt }]
+      }, uuidV7());
+      await application.rebuildIndex();
+      return { externalId: "series-after", noteId, noteHash: application.object(noteId).contentHash };
+    },
+    act: async (application, { externalId }) => { await application.recoverOperations(); await application.createMeetingFromEvent(externalId!); },
+    retry: (application, { externalId }) => application.createMeetingFromEvent(externalId!),
+    check: (objects, { noteId, noteHash }) => {
+      expect(objects.find((object) => object.frontmatter.id === noteId)?.contentHash, "the Legacy shared Note is never rewritten").toBe(noteHash);
+      expect(objects.filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.archived_at)).toEqual([]);
     }
   },
   [operationKinds.supersedeDecision]: {
@@ -312,9 +321,6 @@ describe("every journalled operation, crashed after each change it makes, recove
     it(`${kind}: same objects, every audit once, nothing left open`, async () => {
       const clean = await run(scenario);
       expect(clean.changes, "the clean run journals and writes").toBeGreaterThan(1);
-      if (kind === operationKinds.migrateRecurringNotes) {
-        expect(clean.log.indexOf("complete migrate-recurring-notes"), "migration closes before its audit").toBeLessThan(clean.log.indexOf("write audit meeting-note.migrated"));
-      }
       if (kind === operationKinds.createMeeting) {
         expect(clean.log.indexOf("complete create-meeting"), "meeting creation closes before its audit").toBeLessThan(clean.log.indexOf("write audit meeting.created"));
       }
