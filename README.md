@@ -138,7 +138,7 @@ To change the 15 minutes, add `export LIFEOS_IDLE_RELEASE_MINUTES=30` (for examp
 corepack pnpm dev
 ```
 
-Development runs separately at `http://127.0.0.1:5174` (API on 4311) with live reload. It uses synthetic data in `.dev-data/` (created from `schemas/fixtures` on first run; delete the folder to reset) and the mock calendar, so it never touches your real data (`LIFEOS_DATA_ROOT`). Press **Control+C** to stop it. Dev and the stable app can run at the same time.
+Development runs separately at `http://127.0.0.1:5174` (API on 4311) with live reload. It uses synthetic data in `.dev-data/` (created from `schemas/fixtures` on first run; delete the folder to reset) and the mock calendar, so it never touches your real data (`LIFEOS_DATA_ROOT`). Press **Control+C** to stop it. Dev and the stable app can run at the same time. Browser tests can add synthetic calendar events with `LIFEOS_MOCK_EVENTS=<json file>`, honoured only with `LIFEOS_CALENDAR=mock`.
 
 To see a code change in your daily LifeOS, run `corepack pnpm update-app` when you are not mid-note.
 

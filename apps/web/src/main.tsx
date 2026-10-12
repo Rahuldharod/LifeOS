@@ -61,7 +61,7 @@ import { calendarSearchRange, recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
-import { adoptCreatedOccurrenceDraft, RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
+import { RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
 import { SeriesView } from "./SeriesView.js";
 import { noteSeriesRoute } from "./noteSeriesLink.js";
 import { meetingSummary } from "./meetingSummary.js";
@@ -322,10 +322,6 @@ function App() {
       setFocusCreatedMeetingId(next.meeting.frontmatter.id);
       void refresh();
       return next.note;
-    },
-    adoptCreatedDraft: (created, activeDraft) => {
-      const next = createdWorkspace.current;
-      return adoptCreatedOccurrenceDraft(created.body, next?.occurrences ?? [], next?.meeting.frontmatter.id ?? "", activeDraft);
     }
   });
 

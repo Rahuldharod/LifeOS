@@ -40,6 +40,12 @@ export function recurrenceOccurrenceId(provider: string, event: Pick<CalendarEve
   return series && event.originalOccurrenceStartsAt ? `${series}:${event.originalOccurrenceStartsAt}` : undefined;
 }
 
+/** A Legacy shared Note (ADR 0019): one Note linked to several Meetings or carrying occurrence sections. */
+export function isLegacySharedNote(note: LifeOSObject) {
+  const linked = Array.isArray(note.frontmatter.meeting_ids) ? note.frontmatter.meeting_ids.length : 0;
+  return linked > 1 || Array.isArray(note.frontmatter.occurrence_sections);
+}
+
 export interface EnrichmentOccurrenceTarget {
   occurrenceId: string;
   sectionId: string;
@@ -97,9 +103,12 @@ export class MeetingsModule {
     if (typeof operation.payload.externalId === "string") return this.createMeetingFromEvent(operation.payload.externalId);
   }
 
+  /**
+   * Pre-#172 builds journalled `link-recurring-series` while repairing links between shared series Notes. Those are all Legacy
+   * shared Notes now, which the app never rewrites (ADR 0021), so replaying an old journal only closes it.
+   */
   async recoverSeriesLinks(operation: Operation) {
-    if (typeof operation.payload.seriesId !== "string" || typeof operation.payload.noteId !== "string") return;
-    await this.repairSuccessorSeriesLinks(operation.payload.seriesId, operation.payload.noteId, typeof operation.payload.now === "string" ? operation.payload.now : new Date().toISOString(), operation);
+    await this.ctx.objects.completeOperation?.(operation.id);
   }
 
   /** ADR 0013 recovery of #153 resumes the recorded migration; it never rediscovers candidates. */
@@ -384,6 +393,16 @@ export class MeetingsModule {
     return occurrenceId && original ? { occurrenceId, sectionId: occurrenceSectionId(original) } : undefined;
   }
 
+  /**
+   * ADR 0021: only an occurrence that already sits in a Legacy shared Note has a section for enrichment to
+   * fill. Any other occurrence keeps its Sources on the Meeting; enrichment never creates a Note for it.
+   */
+  hasLegacySharedSection(meeting: LifeOSObject) {
+    const note = this.noteFor(meeting.frontmatter.id);
+    const sections = Array.isArray(note?.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    return sections.some((section) => section.meeting_id === meeting.frontmatter.id);
+  }
+
   /** Explicit enrichment may materialize an otherwise empty occurrence section when material was found. */
   async ensureOccurrenceSectionForEnrichment(meeting: LifeOSObject, from: Date, to: Date, calendarId: string | undefined, noteId: string) {
     const target = this.enrichmentOccurrenceForMeeting(meeting);
@@ -442,18 +461,14 @@ export class MeetingsModule {
     let existing = this.findMeetingForEvent(event.externalId, event.calendarId, event);
     if (existing) {
       existing = await this.recordRecurrenceIdentity(existing, event, now);
-      let existingNote = this.noteFor(existing.frontmatter.id);
-      if (!existingNote) {
+      if (!this.noteFor(existing.frontmatter.id)) {
         // Either finishing an interrupted create-meeting operation, or a meeting that has no note
         // yet (the PB-020 flow, or a meeting created before it): create the note now.
         const recoveredNoteId = pendingOperation && typeof pendingOperation.payload.noteId === "string" ? pendingOperation.payload.noteId : preferredNoteId ?? uuidV7();
         const recoveredBody = initialBody ?? (typeof pendingOperation?.payload.body === "string" ? pendingOperation.payload.body : DEFAULT_NOTE_BODY);
-        existingNote = await this.attachOrCreateNote(event, existing, recoveredNoteId, recoveredBody, context, now);
-      } else {
-        existingNote = await this.followCalendarTitle(existingNote, event, now);
+        await this.createOccurrenceNote(event, existing, recoveredNoteId, recoveredBody, context, now);
       }
       await this.enrichMeetingContext(existing, context, now);
-      if (existingNote?.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(existingNote.frontmatter.recurrence_series_id), existingNote.frontmatter.id, now, undefined, existingNote);
       if (pendingOperation) await ctx.objects.completeOperation?.(pendingOperation.id);
       // #160: after the journal closes, a retry can still reconstruct a missing audit from the
       // meeting. Action + object ID is the durable identity; operation_id is useful metadata only.
@@ -469,8 +484,7 @@ export class MeetingsModule {
     const noteId = typeof operation?.payload.noteId === "string" ? operation.payload.noteId : preferredNoteId ?? uuidV7();
     const noteBody = initialBody ?? (typeof operation?.payload.body === "string" ? operation.payload.body : DEFAULT_NOTE_BODY);
     const meeting = await this.writeMeeting(event, meetingId, context, now);
-    const note = await this.attachOrCreateNote(event, meeting, noteId, noteBody, context, now);
-    if (note.frontmatter.recurrence_series_id) await this.repairSuccessorSeriesLinks(String(note.frontmatter.recurrence_series_id), note.frontmatter.id, now, undefined, note);
+    await this.createOccurrenceNote(event, meeting, noteId, noteBody, context, now);
     await ctx.objects.completeOperation?.(operationId);
     await this.writeCalendarMeetingCreatedAudit(meeting, event, operationId);
     await ctx.rebuildIndex();
@@ -697,7 +711,7 @@ export class MeetingsModule {
     }
     const entries = [...notes.values()].flatMap((note) => {
       const linkedIds = Array.isArray(note.frontmatter.meeting_ids) ? note.frontmatter.meeting_ids.filter((id): id is string => typeof id === "string") : [];
-      const legacyShared = linkedIds.length > 1 || Array.isArray(note.frontmatter.occurrence_sections);
+      const legacyShared = isLegacySharedNote(note);
       const linkedMeetings = (legacyShared ? linkedIds : [String(note.frontmatter.meeting_id)]).map((id) => index.get(id)).filter(liveSeriesMeeting);
       const earlierMeetings = linkedMeetings.filter((meeting) => meeting.frontmatter.id !== position.openedMeetingId && this.seriesAnchor(meeting) < position.openedAnchor);
       if (!earlierMeetings.length) return [];
@@ -967,29 +981,6 @@ export class MeetingsModule {
     return seriesId ? this.ctx.index.all().find((object) => object.frontmatter.type === "meeting-note" && isLive(object) && object.frontmatter.recurrence_series_id === seriesId) : undefined;
   }
 
-  /** A day-scoped provider query may contain only the new half of a split. Use the provider's
-   * stable series UID to reconcile it with an already materialized series in the same calendar. */
-  private findPreviousSeriesNote(event: CalendarEvent, seriesId: string) {
-    if (event.previousSeriesId) return this.findSeriesNote(this.seriesKey(event, event.previousSeriesId));
-    if (!event.seriesUid) return undefined;
-    const calendarScope = `${this.ctx.calendar?.provider ?? "calendar"}:${event.calendarId}:`;
-    const occurrence = Date.parse(event.originalOccurrenceStartsAt ?? event.startsAt);
-    return this.ctx.index.all()
-      .filter((object) => object.frontmatter.type === "meeting-note" && isLive(object)
-        && object.frontmatter.recurrence_series_uid === event.seriesUid
-        && typeof object.frontmatter.recurrence_series_id === "string"
-        && object.frontmatter.recurrence_series_id.startsWith(calendarScope)
-        && object.frontmatter.recurrence_series_id !== seriesId
-        && this.seriesStart(object) < occurrence)
-      .sort((left, right) => this.seriesStart(right) - this.seriesStart(left))[0];
-  }
-
-  private seriesStart(note: LifeOSObject) {
-    const sections = Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
-    const starts = sections.map((section) => Date.parse(String(section.original_starts_at))).filter(Number.isFinite);
-    return starts.length ? Math.min(...starts) : Number.NaN;
-  }
-
   private insertRecurringSection(existingBody: string, existingSections: Array<Record<string, unknown>>, sectionBody: string, section: Record<string, unknown>) {
     const actualStart = (candidate: Record<string, unknown>) => Date.parse(String(candidate.starts_at ?? candidate.original_starts_at));
     const ordered = [...existingSections, section].sort((left, right) => actualStart(right) - actualStart(left));
@@ -1007,90 +998,17 @@ export class MeetingsModule {
     return `## ${event.title} — ${event.startsAt}\n<a id="${sectionId}"></a>\n\n${body}`;
   }
 
-  private generatedNoteTitle(event: CalendarEvent) { return `${event.title} notes`; }
-
-  /** A generated recurring-note title tracks Calendar until a user or external editor changes it. */
-  private async followCalendarTitle(note: LifeOSObject, event: CalendarEvent, now: string) {
-    if (!note.frontmatter.recurrence_series_id || note.frontmatter.title_manually_renamed === true) return note;
-    const generated = note.frontmatter.generated_title;
-    // Legacy Markdown has no provenance marker, so preserve its title rather than guessing whether it was manual.
-    if (typeof generated !== "string") return note;
-    // A direct Markdown edit is manual too. Preserve it even though it could not set the marker itself.
-    if (note.frontmatter.title !== generated) return note;
-    const next = this.generatedNoteTitle(event);
-    if (next === generated) return note;
-    return this.ctx.update(note, { title: next, generated_title: next }, { expectedHash: note.contentHash, now });
-  }
-
-  /** Creates a one-off note unchanged, or idempotently attaches an occurrence to its shared series note. */
-  private async attachOrCreateNote(event: CalendarEvent, meeting: LifeOSObject, noteId: string, body: string, context: EventContext, now: string) {
-    const seriesId = this.seriesKey(event);
+  /** Creates the occurrence's own Note (ADR 0021). */
+  private async createOccurrenceNote(event: CalendarEvent, meeting: LifeOSObject, noteId: string, body: string, context: EventContext, now: string) {
     const base = {
       people_ids: context.people.map((person) => person.frontmatter.id),
       primary_client_id: context.client?.frontmatter.id,
       primary_product_id: context.product?.frontmatter.id,
       primary_project_id: context.project?.frontmatter.id
     };
-    if (!seriesId || !event.originalOccurrenceStartsAt) {
-      return this.ctx.objects.write({ relativePath: `meetings/${markdownFileName(`${event.title} notes`, noteId, event.startsAt, event.timezone)}`, frontmatter: { ...this.ctx.envelope(noteId, "meeting-note", `${event.title} notes`, now), meeting_id: meeting.frontmatter.id, ...base }, body });
-    }
-
-    const section = this.occurrenceSection(event, meeting.frontmatter.id);
-    const found = this.findSeriesNote(seriesId);
-    const existing = found ? await this.followCalendarTitle(found, event, now) : undefined;
-    if (existing) {
-      const sections = Array.isArray(existing.frontmatter.occurrence_sections) ? existing.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
-      if (sections.some((candidate) => candidate.occurrence_id === section.occurrence_id)) return existing;
-      const meetingIds = Array.isArray(existing.frontmatter.meeting_ids) ? existing.frontmatter.meeting_ids.filter((id): id is string => typeof id === "string") : [String(existing.frontmatter.meeting_id)];
-      const inserted = this.insertRecurringSection(existing.body, sections, this.recurringSectionBody(event, section.section_id, body), section);
-      return this.ctx.update(existing, {
-        meeting_ids: [meeting.frontmatter.id, ...meetingIds.filter((id) => id !== meeting.frontmatter.id)],
-        occurrence_sections: inserted.sections
-      }, { expectedHash: existing.contentHash, now, body: inserted.body });
-    }
-
-    const previousSeries = this.findPreviousSeriesNote(event, seriesId);
-    const previousSeriesId = event.previousSeriesId
-      ? this.seriesKey(event, event.previousSeriesId)
-      : previousSeries?.frontmatter.recurrence_series_id;
-    return this.ctx.objects.write({
-      relativePath: `meetings/${markdownFileName(this.generatedNoteTitle(event), noteId, event.startsAt, event.timezone)}`,
-      frontmatter: {
-        ...this.ctx.envelope(noteId, "meeting-note", this.generatedNoteTitle(event), now),
-        meeting_id: meeting.frontmatter.id,
-        meeting_ids: [meeting.frontmatter.id],
-        recurrence_series_id: seriesId,
-        generated_title: this.generatedNoteTitle(event),
-        ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
-        ...(previousSeriesId ? { previous_recurrence_series_id: previousSeriesId } : {}),
-        ...(previousSeriesId ? { previous_recurrence_series_source: event.previousSeriesId ? "provider" : "series-uid" } : {}),
-        occurrence_sections: [section],
-        ...(previousSeries ? { previous_series_note_id: previousSeries.frontmatter.id } : {}),
-        ...base
-      },
-      body: this.recurringSectionBody(event, section.section_id, body)
-    });
-  }
-
-  /** Repairs an out-of-order split after the predecessor series Note is materialized. */
-  private async repairSuccessorSeriesLinks(seriesId: string, noteId: string, now: string, replay?: Operation, sourceNote?: LifeOSObject) {
-    const pending = replay ?? (await this.ctx.objects.incompleteOperations?.() ?? []).find((operation) => operation.kind === operationKinds.linkRecurringSeries && operation.payload.seriesId === seriesId && operation.payload.noteId === noteId);
-    const operation = pending ?? await this.ctx.objects.prepareOperation?.(operationKinds.linkRecurringSeries, { seriesId, noteId, now }, uuidV7());
-    const predecessor = sourceNote ?? this.ctx.index.get(noteId);
-    for (const successor of this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && isLive(object))) {
-      const explicit = successor.frontmatter.previous_recurrence_series_id === seriesId && !successor.frontmatter.previous_series_note_id;
-      const inferred = predecessor?.frontmatter.recurrence_series_uid
-        && successor.frontmatter.recurrence_series_uid === predecessor.frontmatter.recurrence_series_uid
-        && successor.frontmatter.previous_recurrence_series_source !== "provider"
-        && this.seriesStart(predecessor) < this.seriesStart(successor)
-        && (() => {
-          const current = this.findSeriesNote(typeof successor.frontmatter.previous_recurrence_series_id === "string" ? successor.frontmatter.previous_recurrence_series_id : undefined);
-          return !current || this.seriesStart(current) < this.seriesStart(predecessor);
-        })();
-      if (!explicit && !inferred) continue;
-      await this.ctx.update(successor, inferred ? { previous_recurrence_series_id: seriesId, previous_series_note_id: noteId, previous_recurrence_series_source: "series-uid" } : { previous_series_note_id: noteId }, { expectedHash: successor.contentHash, now });
-    }
-    if (operation) await this.ctx.objects.completeOperation?.(operation.id);
+    // ADR 0021: every occurrence gets its own Note, linked only by `meeting_id`. A recurring event never
+    // links to or writes a shared (Legacy) Note, so one first edit writes this one file and nothing else.
+    return this.ctx.objects.write({ relativePath: `meetings/${markdownFileName(`${event.title} notes`, noteId, event.startsAt, event.timezone)}`, frontmatter: { ...this.ctx.envelope(noteId, "meeting-note", `${event.title} notes`, now), meeting_id: meeting.frontmatter.id, ...base }, body });
   }
 
   private async findEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) {
@@ -1136,6 +1054,6 @@ export class MeetingsModule {
     const needsMeetingUpdate = !meeting.frontmatter.primary_project_id || !Array.isArray(meeting.frontmatter.attendee_ids);
     if (needsMeetingUpdate) await this.ctx.update(meeting, fields, { expectedHash: meeting.contentHash, now: timestamp });
     const note = this.noteFor(meeting.frontmatter.id);
-    if (note && !note.frontmatter.primary_project_id) await this.ctx.update(note, { ...fields, people_ids: fields.attendee_ids }, { expectedHash: note.contentHash, now: timestamp });
+    if (note && !isLegacySharedNote(note) && !note.frontmatter.primary_project_id) await this.ctx.update(note, { ...fields, people_ids: fields.attendee_ids }, { expectedHash: note.contentHash, now: timestamp });
   }
 }

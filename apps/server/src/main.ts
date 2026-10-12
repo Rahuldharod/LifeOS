@@ -2,7 +2,7 @@
 // (which listens before starting background work) and stops cleanly on SIGINT/SIGTERM. Routes, lease wiring and background work live in the API module.
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { GoogleCalendarConnector, MockCalendarConnector } from "@lifeos/connectors";
+import { GoogleCalendarConnector, MockCalendarConnector, mockEventsFromEnv } from "@lifeos/connectors";
 import { exitUnlessDataRoot, resolveBackupRoot, resolveDataRoot } from "@lifeos/object-store-markdown";
 import { KnownSecrets, MacOSKeychainSecretStore } from "@lifeos/secrets";
 import { buildApi } from "./api.js";
@@ -24,7 +24,11 @@ if (process.env.GOOGLE_CLIENT_SECRET) await secrets.set(secretRefs.calendarClien
 if (process.env.GOOGLE_CLIENT_ID) await secrets.set(secretRefs.calendarClientId, process.env.GOOGLE_CLIENT_ID);
 // Dev mode (PB-001) forces the mock calendar: Google's OAuth callback belongs to the stable app on 4310. It reads no secret at startup.
 // #94: outside dev mode the mock never answers; a denied Keychain makes calendar reads offline (stored meetings + banner).
-const calendars = calendarSource({ secrets, mockOnly: process.env.LIFEOS_CALENDAR === "mock", mock: new MockCalendarConnector(), createGoogle: (clientId) => new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets }) });
+// Browser tests only (#172): extra synthetic mock events, honoured only with LIFEOS_CALENDAR=mock. A bad file stops startup.
+let mockEvents: ReturnType<typeof mockEventsFromEnv>;
+try { mockEvents = mockEventsFromEnv(process.env); }
+catch (error) { console.error(error instanceof Error ? error.message : error); process.exit(1); }
+const calendars = calendarSource({ secrets, mockOnly: process.env.LIFEOS_CALENDAR === "mock", mock: new MockCalendarConnector(mockEvents), createGoogle: (clientId) => new GoogleCalendarConnector({ clientId, redirectUri: googleRedirectUri, secrets }) });
 /** Startup and Retry: the only reads made just to know what is configured. A denied prompt leaves the card showing Retry. */
 await calendars.probe().catch((error) => console.error("Could not read Google connection secrets", error));
 

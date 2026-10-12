@@ -1,13 +1,41 @@
 import type { CalendarConnector, CalendarEvent, CalendarEventReference, CalendarSummary } from "@lifeos/application";
 import type { SecretStore } from "@lifeos/application";
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+/**
+ * Browser tests only: `LIFEOS_MOCK_EVENTS` names a JSON file of extra synthetic events for the mock calendar. It is honoured
+ * only when `LIFEOS_CALENDAR=mock`, so a stable or Google-backed run can never pick it up. A bad file stops startup with a clear message.
+ */
+export function mockEventsFromEnv(env: Record<string, string | undefined>): CalendarEvent[] {
+  const file = env.LIFEOS_CALENDAR === "mock" ? env.LIFEOS_MOCK_EVENTS : undefined;
+  if (!file) return [];
+  let text: string;
+  try { text = readFileSync(file, "utf8"); }
+  catch (error) { throw new Error(`LIFEOS_MOCK_EVENTS: cannot read ${file} (${error instanceof Error ? error.message : "unknown error"})`); }
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); }
+  catch { throw new Error(`LIFEOS_MOCK_EVENTS: ${file} is not valid JSON`); }
+  if (!Array.isArray(parsed)) throw new Error(`LIFEOS_MOCK_EVENTS: ${file} must hold a JSON array of calendar events`);
+  return parsed as CalendarEvent[];
+}
 
 export class MockCalendarConnector implements CalendarConnector {
   readonly provider = "mock";
+  /**
+   * `fixedEvents` are returned unchanged whenever they overlap the requested window. Dev mode passes none, so its
+   * behaviour is unchanged; the browser-test server passes recurring events so real-API tests can open a new
+   * occurrence of a seeded series (#172).
+   */
+  constructor(private readonly fixedEvents: CalendarEvent[] = []) {}
   async listCalendars(): Promise<CalendarSummary[]> {
     return [{ id: "mock-calendar", name: "LifeOS Demo", color: "#5f8b7c" }];
   }
   async listEvents(from: Date, to: Date) {
+    const fixed = this.fixedEvents.filter((event) => Date.parse(event.startsAt) < to.getTime() && Date.parse(event.endsAt) > from.getTime());
+    return [...fixed, ...this.relativeEvents(from, to)];
+  }
+  private relativeEvents(from: Date, to: Date): CalendarEvent[] {
     const startsAt = new Date(Math.max(from.getTime(), Date.now() + 3_600_000));
     return startsAt < to ? [{
       externalId: "mock-weekly-review",
