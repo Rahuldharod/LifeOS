@@ -68,7 +68,7 @@ export function resolveObjectRedirect<T extends WithFrontmatter>(id: string, obj
     seen.add(target);
     object = next;
   }
-  return { object, redirectedFrom, ...(typeof first.frontmatter.redirect_to_section_id === "string" ? { sectionId: first.frontmatter.redirect_to_section_id } : {}) };
+  return { object, redirectedFrom };
 }
 
 /**

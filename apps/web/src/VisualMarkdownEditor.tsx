@@ -5,7 +5,6 @@ import { lifeosLinkId, type LinkedObject } from "./lifeosLinks.js";
 import { pasteLifeosLink } from "./visualLinkPaste.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
 import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
-import { scrollVisualOccurrence } from "./occurrenceNavigation.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -20,7 +19,7 @@ type CrepeConstructor = new (config: { root: Node; defaultValue: string; feature
 /** Where the Note lives, for rewriting image paths; a Note not saved yet counts as one folder deep. */
 const ownerPath = (owner: EditorOwner | undefined) => owner?.relativePath ?? "meetings/pending.md";
 
-export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnly, onChange, linkObjects, targetSectionId }: { linkObjects: LinkedObject[]; editorKey: string; owner: EditorOwner | undefined; ensureOwner?: () => Promise<EditorOwner | undefined>; markdown: string; readOnly: boolean; onChange: (markdown: string) => void; targetSectionId?: string }) {
+export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, readOnly, onChange, linkObjects }: { linkObjects: LinkedObject[]; editorKey: string; owner: EditorOwner | undefined; ensureOwner?: () => Promise<EditorOwner | undefined>; markdown: string; readOnly: boolean; onChange: (markdown: string) => void}) {
   const root = useRef<HTMLDivElement>(null);
   const crepe = useRef<CrepeInstance | undefined>(undefined);
   // Latest props for callbacks created once per mount. Reading these through refs matters: `readOnly`
@@ -98,12 +97,10 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
       instance.setReadonly(latest.current.readOnly || blocked.current);
       setLost(missing);
       setRoundTrip(roundTripReport(markdown, unedited));
-      scrollVisualOccurrence(editorRoot, markdown, targetSectionId);
     });
     return () => { active = false; crepe.current = undefined; if (instance) void instance.destroy(); };
   }, [editorKey]);
 
   useEffect(() => { crepe.current?.setReadonly(readOnly || blocked.current); }, [readOnly]);
-  useEffect(() => { if (root.current) scrollVisualOccurrence(root.current, markdown, targetSectionId); }, [markdown, targetSectionId]);
   return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }

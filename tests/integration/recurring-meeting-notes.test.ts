@@ -43,7 +43,7 @@ async function setup(events: CalendarEvent[]) {
 
 // #172 (ADR 0021): a recurring occurrence has its own Meeting and its own Note. The ADR 0019 shared-Note creation behaviour
 // these tests used to cover (sections, split chains, previous-series links, title following, restore guard) no longer happens
-// on creation; it survives only for stored Legacy shared Notes and goes with #178. Tests of that stored shape seed it directly.
+// on creation; it survives only as stored Legacy shared Notes (the code that built them is gone, #178). Tests of that stored shape seed it directly.
 describe("recurring meeting notes (#147, #172)", () => {
   it("gives simultaneous first edits of two occurrences one Note each and never lets a retry replace the text", async () => {
     const older = event({ externalId: "older-race", seriesId: "series-race", originalOccurrenceStartsAt: "2026-10-05T08:00:00.000Z" });
@@ -176,80 +176,5 @@ describe("recurring meeting notes (#147, #172)", () => {
     await app.createMeetingFromEvent(recurring.externalId);
 
     expect(await readFile(path.join(root, withUnknown.relativePath), "utf8")).toBe(before);
-  });
-
-  it("makes an exact pre-upgrade recurring Note available for reviewed migration after calendar sync", async () => {
-    const legacyEvent = event({ externalId: "weekly-prio", title: "Weekly Prio" });
-    const { app, calendar } = await setup([legacyEvent]);
-    const legacy = await app.createMeetingFromEvent(legacyEvent.externalId, undefined, undefined, legacyEvent.calendarId, "Last week's details\n");
-    calendar.eventsById.set(legacyEvent.externalId, event({
-      externalId: legacyEvent.externalId,
-      title: legacyEvent.title,
-      seriesId: "weekly-prio-series",
-      originalOccurrenceStartsAt: legacyEvent.startsAt
-    }));
-    calendar.events.splice(0, 1, event({
-      externalId: "weekly-prio-next",
-      title: legacyEvent.title,
-      startsAt: "2026-10-12T08:00:00.000Z",
-      endsAt: "2026-10-12T09:00:00.000Z",
-      seriesId: "weekly-prio-series",
-      originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z"
-    }));
-
-    await app.syncCalendar(new Date("2026-10-12T00:00:00.000Z"), new Date("2026-10-13T00:00:00.000Z"));
-
-    expect(app.recurringMigrationPreview(legacy.meeting.frontmatter.id)).toMatchObject({
-      requiresConfirmation: true,
-      candidates: [{ noteId: legacy.note!.frontmatter.id, body: "Last week's details\n" }]
-    });
-  });
-
-  it("previews migrated history on a new occurrence (as a Series view block) without writing until the first edit", async () => {
-    const legacyEvent = event({ externalId: "weekly-prio", title: "Weekly Prio" });
-    const currentEvent = event({
-      externalId: "weekly-prio-next",
-      title: "Weekly Prio",
-      startsAt: "2026-10-12T08:00:00.000Z",
-      endsAt: "2026-10-12T09:00:00.000Z",
-      seriesId: "weekly-prio-series",
-      originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z"
-    });
-    const { app, calendar } = await setup([legacyEvent]);
-    const legacy = await app.createMeetingFromEvent(legacyEvent.externalId, undefined, undefined, legacyEvent.calendarId, "Last week's details\n");
-    calendar.eventsById.set(legacyEvent.externalId, event({
-      externalId: legacyEvent.externalId,
-      title: legacyEvent.title,
-      seriesId: "weekly-prio-series",
-      originalOccurrenceStartsAt: legacyEvent.startsAt
-    }));
-    calendar.events.splice(0, 1, currentEvent);
-    calendar.eventsById.set(currentEvent.externalId, currentEvent);
-    await app.syncCalendar(new Date("2026-10-12T00:00:00.000Z"), new Date("2026-10-13T00:00:00.000Z"));
-    const migration = app.recurringMigrationPreview(legacy.meeting.frontmatter.id);
-    await app.confirmRecurringMigration(legacy.meeting.frontmatter.id, Object.fromEntries(migration.candidates.map((candidate) => [candidate.noteId, candidate.contentHash])));
-    const before = await app.listObjects();
-
-    const current = await app.previewMeetingFromEvent(currentEvent.externalId, undefined, undefined, currentEvent.calendarId);
-
-    expect(current).toMatchObject({
-      persisted: false,
-      note: undefined,
-      seriesView: { earlier: [{ kind: "legacy-shared", note: { body: expect.stringContaining("Last week's details") } }] }
-    });
-    expect(await app.listObjects()).toEqual(before);
-
-    const sharedIds = (await app.listObjects()).filter((object) => object.frontmatter.type === "meeting-note" && object.frontmatter.recurrence_series_id).map((object) => object.frontmatter.id);
-    expect(sharedIds).toHaveLength(1);
-    const sharedBefore = [app.object(sharedIds[0]!)];
-
-    const saved = await app.createMeetingFromEvent(currentEvent.externalId, undefined, undefined, currentEvent.calendarId, "This week's details\n");
-    // #172: the first edit makes this occurrence's own Note; the migrated Legacy shared Note is neither extended nor rewritten.
-    expect(saved.note?.body).toBe("This week's details\n");
-    expect(saved.note?.frontmatter.occurrence_sections).toBeUndefined();
-    expect(saved.note?.frontmatter.id).not.toBe(sharedBefore[0]!.frontmatter.id);
-    const sharedAfter = app.object(sharedBefore[0]!.frontmatter.id);
-    expect(sharedAfter.contentHash).toBe(sharedBefore[0]!.contentHash);
-    expect(sharedAfter.body).toBe(sharedBefore[0]!.body);
   });
 });

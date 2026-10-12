@@ -36,9 +36,6 @@ export type Workspace = {
   note?: LifeObject;
   reviews: LifeObject[];
   tasks: LifeObject[];
-  noteSectionId?: string;
-  recurringMigration?: RecurringMigrationPreview;
-  occurrences?: OccurrenceWorkspaceItem[];
   /** Present on every recurring occurrence (new or stored): the read-only history of the same provider series (ADR 0021). */
   seriesView?: SeriesView;
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
@@ -62,21 +59,6 @@ export type SeriesViewEarlier = {
   cancelled: boolean;
   /** #176: Sources linked to this occurrence's own Meeting and its accepted summary; absent when there are none, or the occurrence is restricted. */
   materials?: SeriesViewMaterials;
-};
-export type OccurrenceWorkspaceItem = {
-  sectionId: string;
-  occurrenceId: string;
-  originalStartsAt: string;
-  meeting: LifeObject;
-  reviews: LifeObject[];
-  sources: LifeObject[];
-  context: { people: LifeObject[] };
-};
-/** #153: a read-only, exact-identity migration plan. It changes no Markdown until confirmed. */
-export type RecurringMigrationPreview = {
-  seriesId?: string;
-  requiresConfirmation: boolean;
-  candidates: Array<{ noteId: string; meetingId: string; title: string; body: string; contentHash: string; occurrenceId: string; sectionId: string; originalStartsAt: string; startsAt: string }>;
 };
 export type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings: LifeObject[]; decisions: LifeObject[]; openPoints: LifeObject[]; people: LifeObject[] };
 export type EntityRollup = { entity: LifeObject; related: LifeObject[] };

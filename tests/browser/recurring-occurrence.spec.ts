@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 import { RECURRING_NOTE, seed } from "./fixtures.js";
 
 // #181: the Notes tab shows a recurring Note as one plain Note; the occurrence view lives in the Calendar.
@@ -88,4 +88,71 @@ test("the first edit on a new occurrence creates only its own Note and no save e
   const summaries = page.getByRole("region", { name: "Earlier occurrences" }).locator("summary");
   await expect(summaries.nth(0)).toContainText("September 21, 2026");
   await expect(summaries.nth(1)).toContainText("Shared Note");
+});
+
+// #178: a stored occurrence whose own Note is a Legacy shared Note (ADR 0019) used to open a per-section workspace that ignored Visual/Markdown.
+// It now opens like any occurrence: the whole Note is one editor block that follows the mode and saves whole-body. Real local API, nothing mocked.
+// The fixture ("realshape" in serve.mjs) has the shape of the user's real Weekly Prio Note: a heading, the anchor on the very next line, then notes.
+const REAL = { note: "95000000-0000-4000-8000-000000000001", older: "96000000-0000-4000-8000-000000000001" };
+type Shared = { note: { body: string; contentHash: string; frontmatter: Record<string, unknown> } };
+const readShared = async (request: APIRequestContext) => ((await (await request.get(`/api/v1/meetings/${REAL.older}/workspace`)).json()) as Shared).note;
+
+// Red-first finding: the Visual editor (Crepe) cannot keep this shape. For the fixture it inserted a blank line between each heading and its
+// anchor, rewrote "-" list markers as "*", and put the typed word in the wrong place. So a body with anchor lines is kept in Markdown.
+test("a stored Legacy shared Note opens in Markdown even though Visual is the default, and typing changes only the typed word", async ({ page, request }) => {
+  await seed(request);
+  const before = await readShared(request);
+  expect(before.frontmatter.id).toBe(REAL.note);
+  expect(before.body).toContain('## Weekly Prio — 2026-10-12T05:30:00.000Z\n<a id="occurrence-2026-10-12t05-30-00-000z"></a>\n\n');
+
+  await page.goto(`/calendar/2026-10-05/${REAL.older}`);
+  await expect(page.getByText("Confirm migration")).toHaveCount(0);
+  await expect(page.locator(".recurring-occurrence-workspace, .occurrence-section")).toHaveCount(0);
+  await expect(page.getByText("This shared note opens in Markdown to keep its structure.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Visual", exact: true })).toBeDisabled();
+  await expect(page.locator("[contenteditable='true']")).toHaveCount(0);
+  const area = page.getByPlaceholder(/Capture meeting notes/);
+  await expect(area).toHaveValue(before.body);
+
+  await area.focus();
+  await area.evaluate((element: HTMLTextAreaElement) => { const at = element.value.indexOf("Older notes text.") + "Older notes text.".length; element.setSelectionRange(at, at); });
+  await page.keyboard.type(" zzz");
+  await expect.poll(async () => (await readShared(request)).body, { timeout: 10000 }).not.toBe(before.body);
+  await page.waitForTimeout(2500);
+
+  const after = await readShared(request);
+  // The only change is the typed word: every heading and anchor line is byte-for-byte where it was.
+  expect(after.body).toBe(before.body.replace("Older notes text.", "Older notes text. zzz"));
+  expect(after.frontmatter.occurrence_sections).toEqual(before.frontmatter.occurrence_sections);
+  expect(after.frontmatter.meeting_ids).toEqual(before.frontmatter.meeting_ids);
+  expect(after.frontmatter.future_field).toEqual({ keep: ["me"] });
+});
+
+test("focusing a stored Legacy shared Note and leaving writes nothing", async ({ page, request }) => {
+  await seed(request);
+  const before = await readShared(request);
+  await page.goto(`/calendar/2026-10-05/${REAL.older}`);
+  const area = page.getByPlaceholder(/Capture meeting notes/);
+  await expect(area).toHaveValue(before.body);
+  await area.focus();
+  await page.waitForTimeout(3000);
+  await page.goto("/calendar/2026-10-05");
+  await page.waitForTimeout(1000);
+  expect((await readShared(request)).contentHash).toBe(before.contentHash);
+});
+
+test("a stored Legacy shared Note shows its whole body in Markdown mode and saves whole-body", async ({ page, request }) => {
+  await seed(request);
+  const before = await readShared(request);
+  await page.goto(`/calendar/2026-10-05/${REAL.older}`);
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  const area = page.getByPlaceholder(/Capture meeting notes/);
+  await expect(area).toHaveValue(before.body);
+  await expect(page.locator("textarea")).toHaveCount(1);
+  const edited = before.body.replace("Older notes text.", "Older notes text, edited.");
+  await area.fill(edited);
+  await expect.poll(async () => (await readShared(request)).body, { timeout: 10000 }).toBe(edited);
+  const after = await readShared(request);
+  expect(after.frontmatter.occurrence_sections).toEqual(before.frontmatter.occurrence_sections);
+  expect(after.frontmatter.future_field).toEqual({ keep: ["me"] });
 });

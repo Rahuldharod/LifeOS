@@ -1,8 +1,10 @@
-import React, { useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import type { LinkedObject } from "./lifeosLinks.js";
 import { storeManagedImage, suggestedImageAlt, type EditorOwner } from "./editorAssets.js";
 import { insertAtSelection, transformLines, wrapSelection, type Edit } from "./markdownEdit.js";
 import { markdownPasteAction } from "./markdownPaste.js";
+import { hasRawAnchorLines } from "./editorMarkdown.js";
+import { InlineNotice } from "./InlineNotice.js";
 import { MarkdownPreview } from "./MarkdownPreview.js";
 import { objectLinkMarkdown } from "./objectLinkMarkdown.js";
 import { VisualMarkdownEditor } from "./VisualMarkdownEditor.js";
@@ -11,8 +13,8 @@ export type EditorMode = "visual" | "write" | "preview";
 export type { EditorOwner };
 
 /** The Visual / Markdown / Preview switch, rendered inside a note header. */
-export function ModeSwitch({ mode, onChange }: { mode: EditorMode; onChange: (mode: EditorMode) => void }) {
-  return <div className="mode-switch"><button className={mode === "visual" ? "selected" : ""} onClick={() => onChange("visual")}>Visual</button><button className={mode === "write" ? "selected" : ""} onClick={() => onChange("write")}>Markdown</button><button className={mode === "preview" ? "selected" : ""} onClick={() => onChange("preview")}>Preview</button></div>;
+export function ModeSwitch({ mode, onChange, visualDisabled = false }: { mode: EditorMode; onChange: (mode: EditorMode) => void; /** A shared Note with section anchors is kept in Markdown (#178). */ visualDisabled?: boolean }) {
+  return <div className="mode-switch"><button className={mode === "visual" && !visualDisabled ? "selected" : ""} disabled={visualDisabled} title={visualDisabled ? "This shared note opens in Markdown to keep its structure" : undefined} onClick={() => onChange("visual")}>Visual</button><button className={mode === "write" || (visualDisabled && mode === "visual") ? "selected" : ""} onClick={() => onChange("write")}>Markdown</button><button className={mode === "preview" ? "selected" : ""} onClick={() => onChange("preview")}>Preview</button></div>;
 }
 
 export type MarkdownEditorProps = {
@@ -39,34 +41,22 @@ export type MarkdownEditorProps = {
   caretAfterInsert: boolean;
   /** The meeting editor refocuses the textarea after an image is inserted; the Notes editor does not. */
   refocusAfterImage: boolean;
-  /** Occurrence section opened by a recurring-meeting deep link. */
-  targetSectionId?: string;
 };
 
 /** One note editor in any of its three modes. Notes and the Calendar meeting workspace both render this;
  * the draft and its saving stay with the caller (useNoteDraftController). */
 export function MarkdownEditor(props: MarkdownEditorProps) {
-  const { mode, editorKey, draft, onChange, readOnly, busy, ready = true, owner, ensureOwner, linkObjects, setBusy, notify, onImageStored, placeholder, codeLanguagePrompt, caretAfterInsert, refocusAfterImage, targetSectionId } = props;
+  const { mode: requestedMode, editorKey, draft, onChange, readOnly, busy, ready = true, owner, ensureOwner, linkObjects, setBusy, notify, onImageStored, placeholder, codeLanguagePrompt, caretAfterInsert, refocusAfterImage } = props;
+  // #178: a body with section anchor lines never opens in the visual editor, which would rewrite them.
+  const keptInMarkdown = hasRawAnchorLines(draft);
+  const mode: EditorMode = requestedMode === "visual" && keptInMarkdown ? "write" : requestedMode;
   const area = useRef<HTMLTextAreaElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (mode !== "write" || !targetSectionId) return;
-    const frame = requestAnimationFrame(() => {
-      const offset = draft.indexOf(`<a id="${targetSectionId}"></a>`);
-      if (area.current && offset >= 0) {
-        area.current.focus();
-        area.current.setSelectionRange(offset, offset);
-        area.current.scrollIntoView({ block: "center" });
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [draft, editorKey, mode, targetSectionId]);
-
   if (mode !== "write") {
     return mode === "visual" && ready
-      ? <VisualMarkdownEditor linkObjects={linkObjects} editorKey={editorKey} owner={owner} ensureOwner={ensureOwner} markdown={draft} readOnly={busy || readOnly} onChange={onChange} targetSectionId={targetSectionId} />
-      : <MarkdownPreview markdown={draft} empty="_Nothing to preview yet._" occurrenceAnchors />;
+      ? <VisualMarkdownEditor linkObjects={linkObjects} editorKey={editorKey} owner={owner} ensureOwner={ensureOwner} markdown={draft} readOnly={busy || readOnly} onChange={onChange} />
+      : <MarkdownPreview markdown={draft} empty="_Nothing to preview yet._" />;
   }
 
   const selection = () => ({ start: area.current?.selectionStart ?? draft.length, end: area.current?.selectionEnd ?? area.current?.selectionStart ?? draft.length });
@@ -106,6 +96,7 @@ export function MarkdownEditor(props: MarkdownEditorProps) {
   }
 
   return <>
+    {requestedMode === "visual" && keptInMarkdown && <InlineNotice className="unproven-formatting" role="note" title="Opened in Markdown">This shared note opens in Markdown to keep its structure.</InlineNotice>}
     <div className="toolbar">
       <select disabled={readOnly} aria-label="Heading level" defaultValue="" onChange={(event) => { heading(event.target.value); event.target.value = ""; }}><option value="" disabled>Heading</option><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select>
       <button disabled={readOnly} title="Bold" onClick={() => wrap("**", "**")}>B</button>

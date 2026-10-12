@@ -58,12 +58,37 @@ describe("MarkdownEditor", () => {
     expect(dom.querySelector('img[src="/api/v1/assets/b.png"]')).not.toBeNull();
   });
 
+  it("a body with section anchor lines is kept in Markdown even when Visual is asked for, with a plain-language note (#178)", () => {
+    const draft = '## Weekly Prio — 2026-10-12T05:30:00.000Z\n<a id="occurrence-2026-10-12t05-30-00-000z"></a>\n\n- one\n';
+    const dom = render({ mode: "visual", draft });
+    expect(dom.querySelector(".visual-markdown-editor")).toBeNull();
+    expect((dom.querySelector("textarea") as HTMLTextAreaElement).value).toBe(draft);
+    expect(dom.textContent).toContain("This shared note opens in Markdown to keep its structure.");
+    act(() => root?.unmount());
+    host?.remove();
+    expect(render({ mode: "write", draft }).textContent).not.toContain("opens in Markdown to keep");
+    act(() => root?.unmount());
+    host?.remove();
+    expect(render({ mode: "preview", draft }).querySelector("textarea")).toBeNull();
+  });
+
   it("Preview mode shows the empty text for a blank draft", () => {
     expect(render({ mode: "preview", draft: "" }).textContent).toContain("Nothing to preview yet.");
   });
 });
 
 describe("ModeSwitch", () => {
+  it("disables Visual and marks Markdown as the active mode for a shared Note (#178)", () => {
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => root!.render(<ModeSwitch mode="visual" onChange={() => undefined} visualDisabled />));
+    const [visual, markdown] = Array.from(host.querySelectorAll("button"));
+    expect(visual!.disabled).toBe(true);
+    expect(visual!.title).toContain("opens in Markdown");
+    expect(markdown!.className).toBe("selected");
+  });
+
   it("marks the current mode and reports a change", () => {
     const modes: string[] = [];
     host = document.createElement("div");

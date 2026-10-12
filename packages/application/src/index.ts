@@ -44,7 +44,6 @@ export type { DailyFocusView, FocusItem, FocusItemState, FocusOverrideAction, Fo
 export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords, defaultMaxMustDos, maxMustDosLimit, focusOverrideActions } from "./focus.js";
 import type { FocusOverrideChange } from "./focus.js";
 export type { CalendarDay, CalendarOffline, CalendarOfflineReason } from "./calendar.js";
-export type { RecurringMigrationPreview } from "./meetings.js";
 export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySettings, WaitingGroup, Weekday } from "./today.js";
 export { defaultTodaySettings, weekdays } from "./today.js";
 export { agentIndexContentWithoutTimestamp, agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
@@ -211,9 +210,6 @@ export class LifeOSApplication {
   meetingFromEvent(externalId: string) { return this.meetings.meetingFromEvent(externalId); }
   meetingWorkspace(meetingId: string) { return this.meetings.meetingWorkspace(meetingId); }
   seriesViewPage(cursor: string) { return this.meetings.seriesViewPage(cursor); }
-  recurringMigrationPreview(meetingId: string) { return this.meetings.recurringMigrationPreview(meetingId); }
-  confirmRecurringMigration(meetingId: string, expectedHashes: Record<string, string>) { return this.meetings.confirmRecurringMigration(meetingId, expectedHashes); }
-  linkPreviousSeriesNote(noteId: string, previousNoteId: string, expectedHash: string) { return this.meetings.linkPreviousSeriesNote(noteId, previousNoteId, expectedHash); }
   reconcileDuplicateMeetings(options: { apply: boolean }) { return this.meetings.reconcileDuplicateMeetings(options); }
 
   // Review

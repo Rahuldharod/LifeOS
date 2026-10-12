@@ -38,18 +38,6 @@ export function isRestricted(frontmatter: { sensitivity?: unknown } | Record<str
   return (frontmatter as { sensitivity?: unknown }).sensitivity === "restricted";
 }
 
-/** Legacy only: app-managed Materials block markers of Legacy shared Notes. No new writes; removed by #178. */
-export const occurrenceMaterialsStart = (sectionId: string) => `<!-- lifeos:materials:start ${sectionId} -->`;
-export const occurrenceMaterialsEnd = (sectionId: string) => `<!-- lifeos:materials:end ${sectionId} -->`;
-
-export function occurrenceMaterialsBlock(markdown: string, sectionId: string) {
-  const start = occurrenceMaterialsStart(sectionId);
-  const end = occurrenceMaterialsEnd(sectionId);
-  const from = markdown.indexOf(start);
-  const to = from < 0 ? -1 : markdown.indexOf(end, from + start.length);
-  return from >= 0 && to >= 0 ? markdown.slice(from, to + end.length) : "";
-}
-
 /** The Summary section of a meeting body is fenced by these markers (#66). */
 export const summaryStartMarker = "<!-- lifeos:summary:start -->";
 export const summaryEndMarker = "<!-- lifeos:summary:end -->";

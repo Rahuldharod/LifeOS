@@ -242,12 +242,6 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return application.seriesViewPage(request.query.cursor);
   });
   route(server, "GET /api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
-  route(server, "GET /api/v1/meetings/:id/recurring-migration", async (request) => application.recurringMigrationPreview(request.params.id));
-  route(server, "POST /api/v1/meetings/:id/recurring-migration", async (request, reply) => {
-    if (!request.body || typeof request.body.expectedHashes !== "object" || Array.isArray(request.body.expectedHashes)) return reply.status(400).send({ error: "expectedHashes are required to confirm a migration" });
-    if (!Object.values(request.body.expectedHashes).every((value) => typeof value === "string")) return reply.status(400).send({ error: "expectedHashes must map Note IDs to content hashes" });
-    return application.confirmRecurringMigration(request.params.id, request.body.expectedHashes);
-  });
   route(server, "PUT /api/v1/objects/:id/body", async (request) => application.updateBody(request.params.id, request.body.body, request.body.expectedHash));
   route(server, "POST /api/v1/objects/:id/assets", async (request) => {
     const object = application.object(request.params.id);
@@ -270,10 +264,6 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required to edit a note" });
     if (!request.body.changes || typeof request.body.changes !== "object") return reply.status(400).send({ error: "changes are required" });
     return application.updateNoteMetadata(request.params.id, request.body.changes, request.body.expectedHash);
-  });
-  route(server, "POST /api/v1/notes/:id/previous-series", async (request, reply) => {
-    if (!hasExpectedHash(request.body) || typeof request.body.previousNoteId !== "string") return reply.status(400).send({ error: "previousNoteId and expectedHash are required" });
-    return application.linkPreviousSeriesNote(request.params.id, request.body.previousNoteId, request.body.expectedHash);
   });
   route(server, "POST /api/v1/notes/:id/restore", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required to restore a note" });

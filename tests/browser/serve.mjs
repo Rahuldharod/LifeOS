@@ -147,6 +147,22 @@ for (const [month, body] of [["04", "# Solo heading\n\nLast line <!-- keep me --
   await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Solo ${month}`), status: "scheduled", starts_at: "2026-05-12T08:00:00.000Z", ends_at: "2026-05-12T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [] });
   await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Solo notes ${month}`), meeting_id: meetingId }, body);
 }
+// #178 "realshape": a Legacy shared Note shaped like the real Weekly Prio one: per occurrence a heading line, the section anchor on the NEXT line
+// (no blank line), a blank line, then notes with lists, bold and a link; two Meetings; an unknown frontmatter field. Tests open the OLDER occurrence.
+const real = { series: "mock:mock-calendar:realshape", note: "95000000-0000-4000-8000-000000000001", meetings: ["96000000-0000-4000-8000-000000000001", "96000000-0000-4000-8000-000000000002"], days: ["2026-10-05", "2026-10-12"] };
+for (const [index, meetingId] of real.meetings.entries()) {
+  const startsAt = `${real.days[index]}T05:30:00.000Z`;
+  await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", "Weekly Prio"), status: "scheduled", starts_at: startsAt, ends_at: `${real.days[index]}T06:30:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: real.series, recurrence_occurrence_id: `${real.series}:${startsAt}`, original_occurrence_starts_at: startsAt });
+}
+await objectFile("meetings", real.note, {
+  ...stamped(real.note, "meeting-note", "Weekly Prio notes"), meeting_id: real.meetings[1], meeting_ids: [...real.meetings].reverse(), recurrence_series_id: real.series, future_field: { keep: ["me"] },
+  occurrence_sections: real.meetings.map((meetingId, index) => ({ occurrence_id: `${real.series}:${real.days[index]}T05:30:00.000Z`, section_id: `occurrence-${real.days[index]}t05-30-00-000z`, meeting_id: meetingId, original_starts_at: `${real.days[index]}T05:30:00.000Z`, starts_at: `${real.days[index]}T05:30:00.000Z` }))
+}, [
+  "## Weekly Prio — 2026-10-12T05:30:00.000Z", '<a id="occurrence-2026-10-12t05-30-00-000z"></a>', "",
+  "- **Decided** the plan, see [the doc](https://example.com/doc)", "- Follow up with *Ana*", "", "Newer notes text.", "",
+  "## Weekly Prio — 2026-10-05T05:30:00.000Z", '<a id="occurrence-2026-10-05t05-30-00-000z"></a>', "",
+  "1. First point", "2. Second point with **bold**", "", "Older notes text.", ""
+].join("\n"));
 await objectFile("review-items", recurring.review, {
   ...stamped(recurring.review, "review-item", "Send the synthetic agenda"), review_type: "create", target_object_type: "task", proposed_fields: { title: "Send the synthetic agenda", source_meeting_id: recurring.currentMeeting }, confidence_label: "High", status: "pending", operation_id: recurring.operation, source_meeting_id: recurring.currentMeeting, occurrence_section_id: recurring.currentSection
 }, "Synthetic proposal.\n");
