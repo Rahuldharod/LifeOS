@@ -34,6 +34,17 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
   // #91: images this editor would drop if it saved. When any, the editor stays read-only and never saves.
   const [lost, setLost] = useState<string[]>();
   const blocked = useRef(false);
+  // The editor reports changes after a short delay (Crepe debounces markdownUpdated), so typing made just before the editor
+  // goes away (the Visual / Markdown switch) would never reach the draft. `created` and `shown` let unmount flush it (#183).
+  const created = useRef(false);
+  const shown = useRef(markdown);
+  shown.current = markdown;
+  // Declared before the mount effect so its cleanup runs first, while the editor still exists. Runs on unmount only.
+  useEffect(() => () => {
+    if (!crepe.current || !created.current || !engaged.current || blocked.current) return;
+    const typed = storedMarkdown(crepe.current.getMarkdown(), latest.current.owner?.relativePath ?? "meetings/pending.md", shown.current);
+    if (typed !== shown.current) latest.current.onChange(typed);
+  }, []);
 
   useEffect(() => {
     if (!root.current) return;
@@ -42,6 +53,7 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
     const editorRoot = root.current;
     engaged.current = false;
     blocked.current = false;
+    created.current = false;
     setRoundTrip(undefined);
     setLost(undefined);
     void Promise.all([import("@milkdown/crepe"), import("./visualEditorImages.js")]).then(async ([crepePackage, { prepareVisualEditor }]) => {
@@ -67,6 +79,7 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
         latest.current.onChange(storedMarkdown(nextMarkdown, latest.current.owner?.relativePath ?? "meetings/pending.md", markdown));
       }));
       await instance.create();
+      created.current = true;
       if (!active) return;
       const unedited = storedMarkdown(instance.getMarkdown(), latest.current.owner?.relativePath ?? "meetings/pending.md", markdown);
       const missing = lostImages(markdown, unedited);
