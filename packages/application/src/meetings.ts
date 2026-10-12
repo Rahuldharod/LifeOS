@@ -916,13 +916,11 @@ export class MeetingsModule {
     return recurrenceSeriesKey(this.ctx.calendar?.provider ?? "calendar", { ...event, seriesId });
   }
 
-  /** One shared sensitivity covers stored and not-yet-materialized occurrences in the provider series. */
+  /** Per Note, never series-wide: ADR 0021. */
   isEventRestricted(event: CalendarEvent) {
     const meeting = this.findMeetingForEvent(event.externalId, event.calendarId, event);
     const notes = this.ctx.index.all().filter((object) => object.frontmatter.type === "meeting-note" && !object.frontmatter.deleted_at);
-    if (isMeetingRestricted(meeting, notes)) return true;
-    const seriesId = this.seriesKey(event);
-    return Boolean(seriesId && notes.some((note) => note.frontmatter.recurrence_series_id === seriesId && isRestricted(note)));
+    return isMeetingRestricted(meeting, notes);
   }
 
   private occurrenceId(event: CalendarEvent) {
