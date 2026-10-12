@@ -29,7 +29,8 @@ export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, per
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
 export { inboxFolders, operationKinds } from "./ports.js";
-export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus } from "./adoption.js";
+export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus, SkillPackStatus } from "./adoption.js";
+export { currentSkillPack, oldestAcceptedSkillPack } from "./skill-pack.js";
 export type { ReviewEdits, ReviewEvidence } from "./review.js";
 export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./resolution.js";
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
@@ -225,6 +226,7 @@ export class LifeOSApplication {
   /** Also refreshes the Agent Index's pending-adoption list: filing a draft may not rebuild the index. */
   async adoptDrafts(options?: { now?: Date }) { const batch = await this.adoption.adoptDrafts(options); this.agentIndex.schedule(); return batch; }
   inboxStatus() { return this.adoption.inboxStatus(); }
+  skillPackStatus() { return this.adoption.skillPackStatus(); }
   /** #32: debounced adoption on `_inbox/drafts/` watcher events, retries for half-written drafts, and a periodic sweep. */
   startAutoAdoption(options?: AutoAdoptionOptions) { return this.adoption.startAutoAdoption(options); }
 

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readSkillPack } from "./skill-pack.js";
 import { envelopeWriteProblem, lifecycleWriteProblem, objectTypes, validateFrontmatter, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DraftError, draftOrigins, isCalendarDate, text, toUtc, validationIssues, type AdoptionRun, type DraftOrigin, type DraftResult, type FileDocument } from "./adoption.js";
 import { foldForSearch, ObjectConflictError, type AppContext } from "./context.js";
@@ -191,6 +192,8 @@ export class PatchModule {
     if (version === undefined) return { issues: ["lifeos_patch: missing; a patch must start with lifeos_patch: 1"] };
     if (version !== patchContractVersion) return { issues: [`lifeos_patch: unsupported contract version ${String(version)} (this LifeOS reads version ${patchContractVersion})`] };
     const issues: string[] = [];
+    const skillPack = readSkillPack(fields.skill_pack);
+    if (skillPack.issue) issues.push(skillPack.issue);
     const draftKey = text(fields.draft_key);
     if (!draftKey) issues.push("draft_key: missing; choose any unique string so re-sends are recognised");
     const origin = text(fields.origin);
