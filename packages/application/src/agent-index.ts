@@ -4,6 +4,7 @@ import type { AppContext } from "./context.js";
 import type { DecisionsModule } from "./decisions.js";
 import { enrichmentStateOf } from "./enrichment.js";
 import { personDisplayLabels, personEmails, internalDomainsOf } from "./people.js";
+import { contractFolder, contractVersionOf, type ContractFile } from "./contract.js";
 import type { AgentIndexFile, AgentIndexWriter, InboxFolder, InboxStore } from "./ports.js";
 import { isLive, isMeetingRestricted, isRestricted, OneAtATime } from "./support.js";
 
@@ -18,7 +19,8 @@ export const agentIndexContractVersion = 1;
 export const agentIndexFileNames = ["overview.md", "tasks.md", "waiting-on.md", "open-points.md", "decisions.md", "projects-clients-products.md", "people.md", "meetings.md", "pending-adoption.md"] as const;
 export const defaultAgentIndexDebounceMs = 1500;
 /** `canWrite`: false while another device holds the lease (ADR 0003); nothing is written then. */
-export interface AgentIndexOptions { debounceMs?: number; timeZone?: string; canWrite?: () => boolean }
+/** `contract`: the bundled contract files (ADR 0020), written to `_agent/contract/` with every index write. */
+export interface AgentIndexOptions { debounceMs?: number; timeZone?: string; canWrite?: () => boolean; contract?: ContractFile[] }
 
 /**
  * A file's content without its generation time: a writer compares this to skip files whose summary did not
@@ -49,11 +51,14 @@ export class AgentIndexModule {
   private readonly debounceMs: number;
   readonly timeZone: string;
   private readonly canWrite: () => boolean;
+  private readonly contract: ContractFile[];
 
   constructor(private readonly ctx: AppContext, private readonly decisions: DecisionsModule, private readonly adoption: AdoptionModule, private readonly inbox?: InboxStore, private readonly writer?: AgentIndexWriter, options: AgentIndexOptions = {}) {
     this.debounceMs = options.debounceMs ?? defaultAgentIndexDebounceMs;
     this.timeZone = options.timeZone ?? "Europe/Paris";
     this.canWrite = options.canWrite ?? (() => true);
+    this.contract = options.contract ?? [];
+    contractVersionOf(this.contract);
   }
 
   /** Debounced: a burst of rebuilds (an adoption batch, a review acceptance) produces one write. */
@@ -219,6 +224,10 @@ export class AgentIndexModule {
       ]],
       // #93: the enrichment skill's client gate needs the configured domains; none set means every non-synthetic meeting counts as client.
       ["Internal domains", internalDomains.length ? internalDomains.map((domain) => `- ${domain}`) : ["- none set"]],
+      // ADR 0020: the thin skills look here for the contract and stop when it is missing.
+      ["Contract", this.contract.length
+        ? [`- contract_version: ${contractVersionOf(this.contract)}`, ...this.contract.map((entry) => `- \`_agent/${contractFolder}/${entry.name}\``)]
+        : ["- none: this LifeOS ships no contract files"]],
       ["Data root", [
         "- `_inbox/drafts/`, `_inbox/patches/`: where Agents write drafts; `_inbox/processed/`, `_inbox/failed/`: adoption outcomes; `_inbox/requests/`: Work Orders",
         "- `_agent/`: this derived index (disposable)",
@@ -227,7 +236,8 @@ export class AgentIndexModule {
       ["Objects by type", [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([type, { count, folders }]) => `- ${type}: ${count} · ${[...folders].sort().map((folder) => `\`${folder}\``).join(", ")}`)]
     ], "Read the file that answers the question, then open the object at its path for detail. Paths are relative to the data root.");
 
-    return [overview, tasksFile, waitingFile, openPointsFile, decisionsFile, workFile, peopleFile, meetingsFile, pendingFile];
+    const contract = this.contract.map(({ name, content }) => ({ name: `${contractFolder}/${name}`, content }));
+    return [overview, tasksFile, waitingFile, openPointsFile, decisionsFile, workFile, peopleFile, meetingsFile, pendingFile, ...contract];
   }
 
   private async pendingDrafts() {

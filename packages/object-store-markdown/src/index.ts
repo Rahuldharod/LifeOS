@@ -463,7 +463,10 @@ export class FilesystemAgentIndexWriter implements AgentIndexWriter {
   async write(files: AgentIndexFile[]) {
     await mkdir(this.folder).catch((error: NodeJS.ErrnoException) => error.code === "EEXIST" ? undefined : Promise.reject(error));
     for (const file of files) {
-      if (!file.name || file.name !== path.basename(file.name) || file.name.startsWith(".") || !file.name.endsWith(".md")) throw new Error(`Invalid Agent Index file name: ${file.name}`);
+      // A plain name, or one level under `contract/` (ADR 0020); nothing else may leave `_agent/`.
+      const [folder, name] = file.name.startsWith("contract/") ? ["contract", file.name.slice("contract/".length)] : [undefined, file.name];
+      if (!name || name !== path.basename(name) || name.startsWith(".") || !name.endsWith(".md")) throw new Error(`Invalid Agent Index file name: ${file.name}`);
+      if (folder) await mkdir(path.join(this.folder, folder)).catch((error: NodeJS.ErrnoException) => error.code === "EEXIST" ? undefined : Promise.reject(error));
       const target = path.join(this.folder, file.name);
       // Only the generation time changed: leave the file alone, so a synced folder has nothing to upload.
       const current = await readFile(target, "utf8").catch(() => undefined);
