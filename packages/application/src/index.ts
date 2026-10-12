@@ -209,6 +209,7 @@ export class LifeOSApplication {
   previewMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) { return this.meetings.previewMeetingFromEvent(externalId, from, to, calendarId); }
   meetingFromEvent(externalId: string) { return this.meetings.meetingFromEvent(externalId); }
   meetingWorkspace(meetingId: string) { return this.meetings.meetingWorkspace(meetingId); }
+  seriesViewPage(cursor: string) { return this.meetings.seriesViewPage(cursor); }
   recurringMigrationPreview(meetingId: string) { return this.meetings.recurringMigrationPreview(meetingId); }
   confirmRecurringMigration(meetingId: string, expectedHashes: Record<string, string>) { return this.meetings.confirmRecurringMigration(meetingId, expectedHashes); }
   linkPreviousSeriesNote(noteId: string, previousNoteId: string, expectedHash: string) { return this.meetings.linkPreviousSeriesNote(noteId, previousNoteId, expectedHash); }

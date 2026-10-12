@@ -86,6 +86,7 @@ export interface Endpoints {
   "GET /api/v1/meetings/preview": { query: Range & { externalId: string; calendarId?: string }; response: W.Workspace };
   "POST /api/v1/meetings/from-event": { body: Range & { externalId: string; calendarId?: string; body?: string }; response: W.Workspace };
   "GET /api/v1/meetings/from-event/:externalId": { response: unknown };
+  "GET /api/v1/meetings/series-view": { query: { cursor: string }; response: W.SeriesViewPage };
   "GET /api/v1/meetings/:id/workspace": { response: W.Workspace };
   "GET /api/v1/meetings/:id/recurring-migration": { response: W.RecurringMigrationPreview };
   "POST /api/v1/meetings/:id/recurring-migration": { body: { expectedHashes: Record<string, string> }; response: W.LifeObject };

@@ -4,3 +4,6 @@
 .series-view-entry > summary span { flex: 1 1 12rem; }
 .series-view-entry > summary em { color: var(--color-error); }
 .series-view-entry > .markdown-preview { margin: 0 var(--space-4) var(--space-3); overflow-wrap: anywhere; }
+.series-view-newer { margin: 0; }
+.series-view-newer button, .series-view-load-older { justify-self: start; }
+.series-view-error { margin: 0; color: var(--color-error); }

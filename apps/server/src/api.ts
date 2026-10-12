@@ -237,6 +237,10 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return created;
   });
   route(server, "GET /api/v1/meetings/from-event/:externalId", async (request) => application.meetingFromEvent(request.params.externalId));
+  route(server, "GET /api/v1/meetings/series-view", async (request, reply) => {
+    if (!request.query.cursor) return reply.status(400).send({ error: "cursor is required" });
+    return application.seriesViewPage(request.query.cursor);
+  });
   route(server, "GET /api/v1/meetings/:id/workspace", async (request) => application.meetingWorkspace(request.params.id));
   route(server, "GET /api/v1/meetings/:id/recurring-migration", async (request) => application.recurringMigrationPreview(request.params.id));
   route(server, "POST /api/v1/meetings/:id/recurring-migration", async (request, reply) => {
