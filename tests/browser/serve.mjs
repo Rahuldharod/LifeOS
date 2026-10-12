@@ -110,14 +110,14 @@ await objectFile("meetings", prio.ownNote, { ...stamped(prio.ownNote, "meeting-n
 // #173 edit-in-place: two small series (3 occurrences each, a Note per occurrence) that only the edit tests change,
 // so the read-only #179 tests above keep their text. "retro" is edited; "audit" is used for the conflict test.
 // "guard" tests the leave-page save, "typing" the caret while another Note saves, "ledger" a Legacy shared Note (below).
-for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"], ["6", "scroll"]]) {
+for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"], ["6", "scroll"], ["4", "modes"]]) {
   const series = `mock:mock-calendar:${name}`;
   for (const month of ["01", "02", "03"]) {
     const meetingId = `${letter}1000000-0000-4000-8000-0000000000${month}`;
     const noteId = `${letter}2000000-0000-4000-8000-0000000000${month}`;
     const startsAt = `2026-${month}-10T08:00:00.000Z`;
     await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Team ${name}`), status: "scheduled", starts_at: startsAt, ends_at: `2026-${month}-10T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: series, recurrence_occurrence_id: `${series}:${startsAt}`, original_occurrence_starts_at: startsAt });
-    await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Team ${name} notes ${month}`), meeting_id: meetingId, ...(name === "guard" && month === "01" ? { sensitivity: "restricted" } : {}) }, name === "scroll" && month === "02" ? `${Array.from({ length: 80 }, (_, line) => `scroll line ${line + 1} of a very long Note.`).join("\n")}\n` : `${name} words for 2026-${month}.\n`); // #184: "scroll" has a very long February Note
+    await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Team ${name} notes ${month}`), meeting_id: meetingId, ...(name === "guard" && month === "01" ? { sensitivity: "restricted" } : {}) }, name === "modes" ? `# Modes heading ${month}\n\n- first item ${month}\n- second item\n\n[a link](https://example.com/${month}) and <!-- keep me -->\n` : name === "scroll" && month === "02" ? `${Array.from({ length: 80 }, (_, line) => `scroll line ${line + 1} of a very long Note.`).join("\n")}\n` : `${name} words for 2026-${month}.\n`); // #184: "scroll" has a very long February Note
   }
 }
 // "ledger": a Legacy shared Note covering two Meetings plus a later occurrence with its own Note (the edit test opens the later one).
@@ -132,6 +132,17 @@ await objectFile("meetings", ledger.note, {
 }, "Ledger shared words.\n");
 await objectFile("meetings", ledger.own, { ...stamped(ledger.own, "meeting", "Team ledger"), status: "scheduled", starts_at: "2026-04-20T08:00:00.000Z", ends_at: "2026-04-20T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: ledger.series, recurrence_occurrence_id: `${ledger.series}:2026-04-20T08:00:00.000Z`, original_occurrence_starts_at: "2026-04-20T08:00:00.000Z" });
 await objectFile("meetings", ledger.ownNote, { ...stamped(ledger.ownNote, "meeting-note", "Team ledger notes 20 Apr"), meeting_id: ledger.own }, "Ledger own words.\n");
+// "modeledger": like "ledger" but with formatted text, read by the Visual / Markdown mode test (#183).
+const mledger = { series: "mock:mock-calendar:modeledger", note: "93000000-0000-4000-8000-000000000001", meetings: ["94000000-0000-4000-8000-000000000001", "94000000-0000-4000-8000-000000000002"], days: ["2026-04-06", "2026-04-13"], own: "94000000-0000-4000-8000-000000000003" };
+for (const [index, meetingId] of mledger.meetings.entries()) {
+  const startsAt = `${mledger.days[index]}T08:00:00.000Z`;
+  await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", "Team modeledger"), status: "scheduled", starts_at: startsAt, ends_at: `${mledger.days[index]}T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: mledger.series, recurrence_occurrence_id: `${mledger.series}:${startsAt}`, original_occurrence_starts_at: startsAt });
+}
+await objectFile("meetings", mledger.note, {
+  ...stamped(mledger.note, "meeting-note", "Team modeledger notes"), meeting_id: mledger.meetings[0], meeting_ids: mledger.meetings, recurrence_series_id: mledger.series,
+  occurrence_sections: mledger.meetings.map((meetingId, index) => ({ occurrence_id: `${mledger.series}:${mledger.days[index]}T08:00:00.000Z`, section_id: `occurrence-${mledger.days[index]}`, meeting_id: meetingId, original_starts_at: `${mledger.days[index]}T08:00:00.000Z`, starts_at: `${mledger.days[index]}T08:00:00.000Z` }))
+}, "# Shared heading\n\n- shared item\n");
+await objectFile("meetings", mledger.own, { ...stamped(mledger.own, "meeting", "Team modeledger"), status: "scheduled", starts_at: "2026-04-20T08:00:00.000Z", ends_at: "2026-04-20T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: mledger.series, recurrence_occurrence_id: `${mledger.series}:2026-04-20T08:00:00.000Z`, original_occurrence_starts_at: "2026-04-20T08:00:00.000Z" });
 await objectFile("review-items", recurring.review, {
   ...stamped(recurring.review, "review-item", "Send the synthetic agenda"), review_type: "create", target_object_type: "task", proposed_fields: { title: "Send the synthetic agenda", source_meeting_id: recurring.currentMeeting }, confidence_label: "High", status: "pending", operation_id: recurring.operation, source_meeting_id: recurring.currentMeeting, occurrence_section_id: recurring.currentSection
 }, "Synthetic proposal.\n");
