@@ -63,6 +63,7 @@ import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { adoptCreatedOccurrenceDraft, RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
 import { SeriesView } from "./SeriesView.js";
+import { noteSeriesRoute } from "./noteSeriesLink.js";
 import { meetingSummary } from "./meetingSummary.js";
 import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
@@ -194,7 +195,6 @@ function App() {
   const view: View = route?.view ?? "Today";
   const [workspace, setWorkspace] = useState<Workspace>();
   const [dismissedMigration, setDismissedMigration] = useState<string>();
-  const [selectedNoteWorkspace, setSelectedNoteWorkspace] = useState<Workspace>();
   const [selectedNoteId, setSelectedNoteId] = useState<string>();
   // PB-025: Open/Deleted tabs and keyword search over the notes list.
   const noteTab: "open" | "deleted" = route?.view === "Notes" && route.noteTab === "deleted" ? "deleted" : "open";
@@ -227,14 +227,7 @@ function App() {
   const openPointEditorGuard = useRef(createStructuredEditorGuard()).current;
   const settingsEditorGuard = useRef(createSettingsEditorGuard()).current;
   const selectedNote = notes.find((note) => note.frontmatter.id === selectedNoteId);
-  const selectedRecurringMeetingId = selectedNote?.frontmatter.recurrence_series_id && typeof selectedNote.frontmatter.meeting_id === "string" ? selectedNote.frontmatter.meeting_id : undefined;
-  useEffect(() => {
-    const meetingId = selectedRecurringMeetingId;
-    if (!meetingId) { setSelectedNoteWorkspace(undefined); return; }
-    let current = true;
-    void api("GET /api/v1/meetings/:id/workspace", { params: { id: meetingId } }).then((next) => { if (current) setSelectedNoteWorkspace(next); }).catch(() => { if (current) setSelectedNoteWorkspace(undefined); });
-    return () => { current = false; };
-  }, [selectedNote?.frontmatter.id, selectedNote?.contentHash, selectedRecurringMeetingId]);
+  const seriesRoute = selectedNote ? noteSeriesRoute(selectedNote, objectLinks, displayTimeZone) : undefined;
   // Which notes show a "Conflict" badge in the list — any note with a cached browser draft whose
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
   const conflictedNoteIds = new Set(notes.filter((note) => isConflictedDraft(readCachedDraft(note), note)).map((note) => note.frontmatter.id));
@@ -1107,20 +1100,8 @@ function App() {
         conflictDetail={selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> : null}
         renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
               <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
-              {selectedNoteWorkspace?.occurrences?.length ? <RecurringOccurrenceWorkspace
-                note={{ ...selectedNote, body: notesController.draft }}
-                occurrences={selectedNoteWorkspace.occurrences}
-                selectedSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined}
-                timeZone={displayTimeZone}
-                mode="notes"
-                seriesNotes={notes}
-                readOnly={busy || readOnly}
-                linkDisabled={notesController.dirty || notesController.autoSaving}
-                onBodyChange={notesController.setDraft}
-                onLinkPrevious={(previousNoteId) => void linkPreviousSeries(selectedNote, previousNoteId)}
-                renderProposal={renderOccurrenceProposal}
-                onSelectSection={(section) => followRoute({ view: "Notes", noteTab, id: selectedNote.frontmatter.id, section }, { replace: true })}
-              /> : <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} targetSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined} />}
+              {seriesRoute && <p className="series-link"><a href={routePath(seriesRoute)} onClick={(event) => { event.preventDefault(); followRoute(seriesRoute); }}>Show series</a></p>}
+              <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} targetSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined} />
               <div className="editor-footer"><div className="save-state"><i className={notesController.dirty ? "dirty" : "saved"} />{notesController.dirty ? notesController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{notesController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(notesController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}
