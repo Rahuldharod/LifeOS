@@ -108,6 +108,20 @@ describe("RecurringOccurrenceWorkspace", () => {
     expect(onBodyChange).not.toHaveBeenCalled();
   });
 
+  it("toggles an occurrence from the keyboard: Enter and Space on the summary close then open it (#184)", async () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<RecurringOccurrenceWorkspace note={note} occurrences={[older, newer]} selectedSectionId="occurrence-new" timeZone="Europe/Paris" mode="calendar" readOnly={false} onBodyChange={() => undefined} renderProposal={() => null} />));
+    const details = document.querySelector("details.occurrence-section.selected") as HTMLDetailsElement;
+    const summary = details.querySelector("summary") as HTMLElement;
+    // A browser turns Enter or Space on a focused <summary> into a click; happy-dom does not, so dispatch what it does:
+    // the key events, then the click the browser would synthesise from them.
+    const press = async (key: string) => { await act(async () => { summary.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); summary.click(); summary.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true })); }); };
+    await press("Enter");
+    expect(details.hasAttribute("open")).toBe(false);
+    await press(" ");
+    expect(details.hasAttribute("open")).toBe(true);
+  });
+
   it("groups pending proposals under every occurrence in Notes", async () => {
     const withOlderReview = { ...older, reviews: [object("older-review", "review-item", "Older proposal", { status: "pending" })] };
     root = createRoot(document.body.appendChild(document.createElement("div")));

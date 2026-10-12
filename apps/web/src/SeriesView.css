@@ -10,10 +10,19 @@
 .series-note-editor { margin: 0 var(--space-4) var(--space-3); display: grid; gap: var(--space-2); min-width: 0; }
 .series-view-entry { scroll-margin-top: var(--space-3); }
 .series-date-list { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
-/* #184: one long Note scrolls inside its own editor, so it never pushes the other occurrences far down the page. */
-.series-note-editor textarea { min-height: 8rem; max-height: min(60vh, 28rem); overflow-y: auto; resize: vertical; field-sizing: content; }
-.series-note-editor .visual-markdown-editor { max-height: min(60vh, 28rem); overflow-y: auto; }
-.series-note-editor .visual-markdown-editor .milkdown .ProseMirror { min-height: 8rem; }
+/* #184: one long Note scrolls inside its own editor, so it never pushes the other occurrences far down the page.
+   The scrollbar is styled so it stays visible (macOS hides overlay scrollbars until you scroll). */
+.series-note-editor { --series-note-min: calc(var(--space-7) * 3); --series-note-max: min(60vh, calc(var(--space-7) * 9)); }
+.series-note-editor textarea, .series-note-editor .visual-markdown-editor { max-height: var(--series-note-max); overflow-y: auto; scrollbar-gutter: stable; scrollbar-color: var(--color-border-strong) var(--color-surface-raised); }
+.series-note-editor textarea { min-height: var(--series-note-min); resize: vertical; field-sizing: content; }
+.series-note-editor .visual-markdown-editor { min-height: var(--series-note-min); }
+.series-note-editor .visual-markdown-editor .milkdown { min-height: var(--series-note-min); }
+.series-note-editor .visual-markdown-editor .milkdown .ProseMirror { min-height: var(--series-note-min); }
+/* The editor toolbar stays in reach while the content scrolls beneath it. */
+.series-note-editor .visual-markdown-editor .milkdown-top-bar { position: sticky; top: 0; z-index: 2; }
+.series-note-editor textarea::-webkit-scrollbar, .series-note-editor .visual-markdown-editor::-webkit-scrollbar { width: var(--space-3); }
+.series-note-editor textarea::-webkit-scrollbar-track, .series-note-editor .visual-markdown-editor::-webkit-scrollbar-track { background: var(--color-surface-raised); }
+.series-note-editor textarea::-webkit-scrollbar-thumb, .series-note-editor .visual-markdown-editor::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: var(--radius-lg); }
 .series-view-materials { margin: 0 var(--space-4) var(--space-3); display: grid; gap: var(--space-2); overflow-wrap: anywhere; }
 .series-view-materials h4, .series-view-materials p, .series-view-materials ul { margin: 0; }
 .series-view-materials ul { padding-left: var(--space-4); }
