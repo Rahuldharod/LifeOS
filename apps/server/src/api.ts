@@ -17,6 +17,7 @@ import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import type { KnownSecrets } from "@lifeos/secrets";
+import { loadContractFiles } from "./contract-files.js";
 import type { calendarSource } from "./calendar-source.js";
 import { connectionSettings, googleConnectionStatus } from "./connections.js";
 import { httpError } from "./http-errors.js";
@@ -50,6 +51,8 @@ export interface ApiOptions {
   /** The production web build served for every non-API URL. */
   webRoot: string;
   logger?: boolean;
+  /** ADR 0020: where the bundled contract files are read from; defaults to the repository's `contract/`. */
+  contractRoot?: string;
   /** Trigger intervals; the defaults are the stable app's. Tests shorten them. */
   timing?: { heartbeatMs?: number; reconcileDelayMs?: number; adoptionSweepMs?: number; adoptionDebounceMs?: number };
 }
@@ -75,7 +78,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   // #98: no AI provider; Claude does the AI work through the skills (ADR 0008). The mock AI is for tests only.
   // The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild, only by the lease holder and only for files
   // whose summary changed; the watcher ignores `_agent/`.
-  const application = new LifeOSApplication(store, new MemoryIndex(), calendars.calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease() });
+  const application = new LifeOSApplication(store, new MemoryIndex(), calendars.calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease(), contract: await loadContractFiles(options.contractRoot) });
   const server = Fastify({ logger: options.logger ?? false, bodyLimit: 15 * 1024 * 1024 });
   // #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
   let autoBackups: AutoBackups | undefined;

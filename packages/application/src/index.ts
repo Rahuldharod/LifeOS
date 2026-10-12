@@ -1,5 +1,6 @@
 import { AdoptionModule, type AutoAdoptionOptions } from "./adoption.js";
 import { AgentIndexModule, type AgentIndexOptions } from "./agent-index.js";
+import type { ContractFile } from "./contract.js";
 import { BackupModule, type AutoBackupOptions, type BackupService } from "./backups.js";
 import { AppContext } from "./context.js";
 import { CalendarModule } from "./calendar.js";
@@ -31,6 +32,8 @@ export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, Ca
 export { inboxFolders, operationKinds } from "./ports.js";
 export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus, SkillPackStatus } from "./adoption.js";
 export { currentSkillPack, oldestAcceptedSkillPack } from "./skill-pack.js";
+export { contractFileVersion, contractFolder, contractVersionOf, readContractFile } from "./contract.js";
+export type { ContractFile } from "./contract.js";
 export type { ReviewEdits, ReviewEvidence } from "./review.js";
 export { ReferenceResolver, referenceFields, foldName, foldSubject } from "./resolution.js";
 export type { Candidate, ReferenceField, Resolution, UnresolvedReference } from "./resolution.js";
@@ -77,7 +80,7 @@ export class LifeOSApplication {
    * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
    * `agentIndex` writes the derived Agent Index to `_agent/` after index rebuilds (ADR 0009); without it nothing is written.
    */
-  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string; agentIndexCanWrite?: () => boolean } = {}) {
+  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string; agentIndexCanWrite?: () => boolean; contract?: ContractFile[] } = {}) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.patches = new PatchModule(ctx);
     this.people = new PeopleModule(ctx);
@@ -95,7 +98,7 @@ export class LifeOSApplication {
     this.focus = new DailyFocusModule(ctx, inbox);
     this.todayModule = new TodayModule(ctx, this.entitiesModule, this.adoption, this.enrichment, this.meetings, this.calendarModule, this.people);
     this.history = new HistoryModule(ctx);
-    const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite };
+    const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite, contract: options.contract };
     this.agentIndex = new AgentIndexModule(ctx, this.decisionsModule, this.adoption, inbox, agentIndex, agentIndexOptions);
     ctx.onRebuild = () => this.agentIndex.schedule();
     this.backups = new BackupModule(ctx);
