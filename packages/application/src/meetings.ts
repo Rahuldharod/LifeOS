@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { acceptedSummaryText } from "@lifeos/shared";
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { PeopleModule } from "./people.js";
@@ -46,9 +47,9 @@ export function isLegacySharedNote(note: LifeOSObject) {
   return linked > 1 || Array.isArray(note.frontmatter.occurrence_sections);
 }
 
+/** #176: a recurring occurrence is named by its immutable provider identity; enrichment has no section to target. */
 export interface EnrichmentOccurrenceTarget {
   occurrenceId: string;
-  sectionId: string;
 }
 
 function userNoteText(body: string) {
@@ -66,7 +67,9 @@ export class SeriesViewCursorError extends Error { override name = "SeriesViewCu
 type SeriesViewPosition = { seriesId: string; previousSeriesId?: string; openedAnchor: number; openedMeetingId: string; openedNoteId?: string; afterAnchor?: number; afterNoteId?: string };
 /** The shape the API contract (`SeriesView` in @lifeos/contracts) declares; the server's typed routes check they stay compatible. */
 export type SeriesViewNewer = { meetingId: string; startsAt: string; endsAt: string; timezone: string };
-export type SeriesViewPage = { earlier: Array<{ kind: "occurrence" | "legacy-shared"; note: LifeOSObject; range: { startsAt: string; endsAt: string }; cancelled: boolean }>; nextCursor?: string };
+/** #176: what enrichment attached to one occurrence's own Meeting: its Sources and accepted summary. Absent for a Legacy shared Note or a restricted occurrence. */
+export type SeriesViewMaterials = { summary?: string; sources: Array<{ id: string; title: string; sourceType: string; url?: string }> };
+export type SeriesViewPage = { earlier: Array<{ kind: "occurrence" | "legacy-shared"; note: LifeOSObject; range: { startsAt: string; endsAt: string }; cancelled: boolean; materials?: SeriesViewMaterials }>; nextCursor?: string };
 export type SeriesViewResult = SeriesViewPage & { newer?: SeriesViewNewer };
 
 /** Canonical meetings for calendar events: creation, preview, workspace and duplicate reconciliation. */
@@ -383,35 +386,14 @@ export class MeetingsModule {
   async enrichmentOccurrenceForEvent(externalId: string, from: Date, to: Date, calendarId?: string): Promise<EnrichmentOccurrenceTarget | undefined> {
     const event = await this.findEvent(externalId, from, to, calendarId);
     const occurrenceId = recurrenceOccurrenceId(this.ctx.calendar?.provider ?? "calendar", event);
-    return occurrenceId && event.originalOccurrenceStartsAt ? { occurrenceId, sectionId: occurrenceSectionId(event.originalOccurrenceStartsAt) } : undefined;
+    return occurrenceId && event.originalOccurrenceStartsAt ? { occurrenceId } : undefined;
   }
 
   /** Recurrence target already stored on an occurrence Meeting. */
   enrichmentOccurrenceForMeeting(meeting: LifeOSObject): EnrichmentOccurrenceTarget | undefined {
     const occurrenceId = typeof meeting.frontmatter.recurrence_occurrence_id === "string" ? meeting.frontmatter.recurrence_occurrence_id : undefined;
     const original = typeof meeting.frontmatter.original_occurrence_starts_at === "string" ? meeting.frontmatter.original_occurrence_starts_at : undefined;
-    return occurrenceId && original ? { occurrenceId, sectionId: occurrenceSectionId(original) } : undefined;
-  }
-
-  /**
-   * ADR 0021: only an occurrence that already sits in a Legacy shared Note has a section for enrichment to
-   * fill. Any other occurrence keeps its Sources on the Meeting; enrichment never creates a Note for it.
-   */
-  hasLegacySharedSection(meeting: LifeOSObject) {
-    const note = this.noteFor(meeting.frontmatter.id);
-    const sections = Array.isArray(note?.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
-    return sections.some((section) => section.meeting_id === meeting.frontmatter.id);
-  }
-
-  /** Explicit enrichment may materialize an otherwise empty occurrence section when material was found. */
-  async ensureOccurrenceSectionForEnrichment(meeting: LifeOSObject, from: Date, to: Date, calendarId: string | undefined, noteId: string) {
-    const target = this.enrichmentOccurrenceForMeeting(meeting);
-    if (!target) return undefined;
-    const refs = Array.isArray(meeting.frontmatter.external_refs) ? meeting.frontmatter.external_refs as Array<Record<string, unknown>> : [];
-    const externalId = refs.find((ref) => typeof ref.external_id === "string")?.external_id;
-    if (typeof externalId !== "string") throw new Error(`Recurring meeting ${meeting.frontmatter.id} has no Calendar occurrence reference`);
-    const workspace = await this.createMeetingFromEvent(externalId, from, to, calendarId, "", noteId);
-    return { note: workspace.note, target };
+    return occurrenceId && original ? { occurrenceId } : undefined;
   }
 
   /** The `meeting.created` audit of a meeting an adopted draft created, if a crash stopped it being written (#59). */
@@ -725,7 +707,8 @@ export class MeetingsModule {
           kind: legacyShared ? "legacy-shared" as const : "occurrence" as const,
           note,
           range: { startsAt: String(first.frontmatter.starts_at), endsAt: String(last.frontmatter.ends_at) },
-          cancelled: !legacyShared && first.frontmatter.status === "cancelled"
+          cancelled: !legacyShared && first.frontmatter.status === "cancelled",
+          ...(legacyShared ? {} : this.seriesMaterials(first, note))
         }
       }];
     });
@@ -738,6 +721,17 @@ export class MeetingsModule {
       earlier: page.map(({ entry }) => entry),
       ...(more ? { nextCursor: this.encodeSeriesCursor({ ...position, afterAnchor: lastShown.newestEarlierAnchor, afterNoteId: lastShown.entry.note.frontmatter.id }) } : {})
     };
+  }
+
+  /** Sources linked to this occurrence's Meeting and its accepted summary, unless the Meeting or Note is restricted (ADR 0018). */
+  private seriesMaterials(meeting: LifeOSObject, note: LifeOSObject) {
+    if (isMeetingRestricted(meeting, this.ctx.index.all()) || isRestricted(note)) return {};
+    const listed = new Set(Array.isArray(meeting.frontmatter.source_ids) ? meeting.frontmatter.source_ids : []);
+    const sources = this.ctx.index.all()
+      .filter((object) => object.frontmatter.type === "source" && isLive(object) && !isRestricted(object) && (object.frontmatter.meeting_id === meeting.frontmatter.id || listed.has(object.frontmatter.id)))
+      .map((source) => ({ id: source.frontmatter.id, title: source.frontmatter.title, sourceType: String(source.frontmatter.source_type ?? "source"), ...(typeof source.frontmatter.url === "string" ? { url: source.frontmatter.url } : {}) }));
+    const summary = acceptedSummaryText(meeting.body);
+    return sources.length || summary ? { materials: { ...(summary ? { summary } : {}), sources } } : {};
   }
 
   private occurrenceItems(note: LifeOSObject) {

@@ -49,3 +49,16 @@ export function occurrenceMaterialsBlock(markdown: string, sectionId: string) {
   const to = from < 0 ? -1 : markdown.indexOf(end, from + start.length);
   return from >= 0 && to >= 0 ? markdown.slice(from, to + end.length) : "";
 }
+
+/** The Summary section of a meeting body is fenced by these markers (#66). */
+export const summaryStartMarker = "<!-- lifeos:summary:start -->";
+export const summaryEndMarker = "<!-- lifeos:summary:end -->";
+
+/** The accepted summary text inside the markers, without its heading; empty when the body has no marked summary (#176). */
+export function acceptedSummaryText(body: string) {
+  const lines = body.split("\n");
+  const start = lines.findIndex((line) => line.trim() === summaryStartMarker);
+  const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && line.trim() === summaryEndMarker);
+  if (end < 0) return "";
+  return lines.slice(start + 1, end).join("\n").replace(/^\s*##\s+Summary\s*\n/i, "").trim();
+}

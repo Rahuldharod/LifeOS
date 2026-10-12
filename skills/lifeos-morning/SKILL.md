@@ -2,7 +2,7 @@
 name: lifeos-morning
 description: The LifeOS morning routine. On workday mornings it reads the LifeOS Agent Index, today's calendar and pending drafts, writes the Daily Focus brief as a daily-focus Inbox Draft (what the user owes, Top 3, waiting and decisions, meeting prep, day shape, defer candidates), then sends the user a read-only 5-line Slack DM. Never includes restricted items and does no inbox triage. Use when a scheduled routine runs "LifeOS morning", when the user asks for their Daily Focus, or when a replan Work Order says "run LifeOS replan".
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
   skill_pack: 1
   draft_contract: 1
   agent_index_contract: 1

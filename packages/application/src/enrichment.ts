@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import type { CalendarModule } from "./calendar.js";
 import { markdownFileName, type AppContext } from "./context.js";
-import { occurrenceSectionId, recurrenceOccurrenceId, type MeetingsModule } from "./meetings.js";
+import { isLegacySharedNote, recurrenceOccurrenceId, type MeetingsModule } from "./meetings.js";
 import type { CalendarEvent, InboxStore } from "./ports.js";
 import { personEmails } from "./people.js";
 import { isLive, isRestricted, liveMeetingNote } from "./support.js";
@@ -111,6 +111,8 @@ export class EnrichmentModule {
       if (this.meetings.isEventRestricted(event)) { restrictedExcluded += 1; continue; }
       if (meeting && ["enriched", "gave_up"].includes(enrichmentStateOf(meeting))) continue;
       const note = event.noteId ? ctx.index.get(event.noteId) : undefined;
+      // ADR 0021 (#176): a Legacy shared Note receives no further enrichment, so its Meetings get no new Work Order entry.
+      if (note && isLegacySharedNote(note)) continue;
       // A restricted Source still covers its material (so it is not fetched again); it is just never named.
       const allSources = meeting ? this.sourcesFor(meeting, note) : [];
       const sources = allSources.filter((source) => !isRestricted(source));
@@ -125,8 +127,6 @@ export class EnrichmentModule {
         attendee_emails: attendeeEmails([...(event.attendeeDetails ?? []), ...event.attendees]).filter((email) => !hiddenEmails.has(email.toLowerCase())),
         ...(event.seriesId && event.originalOccurrenceStartsAt ? {
           recurrence_occurrence_id: recurrenceOccurrenceId(ctx.calendar.provider ?? "calendar", event),
-          occurrence_section_id: occurrenceSectionId(event.originalOccurrenceStartsAt),
-          occurrence_section_exists: Boolean(note && Array.isArray(note.frontmatter.occurrence_sections) && note.frontmatter.occurrence_sections.some((section: unknown) => typeof section === "object" && section !== null && (section as Record<string, unknown>).meeting_id === meeting?.frontmatter.id)),
           optional_material: ["drive-doc"]
         } : {}),
         ...(note ? { note_path: note.relativePath } : {}),
@@ -212,7 +212,7 @@ export class EnrichmentModule {
 function workOrderBody(count: number) {
   return `# Enrich last 48h\n\n${count} ${count === 1 ? "meeting" : "meetings"} to enrich. For each entry in \`meetings\`:\n\n` +
     "- Fetch only what `missing_material` lists: Meet transcripts and recordings from the calendar event and Drive, Gong calls from the Gong connector, Gong summary emails from Gmail.\n" +
-    "- For recurring meetings, read only the exact `occurrence_section_id`; never read another section in the shared Note.\n" +
+    "- For recurring meetings, read only that occurrence's own Note at `note_path`, never another occurrence's Note.\n" +
     "- Write one occurrence-specific `meeting-material` Inbox Draft per meeting to `_inbox/drafts/`, copying its occurrence identifiers exactly.\n" +
     "- Never read files marked `sensitivity: restricted`.\n" +
     "- When done, move this file to `_inbox/processed/`.\n";

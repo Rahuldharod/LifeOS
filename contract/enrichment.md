@@ -32,12 +32,10 @@ Each entry in `meetings`:
 | `note_path` | The user's meeting note, relative to the data root; absent when they wrote none |
 | `existing_sources` | material already linked: `id`, `source_type`, `path`, `url`, `external_id` |
 | `missing_material` | what is still missing; fetch only these |
-| `recurrence_occurrence_id` | immutable provider occurrence identity; present for a recurring occurrence |
-| `occurrence_section_id` | stable section marker for this recurring occurrence |
-| `occurrence_section_exists` | whether the target section already exists in the shared Note |
+| `recurrence_occurrence_id` | immutable provider occurrence identity; present for a recurring occurrence. The entry is that occurrence's own Meeting and `note_path` Note: every occurrence has its own |
 | `optional_material` | optional linked material such as `drive-doc`; its absence never leaves Enrichment Partial |
 
-Restricted meetings are never in a Work Order.
+Restricted meetings are never in a Work Order. Neither is a meeting inside a Legacy shared Note (an older Note that several occurrences share): it receives no further enrichment.
 
 ## Where the material is
 
@@ -61,7 +59,7 @@ When a kind does not exist, say so with `unavailable`:
 
 Every proposal needs `missed_in_notes`: did the user's notes for this occurrence already capture it?
 
-1. Read front matter first. If it is restricted, stop. For a recurring entry, find the exact anchor `<a id="<occurrence_section_id>"></a>` and read only from that anchor until the next occurrence heading and anchor. When `occurrence_section_exists` is `false`, read no Note content and treat the occurrence as having no user notes.
+1. Read front matter first. If it is restricted, stop. Read only the Note at the entry's `note_path`: for a recurring occurrence it is that occurrence's own Note, so never open another occurrence's Note. With no `note_path`, read nothing and treat the occurrence as having no user notes.
 2. For each task, decision or open point you found in the material:
    - `missed_in_notes: false` when the note already says the same thing, even in other words or another language.
    - `missed_in_notes: true` when the note does not mention it, or only part of it (for example the task but not its owner or date).
@@ -85,11 +83,10 @@ One `meeting-material` Inbox Draft per meeting, in `_inbox/drafts/`. File name `
 | `meeting` | the entry's `calendar_event_id` (or `meeting_id`) |
 | `calendar_id` | the entry's `calendar_id`, when there is one |
 | `recurrence_occurrence_id` | copy exactly from the Work Order for a recurring occurrence |
-| `occurrence_section_id` | copy exactly from the Work Order for a recurring occurrence |
 | `sources` | the material you found: `source_type`, `url`, `external_id`, `occurred_at`, and optional `title`, `provider`, `retrieved_at` and `provider_revision`; LifeOS defaults `retrieved_at` to `captured_at` |
 | `unavailable` | kinds you checked and found do not exist |
 | `summary_confidence` | `High`, `Medium` or `Low` |
-| `summary_evidence` | for a recurring summary, at least one `{ source, locator, quote? }`; the source must be linked to this occurrence and the locator must contain the exact `occurrence_section_id` plus its timestamp, page or other position |
+| `summary_evidence` | for a recurring summary, at least one `{ source, locator, quote? }`; the source must be linked to this occurrence and the locator is its timestamp, page or other position |
 | `proposals` | tasks, decisions and open points, below |
 | body | the proposed meeting summary, in the meeting's language |
 
@@ -101,12 +98,12 @@ Each proposal:
 | `title` | in the meeting's language |
 | `confidence` | `High`, `Medium` or `Low` |
 | `missed_in_notes` | `true` or `false` (see above) |
-| `evidence` | at least one `{ field, source, locator, quote }`. For a recurring occurrence, the source must be linked to that occurrence and the locator includes the occurrence section ID plus the timestamp or page. `quote` is the exact words |
+| `evidence` | at least one `{ field, source, locator, quote }`. For a recurring occurrence, the source must be linked to that occurrence and the locator is the timestamp or page. `quote` is the exact words |
 | optional | `key` (a stable name, so a re-run is recognised), `body`, and task fields such as `due_on`, `owner`, `people`, `status`, `waiting_for` |
 
 Do not put `meeting`, `origin`, `draft_key` or `operation_id` on a proposal. People default to the meeting's attendees.
 
-Re-runs are safe. LifeOS verifies the occurrence identity before writing, recognises Sources by provider and external ID, and recognises proposals by `key`, so nothing is added twice. One Source may be linked to several occurrences without being copied. LifeOS—not the Agent—updates the Materials block in the target section.
+Re-runs are safe. LifeOS verifies the occurrence identity before writing, recognises Sources by provider and external ID, and recognises proposals by `key`, so nothing is added twice. One Source may be linked to several occurrences without being copied. LifeOS writes Sources, the summary and proposals to the occurrence's own Meeting only, never into a Note, so you never write or expect a Materials block. A draft from an older Work Order that still has `occurrence_section_id` is accepted and the field is ignored; do not write it in new drafts.
 
 ## Examples
 

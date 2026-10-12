@@ -58,6 +58,8 @@ export type SeriesViewEarlier = {
   range: { startsAt: string; endsAt: string };
   /** The provider cancelled this occurrence; it is listed only because it has a Note. */
   cancelled: boolean;
+  /** #176: Sources linked to this occurrence's own Meeting and its accepted summary; absent when there are none, or the occurrence is restricted. */
+  materials?: { summary?: string; sources: Array<{ id: string; title: string; sourceType: string; url?: string }> };
 };
 export type OccurrenceWorkspaceItem = {
   sectionId: string;

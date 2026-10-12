@@ -97,6 +97,14 @@ function SeriesNoteEditor({ entry, editor }: { entry: SeriesViewEarlier; editor:
   </div>;
 }
 
+/** #176: what enrichment attached to this occurrence's own Meeting, shown with it and never inside the Note. */
+function SeriesMaterials({ materials }: { materials: NonNullable<SeriesViewEarlier["materials"]> }) {
+  return <div className="series-view-materials">
+    {materials.summary && <section aria-label="Accepted summary"><h4>Summary</h4><p>{materials.summary}</p></section>}
+    {materials.sources.length > 0 && <section aria-label="Sources"><h4>Sources</h4><ul>{materials.sources.map((source) => <li key={source.id}>{source.url ? <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a> : source.title}</li>)}</ul></section>}
+  </div>;
+}
+
 /**
  * History of earlier occurrences with a Note, collapsed by default (ADR 0021, #179), loaded 4 at a time (#180) and
  * edited in place (#173). Remount (key) per opened occurrence so loaded pages never leak between occurrences.
@@ -127,6 +135,7 @@ export function SeriesView({ view, timeZone, editor, onOpenMeeting }: { view: Se
       const { title, detail } = seriesViewLabel(entry, timeZone);
       return <details key={entry.note.frontmatter.id} className="series-view-entry">
         <summary><span>{title}</span><b>{detail}</b>{entry.cancelled && <em>Cancelled</em>}{entry.note.frontmatter.sensitivity === "restricted" && <em>Restricted</em>}</summary>
+        {entry.materials && <SeriesMaterials materials={entry.materials} />}
         <SeriesNoteEditor entry={entry} editor={editor} />
       </details>;
     })}

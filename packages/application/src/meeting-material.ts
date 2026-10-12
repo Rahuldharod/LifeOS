@@ -1,5 +1,5 @@
 import { confidenceLabels, type Confidence, type LifeOSObject } from "@lifeos/domain";
-import { occurrenceMaterialsEnd, occurrenceMaterialsStart } from "@lifeos/shared";
+import { summaryEndMarker, summaryStartMarker } from "@lifeos/shared";
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
@@ -104,8 +104,8 @@ export class MeetingMaterialModule {
     if (occurrence && summary && !summaryEvidence.length) issues.push("summary_evidence: a recurring occurrence summary needs at least one Source and locator");
     const allowedSourceRefs = this.allowedSourceReferences(meeting, sources);
     if (occurrence) {
-      this.validateEvidenceSources(summaryEvidence, "summary_evidence", allowedSourceRefs, occurrence, issues);
-      for (const proposal of proposals) this.validateEvidenceSources(this.parseMaterialEvidence(proposal.draft.fields.evidence, `${proposal.at}.evidence`, issues), `${proposal.at}.evidence`, allowedSourceRefs, occurrence, issues);
+      this.validateEvidenceSources(summaryEvidence, "summary_evidence", allowedSourceRefs, issues);
+      for (const proposal of proposals) this.validateEvidenceSources(this.parseMaterialEvidence(proposal.draft.fields.evidence, `${proposal.at}.evidence`, issues), `${proposal.at}.evidence`, allowedSourceRefs, issues);
     }
     if (issues.length) throw new DraftError(issues);
 
@@ -144,14 +144,6 @@ export class MeetingMaterialModule {
       await ctx.rebuildIndex();
     }
 
-    if (occurrence && (sourceIds.length || summary || proposals.length) && this.meetings?.hasLegacySharedSection(ctx.required(meetingId, "meeting"))) {
-      const materialized = await this.meetings?.ensureOccurrenceSectionForEnrichment(ctx.required(meetingId, "meeting"), lookup.from, lookup.to, lookup.calendarId, run.newId(roles.meetingNote));
-      if (!materialized?.note) throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} could not be materialized`]);
-      await ctx.rebuildIndex();
-      await this.updateMaterialsBlock(ctx.required(meetingId, "meeting"), occurrence, run.now);
-      await ctx.rebuildIndex();
-    }
-
     // 5. Summary and proposals, inheriting the meeting's context.
     meeting = ctx.required(meetingId, "meeting");
     if (summary) objectIds.push(await this.upsertSummary(summary, summaryConfidence!, meeting, sourceIds, summaryEvidence, occurrence, draft, run));
@@ -165,7 +157,7 @@ export class MeetingMaterialModule {
       const inherited = { ...proposal.draft, fields: { ...proposal.draft.fields, meeting: meetingId, ...(proposal.draft.fields.people === undefined && attendees.length ? { people: attendees } : {}) } };
       const [reviewId] = await this.propose(inherited, run, { role: roles.proposal(proposal.key), extra: {
         missed_in_notes: proposal.missedInNotes, proposal_key: proposal.key,
-        ...(occurrence ? { occurrence_section_id: occurrence.sectionId, recurrence_occurrence_id: occurrence.occurrenceId } : {})
+        ...(occurrence ? { recurrence_occurrence_id: occurrence.occurrenceId } : {})
       } });
       raised.set(proposal.key, reviewId!);
       objectIds.push(reviewId!);
@@ -193,15 +185,16 @@ export class MeetingMaterialModule {
     return result.status === "resolved" ? this.ctx.required(result.id, "meeting") : undefined;
   }
 
+  /**
+   * #176: a recurring occurrence is identified by `recurrence_occurrence_id` alone. `occurrence_section_id` (Work
+   * Orders before ADR 0021) is accepted and ignored: nothing is written to a section any more.
+   */
   private validateOccurrence(fields: Record<string, unknown>, occurrence: EnrichmentOccurrenceTarget | undefined, issues: string[]) {
-    const sectionId = text(fields.occurrence_section_id);
     const occurrenceId = text(fields.recurrence_occurrence_id);
     if (!occurrence) {
-      if (sectionId || occurrenceId) issues.push("occurrence_section_id: this is not a recurring occurrence");
+      if (occurrenceId) issues.push("recurrence_occurrence_id: this is not a recurring occurrence");
       return;
     }
-    if (!sectionId) issues.push("occurrence_section_id: missing; copy it from the Work Order");
-    else if (sectionId !== occurrence.sectionId) issues.push(`occurrence_section_id: ${sectionId} does not belong to the resolved occurrence (expected ${occurrence.sectionId})`);
     if (!occurrenceId) issues.push("recurrence_occurrence_id: missing; copy it from the Work Order");
     else if (occurrenceId !== occurrence.occurrenceId) issues.push(`recurrence_occurrence_id: ${occurrenceId} does not belong to the resolved occurrence`);
   }
@@ -229,10 +222,9 @@ export class MeetingMaterialModule {
     ]);
   }
 
-  private validateEvidenceSources(evidence: MaterialEvidence[], at: string, allowed: Set<string>, occurrence: EnrichmentOccurrenceTarget, issues: string[]) {
+  private validateEvidenceSources(evidence: MaterialEvidence[], at: string, allowed: Set<string>, issues: string[]) {
     for (const [index, item] of evidence.entries()) {
       if (!allowed.has(item.source)) issues.push(`${at}[${index}].source: must name a Source linked to this occurrence`);
-      if (!item.locator.includes(occurrence.sectionId)) issues.push(`${at}[${index}].locator: must include the resolved occurrence section ${occurrence.sectionId}`);
     }
   }
 
@@ -352,7 +344,7 @@ export class MeetingMaterialModule {
     const title = `Summary: ${meeting.frontmatter.title}`;
     const body = `# ${title}\n\n${summary}\n`;
     const evidence: Record<string, EvidenceEntry[]> = materialEvidence.length ? { summary: this.resolveMaterialEvidence(materialEvidence, meeting) } : {};
-    const occurrenceFields = occurrence ? { occurrence_section_id: occurrence.sectionId, recurrence_occurrence_id: occurrence.occurrenceId } : {};
+    const occurrenceFields = occurrence ? { recurrence_occurrence_id: occurrence.occurrenceId } : {};
     const pending = summaries.find((review) => review.frontmatter.status === "pending");
     if (pending) {
       const merged = [...new Set([...idList(pending.frontmatter.source_ids), ...sourceIds])];
@@ -375,18 +367,6 @@ export class MeetingMaterialModule {
     });
   }
 
-  private async updateMaterialsBlock(meeting: LifeOSObject, occurrence: EnrichmentOccurrenceTarget, now: string) {
-    const note = liveMeetingNote(meeting.frontmatter.id, this.ctx.index.all());
-    if (!note) throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} has no Recurring Meeting Note`]);
-    const sections = Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
-    if (!sections.some((section) => section.section_id === occurrence.sectionId && section.meeting_id === meeting.frontmatter.id)) {
-      throw new DraftError([`occurrence_section_id: ${occurrence.sectionId} does not resolve to meeting ${meeting.frontmatter.id}`]);
-    }
-    const sources = this.sourcesFor(meeting, idList(meeting.frontmatter.source_ids));
-    const body = withOccurrenceMaterials(note.body, sections, occurrence.sectionId, sources);
-    if (body !== note.body) await this.ctx.update(note, {}, { expectedHash: note.contentHash, now, body });
-  }
-
   private reviewsFor(meetingId: string) {
     return this.ctx.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.source_meeting_id === meetingId);
   }
@@ -399,47 +379,12 @@ export class MeetingMaterialModule {
   }
 }
 
-/** Replaces only one occurrence's app-managed Materials block; all user prose and neighbouring sections survive byte-for-byte. */
-export function withOccurrenceMaterials(body: string, sections: Array<Record<string, unknown>>, sectionId: string, sources: LifeOSObject[]) {
-  const startMarker = occurrenceMaterialsStart(sectionId);
-  const endMarker = occurrenceMaterialsEnd(sectionId);
-  const rows = sources.map((source) => {
-    const title = String(source.frontmatter.title).replaceAll("[", "").replaceAll("]", "");
-    const url = typeof source.frontmatter.url === "string" ? source.frontmatter.url : undefined;
-    const details = [
-      typeof source.frontmatter.retrieved_at === "string" ? `retrieved ${source.frontmatter.retrieved_at}` : undefined,
-      typeof source.frontmatter.provider_revision === "string" ? `provider revision ${source.frontmatter.provider_revision}` : undefined
-    ].filter(Boolean);
-    return `- ${url ? `[${title}](${url})` : title}${details.length ? ` — ${details.join(", ")}` : ""}`;
-  });
-  const block = [startMarker, "", "### Materials", "", ...(rows.length ? rows : ["- No linked materials." ]), "", endMarker].join("\n");
-  const existingStart = body.indexOf(startMarker);
-  const existingEnd = existingStart < 0 ? -1 : body.indexOf(endMarker, existingStart + startMarker.length);
-  if (existingStart >= 0 && existingEnd >= 0) return `${body.slice(0, existingStart)}${block}${body.slice(existingEnd + endMarker.length)}`;
-
-  const anchor = `<a id="${sectionId}"></a>`;
-  const anchorAt = body.indexOf(anchor);
-  if (anchorAt < 0) throw new Error(`Occurrence section anchor is missing: ${sectionId}`);
-  const laterAnchors = sections
-    .map((section) => String(section.section_id))
-    .filter((candidate) => candidate !== sectionId)
-    .map((candidate) => body.indexOf(`<a id="${candidate}"></a>`, anchorAt + anchor.length))
-    .filter((offset) => offset >= 0);
-  const nextAnchor = laterAnchors.length ? Math.min(...laterAnchors) : -1;
-  const nextHeading = nextAnchor < 0 ? body.length : Math.max(0, body.lastIndexOf("\n## ", nextAnchor) + 1);
-  const section = body.slice(0, nextHeading).trimEnd();
-  const after = body.slice(nextHeading);
-  return `${section}\n\n${block}${after ? `\n\n${after}` : ""}`;
-}
-
 /**
  * The Summary section of a meeting body is fenced by these markers (#66), so finding its end never depends on
  * the headings the summary itself contains. Everything outside the markers is the user's and is never changed.
  * Markers, heading and text are separated by blank lines (#96): the form the visual editor keeps byte-for-byte.
  * Sections written before #96 without those blank lines are still read, and respaced when next replaced.
  */
-export const summaryStartMarker = "<!-- lifeos:summary:start -->";
-export const summaryEndMarker = "<!-- lifeos:summary:end -->";
 const markerPattern = /<!--\s*lifeos:summary:(?:start|end)\s*-->/gi;
 const isMarkerLine = (line: string, marker: string) => line.trim() === marker;
 
@@ -486,14 +431,9 @@ export async function acceptSummary(ctx: AppContext, review: LifeOSObject) {
   if (meeting.frontmatter.deleted_at) throw new Error("The meeting for this summary was deleted");
   // ADR 0010, #63: restricted since the summary was raised (the meeting or its note); nothing is written.
   if (isMeetingRestricted(meeting, ctx.index.all())) throw new Error("This meeting is now restricted, so its summary cannot be accepted");
-  const sectionId = typeof review.frontmatter.occurrence_section_id === "string" ? review.frontmatter.occurrence_section_id : undefined;
+  // #176: the summary is written to its own Meeting only. A Review Item that names an occurrence must name this Meeting's.
   const occurrenceId = typeof review.frontmatter.recurrence_occurrence_id === "string" ? review.frontmatter.recurrence_occurrence_id : undefined;
-  if (sectionId || occurrenceId) {
-    const note = liveMeetingNote(meetingId, ctx.index.all());
-    const sections = Array.isArray(note?.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
-    const section = sections.find((candidate) => candidate.meeting_id === meetingId);
-    if (!section || section.section_id !== sectionId || section.occurrence_id !== occurrenceId) throw new Error("This summary no longer belongs to the resolved occurrence section");
-  }
+  if (occurrenceId && occurrenceId !== meeting.frontmatter.recurrence_occurrence_id) throw new Error("This summary no longer belongs to the resolved occurrence");
   const summary = text((review.frontmatter.proposed_fields as Record<string, unknown> | undefined)?.summary);
   if (!summary) throw new Error("This summary Review Item has no summary text");
   const now = new Date().toISOString();

@@ -63,9 +63,14 @@ const monthly = { series: "mock:mock-calendar:monthly-review", months: ["04", "0
 for (const [index, month] of monthly.months.entries()) {
   const meetingId = `a1000000-0000-4000-8000-00000000000${index + 1}`;
   const startsAt = `2026-${month}-07T08:00:00.000Z`;
+  // #176: August's own Meeting carries an enrichment Source and an accepted summary; the Series view shows both with that occurrence only.
+  const enriched = month === "08";
+  if (enriched) await objectFile("sources", "a3000000-0000-4000-8000-000000000008", {
+    ...stamped("a3000000-0000-4000-8000-000000000008", "source", "August review transcript"), source_type: "meet-transcript", captured_at: "2026-08-07T09:05:00.000Z", ingestion_status: "processed", meeting_id: meetingId, url: "https://drive.example.com/docs/monthly-review-august", retrieved_at: "2026-08-07T09:05:00.000Z"
+  }, "Synthetic transcript content.\n");
   await objectFile("meetings", meetingId, {
-    ...stamped(meetingId, "meeting", "Monthly review"), status: "scheduled", starts_at: startsAt, ends_at: `2026-${month}-07T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: monthly.series, recurrence_occurrence_id: `${monthly.series}:${startsAt}`, original_occurrence_starts_at: startsAt
-  });
+    ...stamped(meetingId, "meeting", "Monthly review"), status: "scheduled", starts_at: startsAt, ends_at: `2026-${month}-07T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], ...(enriched ? { source_ids: ["a3000000-0000-4000-8000-000000000008"] } : {}), recurrence_series_id: monthly.series, recurrence_occurrence_id: `${monthly.series}:${startsAt}`, original_occurrence_starts_at: startsAt
+  }, enriched ? "<!-- lifeos:summary:start -->\n\n## Summary\n\nAugust budget approved.\n\n<!-- lifeos:summary:end -->\n" : undefined);
   if (month === "06") continue;
   const noteId = `b1000000-0000-4000-8000-00000000000${index + 1}`;
   await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Monthly review notes ${month}`), meeting_id: meetingId }, `Monthly review words for 2026-${month}.\n`);

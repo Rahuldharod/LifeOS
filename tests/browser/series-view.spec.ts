@@ -34,6 +34,18 @@ for (const [label, width] of [["desktop", 1280], ["phone", 390]] as const) {
   });
 }
 
+test("an earlier occurrence shows its own Sources and accepted summary, and no other occurrence does (#176)", async ({ page, request }) => {
+  await seed(request);
+  await page.goto(`/calendar/2026-09-07/${SEPTEMBER}`);
+  const entries = page.getByRole("region", { name: "Earlier occurrences" }).locator("details");
+  await entries.nth(0).locator("summary").click();
+  await expect(entries.nth(0).getByRole("region", { name: "Accepted summary" })).toContainText("August budget approved.");
+  await expect(entries.nth(0).getByRole("link", { name: "August review transcript" })).toHaveAttribute("href", "https://drive.example.com/docs/monthly-review-august");
+  await entries.nth(1).locator("summary").click();
+  await expect(entries.nth(1).getByRole("region", { name: "Sources" })).toHaveCount(0);
+  await expect(entries.nth(1).getByRole("region", { name: "Accepted summary" })).toHaveCount(0);
+});
+
 test("opening an older occurrence shows only the Notes before it, not the latest ones", async ({ page, request }) => {
   await seed(request);
   await page.goto(`/calendar/2026-08-07/${AUGUST}`);
