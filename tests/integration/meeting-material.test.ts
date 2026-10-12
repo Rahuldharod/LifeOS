@@ -614,6 +614,35 @@ describe("meeting-material adoption", () => {
     expect(application.reviews()).toHaveLength(0);
   });
 
+  it("a restricted occurrence's Note keeps that Meeting's material and Review Items withheld, not the other occurrences' (#175, ADR 0018)", async () => {
+    const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+    const first = event("series-first", { seriesId: "weekly-series", startsAt: hoursAgo(20), endsAt: hoursAgo(19), originalOccurrenceStartsAt: hoursAgo(20) });
+    const second = event("series-second", { seriesId: "weekly-series", originalOccurrenceStartsAt: startedAt });
+    const { root, application } = await vault([first, second]);
+    const restrictedWorkspace = await application.createMeetingFromEvent(first.externalId, range.from, range.to, "work", "Private week\n");
+    const openWorkspace = await application.createMeetingFromEvent(second.externalId, range.from, range.to, "work", "Open week\n");
+    expect(openWorkspace.note!.frontmatter.id).not.toBe(restrictedWorkspace.note!.frontmatter.id);
+    await application.setSensitivity(restrictedWorkspace.note!.frontmatter.id, "restricted", application.object(restrictedWorkspace.note!.frontmatter.id).contentHash);
+    const restrictedId = restrictedWorkspace.meeting.frontmatter.id;
+    const openId = openWorkspace.meeting.frontmatter.id;
+    const taskDraft = (key: string, meeting: string) => `---\nlifeos_draft: 1\nkind: task\ndraft_key: ${key}\norigin: agent-extracted\nconfidence: High\ntitle: Task ${key}\ncaptured_at: 2026-10-04T09:15:00+02:00\nmeeting: ${meeting}\n---\n`;
+    await dropDraft(root, "task-private.md", taskDraft("private", restrictedId));
+    await dropDraft(root, "task-open.md", taskDraft("open", openId));
+    await dropDraft(root, "material-private.md", material({ key: "material-private", meeting: restrictedId, sources: ["drive-doc"], proposals: "proposals: []" }));
+
+    const results = (await application.adoptDrafts()).drafts;
+
+    expect(results.filter((draft) => draft.outcome === "failed")).toMatchObject([{ draft: "_inbox/drafts/material-private.md", reason: expect.stringContaining("is restricted") }]);
+    expect(results.filter((draft) => draft.outcome === "adopted")).toHaveLength(2);
+    expect(await ofType(application, "source")).toHaveLength(0);
+    const reviews = application.reviews();
+    const reviewFor = (meetingId: string, reviewType: string) => reviews.filter((review) => review.frontmatter.source_meeting_id === meetingId && review.frontmatter.review_type === reviewType);
+    expect(reviewFor(restrictedId, "create")).toHaveLength(1);
+    expect(reviewFor(restrictedId, "create")[0]!.frontmatter.sensitivity).toBe("restricted");
+    expect(reviewFor(openId, "create")).toHaveLength(1);
+    expect(reviewFor(openId, "create")[0]!.frontmatter.sensitivity).toBeUndefined();
+  });
+
   it("fails a malformed draft with path-aware reasons and writes nothing", async () => {
     const { root, application } = await vault();
     await dropDraft(root, "bad.md", `---

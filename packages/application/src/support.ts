@@ -13,7 +13,7 @@ export const isRestricted = (object: { frontmatter: { sensitivity?: unknown } } 
 /**
  * ADR 0010, #63: a meeting counts as restricted when the meeting itself or any of its (non-deleted) meeting
  * notes is restricted. The interface restricts the note, so every exclusion of a meeting goes through this
- * one rule. `objects` is where to look for the notes (usually the whole index).
+ * one rule. Per Note, never series-wide: ADR 0021. `objects` is where to look for the notes (usually the whole index).
  */
 export function isMeetingRestricted(meeting: WithFrontmatter | undefined, objects: Iterable<WithFrontmatter>) {
   if (!meeting) return false;
@@ -21,8 +21,7 @@ export function isMeetingRestricted(meeting: WithFrontmatter | undefined, object
   for (const object of objects) {
     // Not isLive on purpose: an archived restricted note still restricts its meeting (fails closed for privacy, ADR 0010).
     const meetingIds = Array.isArray(object.frontmatter.meeting_ids) ? object.frontmatter.meeting_ids : [];
-    const sameSeries = typeof meeting.frontmatter.recurrence_series_id === "string" && meeting.frontmatter.recurrence_series_id === object.frontmatter.recurrence_series_id;
-    if (object.frontmatter.type === "meeting-note" && (object.frontmatter.meeting_id === meeting.frontmatter.id || meetingIds.includes(meeting.frontmatter.id) || sameSeries) && !object.frontmatter.deleted_at && isRestricted(object)) return true;
+    if (object.frontmatter.type === "meeting-note" && (object.frontmatter.meeting_id === meeting.frontmatter.id || meetingIds.includes(meeting.frontmatter.id)) && !object.frontmatter.deleted_at && isRestricted(object)) return true;
   }
   return false;
 }
