@@ -18,6 +18,7 @@ import { EditorFrame } from "./EditorFrame.js";
 import { NoteHeader, PENDING_NOTE_HASH } from "./NoteHeader.js";
 import { isRestricted } from "./envelope.js";
 import { entityOptions, foldText } from "./searchOptions.js";
+import { hasRawAnchorLines } from "./editorMarkdown.js";
 import { MarkdownEditor, ModeSwitch, type EditorOwner } from "./MarkdownEditor.js";
 import { MarkdownPreview } from "./MarkdownPreview.js";
 import { withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
@@ -999,7 +1000,7 @@ function App() {
               {workspace.note && meetingController.conflict ? <NoteConflictPanel noteTitle={workspace.note.frontmatter.title} draftText={meetingController.draft} diskText={workspace.note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(meetingController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(meetingController.keepDiskVersion)} /> :
               <EditorFrame>
                 {workspace.note
-                  ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><ModeSwitch mode={editorMode} onChange={setEditorMode} /><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
+                  ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><ModeSwitch mode={editorMode} onChange={setEditorMode} visualDisabled={hasRawAnchorLines(meetingController.draft)} /><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
                   : <NoteHeader note={pendingHeaderNote(workspace)} kind={workspace.seriesView ? "NEW OCCURRENCE" : "NEW NOTE"} {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><ModeSwitch mode={editorMode} onChange={setEditorMode} /></NoteHeader>}
                 <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraft} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage />
                 <div className="editor-footer">
@@ -1011,10 +1012,10 @@ function App() {
               {workspace.seriesView && <SeriesView key={workspace.meeting.frontmatter.id} view={workspace.seriesView} timeZone={displayTimeZone} editor={{ mode: editorMode, readOnly, linkObjects: objectLinks, notify: setMessage, register: seriesEditors.register }} onOpenMeeting={(meetingId, date) => void go({ view: "Calendar", date, id: meetingId })} />}
               {/* #45: the accepted AI summary lives in the meeting body, apart from the user's own note. */}
               {meetingSummary(workspace.meeting.body) && <article><span>AI SUMMARY</span><h3>Summary</h3><div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{meetingSummary(workspace.meeting.body)!}</ReactMarkdown></div></article>}
-              {<article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
+              <article><span>REVIEW BEFORE PUBLISHING</span><h3>Meeting proposals</h3>
                 {!workspace.reviews.length && <p className="muted">Process the note to create a durable review item.</p>}
                 {workspace.reviews.map((review) => <ReviewCard key={review.frontmatter.id} review={review} busy={busy || readOnly} onAccept={() => accept(review)} onReject={() => reject(review.frontmatter.id)} onSave={(changes) => editReview(review.frontmatter.id, changes)} choices={headerOptions} labels={labels} linkActions={linkActionsFor(review.frontmatter.id)} evidence={reviews.find((item) => item.frontmatter.id === review.frontmatter.id)?.evidence} />)}
-              </article>}
+              </article>
             </>}
         </CalendarWorkspace>
       </>}

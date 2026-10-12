@@ -57,6 +57,15 @@ describe("routes (PB-027)", () => {
   });
 });
 
+describe("old section links (#178)", () => {
+  it("ignores an #occurrence-… hash: the meeting or Note opens normally", () => {
+    const pathname = (url: string) => new URL(url, "http://127.0.0.1").pathname;
+    expect(parseRoute(pathname("/calendar/2026-10-05/abc#occurrence-2026-10-05t05-30-00-000z"))).toEqual({ view: "Calendar", date: "2026-10-05", id: "abc" });
+    expect(parseRoute(pathname("/notes/shared-note#occurrence-2026-10-05"))).toEqual({ view: "Notes", noteTab: "open", id: "shared-note" });
+    expect(routePath({ view: "Notes", noteTab: "open", id: "shared-note" })).toBe("/notes/shared-note");
+  });
+});
+
 describe("routeTarget: a bookmarked id that is gone (PB-027)", () => {
   const TASK = "16fd2706-8baf-433b-82eb-8c7fada847da";
   const REVIEW = "886313e1-3b8a-4372-9b90-0c9aee199e5d";

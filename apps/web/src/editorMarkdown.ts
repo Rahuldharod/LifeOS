@@ -216,3 +216,10 @@ export function roundTripReport(original: string, saved: string): RoundTripRepor
   const constructs = unprovenConstructs(original);
   return { lossless: false, constructs: constructs.length ? constructs : [uncoveredFormatting] };
 }
+
+/**
+ * #178: a Legacy shared Note (ADR 0019) carries one `<a id="..."></a>` anchor line under each occurrence heading. The visual
+ * editor cannot keep those lines as written (it adds a blank line and rewrites list markers), so a body with such a line is
+ * edited in Markdown only.
+ */
+export const hasRawAnchorLines = (markdown: string) => /^<a id="[^"\n]*"><\/a>[ \t]*$/m.test(markdown);

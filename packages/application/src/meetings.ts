@@ -83,19 +83,11 @@ export class MeetingsModule {
   }
 
   /**
-   * Pre-#172 builds journalled `link-recurring-series` while repairing links between shared series Notes. Those are all Legacy
-   * shared Notes now, which the app never rewrites (ADR 0021), so replaying an old journal only closes it.
+   * Pre-#172 builds journalled `link-recurring-series` and pre-#178 builds `migrate-recurring-notes` (ADR 0019 machinery).
+   * Both features are gone (ADR 0021): every Note they touched is a Legacy shared Note the app never rewrites, or an archived
+   * Note whose redirect still resolves. So replaying such a journal only closes it and writes nothing.
    */
-  async recoverSeriesLinks(operation: Operation) {
-    await this.ctx.objects.completeOperation?.(operation.id);
-  }
-
-  /**
-   * Pre-#178 builds journalled `migrate-recurring-notes` for the reviewed recurring-Note migration (ADR 0019). That
-   * feature is gone (ADR 0021), so recovery only closes the journal: it writes nothing, and every Note it had touched stays
-   * as the earlier run left it (a Legacy shared Note, or an archived Note whose redirect still resolves).
-   */
-  async recoverRecurringMigration(operation: Operation) {
+  async closeLegacyJournal(operation: Operation) {
     await this.ctx.objects.completeOperation?.(operation.id);
   }
 

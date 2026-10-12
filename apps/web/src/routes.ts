@@ -11,7 +11,7 @@ export const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions"
  * `id` is the open item: a note on Notes, a meeting on Calendar, the highlighted card on an entity
  * tab, the Review Item on Inbox. `date` is the Calendar day; `noteTab` the Notes list being shown.
  */
-export type Route = { view: View; id?: string; date?: string; noteTab?: "open" | "deleted"; };
+export type Route = { view: View; id?: string; date?: string; noteTab?: "open" | "deleted" };
 
 const slugs = Object.fromEntries(views.map((view) => [view, view.toLowerCase().replace(/ /g, "-")])) as Record<View, string>;
 const viewsBySlug = new Map(views.map((view) => [slugs[view], view]));
