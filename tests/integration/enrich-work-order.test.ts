@@ -208,6 +208,25 @@ describe("Enrich last 48h Work Order", () => {
     expect(application.object(second.meeting.frontmatter.id).frontmatter.enrichment_state).toBeDefined();
   });
 
+  it("a restricted legacy shared Note excludes every Meeting it is linked to; an unlinked same-series occurrence stays eligible (#175)", async () => {
+    const events = [30, 20, 3].map((hours) => event(`series-${hours}`, hours, { seriesId: "weekly-series", originalOccurrenceStartsAt: hoursAgo(hours) }));
+    const { root, application } = await vault(events);
+    // A Legacy shared Note covers the first two occurrences; the third occurrence gets a Note of its own.
+    const { items, noteId } = await seedLegacySharedNote(root, "google", [{ event: events[0]!, body: "First\n" }, { event: events[1]!, body: "Second\n" }]);
+    await application.rebuildIndex();
+    const third = await application.createMeetingFromEvent(events[2]!.externalId, range.from, range.to, "work", "Third occurrence\n");
+    expect(third.note!.frontmatter.id).not.toBe(noteId);
+    const legacy = application.object(noteId);
+    await application.setSensitivity(noteId, "restricted", legacy.contentHash);
+
+    const result = await application.requestEnrichment({ now });
+
+    expect(result.restrictedExcluded).toBe(2);
+    expect(result.meetings.map((entry) => entry.meetingId)).toEqual([third.meeting.frontmatter.id]);
+    for (const item of items) expect(application.object(item.meetingId).frontmatter.enrichment_state).toBeUndefined();
+    expect(application.object(third.meeting.frontmatter.id).frontmatter.enrichment_state).toBe("requested");
+  });
+
   it("never lists the email of a restricted person (#63)", async () => {
     const attendeeDetails = [{ email: "hidden@client.example", displayName: "Hidden Person" }, { email: "joel@client.example", displayName: "Joel Martin" }];
     const { root, application } = await vault([event("a", 3, { attendees: ["Hidden Person", "Joel Martin"], attendeeDetails })]);

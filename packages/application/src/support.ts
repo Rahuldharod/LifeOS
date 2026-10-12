@@ -13,8 +13,7 @@ export const isRestricted = (object: { frontmatter: { sensitivity?: unknown } } 
 /**
  * ADR 0010, #63: a meeting counts as restricted when the meeting itself or any of its (non-deleted) meeting
  * notes is restricted. The interface restricts the note, so every exclusion of a meeting goes through this
- * one rule. Sensitivity is per Note (ADR 0021, #175): a Note restricts only the meetings it is linked to, never
- * the rest of its recurring series. `objects` is where to look for the notes (usually the whole index).
+ * one rule. Per Note, never series-wide: ADR 0021. `objects` is where to look for the notes (usually the whole index).
  */
 export function isMeetingRestricted(meeting: WithFrontmatter | undefined, objects: Iterable<WithFrontmatter>) {
   if (!meeting) return false;

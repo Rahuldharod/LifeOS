@@ -96,6 +96,27 @@ describe("Agent Index (#43)", () => {
     expect(meetings).toContain("Unlinked weekly three");
   });
 
+  it("names a restricted occurrence only as (restricted) on linked tasks, and the other occurrences by name (#175, ADR 0018)", async () => {
+    const { root, application, ids } = await populated();
+    const first = await seed(root, "meetings", "meeting", "Private occurrence", { status: "scheduled", starts_at: at(-2), ends_at: at(-2 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:weekly" });
+    const second = await seed(root, "meetings", "meeting", "Open occurrence", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:weekly" });
+    await seed(root, "meetings", "meeting-note", "Private occurrence notes", { meeting_id: first.id, meeting_ids: [first.id], recurrence_series_id: "google:work:weekly", sensitivity: "restricted" });
+    await seed(root, "meetings", "meeting-note", "Open occurrence notes", { meeting_id: second.id, meeting_ids: [second.id], recurrence_series_id: "google:work:weekly" });
+    await seed(root, "tasks", "task", "Follow up on the private week", { status: "Next", owner_person_id: ids.me.id, source_meeting_id: first.id });
+    await seed(root, "tasks", "task", "Follow up on the open week", { status: "Next", owner_person_id: ids.me.id, source_meeting_id: second.id });
+    await application.rebuildIndex();
+
+    await application.writeAgentIndex({ now });
+
+    const tasks = await read(root, "tasks.md");
+    expect(tasks).toMatch(/Follow up on the private week[^\n]*\n[^\n]*meeting: \(restricted\)/);
+    expect(tasks).toMatch(/Follow up on the open week[^\n]*\n[^\n]*meeting: Open occurrence/);
+    const everything = (await Promise.all(files.map((name) => read(root, name)))).join("\n");
+    expect(everything).not.toContain(first.id);
+    expect(everything).not.toContain("Private occurrence");
+    expect(everything).toContain(second.id);
+  });
+
   it("excludes only the restricted occurrence's Note from a series, not the other occurrences (#175)", async () => {
     const { root, application } = await vault();
     const first = await seed(root, "meetings", "meeting", "Private occurrence", { status: "scheduled", starts_at: at(-2), ends_at: at(-2 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:weekly" });
