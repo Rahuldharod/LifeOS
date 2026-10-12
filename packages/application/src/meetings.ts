@@ -483,22 +483,53 @@ export class MeetingsModule {
     if (existing) return this.meetingWorkspace(existing.frontmatter.id);
     const now = new Date().toISOString();
     const synthetic = (type: ObjectEnvelope["type"], title: string): LifeOSObject => ({ frontmatter: { ...this.ctx.envelope(`preview:${type}:${externalId}:${title}`, type, title, now, "calendar") }, body: "", relativePath: "", contentHash: "" });
+    const context = {
+      project: event.projectName ? synthetic("project", event.projectName) : undefined,
+      client: event.clientName ? synthetic("client", event.clientName) : undefined,
+      product: event.productName ? synthetic("product", event.productName) : undefined,
+      people: this.people.previewAttendees(event, (title) => synthetic("person", title))
+    };
+    const seriesId = this.seriesKey(event);
+    const seriesNotePreview = seriesId ? this.findSeriesNote(seriesId) : undefined;
     const meeting: LifeOSObject = {
-      frontmatter: { ...this.ctx.envelope(`preview:${externalId}`, "meeting", event.title, now, "calendar"), status: "scheduled", starts_at: event.startsAt, ends_at: event.endsAt, timezone: event.timezone, is_all_day: event.isAllDay ?? false, attendee_snapshot: [...event.attendees], ...(event.location ? { location: event.location } : {}), ...(event.joinUrl ? { join_url: event.joinUrl } : {}) },
+      frontmatter: {
+        ...this.ctx.envelope(`preview:${externalId}`, "meeting", event.title, now, "calendar"),
+        status: event.status === "cancelled" ? "cancelled" : "scheduled",
+        starts_at: event.startsAt,
+        ends_at: event.endsAt,
+        timezone: event.timezone,
+        is_all_day: event.isAllDay ?? false,
+        attendee_snapshot: [...event.attendees],
+        ...(event.location ? { location: event.location } : {}),
+        ...(event.joinUrl ? { join_url: event.joinUrl } : {}),
+        ...(seriesId && event.originalOccurrenceStartsAt ? {
+          recurrence_series_id: seriesId,
+          ...(event.seriesUid ? { recurrence_series_uid: event.seriesUid } : {}),
+          recurrence_occurrence_id: this.occurrenceId(event),
+          original_occurrence_starts_at: event.originalOccurrenceStartsAt
+        } : {})
+      },
       body: "", relativePath: "", contentHash: ""
     };
+    const occurrenceId = this.occurrenceId(event);
+    const pendingOccurrence = seriesNotePreview && occurrenceId && event.originalOccurrenceStartsAt ? {
+      sectionId: occurrenceSectionId(event.originalOccurrenceStartsAt),
+      occurrenceId,
+      originalStartsAt: event.originalOccurrenceStartsAt,
+      meeting,
+      reviews: [] as LifeOSObject[],
+      sources: [] as LifeOSObject[],
+      context: { people: context.people }
+    } : undefined;
     return {
       persisted: false as const,
       meeting,
       note: undefined,
       reviews: [] as LifeOSObject[],
       tasks: [] as LifeOSObject[],
-      context: {
-        project: event.projectName ? synthetic("project", event.projectName) : undefined,
-        client: event.clientName ? synthetic("client", event.clientName) : undefined,
-        product: event.productName ? synthetic("product", event.productName) : undefined,
-        people: this.people.previewAttendees(event, (title) => synthetic("person", title))
-      }
+      ...(seriesNotePreview ? { seriesNotePreview, occurrences: this.occurrenceItems(seriesNotePreview) } : {}),
+      ...(pendingOccurrence ? { pendingOccurrence } : {}),
+      context
     };
   }
 
@@ -519,22 +550,7 @@ export class MeetingsModule {
     const tasks = index.all().filter((object) => object.frontmatter.type === "task" && isLive(object) && object.frontmatter.source_meeting_id === resolvedMeetingId);
     const resolve = (value: unknown) => typeof value === "string" ? index.get(value) : undefined;
     const attendeeIds = Array.isArray(meeting.frontmatter.attendee_ids) ? meeting.frontmatter.attendee_ids : [];
-    const sections = note && Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
-    const occurrenceItems = sections.flatMap((section) => {
-      const sectionMeeting = typeof section.meeting_id === "string" ? index.get(section.meeting_id) : undefined;
-      if (!sectionMeeting || sectionMeeting.frontmatter.type !== "meeting" || !isLive(sectionMeeting)) return [];
-      const sectionMeetingId = sectionMeeting.frontmatter.id;
-      const sectionAttendeeIds = Array.isArray(sectionMeeting.frontmatter.attendee_ids) ? sectionMeeting.frontmatter.attendee_ids : [];
-      const sourceIds = new Set(Array.isArray(sectionMeeting.frontmatter.source_ids) ? sectionMeeting.frontmatter.source_ids.filter((id): id is string => typeof id === "string") : []);
-      const sources = index.all().filter((object) => object.frontmatter.type === "source" && isLive(object) && (object.frontmatter.meeting_id === sectionMeetingId || sourceIds.has(object.frontmatter.id)));
-      return [{
-        sectionId: String(section.section_id), occurrenceId: String(section.occurrence_id),
-        originalStartsAt: String(section.original_starts_at), meeting: sectionMeeting,
-        reviews: index.all().filter((object) => object.frontmatter.type === "review-item" && isLive(object) && object.frontmatter.source_meeting_id === sectionMeetingId),
-        sources,
-        context: { people: sectionAttendeeIds.map(resolve).filter((person): person is LifeOSObject => Boolean(person)) }
-      }];
-    });
+    const occurrenceItems = note ? this.occurrenceItems(note) : [];
     return {
       persisted: true as const,
       meeting,
@@ -551,6 +567,27 @@ export class MeetingsModule {
         people: attendeeIds.map(resolve).filter((person): person is LifeOSObject => Boolean(person))
       }
     };
+  }
+
+  private occurrenceItems(note: LifeOSObject) {
+    const { index } = this.ctx;
+    const sections = Array.isArray(note.frontmatter.occurrence_sections) ? note.frontmatter.occurrence_sections as Array<Record<string, unknown>> : [];
+    const resolve = (value: unknown) => typeof value === "string" ? index.get(value) : undefined;
+    return sections.flatMap((section) => {
+      const sectionMeeting = typeof section.meeting_id === "string" ? index.get(section.meeting_id) : undefined;
+      if (!sectionMeeting || sectionMeeting.frontmatter.type !== "meeting" || !isLive(sectionMeeting)) return [];
+      const sectionMeetingId = sectionMeeting.frontmatter.id;
+      const sectionAttendeeIds = Array.isArray(sectionMeeting.frontmatter.attendee_ids) ? sectionMeeting.frontmatter.attendee_ids : [];
+      const sourceIds = new Set(Array.isArray(sectionMeeting.frontmatter.source_ids) ? sectionMeeting.frontmatter.source_ids.filter((id): id is string => typeof id === "string") : []);
+      const sources = index.all().filter((object) => object.frontmatter.type === "source" && isLive(object) && (object.frontmatter.meeting_id === sectionMeetingId || sourceIds.has(object.frontmatter.id)));
+      return [{
+        sectionId: String(section.section_id), occurrenceId: String(section.occurrence_id),
+        originalStartsAt: String(section.original_starts_at), meeting: sectionMeeting,
+        reviews: index.all().filter((object) => object.frontmatter.type === "review-item" && isLive(object) && object.frontmatter.source_meeting_id === sectionMeetingId),
+        sources,
+        context: { people: sectionAttendeeIds.map(resolve).filter((person): person is LifeOSObject => Boolean(person)) }
+      }];
+    });
   }
 
   /** Explicit continuity for a restarted lookalike series. Titles and attendees never imply this link. */

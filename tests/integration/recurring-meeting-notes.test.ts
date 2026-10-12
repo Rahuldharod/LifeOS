@@ -347,4 +347,45 @@ describe("recurring meeting notes (#147)", () => {
       candidates: [{ noteId: legacy.note!.frontmatter.id, body: "Last week's details\n" }]
     });
   });
+
+  it("previews migrated history on a new occurrence without writing until the first edit", async () => {
+    const legacyEvent = event({ externalId: "weekly-prio", title: "Weekly Prio" });
+    const currentEvent = event({
+      externalId: "weekly-prio-next",
+      title: "Weekly Prio",
+      startsAt: "2026-10-12T08:00:00.000Z",
+      endsAt: "2026-10-12T09:00:00.000Z",
+      seriesId: "weekly-prio-series",
+      originalOccurrenceStartsAt: "2026-10-12T08:00:00.000Z"
+    });
+    const { app, calendar } = await setup([legacyEvent]);
+    const legacy = await app.createMeetingFromEvent(legacyEvent.externalId, undefined, undefined, legacyEvent.calendarId, "Last week's details\n");
+    calendar.eventsById.set(legacyEvent.externalId, event({
+      externalId: legacyEvent.externalId,
+      title: legacyEvent.title,
+      seriesId: "weekly-prio-series",
+      originalOccurrenceStartsAt: legacyEvent.startsAt
+    }));
+    calendar.events.splice(0, 1, currentEvent);
+    calendar.eventsById.set(currentEvent.externalId, currentEvent);
+    await app.syncCalendar(new Date("2026-10-12T00:00:00.000Z"), new Date("2026-10-13T00:00:00.000Z"));
+    const migration = app.recurringMigrationPreview(legacy.meeting.frontmatter.id);
+    await app.confirmRecurringMigration(legacy.meeting.frontmatter.id, Object.fromEntries(migration.candidates.map((candidate) => [candidate.noteId, candidate.contentHash])));
+    const before = await app.listObjects();
+
+    const current = await app.previewMeetingFromEvent(currentEvent.externalId, undefined, undefined, currentEvent.calendarId);
+
+    expect(current).toMatchObject({
+      persisted: false,
+      note: undefined,
+      seriesNotePreview: { body: expect.stringContaining("Last week's details") },
+      pendingOccurrence: { originalStartsAt: currentEvent.originalOccurrenceStartsAt }
+    });
+    expect(await app.listObjects()).toEqual(before);
+
+    const saved = await app.createMeetingFromEvent(currentEvent.externalId, undefined, undefined, currentEvent.calendarId, "This week's details\n");
+    expect(saved.note?.body).toContain("This week's details");
+    expect(saved.note?.body).toContain("Last week's details");
+    expect(saved.note?.frontmatter.occurrence_sections).toHaveLength(2);
+  });
 });

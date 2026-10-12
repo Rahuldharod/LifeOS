@@ -38,6 +38,17 @@ export function replaceOccurrenceNotes(markdown: string, occurrences: Occurrence
   return `${before}${section}${after ? "\n\n" : ""}${after}`;
 }
 
+/**
+ * A pending editor holds only the new occurrence's text. After the server attaches that occurrence
+ * to the shared Note, expand the browser draft to the canonical body without losing history or
+ * keystrokes made while creation was in flight.
+ */
+export function adoptCreatedOccurrenceDraft(createdBody: string, occurrences: OccurrenceWorkspaceItem[], meetingId: string, activeDraft: string, submittedDraft: string) {
+  const occurrence = occurrences.find((item) => item.meeting.frontmatter.id === meetingId);
+  return occurrence ? replaceOccurrenceNotes(createdBody, occurrences, occurrence.sectionId, activeDraft)
+    : activeDraft === submittedDraft ? createdBody : activeDraft;
+}
+
 function day(value: string, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
@@ -72,9 +83,12 @@ function eventDifferences(item: OccurrenceWorkspaceItem, current?: CalendarEvent
   return changed;
 }
 
-export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectionId, timeZone, mode, currentEvent, seriesNotes = [], readOnly, linkDisabled = false, onBodyChange, onLinkPrevious, renderProposal, onSelectSection }: {
+export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurrence, pendingNotes = "", selectedSectionId, timeZone, mode, currentEvent, seriesNotes = [], readOnly, linkDisabled = false, onBodyChange, onPendingNotesChange, onLinkPrevious, renderProposal, onSelectSection }: {
   note: LifeObject;
   occurrences: OccurrenceWorkspaceItem[];
+  /** An occurrence not yet written to Markdown. Stored history stays visible but read-only beside it. */
+  pendingOccurrence?: OccurrenceWorkspaceItem;
+  pendingNotes?: string;
   selectedSectionId?: string;
   timeZone: string;
   mode: "calendar" | "notes";
@@ -83,11 +97,14 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectio
   readOnly: boolean;
   linkDisabled?: boolean;
   onBodyChange: (body: string) => void;
+  onPendingNotesChange?: (body: string) => void;
   onLinkPrevious?: (noteId: string) => void;
   renderProposal: (review: LifeObject) => ReactNode;
   onSelectSection?: (sectionId: string) => void;
 }) {
-  const ordered = useMemo(() => [...occurrences].sort((left, right) => Date.parse(String(right.meeting.frontmatter.starts_at)) - Date.parse(String(left.meeting.frontmatter.starts_at))), [occurrences]);
+  const ordered = useMemo(() => [...(pendingOccurrence ? [pendingOccurrence] : []), ...occurrences]
+    .sort((left, right) => Date.parse(String(right.meeting.frontmatter.starts_at)) - Date.parse(String(left.meeting.frontmatter.starts_at))), [occurrences, pendingOccurrence]);
+  const storedOccurrences = useMemo(() => ordered.filter((item) => item.sectionId !== pendingOccurrence?.sectionId), [ordered, pendingOccurrence?.sectionId]);
   const fallback = defaultOccurrenceSection(ordered, new Date(), timeZone);
   const storageKey = `lifeos.occurrence-section.${note.frontmatter.id}`;
   const remembered = typeof localStorage === "undefined" ? undefined : localStorage.getItem(storageKey) ?? undefined;
@@ -107,14 +124,15 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectio
     </div> : null}
     {ordered.map((item) => {
       const active = item.sectionId === selected;
+      const pendingOccurrenceItem = item.sectionId === pendingOccurrence?.sectionId;
       const meeting = item.meeting.frontmatter;
-      const pending = item.reviews.filter((review) => review.frontmatter.status === "pending");
+      const pendingReviews = item.reviews.filter((review) => review.frontmatter.status === "pending");
       const acceptedSummary = meetingSummary(item.meeting.body);
       const current = currentEvent?.originalOccurrenceStartsAt === item.originalStartsAt ? currentEvent : undefined;
       const differences = eventDifferences(item, current);
       const select = () => { setSelected(item.sectionId); localStorage.setItem(storageKey, item.sectionId); };
       return <details key={item.sectionId} className={active ? "occurrence-section selected" : "occurrence-section"} open={active || undefined}>
-        <summary onClick={(event) => { event.preventDefault(); select(); onSelectSection?.(item.sectionId); }}><span>{new Date(String(meeting.starts_at)).toLocaleDateString([], { timeZone, dateStyle: "full" })}</span><b>{new Date(String(meeting.starts_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}–{new Date(String(meeting.ends_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}</b>{(meeting.status === "cancelled" || current?.status === "cancelled") && <em>Cancelled</em>}</summary>
+        <summary onClick={(event) => { event.preventDefault(); select(); onSelectSection?.(item.sectionId); }}><span>{new Date(String(meeting.starts_at)).toLocaleDateString([], { timeZone, dateStyle: "full" })}</span><b>{new Date(String(meeting.starts_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}–{new Date(String(meeting.ends_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}</b>{pendingOccurrenceItem && <em>Not saved yet</em>}{(meeting.status === "cancelled" || current?.status === "cancelled") && <em>Cancelled</em>}</summary>
         <div className="occurrence-snapshot" aria-label="Saved event snapshot">
           <span>SAVED EVENT DETAILS</span>
           <p><b>{meeting.title}</b></p>
@@ -122,10 +140,15 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, selectedSectio
           {Boolean(meeting.location || meeting.join_url) && <p>{String(meeting.location ?? "")}{meeting.location && meeting.join_url ? " · " : ""}{Boolean(meeting.join_url) && <a href={String(meeting.join_url)}>Join meeting</a>}</p>}
         </div>
         {differences.length > 0 && <aside className="occurrence-calendar-changes" aria-label="Current Calendar changes"><b>Changed in Calendar</b><ul>{differences.map((change) => <li key={change}>{change}</li>)}</ul></aside>}
-        <label className="occurrence-notes"><span>Your notes</span><textarea aria-label={`Notes for ${item.sectionId}`} disabled={readOnly} value={occurrenceNotes(note.body, ordered, item.sectionId)} onChange={(event) => onBodyChange(replaceOccurrenceNotes(note.body, ordered, item.sectionId, event.target.value))} /></label>
+        <label className="occurrence-notes"><span>Your notes</span><textarea
+          aria-label={`Notes for ${item.sectionId}`}
+          disabled={readOnly || Boolean(pendingOccurrence && !pendingOccurrenceItem)}
+          value={pendingOccurrenceItem ? pendingNotes : occurrenceNotes(note.body, storedOccurrences, item.sectionId)}
+          onChange={(event) => pendingOccurrenceItem ? onPendingNotesChange?.(event.target.value) : onBodyChange(replaceOccurrenceNotes(note.body, storedOccurrences, item.sectionId, event.target.value))}
+        /></label>
         <section className="occurrence-materials"><h4>Materials</h4>{item.sources.length ? <ul>{item.sources.map((source) => <li key={source.frontmatter.id}>{sourceLink(source) ? <a href={sourceLink(source)}>{source.frontmatter.title}</a> : source.frontmatter.title}{Boolean(source.frontmatter.retrieved_at) && <small> Retrieved {new Date(String(source.frontmatter.retrieved_at)).toLocaleString()}</small>}</li>)}</ul> : <p>No linked materials.</p>}</section>
         {acceptedSummary && <section className="occurrence-summary"><h4>Accepted summary</h4><p>{acceptedSummary}</p></section>}
-        {(mode === "notes" || active) && <section className="occurrence-proposals"><h4>Pending proposals</h4>{pending.length ? pending.map((review) => <React.Fragment key={review.frontmatter.id}>{renderProposal(review)}</React.Fragment>) : <p>No pending proposals.</p>}</section>}
+        {(mode === "notes" || active) && <section className="occurrence-proposals"><h4>Pending proposals</h4>{pendingReviews.length ? pendingReviews.map((review) => <React.Fragment key={review.frontmatter.id}>{renderProposal(review)}</React.Fragment>) : <p>No pending proposals.</p>}</section>}
       </details>;
     })}
   </section>;

@@ -39,6 +39,10 @@ export type Workspace = {
   noteSectionId?: string;
   recurringMigration?: RecurringMigrationPreview;
   occurrences?: OccurrenceWorkspaceItem[];
+  /** Existing shared history shown while a new recurring occurrence is still a write-free preview. */
+  seriesNotePreview?: LifeObject;
+  /** The unsaved occurrence displayed above `seriesNotePreview`; materialized only on the first edit. */
+  pendingOccurrence?: OccurrenceWorkspaceItem;
   context: { project?: LifeObject; client?: LifeObject; product?: LifeObject; people: LifeObject[] };
 };
 export type OccurrenceWorkspaceItem = {

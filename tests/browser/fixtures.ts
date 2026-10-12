@@ -8,6 +8,7 @@ export type Seeded = { id: string; title: string };
 export const RECURRING_NOTE = {
   id: "33333333-3333-4333-8333-333333333333",
   title: "Weekly planning notes",
+  currentMeetingId: "22222222-2222-4222-8222-222222222222",
   currentSectionId: "occurrence-2026-10-12t08-00-00-000z",
   olderSectionId: "occurrence-2026-10-05t08-00-00-000z"
 } as const;

@@ -61,7 +61,7 @@ import { calendarSearchRange, recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
-import { RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
+import { adoptCreatedOccurrenceDraft, RecurringOccurrenceWorkspace } from "./RecurringOccurrenceWorkspace.js";
 import { meetingSummary } from "./meetingSummary.js";
 import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
@@ -325,12 +325,17 @@ function App() {
       createdWorkspace.current = next;
       void refresh();
       return next.note;
+    },
+    adoptCreatedDraft: (created, activeDraft, submittedDraft) => {
+      const next = createdWorkspace.current;
+      return adoptCreatedOccurrenceDraft(created.body, next?.occurrences ?? [], next?.meeting.frontmatter.id ?? "", activeDraft, submittedDraft);
     }
   });
 
   // An editor is shown for an existing note, or for an unsaved draft over a calendar event.
   const editorReady = Boolean(workspace?.note) || meetingController.pending;
   const meetingOwner: EditorOwner | undefined = workspace?.note ? { id: workspace.note.frontmatter.id, relativePath: workspace.note.relativePath } : undefined;
+  const recurringDisplayNote = workspace?.note ?? workspace?.seriesNotePreview;
 
   // PB-027 navigation. Every in-app move goes through `go`: it saves the open notes first, then
   // changes the URL; effects below open whatever the URL names. Back/Forward is held by the router
@@ -1032,21 +1037,24 @@ function App() {
               <EditorFrame>
                 {workspace.note
                   ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><ModeSwitch mode={editorMode} onChange={setEditorMode} /><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
-                  : <NoteHeader note={pendingHeaderNote(workspace)} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><ModeSwitch mode={editorMode} onChange={setEditorMode} /></NoteHeader>}
-                {workspace.note && workspace.occurrences?.length ? <RecurringOccurrenceWorkspace
-                  note={{ ...workspace.note, body: meetingController.draft }}
-                  occurrences={workspace.occurrences}
-                  selectedSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || workspace.occurrences.find((item) => item.meeting.frontmatter.id === workspace.meeting.frontmatter.id)?.sectionId}
+                  : <NoteHeader note={pendingHeaderNote(workspace)} kind={workspace.seriesNotePreview ? "NEW OCCURRENCE" : "NEW NOTE"} {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><ModeSwitch mode={editorMode} onChange={setEditorMode} /></NoteHeader>}
+                {recurringDisplayNote && (workspace.occurrences?.length || workspace.pendingOccurrence) ? <RecurringOccurrenceWorkspace
+                  note={{ ...recurringDisplayNote, body: workspace.note ? meetingController.draft : recurringDisplayNote.body }}
+                  occurrences={workspace.occurrences ?? []}
+                  pendingOccurrence={workspace.pendingOccurrence}
+                  pendingNotes={workspace.pendingOccurrence ? meetingController.draft : undefined}
+                  selectedSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || workspace.pendingOccurrence?.sectionId || workspace.occurrences?.find((item) => item.meeting.frontmatter.id === workspace.meeting.frontmatter.id)?.sectionId}
                   timeZone={displayTimeZone}
                   mode="calendar"
                   currentEvent={calendar.filteredEvents.find((event) => event.meetingId === workspace.meeting.frontmatter.id || event.originalOccurrenceStartsAt === workspace.meeting.frontmatter.original_occurrence_starts_at)}
                   seriesNotes={notes}
-                  readOnly={busy || readOnly}
+                  readOnly={busy || readOnly || meetingController.autoSaving}
                   linkDisabled={meetingController.dirty || meetingController.autoSaving}
                   onBodyChange={meetingController.setDraft}
-                  onLinkPrevious={(previousNoteId) => { if (workspace.note) void linkPreviousSeries(workspace.note, previousNoteId, workspace.meeting.frontmatter.id); }}
+                  onPendingNotesChange={meetingController.setDraft}
+                  onLinkPrevious={workspace.note ? (previousNoteId) => { void linkPreviousSeries(workspace.note!, previousNoteId, workspace.meeting.frontmatter.id); } : undefined}
                   renderProposal={renderOccurrenceProposal}
-                  onSelectSection={(section) => followRoute({ view: "Calendar", date: selectedDate, id: workspace.meeting.frontmatter.id, section }, { replace: true })}
+                  onSelectSection={workspace.persisted === false ? undefined : (section) => followRoute({ view: "Calendar", date: selectedDate, id: workspace.meeting.frontmatter.id, section }, { replace: true })}
                 /> : <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraft} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage targetSectionId={decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined} />}
                 <div className="editor-footer">
                   <div className="save-state"><i className={meetingController.dirty ? "dirty" : "saved"} />{meetingController.pending && !meetingController.dirty ? "Not saved yet · nothing is written until you edit" : meetingController.dirty ? meetingController.autoSaving ? "Saving to Markdown…" : "Cached locally · autosave pending" : "Saved to Markdown"}{meetingController.undoAvailable && <button disabled={busy || readOnly} onClick={() => withBusy(meetingController.undoKeepDiskVersion)}>Undo "Keep disk version"</button>}</div>

@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CalendarEvent, LifeObject, OccurrenceWorkspaceItem } from "@lifeos/contracts";
-import { defaultOccurrenceSection, occurrenceNotes, RecurringOccurrenceWorkspace, replaceOccurrenceNotes } from "./RecurringOccurrenceWorkspace.js";
+import { adoptCreatedOccurrenceDraft, defaultOccurrenceSection, occurrenceNotes, RecurringOccurrenceWorkspace, replaceOccurrenceNotes } from "./RecurringOccurrenceWorkspace.js";
 import { CalendarWorkspace } from "./CalendarWorkspace.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,6 +29,41 @@ describe("RecurringOccurrenceWorkspace", () => {
     expect(changed).toContain("Newer notes");
     expect(changed).toContain("Edited history");
     expect(changed).not.toContain("Older notes");
+  });
+
+  it("adopts the canonical body after first save without replacing prior occurrence history", () => {
+    const adopted = adoptCreatedOccurrenceDraft(markdown, [newer, older], newer.meeting.frontmatter.id, "This week's final notes", "This week's submitted notes");
+    expect(occurrenceNotes(adopted, [newer, older], newer.sectionId)).toBe("This week's final notes");
+    expect(occurrenceNotes(adopted, [newer, older], older.sectionId)).toBe("Older notes");
+  });
+
+  it("shows shared history while only the unsaved occurrence is editable", async () => {
+    const pending = occurrence("occurrence-pending", "2026-10-19T08:00:00.000Z");
+    const changePending = vi.fn();
+    const changeStored = vi.fn();
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<RecurringOccurrenceWorkspace
+      note={note}
+      occurrences={[older, newer]}
+      pendingOccurrence={pending}
+      pendingNotes=""
+      timeZone="Europe/Paris"
+      mode="calendar"
+      readOnly={false}
+      onBodyChange={changeStored}
+      onPendingNotesChange={changePending}
+      renderProposal={() => null}
+    />));
+
+    const pendingArea = document.querySelector("textarea[aria-label='Notes for occurrence-pending']") as HTMLTextAreaElement;
+    const olderArea = document.querySelector("textarea[aria-label='Notes for occurrence-old']") as HTMLTextAreaElement;
+    expect(document.body.textContent).toContain("Older notes");
+    expect(document.body.textContent).toContain("Not saved yet");
+    expect(pendingArea.disabled).toBe(false);
+    expect(olderArea.disabled).toBe(true);
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(pendingArea, "This week's notes"); pendingArea.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(changePending).toHaveBeenCalledWith("This week's notes");
+    expect(changeStored).not.toHaveBeenCalled();
   });
 
   it("keeps the app-managed Materials block out of editable notes and preserves it on edit (#151)", () => {
