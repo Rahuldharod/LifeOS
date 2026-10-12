@@ -181,7 +181,7 @@ LifeOS backs up by itself into `LIFEOS_BACKUP_ROOT` (`~/LifeOS-backups` on each 
 
 ### Claude skills
 
-The skills that let Claude capture, answer questions, enrich meetings and write the morning brief are in `skills/`. Install them and run the dry-run on fake data first: see [`skills/INSTALL.md`](skills/INSTALL.md).
+The skills that let Claude capture, answer questions, enrich meetings and write the morning brief are in `skills/`. Install them from LifeOS **Settings → Claude skills** (zip downloads for Claude chat and phone, plugin commands for Claude Code), and run the dry-run on fake data first: see [`skills/INSTALL.md`](skills/INSTALL.md).
 
 ### Maintenance
 

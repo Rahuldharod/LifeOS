@@ -18,6 +18,7 @@ import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import type { KnownSecrets } from "@lifeos/secrets";
 import { loadContractFiles } from "./contract-files.js";
+import { listBundledSkills, pluginMarketplace, zipBundledSkill } from "./skills-bundle.js";
 import type { calendarSource } from "./calendar-source.js";
 import { connectionSettings, googleConnectionStatus } from "./connections.js";
 import { httpError } from "./http-errors.js";
@@ -38,6 +39,10 @@ export interface GoogleCalendar extends CalendarConnector {
 
 export type CalendarSource = ReturnType<typeof calendarSource<GoogleCalendar>>;
 
+/** The Claude Code plugin and marketplace names in `.claude-plugin/` (ADR 0020). */
+const pluginName = "lifeos";
+const marketplaceName = "lifeos-skills";
+
 export interface ApiOptions {
   /** A LifeOS data folder; the caller has already checked it holds `.lifeos/schema.md` (ADR 0014). */
   dataRoot: string;
@@ -53,6 +58,8 @@ export interface ApiOptions {
   logger?: boolean;
   /** ADR 0020: where the bundled contract files are read from; defaults to the repository's `contract/`. */
   contractRoot?: string;
+  /** ADR 0020: where the installable skills are read from; defaults to the repository's `skills/`. */
+  skillsRoot?: string;
   /** Trigger intervals; the defaults are the stable app's. Tests shorten them. */
   timing?: { heartbeatMs?: number; reconcileDelayMs?: number; adoptionSweepMs?: number; adoptionDebounceMs?: number };
 }
@@ -136,7 +143,16 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return application.saveInternalDomains(domains, expectedHash);
   });
   // ADR 0020: read-only; derived from the newest .result.md, so it reads no settings or secrets.
-  route(server, "GET /api/v1/settings/claude-skills", async () => application.skillPackStatus());
+  route(server, "GET /api/v1/settings/claude-skills", async () => {
+    const [status, skills, marketplace] = await Promise.all([application.skillPackStatus(), listBundledSkills(options.skillsRoot), pluginMarketplace()]);
+    return { ...status, skills, ...(marketplace ? { plugin: { marketplace, install: `${pluginName}@${marketplaceName}` } } : {}) };
+  });
+  // ADR 0020: one bundled skill as a zip for claude.ai (Settings → Capabilities → Skills → Upload skill). Read-only.
+  server.get<{ Params: { name: string } }>("/api/v1/settings/claude-skills/:name/zip", async (request, reply) => {
+    const zip = await zipBundledSkill(request.params.name, options.skillsRoot);
+    if (!zip) return reply.status(404).send({ error: "No such LifeOS skill" });
+    return reply.type("application/zip").header("content-disposition", `attachment; filename="${request.params.name}.zip"`).send(zip);
+  });
   // #54: the user's own addresses live in a synced setting, never in code.
   route(server, "GET /api/v1/settings/self-emails", async () => application.getSelfEmails());
   route(server, "PUT /api/v1/settings/self-emails", async (request, reply) => {

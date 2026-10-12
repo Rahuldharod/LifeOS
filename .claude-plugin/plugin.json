@@ -1,0 +1,8 @@
+{
+  "name": "lifeos",
+  "version": "1.2.0",
+  "description": "LifeOS skills for Claude Code: capture, ask, morning routine and meeting enrichment.",
+  "author": {
+    "name": "LifeOS"
+  }
+}
