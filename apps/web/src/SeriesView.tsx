@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { LifeObject, SeriesView as SeriesViewData, SeriesViewEarlier } from "@lifeos/contracts";
+import type { LifeObject, SeriesView as SeriesViewData, SeriesViewEarlier, SeriesViewMaterials } from "@lifeos/contracts";
 import { ApiError, api } from "./api.js";
 import { readCachedDraft } from "./draftStorage.js";
 import type { LinkedObject } from "./lifeosLinks.js";
@@ -98,7 +98,7 @@ function SeriesNoteEditor({ entry, editor }: { entry: SeriesViewEarlier; editor:
 }
 
 /** #176: what enrichment attached to this occurrence's own Meeting, shown with it and never inside the Note. */
-function SeriesMaterials({ materials }: { materials: NonNullable<SeriesViewEarlier["materials"]> }) {
+function SeriesMaterials({ materials }: { materials: SeriesViewMaterials }) {
   return <div className="series-view-materials">
     {materials.summary && <section aria-label="Accepted summary"><h4>Summary</h4><p>{materials.summary}</p></section>}
     {materials.sources.length > 0 && <section aria-label="Sources"><h4>Sources</h4><ul>{materials.sources.map((source) => <li key={source.id}>{source.url ? <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a> : source.title}</li>)}</ul></section>}

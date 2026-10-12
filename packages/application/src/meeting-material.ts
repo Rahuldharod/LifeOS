@@ -1,5 +1,5 @@
 import { confidenceLabels, type Confidence, type LifeOSObject } from "@lifeos/domain";
-import { summaryEndMarker, summaryStartMarker } from "@lifeos/shared";
+import { findSummaryFence, summaryEndMarker, summaryStartMarker } from "@lifeos/shared";
 import { DraftError, text, toUtc, type AdoptionRun, type ParsedDraft, type ProposeOptions } from "./adoption.js";
 import { markdownFileName, type AppContext } from "./context.js";
 import { expectedMaterial, unavailableOf } from "./enrichment.js";
@@ -380,13 +380,13 @@ export class MeetingMaterialModule {
 }
 
 /**
- * The Summary section of a meeting body is fenced by these markers (#66), so finding its end never depends on
+ * The Summary section of a meeting body is fenced by the shared start and end markers (#66), parsed by `findSummaryFence`
+ * in @lifeos/shared (also used to read it for the Series view), so finding its end never depends on
  * the headings the summary itself contains. Everything outside the markers is the user's and is never changed.
  * Markers, heading and text are separated by blank lines (#96): the form the visual editor keeps byte-for-byte.
  * Sections written before #96 without those blank lines are still read, and respaced when next replaced.
  */
 const markerPattern = /<!--\s*lifeos:summary:(?:start|end)\s*-->/gi;
-const isMarkerLine = (line: string, marker: string) => line.trim() === marker;
 
 /**
  * Writes `summary` as the meeting body's Summary section, replacing the one already there, or appending one.
@@ -400,8 +400,7 @@ export function withSummarySection(body: string, summary: string) {
   const text = summary.replace(markerPattern, "").trim();
   const section = [summaryStartMarker, "", "## Summary", "", ...(text ? [...text.split("\n"), ""] : []), summaryEndMarker];
   const lines = body.split("\n");
-  const start = lines.findIndex((line) => isMarkerLine(line, summaryStartMarker));
-  const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && isMarkerLine(line, summaryEndMarker));
+  const { start, end } = findSummaryFence(lines);
   if (end >= 0) return [...lines.slice(0, start), ...section, ...lines.slice(end + 1)].join("\n");
 
   const isSummaryHeading = (line: string) => /^##\s+Summary\s*$/i.test(line);

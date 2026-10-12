@@ -46,7 +46,7 @@ Optional on every kind: `area` (`work`, `maintenance`, `household`, `learning`, 
 | `meeting-material` | written by the enrichment skill only | `meeting`; recurring occurrences also copy `recurrence_occurrence_id` from the Work Order (an older `occurrence_section_id` is ignored) |
 | `daily-focus` | written by the daily focus skill only | none |
 
-A reference field a kind does not list is refused, not ignored.
+A reference field a kind does not list is refused, not ignored. One exception: a `meeting-material` draft from an older Work Order may still carry `occurrence_section_id`; it is accepted and ignored.
 
 ### References by name
 

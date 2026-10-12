@@ -484,22 +484,26 @@ describe("Series view review fixes (#180)", () => {
     unsaved(5);
     await app.rebuildIndex();
     const stamp = (id: string, title: string) => ({ id, type: "source" as const, schema_version: 1, revision: 1, title, created_at: "2026-09-01T08:00:00.000Z", updated_at: "2026-09-01T08:00:00.000Z", updated_by_device: "series-view-test", origin: "app" as const });
-    const addMaterials = async (meetingId: string, summary: string, sourceTitle: string) => {
+    const addMaterials = async (meetingId: string, summary: string, sourceTitle: string, restrictedSource = false) => {
       const sourceId = uuidV7();
-      await store.write({ relativePath: `sources/${sourceId}.md`, frontmatter: { ...stamp(sourceId, sourceTitle), source_type: "meet-transcript", captured_at: "2026-09-01T08:00:00.000Z", ingestion_status: "processed", meeting_id: meetingId, url: `https://example.com/${sourceId}`, retrieved_at: "2026-09-01T08:00:00.000Z" } as ObjectEnvelope, body: "" });
+      await store.write({ relativePath: `sources/${sourceId}.md`, frontmatter: { ...stamp(sourceId, sourceTitle), source_type: "meet-transcript", captured_at: "2026-09-01T08:00:00.000Z", ingestion_status: "processed", meeting_id: meetingId, ...(restrictedSource ? { sensitivity: "restricted" } : {}), url: `https://example.com/${sourceId}`, retrieved_at: "2026-09-01T08:00:00.000Z" } as ObjectEnvelope, body: "" });
       const meeting = await store.read(`meetings/${meetingId}.md`);
       await store.write({ relativePath: meeting.relativePath, expectedHash: meeting.contentHash, frontmatter: { ...meeting.frontmatter, revision: meeting.frontmatter.revision + 1 }, body: `${meeting.body}\n<!-- lifeos:summary:start -->\n\n## Summary\n\n${summary}\n\n<!-- lifeos:summary:end -->\n` });
     };
     await addMaterials(first.meetingId, "Week one summary.", "Week one transcript");
     await addMaterials(third.meetingId, "Secret summary.", "Secret transcript");
+    await addMaterials(second.meetingId, "Week two summary.", "Week two secret transcript", true);
     await app.rebuildIndex();
 
     const workspace = await preview(app, 5) as View & { seriesView: NonNullable<View["seriesView"]> };
     const byBody = (text: string) => workspace.seriesView.earlier.find((entry) => entry.note.body.includes(text))!;
 
     expect(byBody("week 1").materials).toMatchObject({ summary: "Week one summary.", sources: [{ title: "Week one transcript" }] });
-    expect(byBody("week 2").materials).toBeUndefined();
+    // (a) a restricted Source on an unrestricted occurrence is left out; its summary is not restricted so it stays.
+    expect(byBody("week 2").materials).toEqual({ summary: "Week two summary.", sources: [] });
+    expect(JSON.stringify(workspace.seriesView)).not.toContain("Week two secret transcript");
+    // (b) an occurrence whose own Note is restricted shows no materials at all.
     expect(byBody("restricted").materials).toBeUndefined();
-    expect(second.meetingId).not.toBe(first.meetingId);
+    expect(JSON.stringify(workspace.seriesView)).not.toContain("Secret");
   });
 });

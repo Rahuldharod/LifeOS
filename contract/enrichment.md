@@ -35,7 +35,7 @@ Each entry in `meetings`:
 | `recurrence_occurrence_id` | immutable provider occurrence identity; present for a recurring occurrence. The entry is that occurrence's own Meeting and `note_path` Note: every occurrence has its own |
 | `optional_material` | optional linked material such as `drive-doc`; its absence never leaves Enrichment Partial |
 
-Restricted meetings are never in a Work Order. Neither is a meeting inside a Legacy shared Note (an older Note that several occurrences share): it receives no further enrichment.
+Restricted meetings are never in a Work Order. A meeting inside a Legacy shared Note (an older Note that several occurrences share) gets no new Work Order entry, and LifeOS never writes into that Note. A draft for such a meeting that is already in flight is still adopted, onto the meeting only.
 
 ## Where the material is
 
