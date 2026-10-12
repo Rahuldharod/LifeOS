@@ -22,6 +22,45 @@ await writeFile(path.join(dataRoot, ".lifeos/schema.md"), "# LifeOS data root\n\
 await mkdir(path.join(dataRoot, "people"), { recursive: true });
 await cp(path.join(repo, "schemas/fixtures/person-self.md"), path.join(dataRoot, "people/person-self.md"));
 
+// A complete recurring-note workspace for #149's real-browser contract: two editable occurrence sections,
+// immutable event snapshots, one linked material, an accepted summary and one pending proposal.
+const objectFile = async (folder, name, frontmatter, body = "") => {
+  const target = path.join(dataRoot, folder, `${name}.md`);
+  await mkdir(path.dirname(target), { recursive: true });
+  const yaml = Object.entries(frontmatter).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n");
+  await writeFile(target, `---\n${yaml}\n---\n${body}`);
+};
+const stamped = (id, type, title) => ({ id, type, schema_version: 1, revision: 1, title, created_at: "2026-10-05T08:00:00.000Z", updated_at: "2026-10-12T08:30:00.000Z", updated_by_device: "browser-test", origin: "app" });
+const recurring = {
+  olderMeeting: "11111111-1111-4111-8111-111111111111",
+  currentMeeting: "22222222-2222-4222-8222-222222222222",
+  note: "33333333-3333-4333-8333-333333333333",
+  source: "44444444-4444-4444-8444-444444444444",
+  review: "55555555-5555-4555-8555-555555555555",
+  operation: "66666666-6666-4666-8666-666666666666",
+  series: "mock:mock-calendar:weekly-planning",
+  olderSection: "occurrence-2026-10-05t08-00-00-000z",
+  currentSection: "occurrence-2026-10-12t08-00-00-000z"
+};
+await objectFile("meetings", recurring.olderMeeting, {
+  ...stamped(recurring.olderMeeting, "meeting", "Weekly planning"), status: "scheduled", starts_at: "2026-10-05T08:00:00.000Z", ends_at: "2026-10-05T08:30:00.000Z", timezone: "Europe/Paris", attendee_ids: [], location: "Example room", recurrence_series_id: recurring.series, recurrence_occurrence_id: `${recurring.series}:2026-10-05T08:00:00.000Z`, original_occurrence_starts_at: "2026-10-05T08:00:00.000Z"
+}, "# Weekly planning\n");
+await objectFile("meetings", recurring.currentMeeting, {
+  ...stamped(recurring.currentMeeting, "meeting", "Weekly planning"), status: "scheduled", starts_at: "2026-10-12T08:00:00.000Z", ends_at: "2026-10-12T08:30:00.000Z", timezone: "Europe/Paris", attendee_ids: [], location: "Example room", join_url: "https://meet.example.com/weekly-planning", source_ids: [recurring.source], recurrence_series_id: recurring.series, recurrence_occurrence_id: `${recurring.series}:2026-10-12T08:00:00.000Z`, original_occurrence_starts_at: "2026-10-12T08:00:00.000Z"
+}, "<!-- lifeos:summary:start -->\n## Summary\nAgreed the synthetic launch plan.\n<!-- lifeos:summary:end -->\n");
+await objectFile("meetings", recurring.note, {
+  ...stamped(recurring.note, "meeting-note", "Weekly planning notes"), meeting_id: recurring.currentMeeting, meeting_ids: [recurring.currentMeeting, recurring.olderMeeting], recurrence_series_id: recurring.series, generated_title: "Weekly planning notes", occurrence_sections: [
+    { occurrence_id: `${recurring.series}:2026-10-12T08:00:00.000Z`, section_id: recurring.currentSection, meeting_id: recurring.currentMeeting, original_starts_at: "2026-10-12T08:00:00.000Z", starts_at: "2026-10-12T08:00:00.000Z" },
+    { occurrence_id: `${recurring.series}:2026-10-05T08:00:00.000Z`, section_id: recurring.olderSection, meeting_id: recurring.olderMeeting, original_starts_at: "2026-10-05T08:00:00.000Z", starts_at: "2026-10-05T08:00:00.000Z" }
+  ]
+}, `## Weekly planning — 2026-10-12T08:00:00.000Z\n<a id="${recurring.currentSection}"></a>\n\nCurrent occurrence notes.\n\n## Weekly planning — 2026-10-05T08:00:00.000Z\n<a id="${recurring.olderSection}"></a>\n\nOlder occurrence notes.\n`);
+await objectFile("sources", recurring.source, {
+  ...stamped(recurring.source, "source", "Synthetic planning transcript"), source_type: "meet-transcript", captured_at: "2026-10-12T08:35:00.000Z", ingestion_status: "processed", meeting_id: recurring.currentMeeting, url: "https://drive.example.com/docs/weekly-planning", retrieved_at: "2026-10-12T08:35:00.000Z"
+}, "Synthetic transcript content.\n");
+await objectFile("review-items", recurring.review, {
+  ...stamped(recurring.review, "review-item", "Send the synthetic agenda"), review_type: "create", target_object_type: "task", proposed_fields: { title: "Send the synthetic agenda", source_meeting_id: recurring.currentMeeting }, confidence_label: "High", status: "pending", operation_id: recurring.operation, source_meeting_id: recurring.currentMeeting, occurrence_section_id: recurring.currentSection
+}, "Synthetic proposal.\n");
+
 // Inbox Drafts (skills/lifeos-object-contract): the server adopts them once they are 2 seconds old, so they are
 // written here (the API has no route that creates them) and backdated. `seed()` in fixtures.ts triggers adoption.
 const drafts = path.join(dataRoot, "_inbox/drafts");

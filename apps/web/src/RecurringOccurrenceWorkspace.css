@@ -1,0 +1,12 @@
+.recurring-occurrence-workspace { display: grid; gap: var(--space-3); }
+.occurrence-section { border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: clip; }
+.occurrence-section > summary { cursor: pointer; display: flex; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); }
+.occurrence-section > summary span { flex: 1; }
+.occurrence-section > summary em { color: var(--color-error); }
+.occurrence-section > :not(summary) { margin-inline: var(--space-4); }
+.occurrence-snapshot, .occurrence-calendar-changes { margin-block: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-quiet); }
+.occurrence-calendar-changes { border-left: 3px solid var(--color-warning); }
+.occurrence-notes { display: grid; gap: var(--space-2); }
+.occurrence-notes textarea { min-height: 10rem; resize: vertical; }
+.occurrence-materials, .occurrence-summary, .occurrence-proposals { padding-block: var(--space-3); border-top: var(--border-thin) solid var(--color-border); }
+@media (max-width: 760px) { .occurrence-section > summary { align-items: flex-start; flex-direction: column; gap: var(--space-1); } }

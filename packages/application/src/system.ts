@@ -9,6 +9,7 @@ import type { NotesModule } from "./notes.js";
 import type { OpenPointsModule } from "./open-points.js";
 import type { PatchModule } from "./patches.js";
 import { operationKinds, type Operation, type OperationKind } from "./ports.js";
+import { resolveObjectRedirect } from "./support.js";
 import type { ReviewModule } from "./review.js";
 
 /**
@@ -64,7 +65,9 @@ export class SystemModule {
     [operationKinds.acceptReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverAccept(operation), true),
     [operationKinds.mergePerson]: async (operation) => (await this.review.recoverMerge(operation), true),
     [operationKinds.rejectReview]: async (operation) => typeof operation.payload.reviewId === "string" && (await this.review.recoverReject(operation), true),
-    [operationKinds.createMeeting]: async (operation) => typeof operation.payload.externalId === "string" && !!this.ctx.calendar && (await this.meetings.createMeetingFromEvent(operation.payload.externalId), true),
+    [operationKinds.createMeeting]: async (operation) => typeof operation.payload.externalId === "string" && !!this.ctx.calendar && (await this.meetings.recoverCreateMeeting(operation), true),
+    [operationKinds.linkRecurringSeries]: async (operation) => (await this.meetings.recoverSeriesLinks(operation), true),
+    [operationKinds.migrateRecurringNotes]: async (operation) => (await this.meetings.recoverRecurringMigration(operation), true),
     [operationKinds.supersedeDecision]: async (operation) => (await this.decisions.recoverSupersede(operation), true),
     [operationKinds.resolveOpenPoint]: async (operation) => !!this.openPoints && (await this.openPoints.recoverResolve(operation), true),
     [operationKinds.applyPatch]: async (operation) => !!this.patches && (await this.patches.recoverJournal(operation), true),
@@ -83,6 +86,11 @@ export class SystemModule {
 
   object(id: string) {
     return this.ctx.required(id);
+  }
+
+  /** Resolves additive recurrence-migration redirects while keeping the old Markdown object intact. */
+  resolveObjectLink(id: string) {
+    return resolveObjectRedirect(id, this.ctx.index.all());
   }
 
   /** #30: the user can mark any object restricted, or normal again. Repeating the same value writes nothing. */

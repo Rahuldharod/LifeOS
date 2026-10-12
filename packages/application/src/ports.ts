@@ -50,6 +50,8 @@ export const operationKinds = {
   mergePerson: "merge-person",
   rejectReview: "reject-review",
   createMeeting: "create-meeting",
+  linkRecurringSeries: "link-recurring-series",
+  migrateRecurringNotes: "migrate-recurring-notes",
   supersedeDecision: "supersede-decision",
   resolveOpenPoint: "resolve-open-point",
   applyPatch: "apply-patch",
@@ -110,10 +112,24 @@ export interface CalendarEvent {
   endsAt: string;
   timezone: string;
   isAllDay?: boolean;
+  /** Provider recurrence series. Absent for one-off and copied standalone events. */
+  seriesId?: string;
+  /** Provider-stable recurrence UID used to relate native series splits; ignored on standalone copies. */
+  seriesUid?: string;
+  /** Immutable provider occurrence identity; unlike startsAt this survives a move. */
+  originalOccurrenceStartsAt?: string;
+  /** Provider-declared predecessor when "this and following" creates a new series. */
+  previousSeriesId?: string;
+  /** Cancelled exceptions remain visible to sync/reconciliation even when they have no displayable event. */
+  status?: "confirmed" | "cancelled";
   /** The user declined the invitation; declined events are never enriched (#44). */
   declined?: boolean;
   /** Display labels (name, else email). Kept for the UI and name-only connectors. */
   attendees: string[];
+  /** Saved meeting-place snapshot. */
+  location?: string;
+  /** Provider joining link, when available. */
+  joinUrl?: string;
   /** Attendees with email when the connector knows it (#38); people are matched on these when present. */
   attendeeDetails?: CalendarAttendee[];
   clientName?: string;

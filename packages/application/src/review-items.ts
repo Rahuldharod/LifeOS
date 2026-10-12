@@ -134,6 +134,7 @@ export interface ReviewRevision {
   body: string;
   /** All the Sources the revised proposal draws on (not only the new ones). */
   sourceIds: string[];
+  evidence?: Record<string, EvidenceEntry[]>;
   fields?: Record<string, unknown>;
 }
 
@@ -147,11 +148,12 @@ export async function reviseReviewItem(ctx: AppContext, run: ProposingRun, revie
   if (stored.status !== "pending") throw new Error("Only a pending Review Item can be revised");
   const meetingId = revision.fields?.source_meeting_id ?? stored.source_meeting_id;
   const sensitivity = sensitivityOf(ctx, {
-    sourceIds: revision.sourceIds, evidence: (stored.field_evidence ?? {}) as Record<string, EvidenceEntry[]>, sensitivity: stored.sensitivity,
+    sourceIds: revision.sourceIds, evidence: revision.evidence ?? (stored.field_evidence ?? {}) as Record<string, EvidenceEntry[]>, sensitivity: stored.sensitivity,
     targetId: typeof stored.target_object_id === "string" ? stored.target_object_id : undefined, meetingId: typeof meetingId === "string" ? meetingId : undefined
   });
   return ctx.update(review, {
     proposed_fields: revision.proposed, confidence_label: revision.confidence, source_ids: revision.sourceIds,
+    ...(revision.evidence ? { field_evidence: revision.evidence } : {}),
     ...(sensitivity !== undefined ? { sensitivity } : {}), ...(run.id ? { agent_run_id: run.id } : {}), ...revision.fields
   }, { expectedHash: review.contentHash, now: run.now, body: revision.body });
 }

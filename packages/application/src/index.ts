@@ -44,6 +44,7 @@ export type { DailyFocusView, FocusItem, FocusItemState, FocusOverrideAction, Fo
 export { maxTopThree, maxMeetingPrep, maxDeferCandidates, maxBriefWords, defaultMaxMustDos, maxMustDosLimit, focusOverrideActions } from "./focus.js";
 import type { FocusOverrideChange } from "./focus.js";
 export type { CalendarDay, CalendarOffline, CalendarOfflineReason } from "./calendar.js";
+export type { RecurringMigrationPreview } from "./meetings.js";
 export type { MeetingOpenPoint, NextMeeting, OpenPointLink, TodayPanels, TodaySettings, WaitingGroup, Weekday } from "./today.js";
 export { defaultTodaySettings, weekdays } from "./today.js";
 export { agentIndexContentWithoutTimestamp, agentIndexFileNames, defaultAgentIndexDebounceMs } from "./agent-index.js";
@@ -116,6 +117,7 @@ export class LifeOSApplication {
   recoverOperations(options?: Parameters<SystemModule["recoverOperations"]>[0]) { return this.system.recoverOperations(options); }
   listObjects() { return this.system.listObjects(); }
   object(id: string) { return this.system.object(id); }
+  resolveObjectLink(id: string) { return this.system.resolveObjectLink(id); }
   archiveObject(id: string, expectedHash: string) { return this.system.archiveObject(id, expectedHash); }
   /** Called by the file watcher (U4, U5). */
   recordExternalChanges() { return this.history.recordExternalChanges(); }
@@ -207,6 +209,9 @@ export class LifeOSApplication {
   previewMeetingFromEvent(externalId: string, from?: Date, to?: Date, calendarId?: string) { return this.meetings.previewMeetingFromEvent(externalId, from, to, calendarId); }
   meetingFromEvent(externalId: string) { return this.meetings.meetingFromEvent(externalId); }
   meetingWorkspace(meetingId: string) { return this.meetings.meetingWorkspace(meetingId); }
+  recurringMigrationPreview(meetingId: string) { return this.meetings.recurringMigrationPreview(meetingId); }
+  confirmRecurringMigration(meetingId: string, expectedHashes: Record<string, string>) { return this.meetings.confirmRecurringMigration(meetingId, expectedHashes); }
+  linkPreviousSeriesNote(noteId: string, previousNoteId: string, expectedHash: string) { return this.meetings.linkPreviousSeriesNote(noteId, previousNoteId, expectedHash); }
   reconcileDuplicateMeetings(options: { apply: boolean }) { return this.meetings.reconcileDuplicateMeetings(options); }
 
   // Review

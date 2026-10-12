@@ -79,6 +79,21 @@ const populatedSelf = async (root: string) => (await readFile(path.join(root, "p
 const section = (content: string, heading: string) => content.split(heading)[1]?.split(/\n## /)[0] ?? "";
 
 describe("Agent Index (#43)", () => {
+  it("excludes every occurrence linked to one restricted recurring Note (#148)", async () => {
+    const { root, application } = await vault();
+    const first = await seed(root, "meetings", "meeting", "Private weekly one", { status: "scheduled", starts_at: at(-2), ends_at: at(-2 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [] });
+    await seed(root, "meetings", "meeting", "Private weekly two", { status: "scheduled", starts_at: at(-1), ends_at: at(-1 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: "google:work:private" });
+    await seed(root, "meetings", "meeting-note", "Private weekly notes", { meeting_id: first.id, meeting_ids: [first.id], recurrence_series_id: "google:work:private", sensitivity: "restricted" });
+    await application.rebuildIndex();
+
+    await application.writeAgentIndex({ now });
+
+    const meetings = await read(root, "meetings.md");
+    expect(meetings).toContain("2 restricted not listed.");
+    expect(meetings).not.toContain("Private weekly one");
+    expect(meetings).not.toContain("Private weekly two");
+  });
+
   it("writes every summary file, each stating its generation time, with ID, title, path and key fields", async () => {
     const { root, application, ids } = await populated();
     await application.writeAgentIndex({ now });

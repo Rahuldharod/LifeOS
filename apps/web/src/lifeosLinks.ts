@@ -1,7 +1,7 @@
 // `lifeos://object/<id>` links point at a LifeOS object (PB-007). This decides where a click goes:
 // which view shows the object, or why it cannot be opened.
 
-export type LinkedObject = { frontmatter: { id: string; type: string; title: string; deleted_at?: unknown; archived_at?: unknown } };
+export type LinkedObject = { frontmatter: { id: string; type: string; title: string; deleted_at?: unknown; archived_at?: unknown; redirect_to_note_id?: unknown; redirect_to_meeting_id?: unknown; redirect_to_section_id?: unknown } };
 
 export type LinkTarget =
   | { kind: "note"; id: string; deleted: boolean }

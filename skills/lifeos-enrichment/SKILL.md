@@ -1,6 +1,6 @@
 ---
 name: lifeos-enrichment
-description: Runs LifeOS enrichment after meetings. Reads the enrichment Work Order in _inbox/requests/, fetches Meet transcripts and recordings (calendar attachments and Drive), Gong calls (Gong connector) and Gong summary emails (Gmail), compares them with the user's meeting note, and writes one meeting-material Inbox Draft per meeting with sources, a summary and proposals flagged missed_in_notes. Skips restricted meetings, and refuses client meetings while the IT/legal policy gate is blocked. Use when the user says "run LifeOS enrichment", "enrich my meetings" or "process the Work Order".
+description: Runs LifeOS enrichment after meetings. Reads one occurrence target from each enrichment Work Order entry, fetches only its Meet, Drive, Gong and Gmail material, compares only its marked note section, and writes an occurrence-specific meeting-material Inbox Draft. Never edits LifeOS objects. Skips restricted meetings and refuses client meetings while the IT/legal policy gate is blocked. Use when the user says "run LifeOS enrichment", "enrich my meetings" or "process the Work Order".
 metadata:
   version: "1.2.0"
   skill_pack: 1
@@ -103,8 +103,8 @@ You never write objects, never edit the user's note and never edit the meeting. 
 3. **Find the Work Order** in `_inbox/requests/`: a file whose front matter has `lifeos_work_order: 1` and `kind: enrichment`. If there are several, do the oldest `requested_at` first. If there is none, tell the user to press **Enrich last 48h** in LifeOS, and stop.
 4. **Read `_agent/overview.md` (for the internal domains) and `_agent/meetings.md`.** If their `generated_at` is more than 24 hours old, warn the user that LifeOS may not be running.
 5. **For each entry in `meetings`**, decide whether to skip it (see "Skip these meetings"). Then:
-   1. Fetch only the kinds listed in `missing_material` (see "Where the material is" in the contract).
-   2. Read the user's note at `note_path`, if there is one (see "Compare with the note" in the contract).
+   1. Fetch the kinds listed in `missing_material`, plus linked material named in `optional_material` (see "Where the material is" in the contract). Missing optional material is not `unavailable` and never keeps the occurrence Partial.
+   2. When `occurrence_section_exists` is `true`, read only the section named by `occurrence_section_id` at `note_path` (see "Compare with the note" in the contract). Never read a neighbouring occurrence section.
    3. Write the draft (see "The draft" in the contract).
 6. **Self-check each draft.** Read its `.result.md` in `_inbox/processed/` or `_inbox/failed/`. If it failed, read `errors`, fix the draft, and send it again under a new file name.
 7. **File the Work Order** once every entry is done or skipped. When you have finished a Work Order, move that Work Order file from `_inbox/requests/` to `_inbox/processed/`. Move nothing else there.

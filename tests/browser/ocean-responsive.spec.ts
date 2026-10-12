@@ -300,9 +300,11 @@ test.describe("workspace-specific reflow", () => {
     const card = (await page.locator(".today-top3 > article").boundingBox())!;
     expect(Math.abs(top3.height - card.height)).toBeLessThanOrEqual(1);
     await page.setViewportSize({ width: 390, height: 800 });
+    await expect(page.locator(".application-shell")).toHaveAttribute("data-band", "narrow");
     const narrow = await Promise.all([".today-top3", ".today-next-meeting", ".quick-capture", ".today-context"].map(async (selector) => (await page.locator(selector).first().boundingBox())!.y));
     expect([...narrow].sort((a, b) => a - b)).toEqual(narrow);
     await page.setViewportSize({ width: 2560, height: 1440 });
+    await expect(page.locator(".application-shell")).toHaveAttribute("data-band", "wide");
     const columns = await Promise.all([".today-top3", ".today-side-rail", ".today-context"].map(async (selector) => (await page.locator(selector).boundingBox())!));
     expect(columns[0]!.x).toBeLessThan(columns[1]!.x);
     expect(columns[1]!.x).toBeLessThan(columns[2]!.x);

@@ -20,7 +20,9 @@ export function isMeetingRestricted(meeting: WithFrontmatter | undefined, object
   if (isRestricted(meeting)) return true;
   for (const object of objects) {
     // Not isLive on purpose: an archived restricted note still restricts its meeting (fails closed for privacy, ADR 0010).
-    if (object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meeting.frontmatter.id && !object.frontmatter.deleted_at && isRestricted(object)) return true;
+    const meetingIds = Array.isArray(object.frontmatter.meeting_ids) ? object.frontmatter.meeting_ids : [];
+    const sameSeries = typeof meeting.frontmatter.recurrence_series_id === "string" && meeting.frontmatter.recurrence_series_id === object.frontmatter.recurrence_series_id;
+    if (object.frontmatter.type === "meeting-note" && (object.frontmatter.meeting_id === meeting.frontmatter.id || meetingIds.includes(meeting.frontmatter.id) || sameSeries) && !object.frontmatter.deleted_at && isRestricted(object)) return true;
   }
   return false;
 }
@@ -43,9 +45,31 @@ export const byIdentifier = <T extends WithFrontmatter>(matches: T[]) => {
  */
 export function liveMeetingNote<T extends WithFrontmatter>(meetingId: string, objects: Iterable<T>): T | undefined {
   for (const object of objects) {
-    if (object.frontmatter.type === "meeting-note" && object.frontmatter.meeting_id === meetingId && isLive(object)) return object;
+    const meetingIds = Array.isArray(object.frontmatter.meeting_ids) ? object.frontmatter.meeting_ids : [];
+    if (object.frontmatter.type === "meeting-note" && (object.frontmatter.meeting_id === meetingId || meetingIds.includes(meetingId)) && isLive(object)) return object;
   }
   return undefined;
+}
+
+/** Follows additive Meeting/Note migration redirects without mutating the legacy objects. */
+export function resolveObjectRedirect<T extends WithFrontmatter>(id: string, objects: Iterable<T>) {
+  const byId = new Map(Array.from(objects, (object) => [object.frontmatter.id, object]));
+  const first = byId.get(id);
+  if (!first) throw new Error(`Object not found: ${id}`);
+  const redirectedFrom: string[] = [];
+  const seen = new Set([id]);
+  let object = first;
+  while (true) {
+    const target = object.frontmatter.type === "meeting-note" ? object.frontmatter.redirect_to_note_id : object.frontmatter.type === "meeting" ? object.frontmatter.redirect_to_meeting_id : undefined;
+    if (typeof target !== "string") break;
+    if (seen.has(target)) throw new Error(`Object redirect cycle at ${target}`);
+    const next = byId.get(target);
+    if (!next) throw new Error(`Object not found: ${target}`);
+    redirectedFrom.push(object.frontmatter.id);
+    seen.add(target);
+    object = next;
+  }
+  return { object, redirectedFrom, ...(typeof first.frontmatter.redirect_to_section_id === "string" ? { sectionId: first.frontmatter.redirect_to_section_id } : {}) };
 }
 
 /**
@@ -124,6 +148,8 @@ export const replayRoles = {
   main: role("main"),
   /** The meeting a meeting-material draft creates. */
   meeting: role("meeting"),
+  /** The shared recurring Note a meeting-material draft may materialize. */
+  meetingNote: role("meeting-note"),
   /** The summary Review Item of meeting material. */
   summary: role("summary"),
   /** The update Review Item a patch raises. */
