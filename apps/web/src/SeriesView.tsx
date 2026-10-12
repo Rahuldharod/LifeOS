@@ -1,12 +1,18 @@
-import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import type { SeriesView as SeriesViewData, SeriesViewEarlier } from "@lifeos/contracts";
-import { api } from "./api.js";
+import { useEffect, useRef, useState } from "react";
+import type { LifeObject, SeriesView as SeriesViewData, SeriesViewEarlier } from "@lifeos/contracts";
+import { ApiError, api } from "./api.js";
+import { readCachedDraft } from "./draftStorage.js";
+import type { LinkedObject } from "./lifeosLinks.js";
+import { MarkdownEditor, type EditorMode } from "./MarkdownEditor.js";
+import type { GuardedEditor } from "./navigationGuard.js";
+import { NoteConflictPanel } from "./NoteConflictPanel.js";
+import { SaveState } from "./SaveState.js";
+import { useNoteDraftController } from "./useNoteDraftController.js";
 import "./SeriesView.css";
 
 const dateLabel = (value: string, timeZone: string) => new Date(value).toLocaleDateString([], { timeZone, dateStyle: "full" });
 const timeLabel = (value: string, timeZone: string) => new Date(value).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" });
+
 /** The Calendar's yyyy-mm-dd for a moment in the display time zone. */
 export const calendarDate = (value: string, timeZone: string) => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
 
@@ -20,11 +26,83 @@ export function seriesViewLabel(entry: SeriesViewEarlier, timeZone: string) {
   return { title: dateLabel(entry.range.startsAt, timeZone), detail: `${timeLabel(entry.range.startsAt, timeZone)}–${timeLabel(entry.range.endsAt, timeZone)}` };
 }
 
+/** What every Series editor needs from the app. */
+export type SeriesEditorContext = {
+  mode: EditorMode;
+  /** True when another device holds the write lease: nothing may be written from here. */
+  readOnly: boolean;
+  linkObjects: LinkedObject[];
+  notify: (message: string) => void;
+  /** Registers the editor with the leave-page guard (PB-027); returns the unregister function. */
+  register: (id: string, read: () => GuardedEditor) => () => void;
+};
+
 /**
- * History of earlier occurrences with a Note, collapsed by default (ADR 0021, #179), loaded 4 at a time (#180).
- * Remount (key) per opened occurrence so loaded pages never leak between occurrences.
+ * One earlier Note, edited in place (ADR 0021, #173). It owns its own draft controller and busy state, so its
+ * autosave, base hash, browser draft, conflict and save status never touch another Note's, nor the opened
+ * occurrence's editor. A Legacy shared Note is one whole Note: its body is never split.
  */
-export function SeriesView({ view, timeZone, onOpenMeeting }: { view: SeriesViewData; timeZone: string; onOpenMeeting: (meetingId: string, date: string) => void }) {
+function SeriesNoteEditor({ entry, editor }: { entry: SeriesViewEarlier; editor: SeriesEditorContext }) {
+  const { mode, readOnly, linkObjects, notify, register } = editor;
+  const id = entry.note.frontmatter.id;
+  const [note, setNote] = useState<LifeObject>(entry.note);
+  const [opened, setOpened] = useState(false);
+  const [gone, setGone] = useState(false);
+  // Per Note, like the app-wide busy flag: image attach and the conflict choices lock only this Note.
+  const [busy, setBusy] = useState(false);
+  const controller = useNoteDraftController({
+    note,
+    readOnly,
+    busy,
+    onMessage: notify,
+    onSaved: (updated) => setNote(updated as LifeObject),
+    // The disk copy, fetched by id so a Note outside the Series view's window still resolves. Only a real 404 means gone.
+    fetchLatest: async () => {
+      try {
+        const latest = await api("GET /api/v1/notes/:id", { params: { id } });
+        setNote(latest);
+        return latest;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) { setGone(true); return undefined; }
+        throw error;
+      }
+    }
+  });
+  useEffect(() => { controller.open(entry.note, readCachedDraft(entry.note)); setOpened(true); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A refreshed Series view (the opened occurrence was reloaded) hands in a newer copy of this Note. Take it only when it
+  // is not the copy the draft is based on and not older than what we hold; the controller then resyncs or flags a conflict.
+  // The deps are deliberately just the incoming hash: we react to the parent changing it, not to our own saves.
+  const incoming = entry.note.contentHash;
+  const baseHash = controller.base?.hash;
+  useEffect(() => {
+    if (incoming !== baseHash && Number(entry.note.frontmatter.revision) >= Number(note.frontmatter.revision)) setNote(entry.note);
+  }, [incoming]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The leave-page guard reads the latest controller each time it asks.
+  const latest = useRef<GuardedEditor>(controller);
+  latest.current = controller;
+  useEffect(() => register(id, () => latest.current), [id, register]);
+
+  const choose = async (action: () => Promise<void>) => {
+    setBusy(true);
+    try { await action(); } catch (error) { notify(error instanceof Error ? error.message : "Could not reach LifeOS; try again"); } finally { setBusy(false); }
+  };
+  if (gone) return <p className="muted">This Note no longer exists on disk.</p>;
+  if (!opened) return null;
+  if (controller.conflict) return <NoteConflictPanel noteTitle={note.frontmatter.title} draftText={controller.draft} diskText={note.body} disabled={busy || readOnly} onKeepBrowserVersion={() => void choose(controller.keepBrowserVersion)} onKeepDiskVersion={() => void choose(controller.keepDiskVersion)} />;
+  return <div className="series-note-editor">
+    <MarkdownEditor mode={mode} editorKey={`series:${id}`} draft={controller.draft} onChange={controller.setDraft} readOnly={readOnly} busy={busy} owner={{ id, relativePath: note.relativePath }} linkObjects={linkObjects} setBusy={setBusy} notify={notify} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
+    <SaveState dirty={controller.dirty} autoSaving={controller.autoSaving} undoAvailable={controller.undoAvailable} undoDisabled={busy || readOnly} onUndo={() => void choose(controller.undoKeepDiskVersion)} />
+  </div>;
+}
+
+/**
+ * History of earlier occurrences with a Note, collapsed by default (ADR 0021, #179), loaded 4 at a time (#180) and
+ * edited in place (#173). Remount (key) per opened occurrence so loaded pages never leak between occurrences.
+ * There is no delete here. Every Note, including each loaded page, is its own SeriesNoteEditor.
+ */
+export function SeriesView({ view, timeZone, editor, onOpenMeeting }: { view: SeriesViewData; timeZone: string; editor: SeriesEditorContext; onOpenMeeting: (meetingId: string, date: string) => void }) {
   const [loaded, setLoaded] = useState<{ entries: SeriesViewEarlier[]; cursor: string | undefined } | undefined>();
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -49,7 +127,7 @@ export function SeriesView({ view, timeZone, onOpenMeeting }: { view: SeriesView
       const { title, detail } = seriesViewLabel(entry, timeZone);
       return <details key={entry.note.frontmatter.id} className="series-view-entry">
         <summary><span>{title}</span><b>{detail}</b>{entry.cancelled && <em>Cancelled</em>}{entry.note.frontmatter.sensitivity === "restricted" && <em>Restricted</em>}</summary>
-        <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.note.body}</ReactMarkdown></div>
+        <SeriesNoteEditor entry={entry} editor={editor} />
       </details>;
     })}
     {cursor && <button type="button" className="series-view-load-older" disabled={loading} onClick={() => void loadOlder()}>{loading ? "Loading…" : "Load older"}</button>}

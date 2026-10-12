@@ -42,6 +42,12 @@ export class NotesModule {
 
   constructor(private readonly ctx: AppContext) {}
 
+  /** One Note by id, live or deleted (#173); undefined when the id is not a Note. */
+  note(id: string) {
+    const object = this.ctx.index.get(id);
+    return object && noteTypes.includes(object.frontmatter.type) ? object : undefined;
+  }
+
   notes() {
     return this.ctx.index.all()
       .filter((object) => noteTypes.includes(object.frontmatter.type) && isLive(object))

@@ -27,6 +27,7 @@ export interface Endpoints {
 
   // Notes (PB-025, #105, PB-030)
   "GET /api/v1/notes": { query: { q?: string; state?: string; type?: string | string[]; projectId?: string; clientId?: string; productId?: string; personId?: string; from?: string; to?: string }; response: W.LifeObject[] };
+  "GET /api/v1/notes/:id": { response: W.LifeObject };
   "PATCH /api/v1/notes/:id": { body: { changes: Record<string, unknown>; expectedHash: string }; response: W.LifeObject };
   "POST /api/v1/notes/:id/previous-series": { body: { previousNoteId: string; expectedHash: string }; response: W.LifeObject };
   "POST /api/v1/notes/:id/restore": Guarded & { response: W.LifeObject };

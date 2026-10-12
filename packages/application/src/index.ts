@@ -129,6 +129,7 @@ export class LifeOSApplication {
   setSensitivity(id: string, sensitivity: Sensitivity, expectedHash: string) { return this.system.setSensitivity(id, sensitivity, expectedHash); }
 
   // Notes
+  note(id: string) { return this.notesModule.note(id); }
   notes() { return this.notesModule.notes(); }
   deletedNotes() { return this.notesModule.deletedNotes(); }
   searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) { return this.notesModule.searchNotes(query, state, filters); }
