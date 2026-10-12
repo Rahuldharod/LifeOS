@@ -103,6 +103,8 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurre
   const storageKey = `lifeos.occurrence-section.${note.frontmatter.id}`;
   const remembered = typeof localStorage === "undefined" ? undefined : localStorage.getItem(storageKey) ?? undefined;
   const [selected, setSelected] = useState(selectedSectionId ?? remembered ?? fallback);
+  // #184: clicking the open occurrence's title closes it. Sections stay mounted, so typing is kept and nothing saves.
+  const [closed, setClosed] = useState(false);
   const [previousNoteId, setPreviousNoteId] = useState("");
   const root = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -116,7 +118,7 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurre
   const previous = seriesNotes.find((candidate) => candidate.frontmatter.id === note.frontmatter.previous_series_note_id);
   const linkable = seriesNotes.filter((candidate) => candidate.frontmatter.id !== note.frontmatter.id && typeof candidate.frontmatter.recurrence_series_id === "string");
   useEffect(() => {
-    if (selectedSectionId) setSelected(selectedSectionId);
+    if (selectedSectionId) { setSelected(selectedSectionId); setClosed(false); }
     else setSelected((current) => current && ordered.some((item) => item.sectionId === current) ? current : fallback);
   }, [selectedSectionId, fallback, ordered]);
 
@@ -126,7 +128,7 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurre
       <button type="button" disabled={readOnly || linkDisabled || !previousNoteId} onClick={() => onLinkPrevious(previousNoteId)}>Link previous Note</button>
     </div> : null}
     {ordered.map((item) => {
-      const active = item.sectionId === selected;
+      const active = item.sectionId === selected && !closed;
       const pendingOccurrenceItem = item.sectionId === pendingOccurrence?.sectionId;
       const meeting = item.meeting.frontmatter;
       const pendingReviews = item.reviews.filter((review) => review.frontmatter.status === "pending");
@@ -135,7 +137,7 @@ export function RecurringOccurrenceWorkspace({ note, occurrences, pendingOccurre
       const differences = eventDifferences(item, current);
       const select = () => { setSelected(item.sectionId); localStorage.setItem(storageKey, item.sectionId); };
       return <details key={item.sectionId} className={active ? "occurrence-section selected" : "occurrence-section"} open={active || undefined}>
-        <summary onClick={(event) => { event.preventDefault(); select(); onSelectSection?.(item.sectionId); }}><span>{new Date(String(meeting.starts_at)).toLocaleDateString([], { timeZone, dateStyle: "full" })}</span><b>{new Date(String(meeting.starts_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}–{new Date(String(meeting.ends_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}</b>{pendingOccurrenceItem && <em>Not saved yet</em>}{(meeting.status === "cancelled" || current?.status === "cancelled") && <em>Cancelled</em>}</summary>
+        <summary onClick={(event) => { event.preventDefault(); if (active) { setClosed(true); return; } setClosed(false); select(); onSelectSection?.(item.sectionId); }}><span>{new Date(String(meeting.starts_at)).toLocaleDateString([], { timeZone, dateStyle: "full" })}</span><b>{new Date(String(meeting.starts_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}–{new Date(String(meeting.ends_at)).toLocaleTimeString([], { timeZone, hour: "2-digit", minute: "2-digit" })}</b>{pendingOccurrenceItem && <em>Not saved yet</em>}{(meeting.status === "cancelled" || current?.status === "cancelled") && <em>Cancelled</em>}</summary>
         <div className="occurrence-snapshot" aria-label="Saved event snapshot">
           <span>SAVED EVENT DETAILS</span>
           <p><b>{meeting.title}</b></p>

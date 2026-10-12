@@ -6,6 +6,7 @@ import type { LinkedObject } from "./lifeosLinks.js";
 import { MarkdownEditor, type EditorMode } from "./MarkdownEditor.js";
 import type { GuardedEditor } from "./navigationGuard.js";
 import { NoteConflictPanel } from "./NoteConflictPanel.js";
+import { SeriesDateList, seriesEntryDomId } from "./SeriesDateList.js";
 import { SaveState } from "./SaveState.js";
 import { useNoteDraftController } from "./useNoteDraftController.js";
 import "./SeriesView.css";
@@ -128,12 +129,21 @@ export function SeriesView({ view, timeZone, editor, onOpenMeeting }: { view: Se
       setLoaded({ entries: [...(loaded?.entries ?? []), ...page.earlier], cursor: page.nextCursor });
     } catch { setFailed(true); } finally { setLoading(false); }
   };
+  // #184: open the entry (the native <details> state, so the user's own toggling is never fought) and bring it into view.
+  const jump = (entry: SeriesViewEarlier) => {
+    const target = document.getElementById(seriesEntryDomId(entry));
+    if (!(target instanceof HTMLDetailsElement)) return;
+    target.open = true;
+    target.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    target.querySelector("summary")?.focus({ preventScroll: true });
+  };
   return <section className="series-view" aria-label="Earlier occurrences">
     {newer && <p className="series-view-newer">Newer occurrences exist. <button type="button" onClick={() => onOpenMeeting(newer.meetingId, calendarDate(newer.startsAt, timeZone))}>Open the latest ({dateLabel(newer.startsAt, timeZone)})</button></p>}
     {earlier.length > 0 && <h3>Earlier occurrences</h3>}
+    <SeriesDateList entries={earlier} labelOf={(entry) => seriesViewLabel(entry, timeZone).title} onJump={jump} />
     {earlier.map((entry) => {
       const { title, detail } = seriesViewLabel(entry, timeZone);
-      return <details key={entry.note.frontmatter.id} className="series-view-entry">
+      return <details key={entry.note.frontmatter.id} id={seriesEntryDomId(entry)} className="series-view-entry">
         <summary><span>{title}</span><b>{detail}</b>{entry.cancelled && <em>Cancelled</em>}{entry.note.frontmatter.sensitivity === "restricted" && <em>Restricted</em>}</summary>
         {entry.materials && <SeriesMaterials materials={entry.materials} />}
         <SeriesNoteEditor entry={entry} editor={editor} />

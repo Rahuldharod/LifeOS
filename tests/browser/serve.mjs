@@ -110,14 +110,14 @@ await objectFile("meetings", prio.ownNote, { ...stamped(prio.ownNote, "meeting-n
 // #173 edit-in-place: two small series (3 occurrences each, a Note per occurrence) that only the edit tests change,
 // so the read-only #179 tests above keep their text. "retro" is edited; "audit" is used for the conflict test.
 // "guard" tests the leave-page save, "typing" the caret while another Note saves, "ledger" a Legacy shared Note (below).
-for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"]]) {
+for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"], ["6", "scroll"]]) {
   const series = `mock:mock-calendar:${name}`;
   for (const month of ["01", "02", "03"]) {
     const meetingId = `${letter}1000000-0000-4000-8000-0000000000${month}`;
     const noteId = `${letter}2000000-0000-4000-8000-0000000000${month}`;
     const startsAt = `2026-${month}-10T08:00:00.000Z`;
     await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Team ${name}`), status: "scheduled", starts_at: startsAt, ends_at: `2026-${month}-10T09:00:00.000Z`, timezone: "Europe/Paris", attendee_ids: [], recurrence_series_id: series, recurrence_occurrence_id: `${series}:${startsAt}`, original_occurrence_starts_at: startsAt });
-    await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Team ${name} notes ${month}`), meeting_id: meetingId, ...(name === "guard" && month === "01" ? { sensitivity: "restricted" } : {}) },`${name} words for 2026-${month}.\n`);
+    await objectFile("meetings", noteId, { ...stamped(noteId, "meeting-note", `Team ${name} notes ${month}`), meeting_id: meetingId, ...(name === "guard" && month === "01" ? { sensitivity: "restricted" } : {}) }, name === "scroll" && month === "02" ? `${Array.from({ length: 80 }, (_, line) => `scroll line ${line + 1} of a very long Note.`).join("\n")}\n` : `${name} words for 2026-${month}.\n`); // #184: "scroll" has a very long February Note
   }
 }
 // "ledger": a Legacy shared Note covering two Meetings plus a later occurrence with its own Note (the edit test opens the later one).
