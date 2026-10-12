@@ -4,7 +4,7 @@ import { occurrenceMaterialsBlock } from "@lifeos/shared";
 import { meetingSummary } from "./meetingSummary.js";
 import "./RecurringOccurrenceWorkspace.css";
 
-type SectionRange = { sectionId: string; notesStart: number; notesEnd: number };
+type SectionRange = { sectionId: string; notesStart: number; notesEnd: number; last: boolean };
 
 function ranges(markdown: string, occurrences: OccurrenceWorkspaceItem[]): SectionRange[] {
   return occurrences.flatMap((occurrence, index) => {
@@ -15,16 +15,18 @@ function ranges(markdown: string, occurrences: OccurrenceWorkspaceItem[]): Secti
     const next = occurrences[index + 1];
     const nextAnchorAt = next ? markdown.indexOf(`<a id="${next.sectionId}"></a>`, anchorAt + anchor.length) : -1;
     const nextHeadingAt = nextAnchorAt < 0 ? markdown.length : Math.max(0, markdown.lastIndexOf("\n## ", nextAnchorAt) + 1);
-    return [{ sectionId: occurrence.sectionId, notesStart: anchorAt + anchor.length + notesStart, notesEnd: nextHeadingAt }];
+    return [{ sectionId: occurrence.sectionId, notesStart: anchorAt + anchor.length + notesStart, notesEnd: nextHeadingAt, last: nextAnchorAt < 0 }];
   });
 }
 
 export function occurrenceNotes(markdown: string, occurrences: OccurrenceWorkspaceItem[], sectionId: string) {
   const range = ranges(markdown, occurrences).find((candidate) => candidate.sectionId === sectionId);
   if (!range) return "";
-  const section = markdown.slice(range.notesStart, range.notesEnd);
+  // Strip only the separator `replaceOccurrenceNotes` writes, so a trailing space or line break the
+  // user is typing survives the round trip through the shared body.
+  const section = markdown.slice(range.notesStart, range.notesEnd).replace(range.last ? /\n$/ : /\n\n$/, "");
   const managed = occurrenceMaterialsBlock(section, sectionId);
-  return (managed ? section.replace(managed, "") : section).trimEnd();
+  return managed ? section.replace(managed, "").replace(/\n\n$/, "") : section;
 }
 
 export function replaceOccurrenceNotes(markdown: string, occurrences: OccurrenceWorkspaceItem[], sectionId: string, notes: string) {
@@ -33,9 +35,9 @@ export function replaceOccurrenceNotes(markdown: string, occurrences: Occurrence
   const before = markdown.slice(0, range.notesStart);
   const after = markdown.slice(range.notesEnd);
   const managed = occurrenceMaterialsBlock(markdown.slice(range.notesStart, range.notesEnd), sectionId);
-  const editable = notes.replace(/^\s+|\s+$/g, "");
+  const editable = notes.replace(/^\s+/, "");
   const section = [editable, managed].filter(Boolean).join("\n\n");
-  return `${before}${section}${after ? "\n\n" : ""}${after}`;
+  return `${before}${section}${range.last ? "\n" : "\n\n"}${after}`;
 }
 
 /**
@@ -43,10 +45,12 @@ export function replaceOccurrenceNotes(markdown: string, occurrences: Occurrence
  * to the shared Note, expand the browser draft to the canonical body without losing history or
  * keystrokes made while creation was in flight.
  */
-export function adoptCreatedOccurrenceDraft(createdBody: string, occurrences: OccurrenceWorkspaceItem[], meetingId: string, activeDraft: string, submittedDraft: string) {
+export function adoptCreatedOccurrenceDraft(createdBody: string, occurrences: OccurrenceWorkspaceItem[], meetingId: string, activeDraft: string) {
   const occurrence = occurrences.find((item) => item.meeting.frontmatter.id === meetingId);
-  return occurrence ? replaceOccurrenceNotes(createdBody, occurrences, occurrence.sectionId, activeDraft)
-    : activeDraft === submittedDraft ? createdBody : activeDraft;
+  // Without the new occurrence the typed text cannot be placed, and it must never stand in for the
+  // whole shared body (the 2026-10-12 overwrite). The editor is disabled while creating, so the
+  // created body already holds what was typed.
+  return occurrence ? replaceOccurrenceNotes(createdBody, occurrences, occurrence.sectionId, activeDraft) : createdBody;
 }
 
 function day(value: string, timeZone: string) {
