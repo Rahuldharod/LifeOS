@@ -1,9 +1,9 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
+import { isNoteType, noteTypes } from "@lifeos/shared";
 import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { operationKinds, type Operation } from "./ports.js";
 import { isLive, liveMeetingNote, OneAtATime, parseInstantRange, sameValue } from "./support.js";
 
-const noteTypes = ["meeting-note", "knowledge-note", "standalone-note"];
 
 const isUuid = (value: unknown) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -56,19 +56,19 @@ export class NotesModule {
   /** One Note by id, live or deleted (#173); undefined when the id is not a Note. */
   note(id: string) {
     const object = this.ctx.index.get(id);
-    return object && noteTypes.includes(object.frontmatter.type) ? object : undefined;
+    return object && isNoteType(object.frontmatter.type) ? object : undefined;
   }
 
   notes() {
     return this.ctx.index.all()
-      .filter((object) => noteTypes.includes(object.frontmatter.type) && isLive(object))
+      .filter((object) => isNoteType(object.frontmatter.type) && isLive(object))
       .sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at));
   }
 
   /** Tombstoned notes (PB-021), most recently deleted first. */
   deletedNotes() {
     return this.ctx.index.all()
-      .filter((object) => noteTypes.includes(object.frontmatter.type) && object.frontmatter.deleted_at && !object.frontmatter.archived_at)
+      .filter((object) => isNoteType(object.frontmatter.type) && object.frontmatter.deleted_at && !object.frontmatter.archived_at)
       .sort((left, right) => Date.parse(String(right.frontmatter.deleted_at)) - Date.parse(String(left.frontmatter.deleted_at)));
   }
 
@@ -79,7 +79,7 @@ export class NotesModule {
    */
   searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) {
     const types = filters.types ?? [];
-    if (types.some((type) => !noteTypes.includes(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
+    if (types.some((type) => !isNoteType(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
     const { from, to } = parseInstantRange(filters.from, filters.to);
     const dateField = state === "deleted" ? "deleted_at" : "updated_at";
     const needsMeetingNote = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
@@ -120,7 +120,7 @@ export class NotesModule {
    */
   async updateNoteMetadata(id: string, changes: Record<string, unknown>, expectedHash: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be edited here");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be edited here");
     if (current.frontmatter.deleted_at) throw new Error("This note was deleted; it can no longer be edited");
     const selected = this.validatedChanges(current.frontmatter.type, changes);
     if (current.frontmatter.type === "meeting-note" && current.frontmatter.recurrence_series_id && typeof selected.title === "string" && selected.title !== current.frontmatter.title) {
@@ -213,7 +213,7 @@ export class NotesModule {
    */
   async deleteNote(id: string, expectedHash: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be deleted here");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be deleted here");
     if (current.frontmatter.deleted_at) return current;
     const now = new Date().toISOString();
     const updated = await this.ctx.update(current, { deleted_at: now }, { expectedHash, now });
@@ -229,7 +229,7 @@ export class NotesModule {
    */
   async restoreNote(id: string, expectedHash: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be restored here");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be restored here");
     if (!current.frontmatter.deleted_at) return current;
     const meetingId = current.frontmatter.meeting_id;
     const seriesId = current.frontmatter.recurrence_series_id;
@@ -319,7 +319,7 @@ export class NotesModule {
 
   private tombstoned(id: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be deleted permanently");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be deleted permanently");
     if (!current.frontmatter.deleted_at) throw new Error("Only deleted notes can be deleted permanently; delete the note first");
     return current;
   }

@@ -3,6 +3,11 @@ export const LIFEOS_SCHEMA_VERSION = 1;
 // Rules both the server and the browser bundle need (#75). This package has no Node dependencies, so the web app
 // can import it; @lifeos/domain cannot be (it uses node:crypto).
 
+/** The three note types (ADR 0023). Every list of "what is a note" uses this one, so a new type is added once. */
+export const noteTypes = ["meeting-note", "knowledge-note", "standalone-note"] as const;
+export type NoteType = (typeof noteTypes)[number];
+export const isNoteType = (type: unknown): type is NoteType => (noteTypes as readonly unknown[]).includes(type);
+
 /** The context links an object carries: its primary project, client and product. */
 export const contextLinkFields = ["primary_project_id", "primary_client_id", "primary_product_id"] as const;
 

@@ -1,3 +1,4 @@
+import { isNoteType } from "@lifeos/shared";
 import type { CalendarEvent, LifeObject } from "@lifeos/contracts";
 import type { Route } from "./routes.js";
 import { foldText } from "./searchOptions.js";
@@ -95,7 +96,7 @@ function calendarItem(event: CalendarEvent, timeZone: string): GlobalSearchItem 
 
 export function globalSearchResults({ tasks, notes, calendar = [], query, recentIds, timeZone = "UTC" }: { tasks: LifeObject[]; notes: LifeObject[]; calendar?: CalendarEvent[]; query: string; recentIds: string[]; timeZone?: string }): GlobalSearchGroups {
   const folded = foldText(query.trim());
-  const liveNotes = notes.filter((note) => (note.frontmatter.type === "knowledge-note" || note.frontmatter.type === "meeting-note") && !note.frontmatter.archived_at && !note.frontmatter.deleted_at);
+  const liveNotes = notes.filter((note) => isNoteType(note.frontmatter.type) && !note.frontmatter.archived_at && !note.frontmatter.deleted_at);
   const calendarByNote = new Map<string, CalendarEvent[]>();
   for (const event of calendar) if (event.noteId) calendarByNote.set(event.noteId, [...calendarByNote.get(event.noteId) ?? [], event]);
   const noteItems = liveNotes.map((note) => {

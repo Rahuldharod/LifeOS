@@ -25,6 +25,18 @@ async function setup() {
 }
 
 describe("standalone note (PB-034)", () => {
+  it("the Notes list filters to Standalone Notes and the keyword reaches title and body (#224)", async () => {
+    const { application } = await setup();
+    await application.createStandaloneNote({ id: NOTE_ID, title: "Zebrafinch planning", body: "A quokkawombat idea\n", now: "2026-10-14T12:05:00.000Z" });
+    await application.createStandaloneNote({ id: "0190a1b2-0000-7000-8000-0000000000a2", title: "Other", body: "Nothing\n", now: "2026-10-14T12:06:00.000Z" });
+    const titles = (query: string, types?: string[]) => application.searchNotes(query, "open", { types }).map((note) => note.frontmatter.title);
+
+    expect(titles("", ["standalone-note"]).sort()).toEqual(["Other", "Zebrafinch planning"]);
+    expect(titles("", ["meeting-note", "knowledge-note"])).toEqual([]);
+    expect(titles("zebrafinch")).toEqual(["Zebrafinch planning"]);
+    expect(titles("quokkawombat", ["standalone-note"])).toEqual(["Zebrafinch planning"]);
+  });
+
   it("creates one file in notes/ with origin app and an auto title", async () => {
     const { root, store, application } = await setup();
     const created = await application.createStandaloneNote({ id: NOTE_ID, body: "First thoughts\n", timeZone: "Europe/Paris", now: "2026-10-14T12:05:00.000Z" });

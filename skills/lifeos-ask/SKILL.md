@@ -2,7 +2,7 @@
 name: lifeos-ask
 description: Answers questions about the user's LifeOS - open tasks, what they owe or are waiting on, open points, recent decisions, projects, clients, people and meetings - by reading the LifeOS Agent Index in the _agent/ folder. Warns when the index is more than 24 hours old and never reads restricted files. Use when the user asks "what do I owe Joel?", "what's overdue?", "what did we decide about X?", "who is waiting on me?", or any question about their LifeOS data.
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
   skill_pack: 1
   agent_index_contract: 1
 ---
@@ -34,6 +34,7 @@ This skill only reads. To add or change something, use the **lifeos-capture** sk
 | Active projects, clients and products | `_agent/projects-clients-products.md` |
 | Who is someone, their email, internal or external | `_agent/people.md` |
 | Meetings from the last 14 days and the next 7 | `_agent/meetings.md` |
+| Notes the user wrote without a meeting (Standalone Notes), newest first | `_agent/notes.md` |
 | Drafts sent but not adopted yet | `_agent/pending-adoption.md` |
 
 "What do I owe Joel?" needs two files: `_agent/tasks.md` for tasks linked to Joel, and `_agent/meetings.md` for recent meetings with him. Use `_agent/people.md` to tell two people with the same first name apart.

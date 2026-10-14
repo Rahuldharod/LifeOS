@@ -2,7 +2,7 @@
 name: lifeos-object-contract
 description: The rules for asking LifeOS to create or change anything. Covers where to write, the language rule, the restricted rule and the self-check, and reads the Inbox Draft and Patch Draft formats, draft kinds and routing from the contract LifeOS writes in _agent/contract/. Use whenever you write a file into a LifeOS _inbox/ folder, or check what happened to one. The lifeos-capture skill follows these rules.
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
   skill_pack: 1
   draft_contract: 1
   patch_contract: 1

@@ -1,6 +1,7 @@
 // PB-027: every tab and every open item has its own path, so Back/Forward, reload and bookmarks work.
 // The URL is the source of truth for which tab and which item are open.
 
+import { isNoteType } from "@lifeos/shared";
 import { resolveLifeosLink, type LinkedObject } from "./lifeosLinks.js";
 
 export type View = "Today" | "Calendar" | "Notes" | "Tasks" | "Decisions" | "Open Points" | "Projects" | "Clients" | "Products" | "People" | "Knowledge" | "Inbox" | "System" | "Settings";
@@ -68,7 +69,7 @@ export function routeTarget(route: Route, data: RouteData): RouteTarget {
     // durable redirect must still make old bookmarks land on the Note that took over (a Legacy shared Note, ADR 0021).
     const current = here.find((object) => object.frontmatter.id === id)
       ?? data.objects.find((object) => object.frontmatter.id === id && Boolean(object.frontmatter.archived_at)
-        && (object.frontmatter.type === "meeting-note" || object.frontmatter.type === "knowledge-note"));
+        && isNoteType(object.frontmatter.type));
     if (current) {
       const target = current.frontmatter.redirect_to_note_id;
       if (typeof target !== "string") return { kind: "ok" };

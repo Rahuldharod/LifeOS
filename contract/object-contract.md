@@ -95,6 +95,10 @@ What happens:
 - **Applies on its own** only when `user-dictated` and the target is a task changing `status`, `due_on`, `due_at`, `due_timezone`, `priority` or `waiting_for` (with status Waiting), or when it only appends a note. The user can undo it in LifeOS.
 - **Becomes an `update` Review Item** for everything else: titles, owners, decision text, any field on a decision, closing or resolving an open point, any `agent-extracted` patch, and any field the user changed after `captured_at` (conflict rule).
 
+## Standalone Notes (read-only for Agents)
+
+A `standalone-note` is a note the user wrote with no meeting and no source. You can read them in `_agent/notes.md` (title, path, created, project, client, product, people), and restricted ones are never listed. You cannot create one: there is no draft kind for it, so capture ideas as `knowledge-note` drafts as before.
+
 ## Idempotency
 
 - Re-sending the same file with the same `draft_key` is harmless: the result is `duplicate`.

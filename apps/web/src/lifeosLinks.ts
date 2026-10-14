@@ -1,6 +1,8 @@
 // `lifeos://object/<id>` links point at a LifeOS object (PB-007). This decides where a click goes:
 // which view shows the object, or why it cannot be opened.
 
+import { isNoteType } from "@lifeos/shared";
+
 export type LinkedObject = { frontmatter: { id: string; type: string; title: string; deleted_at?: unknown; archived_at?: unknown; redirect_to_note_id?: unknown; redirect_to_meeting_id?: unknown; redirect_to_section_id?: unknown } };
 
 export type LinkTarget =
@@ -27,7 +29,7 @@ export function resolveLifeosLink(href: string, objects: LinkedObject[]): LinkTa
   const object = objects.find((candidate) => candidate.frontmatter.id.toLowerCase() === id);
   if (!object) return { kind: "missing", id };
   const { type } = object.frontmatter;
-  if (type === "meeting-note" || type === "knowledge-note") return { kind: "note", id, deleted: Boolean(object.frontmatter.deleted_at) };
+  if (isNoteType(type)) return { kind: "note", id, deleted: Boolean(object.frontmatter.deleted_at) };
   // #118: an explicit ID still opens an archived object, so old links keep working; only a deleted one is gone.
   if (object.frontmatter.deleted_at) return { kind: "missing", id };
   if (type === "meeting") return { kind: "meeting", id };

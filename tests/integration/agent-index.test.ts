@@ -72,13 +72,33 @@ async function populated() {
 }
 
 const read = (root: string, name: string) => readFile(path.join(root, "_agent", name), "utf8");
-const files = ["overview.md", "tasks.md", "waiting-on.md", "open-points.md", "decisions.md", "projects-clients-products.md", "people.md", "meetings.md", "pending-adoption.md"];
+const files = ["overview.md", "tasks.md", "waiting-on.md", "open-points.md", "decisions.md", "projects-clients-products.md", "people.md", "meetings.md", "notes.md", "pending-adoption.md"];
 /** The part of a file between a heading and the next heading of the same level. */
 /** The ID of the self person in a populated vault. */
 const populatedSelf = async (root: string) => (await readFile(path.join(root, "people", (await readdir(path.join(root, "people"))).find((name) => name.startsWith("robin-doe"))!), "utf8")).match(/^id: (.+)$/m)![1]!;
 const section = (content: string, heading: string) => content.split(heading)[1]?.split(/\n## /)[0] ?? "";
 
 describe("Agent Index (#43)", () => {
+  it("lists a normal Standalone Note and leaves out a restricted one (#224, ADR 0023)", async () => {
+    const { root, application } = await vault();
+    const project = await seed(root, "projects", "project", "Retail Media", { status: "active" });
+    const normal = await seed(root, "notes", "standalone-note", "Pricing thoughts", { primary_project_id: project.id, created_at: "2026-10-03T09:00:00.000Z" }, "# Pricing thoughts\n\nPRIVATE-BODY-TEXT\n");
+    await seed(root, "notes", "standalone-note", "Hush thoughts", { sensitivity: "restricted" });
+    await seed(root, "notes", "standalone-note", "Old thoughts", { archived_at: at(-1) });
+    await application.rebuildIndex();
+
+    await application.writeAgentIndex({ now });
+
+    const notes = await read(root, "notes.md");
+    expect(notes).toContain("restricted_excluded: 1");
+    expect(notes).toContain("1 restricted not listed.");
+    expect(notes).toContain(`- **Pricing thoughts**\n  id: ${normal.id} · path: ${normal.relativePath} · created: 2026-10-03T09:00:00.000Z · project: Retail Media`);
+    for (const left of ["Hush thoughts", "Old thoughts", "PRIVATE-BODY-TEXT"]) expect(notes).not.toContain(left);
+    const overview = await read(root, "overview.md");
+    expect(overview).toContain("- notes.md: Standalone Notes");
+    expect(overview).toContain("- standalone-note: 1 · `notes/`");
+  });
+
   it("excludes every meeting a restricted legacy shared Note is linked to, and no other (#148, #175)", async () => {
     const { root, application } = await vault();
     const first = await seed(root, "meetings", "meeting", "Private weekly one", { status: "scheduled", starts_at: at(-2), ends_at: at(-2 + 1 / 24), timezone: "Europe/Paris", attendee_ids: [] });

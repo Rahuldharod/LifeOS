@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { uuidV7 } from "../../apps/web/src/uuid.js";
 import { seed } from "./fixtures.js";
 
 // PB-034 (#222): "New note" writes nothing until the first real edit. Real local API, synthetic data from serve.mjs.
@@ -104,4 +105,35 @@ test("A failed first save keeps the held choices on screen with the error", asyn
   await page.getByRole("button", { name: "Markdown" }).click();
   await page.getByPlaceholder("Write Markdown…").fill("Recovered after failure");
   await expect.poll(async () => (await standaloneNotes(request)).find((note) => note.body === "Recovered after failure")?.frontmatter.sensitivity, { timeout: 10_000 }).toBe("restricted");
+});
+
+// PB-034 (#224): a Standalone Note is found by global search and opened by a lifeos:// link.
+const createNote = async (request: APIRequestContext, title: string, body: string) => {
+  const response = await request.post("/api/v1/notes", { data: { id: uuidV7(), title, body } });
+  expect(response.ok()).toBe(true);
+  return ((await response.json()) as Created).frontmatter.id;
+};
+
+test("Global search finds a Standalone Note by its title and by a word in its body", async ({ page, request }) => {
+  await seed(request);
+  const id = await createNote(request, "Zebrafinch planning", "Remember the quokkawombat idea.");
+  await page.goto("/tasks");
+  await page.getByRole("complementary", { name: "Application navigation" }).getByRole("button", { name: "Search" }).click();
+  const search = page.getByLabel("Search LifeOS");
+  for (const query of ["Zebrafinch", "quokkawombat"]) {
+    await search.fill(query);
+    await page.getByRole("button", { name: /Zebrafinch planning/ }).first().click();
+    await expect(page).toHaveURL(new RegExp(`/notes/${id}$`));
+    await page.getByRole("complementary", { name: "Application navigation" }).getByRole("button", { name: "Search" }).click();
+  }
+});
+
+test("A lifeos:// link in another note opens the Standalone Note", async ({ page, request }) => {
+  await seed(request);
+  const target = await createNote(request, "Linked target note", "Target body");
+  const source = await createNote(request, "Linking note", `See [the target](lifeos://object/${target}) now.`);
+  await page.goto(`/notes/${source}`);
+  await page.getByRole("link", { name: "the target" }).dispatchEvent("click");
+  await expect(page).toHaveURL(new RegExp(`/notes/${target}$`));
+  await expect(page.getByRole("button", { name: "Open note: Linked target note" })).toBeVisible();
 });

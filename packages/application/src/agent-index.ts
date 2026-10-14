@@ -16,7 +16,7 @@ import { isLive, isMeetingRestricted, isRestricted, OneAtATime } from "./support
  */
 
 export const agentIndexContractVersion = 1;
-export const agentIndexFileNames = ["overview.md", "tasks.md", "waiting-on.md", "open-points.md", "decisions.md", "projects-clients-products.md", "people.md", "meetings.md", "pending-adoption.md"] as const;
+export const agentIndexFileNames = ["overview.md", "tasks.md", "waiting-on.md", "open-points.md", "decisions.md", "projects-clients-products.md", "people.md", "meetings.md", "notes.md", "pending-adoption.md"] as const;
 export const defaultAgentIndexDebounceMs = 1500;
 /** `canWrite`: false while another device holds the lease (ADR 0003); nothing is written then. */
 /** `contract`: the bundled contract files (ADR 0020), written to `_agent/contract/` with every index write. */
@@ -199,6 +199,12 @@ export class AgentIndexModule {
       ["Next 7 days", meetings.shown.filter((meeting) => start(meeting) >= now.getTime()).map(meetingEntry)]
     ], "Enrichment: none, requested, enriched, partial or gave_up.");
 
+    // Standalone Notes (ADR 0023): listed by title and path only, never the body; restricted ones are counted, not named.
+    const standalone = visible(ofType("standalone-note").sort((a, b) => String(b.frontmatter.created_at).localeCompare(String(a.frontmatter.created_at))));
+    const notesFile = file("notes.md", "Standalone Notes", standalone.restricted, [["Standalone Notes", standalone.shown.map((note) => entry(note, [
+      ["created", str(note.frontmatter.created_at)], ...context(note), ["people", list(note.frontmatter.people_ids).map(name).filter((value) => value && value !== "(restricted)").join(", ")]]))]],
+    "Notes the user wrote without a meeting. Newest first. Open the note at its path for the text. Agents read them here and cannot create them.");
+
     const pending = await this.pendingDrafts();
     const pendingFile = file("pending-adoption.md", "Pending adoption", pending.restricted, [["Drafts and patches in _inbox/", pending.entries]],
       "Agent drafts LifeOS has not adopted yet. They are not objects: treat their content as provisional.");
@@ -220,7 +226,7 @@ export class AgentIndexModule {
       ["Files", [
         "- tasks.md: my open tasks, overdue / today / upcoming / no date", "- waiting-on.md: waiting on others, by person, with age", "- open-points.md: open points",
         "- decisions.md: decisions from the last 30 days", "- projects-clients-products.md: active projects, clients and products", "- people.md: people, labels, emails, external flag",
-        "- meetings.md: meetings from the last 14 days and the next 7, with enrichment state", "- pending-adoption.md: drafts waiting in _inbox/"
+        "- meetings.md: meetings from the last 14 days and the next 7, with enrichment state", "- notes.md: Standalone Notes (notes written without a meeting), newest first", "- pending-adoption.md: drafts waiting in _inbox/"
       ]],
       // #93: the enrichment skill's client gate needs the configured domains; none set means every non-synthetic meeting counts as client.
       ["Internal domains", internalDomains.length ? internalDomains.map((domain) => `- ${domain}`) : ["- none set"]],
@@ -237,7 +243,7 @@ export class AgentIndexModule {
     ], "Read the file that answers the question, then open the object at its path for detail. Paths are relative to the data root.");
 
     const contract = this.contract.map(({ name, content }) => ({ name: `${contractFolder}/${name}`, content }));
-    return [overview, tasksFile, waitingFile, openPointsFile, decisionsFile, workFile, peopleFile, meetingsFile, pendingFile, ...contract];
+    return [overview, tasksFile, waitingFile, openPointsFile, decisionsFile, workFile, peopleFile, meetingsFile, notesFile, pendingFile, ...contract];
   }
 
   private async pendingDrafts() {
