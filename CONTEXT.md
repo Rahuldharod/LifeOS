@@ -60,6 +60,10 @@ An Inbox Draft that changes an existing object rather than creating one.
 An app-written request in `_inbox/requests/` for an Agent run, such as Enrichment or a replan.
 _Avoid_: Job, task (a Task is a user commitment)
 
+**App Feedback**:
+A Bug or Feature note about LifeOS itself, typed into the app's feedback button. Not an object: it never appears in Notes or the Agent Index, and it gets a backlog ID only when promoted into the Product Backlog.
+_Avoid_: Inbox item, idea (the backlog's Inbox is where it lands after promotion)
+
 **Work Order filing rule**:
 The one exception to "Agents never write into `_inbox/processed/`": when an Agent finishes a Work Order, it moves that file from `_inbox/requests/` to `_inbox/processed/`, and nothing else. A Work Order still in `requests/` counts as not done.
 
