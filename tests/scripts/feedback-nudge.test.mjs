@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 // ADR 0022: the SessionStart hook reports waiting App Feedback files. Temporary roots only, never the real data root.
 
+// The zshrc fallback only matters on the user's Macs; CI runners may lack zsh, so only the fallback success test is skipped there.
+const hasZsh = spawnSync("zsh", ["-c", "true"]).status === 0;
 const script = path.resolve("scripts/hooks/feedback-nudge.mjs");
 const roots = [];
 async function makeRoot(files) {
@@ -59,7 +61,7 @@ describe("feedback nudge", () => {
     expect(await run({})).toMatchObject({ status: 0, stdout: "", stderr: "" });
     expect(await run({ LIFEOS_DATA_ROOT: "  " })).toMatchObject({ status: 0, stdout: "", stderr: "" });
   });
-  it("falls back to the root exported in zshrc, ignoring other zshrc output", async () => {
+  it.skipIf(!hasZsh)("falls back to the root exported in zshrc, ignoring other zshrc output", async () => {
     const root = await makeRoot(["a.md", "b.md"]);
     const zdot = await zdotdirWith(`echo noisy zshrc output\nexport LIFEOS_DATA_ROOT='${root}'\n`);
     const result = await run({ ZDOTDIR: zdot });
