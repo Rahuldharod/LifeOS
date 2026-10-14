@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { BodyOf } from "@lifeos/contracts";
+import { api } from "./api.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 
 export type FeedbackRequest = BodyOf<"POST /api/v1/feedback">;
@@ -63,4 +64,25 @@ function FeedbackForm({ page, object, onClose, onSend }: { page: string; object?
       <button type="submit" className="primary" disabled={!text.trim() || sending}>{sending ? "Sending…" : "Send"}</button>
     </div>
   </form>;
+}
+
+/**
+ * PB-018: the feedback state for the application page: whether the popup is open, the "Feedback saved" toast (cleared after
+ * 4 s) and the send call. The object link is sent only when the URL's open item is a loaded object (`knownObjectIds`).
+ * Spread `dialog` onto `FeedbackDialog`; call `open` from the nav button.
+ */
+export function useAppFeedback({ page, openObjectId, knownObjectIds }: { page: string; openObjectId?: string; knownObjectIds: readonly string[] }) {
+  const [isOpen, setOpen] = useState(false);
+  const [toast, setToast] = useState("");
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(""), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+  const object = openObjectId && knownObjectIds.includes(openObjectId) ? `lifeos://object/${openObjectId}` : undefined;
+  const send = async (request: FeedbackRequest) => {
+    const saved = await api("POST /api/v1/feedback", { body: request });
+    setToast(saved.message);
+  };
+  return { open: () => setOpen(true), toast, dialog: { open: isOpen, page, object, onClose: () => setOpen(false), onSend: send } };
 }

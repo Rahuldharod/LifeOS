@@ -29,11 +29,11 @@ export class FeedbackWriteError extends Error { override name = "FeedbackWriteEr
 const objectLink = /^lifeos:\/\/object\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 
+/** The date and time in the user's zone, for the file name only; stored instants are UTC. */
 function localParts(now: Date, timeZone?: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "longOffset" }).formatToParts(now);
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", }).formatToParts(now);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value ?? "";
-  const offset = part("timeZoneName").replace("GMT", "") || "+00:00";
-  return { date: `${part("year")}-${part("month")}-${part("day")}`, time: `${part("hour")}${part("minute")}${part("second")}`, clock: `${part("hour")}:${part("minute")}:${part("second")}`, offset };
+  return { date: `${part("year")}-${part("month")}-${part("day")}`, time: `${part("hour")}${part("minute")}${part("second")}` };
 }
 
 const deviceSlug = (device: string) => device.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "device";
@@ -59,7 +59,7 @@ export class FeedbackModule {
       const file = await this.inbox.writeDocument("feedback", name, {
         lifeos_feedback: feedbackContractVersion,
         label: input.label,
-        captured_at: `${local.date}T${local.clock}${local.offset}`,
+        captured_at: now.toISOString(),
         page: input.page,
         ...(input.object ? { object: input.object } : {}),
         app_version: this.appInfo.version,

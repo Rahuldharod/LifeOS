@@ -43,8 +43,16 @@ describe("submitting App Feedback", () => {
     expect(name).toMatch(/^2026-10-14-090503-rahul-s-macbook-pro-[a-z0-9]{4}\.md$/);
     expect(result.file).toBe(`_inbox/feedback/${name}`);
     const { frontmatter, body } = await read(root, name!);
-    expect(frontmatter).toEqual({ lifeos_feedback: 1, label: "bug", captured_at: "2026-10-14T09:05:03+02:00", page: "Tasks", object: objectLink, app_version: "0.1.0", app_commit: "abc1234", device: "Rahul's MacBook Pro" });
+    expect(frontmatter).toEqual({ lifeos_feedback: 1, label: "bug", captured_at: "2026-10-14T07:05:03.000Z", page: "Tasks", object: objectLink, app_version: "0.1.0", app_commit: "abc1234", device: "Rahul's MacBook Pro" });
     expect(body).toBe(text);
+  });
+
+  it("stores captured_at in UTC and names the file in the user's local time", async () => {
+    const { root, application } = await vault();
+    await application.submitFeedback({ label: "feature", text: "Late evening", page: "Today" }, { now: new Date("2026-10-14T22:30:00.000Z") });
+    const [name] = await files(root);
+    expect(name).toMatch(/^2026-10-15-003000-/);
+    expect((await read(root, name!)).frontmatter.captured_at).toBe("2026-10-14T22:30:00.000Z");
   });
 
   it("leaves the object field out when no object is open", async () => {
