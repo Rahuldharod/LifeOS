@@ -61,6 +61,7 @@ import { GlobalSearchOverlay } from "./GlobalSearchOverlay.js";
 import { calendarSearchRange, recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
+import { FeedbackDialog, useAppFeedback } from "./FeedbackDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { SeriesView } from "./SeriesView.js";
 import { noteSeriesRoute } from "./noteSeriesLink.js";
@@ -940,6 +941,8 @@ function App() {
 
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
 
+  const feedback = useAppFeedback({ page: view, openObjectId: route?.id, knownObjectIds: objectLinks.map((object) => object.frontmatter.id) });
+
   return <ApplicationShell
     activeView={view}
     pendingReviewCount={pendingReviews.length}
@@ -948,7 +951,10 @@ function App() {
     onNavigate={(item) => void go(tabRoute(item))}
     onSearch={openSearch}
     onCapture={() => setCaptureOpen(true)}
+    onFeedback={feedback.open}
   >
+      <FeedbackDialog {...feedback.dialog} />
+      {feedback.toast && <div className="feedback-toast" role="status">{feedback.toast}</div>}
       <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} calendar={searchCalendar.events} calendarOffline={searchCalendar.offline} calendarUnavailable={searchCalendar.unavailable} timeZone={displayTimeZone} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
       <OverlayDialog open={captureOpen} label="Global Capture" onClose={() => setCaptureOpen(false)}>
         <header className="global-search-header"><div><span>GLOBAL CAPTURE</span><h2>Capture a task</h2></div><button type="button" aria-label="Close Capture" onClick={() => setCaptureOpen(false)}>×</button></header>

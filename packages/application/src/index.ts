@@ -9,6 +9,7 @@ import { EnrichmentModule } from "./enrichment.js";
 import { DecisionsModule, type DecisionFilters } from "./decisions.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
 import { DailyFocusModule } from "./focus.js";
+import { FeedbackModule, type AppInfo, type FeedbackInput } from "./feedback.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule, type NoteFilters } from "./notes.js";
@@ -30,6 +31,8 @@ export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, per
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarEventReference, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
 export { inboxFolders, operationKinds } from "./ports.js";
+export type { AppInfo, FeedbackInput, FeedbackLabel } from "./feedback.js";
+export { feedbackLabels } from "./feedback.js";
 export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus, SkillPackStatus } from "./adoption.js";
 export { currentSkillPack, oldestAcceptedSkillPack } from "./skill-pack.js";
 export { contractFileVersion, contractFolder, contractVersionOf, readContractFile } from "./contract.js";
@@ -72,6 +75,7 @@ export class LifeOSApplication {
   private readonly patches: PatchModule;
   private readonly people: PeopleModule;
   private readonly focus: DailyFocusModule;
+  private readonly feedback: FeedbackModule;
   private readonly agentIndex: AgentIndexModule;
   private readonly todayModule: TodayModule;
   private readonly backups: BackupModule;
@@ -80,7 +84,7 @@ export class LifeOSApplication {
    * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
    * `agentIndex` writes the derived Agent Index to `_agent/` after index rebuilds (ADR 0009); without it nothing is written.
    */
-  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string; agentIndexCanWrite?: () => boolean; contract?: ContractFile[] } = {}) {
+  constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string; agentIndexCanWrite?: () => boolean; contract?: ContractFile[]; appInfo?: AppInfo } = {}) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
     this.patches = new PatchModule(ctx);
     this.people = new PeopleModule(ctx);
@@ -96,6 +100,7 @@ export class LifeOSApplication {
     this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.capture, this.enrichment, this.openPointsModule, this.patches, this.notesModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.focus = new DailyFocusModule(ctx, inbox);
+    this.feedback = new FeedbackModule(inbox, deviceId, options.appInfo ?? { version: "unknown", commit: "unknown" }, options.timeZone);
     this.todayModule = new TodayModule(ctx, this.entitiesModule, this.adoption, this.enrichment, this.meetings, this.calendarModule, this.people);
     this.history = new HistoryModule(ctx);
     const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite, contract: options.contract };
@@ -165,6 +170,8 @@ export class LifeOSApplication {
   saveTodaySettings(input: Partial<Omit<TodaySettings, "contentHash">>, expectedHash?: string) { return this.todayModule.saveSettings(input, expectedHash); }
   /** "Refresh" on Today: writes a `replan` Work Order for the date (#46). */
   requestReplan(date: string, options?: { now?: Date }) { return this.focus.requestReplan(date, options); }
+  /** ADR 0022: saves one App Feedback file in `_inbox/feedback/`. */
+  submitFeedback(input: FeedbackInput, options?: { now?: Date }) { return this.feedback.submit(input, options); }
   rollups(type: "client" | "product" | "person") { return this.entitiesModule.rollups(type); }
   projects() { return this.entitiesModule.projects(); }
 

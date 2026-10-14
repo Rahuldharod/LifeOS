@@ -69,6 +69,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .shell-nav-group { display: grid; gap: var(--space-1); }
 .shell-nav-group + .shell-nav-group { margin-top: var(--space-3); padding-top: var(--space-3); border-top: var(--border-thin) solid var(--color-sidebar-divider); }
 .shell-sidebar-footer { flex: 0 0 auto; display: grid; gap: var(--space-1); margin-top: var(--space-3); padding-top: var(--space-3); border-top: var(--border-thin) solid var(--color-sidebar-divider); }
+.shell-footer-pair { display: flex; gap: var(--space-1); }
+.shell-sidebar .shell-footer-pair > button:first-child { flex: 1 1 0; width: auto; min-width: 0; }
+.shell-sidebar .shell-footer-pair > .shell-feedback { flex: 0 0 var(--target-min); width: var(--target-min); justify-content: center; padding-inline: 0; }
+.navigation-collapsed .shell-footer-pair { flex-direction: column; }
+.navigation-collapsed .shell-sidebar .shell-footer-pair > button:first-child, .navigation-collapsed .shell-sidebar .shell-footer-pair > .shell-feedback { flex: 0 0 auto; width: 100%; }
 .shell-sidebar em { min-width: 22px; margin-left: auto; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--color-sidebar-text); color: var(--color-sidebar); font-size: var(--font-size-xs); font-style: normal; font-weight: 800; text-align: center; }
 .connection { margin: 0; padding: 0 var(--space-2); overflow: hidden; color: var(--color-sidebar-muted); font-size: var(--font-size-xs); line-height: 1.4; overflow-wrap: anywhere; }
 .connection > i { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--color-success-border); }
@@ -727,3 +732,14 @@ h2, h3 { overflow-wrap: anywhere; }
 .settings-rail nav button, .settings-search-results button, .reference-rows > button, .inbox-row, .global-search-result, .focus-controls button, .knowledge-row, .task-row > button { justify-content: flex-start; text-align: left; }
 .settings-search-results button, .knowledge-row, .task-row > button { display: grid; }
 .calendar-day-buttons { grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)) !important; }
+
+/* PB-018 / ADR 0022: the App Feedback popup (content of OverlayDialog) and its "Feedback saved" toast. */
+.feedback-dialog { display: grid; gap: var(--space-4); }
+.feedback-dialog .feedback-text { width: 100%; min-height: 9rem; resize: vertical; font: inherit; }
+.feedback-label-toggle { display: inline-flex; margin: 0; padding: 0; border: 0; gap: var(--space-2); }
+.feedback-label-toggle label { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); cursor: pointer; }
+.feedback-label-toggle label:has(input:checked) { border-color: var(--color-accent); background: var(--color-surface-quiet); font-weight: 700; }
+.feedback-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); }
+.feedback-error { margin: 0; color: var(--color-error); }
+.feedback-hint { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.feedback-toast { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 70; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-success-surface); color: var(--color-success); box-shadow: var(--shadow-overlay); font-weight: 700; }

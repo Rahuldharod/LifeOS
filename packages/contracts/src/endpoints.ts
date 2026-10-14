@@ -99,6 +99,7 @@ export interface Endpoints {
   "GET /api/v1/today": { query: { date?: string }; response: W.Today };
   "GET /api/v1/today/panels": { query: { date?: string; timeZone?: string }; response: W.TodayPanels };
   "POST /api/v1/focus/replan": { body: { date: string }; response: W.Message };
+  "POST /api/v1/feedback": { body: { label: "bug" | "feature"; text: string; page: string; object?: string }; response: W.Message };
   "POST /api/v1/focus/overrides": { body: W.FocusChange & { date: string; expectedHash?: string }; response: W.DailyFocus };
 
   // Tasks, capture, knowledge, rollups

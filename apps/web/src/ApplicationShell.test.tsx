@@ -62,6 +62,14 @@ describe("ApplicationShell", () => {
     expect(document.querySelector(".application-shell")?.classList.contains("navigation-collapsed")).toBe(true);
   });
 
+  it("puts a Feedback button beside Settings when the page can open feedback", () => {
+    const onFeedback = vi.fn();
+    act(() => root!.render(<ApplicationShell activeView="Today" status="Ready" onNavigate={vi.fn()} onSearch={vi.fn()} onCapture={vi.fn()} onFeedback={onFeedback}><p>Page</p></ApplicationShell>));
+    expect([...document.querySelectorAll(".shell-footer-pair button")].map((item) => item.getAttribute("aria-label"))).toEqual(["Settings", "Send feedback"]);
+    act(() => button("Send feedback")!.click());
+    expect(onFeedback).toHaveBeenCalledTimes(1);
+  });
+
   it("exposes navigation, Search and Capture through public controls", () => {
     const onNavigate = vi.fn();
     const onSearch = vi.fn();

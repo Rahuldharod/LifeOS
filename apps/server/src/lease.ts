@@ -51,11 +51,11 @@ export class IdleRelease {
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 /** Writes allowed without the lease: they change no objects. */
-const allowedWithoutLease = new Set(["/api/v1/session/take-over", "/api/v1/session/activity", "/api/v1/index/rebuild", "/api/v1/settings/connections/retry"]);
+const allowedWithoutLease = new Set(["/api/v1/session/take-over", "/api/v1/session/activity", "/api/v1/index/rebuild", "/api/v1/settings/connections/retry", "/api/v1/feedback"]);
 /** These routes update the lease themselves. */
 const sessionRoutes = new Set(["/api/v1/session/take-over", "/api/v1/session/activity"]);
 /** Writes that do not prove someone is at this Mac. */
-const notActivity = [/^\/api\/v1\/backups(\/|$)/, /^\/api\/v1\/calendar\/day\/sync/, /^\/api\/v1\/index\/rebuild$/, /^\/api\/v1\/settings\/connections\/retry$/, /^\/api\/v1\/inbox\/adopt$/];
+const notActivity = [/^\/api\/v1\/backups(\/|$)/, /^\/api\/v1\/calendar\/day\/sync/, /^\/api\/v1\/index\/rebuild$/, /^\/api\/v1\/settings\/connections\/retry$/, /^\/api\/v1\/inbox\/adopt$/, /^\/api\/v1\/feedback$/];
 
 export function countsAsActivity(method: string, url: string) {
   const route = url.split("?")[0] ?? url;
