@@ -262,6 +262,9 @@ importers:
       '@lifeos/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      '@lifeos/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       fastify:
         specifier: ^5.0.0
         version: 5.12.5

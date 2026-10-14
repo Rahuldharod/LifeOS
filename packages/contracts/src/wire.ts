@@ -70,7 +70,9 @@ export type SetupWarning = { selfEmailsMissing: boolean; internalDomainsMissing:
 export type BackupWarningKind = "backup-failed" | "off-drive-failed" | "overdue";
 /** #84: a backup or the off-Drive copy failed, or none succeeded in 26 hours. */
 export type BackupWarning = { kind: BackupWarningKind; message: string; reason: string; at?: string };
-export type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; idleReleaseMinutes: number; setupWarning?: SetupWarning; backupWarning?: BackupWarning };
+export type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; idleReleaseMinutes: number; setupWarning?: SetupWarning; backupWarning?: BackupWarning; appInfo: AppInfo };
+/** #208: the server's App version (`YY.MM.DD.N`, `-dev+<commit>` off main) and short commit. */
+export type AppInfo = { version: string; commit: string };
 
 /** ADR 0007: Inbox Drafts plus Patch Drafts waiting to be adopted, and the ones that failed. */
 export type InboxStatus = { awaiting: number; drafts: number; patches: number; failed: Array<{ path: string; reason: string }> };

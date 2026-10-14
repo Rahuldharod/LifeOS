@@ -105,7 +105,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   const idle = new IdleRelease(session, options.idleReleaseMs);
   registerLease(server, { session, idle, stopping: () => stopping });
 
-  route(server, "GET /api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
+  route(server, "GET /api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning(), appInfo: options.appInfo ?? { version: "unknown", commit: "unknown" } }));
   route(server, "GET /api/v1/objects", async () => application.listObjects());
   registerNotesList(server, application);
   route(server, "GET /api/v1/entities/:type", async (request) => application.entities(request.params.type));

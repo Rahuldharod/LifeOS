@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, type ReactNode } from "react";
 import { OverlayDialog } from "./OverlayDialog.js";
 import type { View } from "./routes.js";
 import { useShellLayout, WorkspaceLayoutContext } from "./useNarrowWorkspace.js";
+import { uiAppInfo } from "./app-info.js";
 
 export const navigationCollapsedKey = "lifeos.navigation.collapsed";
 
@@ -99,6 +100,7 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
         {destination("Settings")}
         {onFeedback && <button type="button" className="shell-feedback" aria-label="Send feedback" title="Send feedback" onClick={() => { setMenuOpen(false); onFeedback(); }}><ShellIcon name="Feedback" /></button>}
       </div>
+      <p className="shell-version shell-label" aria-label="App version" title={`App version, commit ${uiAppInfo.commit}`}>{uiAppInfo.version}</p>
       <p className="connection" role="status" title={status}><i className={readOnly ? "warning-dot" : ""} /> <span className="shell-label">{status}</span></p>
     </div>
   </>;

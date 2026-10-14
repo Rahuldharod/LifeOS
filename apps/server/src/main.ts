@@ -37,7 +37,7 @@ const api = await buildApi({
   dataRoot,
   backupRoot: resolveBackupRoot(),
   deviceId,
-  appInfo: readAppInfo(),
+  appInfo: readAppInfo(undefined, { dev: process.env.NODE_ENV !== "production" }),
   secrets,
   calendars,
   idleReleaseMs: idleReleaseMs(),
