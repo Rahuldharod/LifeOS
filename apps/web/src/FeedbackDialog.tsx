@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { BodyOf } from "@lifeos/contracts";
 import { OverlayDialog } from "./OverlayDialog.js";
+import { useResizableBox } from "./resizableBox.js";
+
+/** Browser-storage key of the popup size: a per-device preference (ADR 0005), separate from the editor size. */
+export const FEEDBACK_SIZE_KEY = "lifeos.feedbackSize";
+/** Smallest popup that still shows the text box, the label toggle and Send. */
+export const FEEDBACK_MIN_SIZE = { minWidth: 360, minHeight: 360 } as const;
 
 export type FeedbackRequest = BodyOf<"POST /api/v1/feedback">;
 type Label = FeedbackRequest["label"];
@@ -19,7 +25,9 @@ export function FeedbackDialog({ open, page, object, onClose, onSend }: {
   onClose: () => void;
   onSend: (request: FeedbackRequest) => Promise<void>;
 }) {
-  return <OverlayDialog open={open} label="Send feedback" onClose={onClose}>
+  const box = useResizableBox(FEEDBACK_SIZE_KEY, [], { ...FEEDBACK_MIN_SIZE, centered: true, fitWindow: true });
+  return <OverlayDialog open={open} label="Send feedback" onClose={onClose} className={box.resized ? "feedback-popup resized" : "feedback-popup"} style={box.style}
+    decoration={<div {...box.handleProps} aria-label="Resize feedback (double-click to reset)" />}>
     <FeedbackForm page={page} object={object} onClose={onClose} onSend={onSend} />
   </OverlayDialog>;
 }

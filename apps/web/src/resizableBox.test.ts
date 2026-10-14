@@ -8,3 +8,14 @@ describe("notes editor resize (PB-024 follow-up)", () => {
     expect(clampBoxSize({ width: 2000, height: 3000 }, 1200)).toEqual({ width: 1200, height: 3000 });
   });
 });
+
+describe("feedback popup limits", () => {
+  const limits = { minWidth: 360, minHeight: 360, maxHeight: 500 };
+  it("uses its own minimum and never grows taller than the window room", () => {
+    expect(clampBoxSize({ width: 100, height: 100 }, 1200, limits)).toEqual({ width: 360, height: 360 });
+    expect(clampBoxSize({ width: 800, height: 900 }, 1200, limits)).toEqual({ width: 800, height: 500 });
+  });
+  it("keeps the minimum when the window is smaller than it", () => {
+    expect(clampBoxSize({ width: 800, height: 900 }, 300, { ...limits, maxHeight: 200 })).toEqual({ width: 360, height: 360 });
+  });
+});

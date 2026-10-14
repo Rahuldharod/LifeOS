@@ -51,3 +51,61 @@ test("keeps the popup open with the text and an error when the save fails", asyn
   await expect(dialog.getByRole("alert")).toHaveText("Could not save feedback: disk full");
   await expect(dialog.getByLabel("Feedback", { exact: true })).toHaveValue("Do not lose this");
 });
+
+// PB-018 (#201): the popup has a bottom-right handle; the size is kept per device and double-click resets it.
+test("resizes the popup by its corner handle, remembers it after reload and resets on double-click", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Send feedback" }).click();
+  const dialog = page.getByRole("dialog", { name: "Send feedback" });
+  const handle = dialog.getByRole("separator");
+  const size = async () => (await dialog.boundingBox())!;
+  const defaultSize = await size();
+
+  const grab = (await handle.boundingBox())!;
+  const from = { x: grab.x + grab.width / 2, y: grab.y + grab.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 100, from.y + 120, { steps: 5 });
+  await page.mouse.up();
+  const grown = await size();
+  expect(grown.width).toBeGreaterThan(defaultSize.width + 150);
+  expect(grown.height).toBeGreaterThan(defaultSize.height + 100);
+  await expect(dialog.getByLabel("Feedback", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Send", exact: true })).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Send feedback" }).click();
+  const remembered = await size();
+  expect(remembered.width).toBeCloseTo(grown.width, 0);
+  expect(remembered.height).toBeCloseTo(grown.height, 0);
+
+  await dialog.getByRole("separator").dblclick();
+  const reset = await size();
+  expect(reset.width).toBeCloseTo(defaultSize.width, 0);
+  expect(reset.height).toBeCloseTo(defaultSize.height, 0);
+});
+
+test("never grows past the window or below the size that keeps Send visible", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Send feedback" }).click();
+  const dialog = page.getByRole("dialog", { name: "Send feedback" });
+  const grab = (await dialog.getByRole("separator").boundingBox())!;
+  await page.mouse.move(grab.x + 10, grab.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(2000, 2000, { steps: 4 });
+  await page.mouse.up();
+  const big = (await dialog.boundingBox())!;
+  expect(big.x + big.width).toBeLessThanOrEqual(1000);
+  expect(big.y + big.height).toBeLessThanOrEqual(700);
+
+  const small = (await dialog.getByRole("separator").boundingBox())!;
+  await page.mouse.move(small.x + 10, small.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(0, 0, { steps: 4 });
+  await page.mouse.up();
+  await expect(dialog.getByLabel("Feedback", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Send", exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("Bug")).toBeVisible();
+});

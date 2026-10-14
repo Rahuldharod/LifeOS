@@ -622,6 +622,9 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
 @media (max-width: 640px) {
   .overlay-backdrop { place-items: end center; padding: 0; }
   .overlay-dialog { width: 100%; max-height: 88vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  /* The bottom sheet is always full width; a remembered desktop size does not apply and the handle is hidden. */
+  .feedback-popup, .feedback-popup.resized { width: 100% !important; height: auto !important; max-height: 88vh; }
+  .feedback-popup > .resize-handle { display: none; }
   .global-search-groups { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .overlay-backdrop, .overlay-dialog { scroll-behavior: auto; } }
@@ -734,8 +737,11 @@ h2, h3 { overflow-wrap: anywhere; }
 .calendar-day-buttons { grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)) !important; }
 
 /* PB-018 / ADR 0022: the App Feedback popup (content of OverlayDialog) and its "Feedback saved" toast. */
-.feedback-dialog { display: grid; gap: var(--space-4); }
-.feedback-dialog .feedback-text { width: 100%; min-height: 9rem; resize: vertical; font: inherit; }
+.feedback-popup { position: relative; display: flex; flex-direction: column; overflow: hidden; max-height: calc(100vh - min(12vh, 96px) - var(--space-4)); }
+.feedback-popup.resized { max-width: calc(100vw - 2 * var(--space-4)); }
+.feedback-dialog { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; gap: var(--space-4); }
+.feedback-dialog > * { flex: none; }
+.feedback-dialog .feedback-text { flex: 1 1 9rem; width: 100%; min-height: 3rem; box-sizing: border-box; resize: none; font: inherit; }
 .feedback-label-toggle { display: inline-flex; margin: 0; padding: 0; border: 0; gap: var(--space-2); }
 .feedback-label-toggle label { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); cursor: pointer; }
 .feedback-label-toggle label:has(input:checked) { border-color: var(--color-accent); background: var(--color-surface-quiet); font-weight: 700; }
