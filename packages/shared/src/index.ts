@@ -77,5 +77,5 @@ export function personMatchesQuery(frontmatter: Readonly<Record<string, unknown>
   return words.every((word) => haystack.includes(word));
 }
 
-export { emailFitsName, emailNameMatch, isUnreviewedPerson, type EmailNameMatchKind, type NameCandidate } from "./person-match.js";
+export { emailFitsName, emailNameMatch, foldForSearch, isUnreviewedPerson, type EmailNameMatchKind, type NameCandidate } from "./person-match.js";
 export { appVersion, unknownAppInfo, type AppInfo, type BuildHistory, type MainCommit } from "./app-version.js";
