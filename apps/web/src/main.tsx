@@ -74,7 +74,7 @@ import { NotesWorkspace } from "./NotesWorkspace.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
-import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
+import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, PersonMergeChoice, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
@@ -782,6 +782,17 @@ function App() {
     await refresh();
   }, `${object.frontmatter.title} confirmed`);
 
+  // #213: Manual merge. The preview is read-only; the merge goes through the same crash-safe merge as an Inbox suggestion and answers the kept person.
+  const previewPersonMerge = (person: LifeObject, choice: PersonMergeChoice) => api("GET /api/v1/people/:id/merge-preview", { params: { id: person.frontmatter.id }, query: choice });
+  const mergePeople = async (person: LifeObject, choice: PersonMergeChoice) => {
+    let kept: LifeObject | undefined;
+    await run(async () => {
+      kept = await api("POST /api/v1/people/:id/merge", { params: { id: person.frontmatter.id }, body: choice });
+      await refresh();
+    }, "People merged");
+    return kept;
+  };
+
   // #87: Give up from the meeting page, guarded by the meeting's own content hash.
   const giveUpMeetingEnrichment = (meeting: LifeObject) => run(async () => {
     await api("POST /api/v1/meetings/:id/enrichment/gave-up", { params: { id: meeting.frontmatter.id }, body: { expectedHash: meeting.contentHash } });
@@ -1159,7 +1170,7 @@ function App() {
           const plural = type === "person" ? "people" : `${type}s`;
           const label = plural[0]!.toUpperCase() + plural.slice(1);
           const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
-          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} run={run} onRestored={refresh} /> }] };
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} run={run} onRestored={refresh} /> }] };
         })}
       />}
   </ApplicationShell>;

@@ -109,7 +109,16 @@ export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" 
 /** #39: a person's display label; `externalSource` says why they are (or are not) external. */
 export type PersonLabel = { id: string; name: string; label: string; suffix?: string; isExternal: boolean; externalSource: "self" | "override" | "email" | "stored"; unreviewed?: boolean };
 
-export type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
+/** #213: the other person of a Manual merge and, optionally, who survives and whose name is kept (IDs of the two people). */
+export type PersonMergeChoice = { otherPersonId: string; keepPersonId?: string; nameFromPersonId?: string };
+/** #213: what a Manual merge would do; `keepLocked` means the Self person is involved, so who survives cannot be changed. */
+export type PersonMergePreview = {
+  keepPersonId: string; nameFromPersonId: string; keepLocked: boolean;
+  keep: { id: string; title: string }; merge: { id: string; title: string };
+  keptName: string; aliases: string[]; emails: string[]; referenceCount: number;
+};
+
+export type FocusItem ={ id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
 /** #47: one change to the date's Top 3. */
 export type FocusChange = { action: "pin" | "unpin" | "replace" | "dismiss" | "restore" | "reset"; taskId?: string; replacementId?: string };
 /** #46: the Daily Focus brief with live status. */
