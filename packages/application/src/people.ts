@@ -17,6 +17,12 @@ const FREE_MAIL_DOMAINS = new Set(["gmail.com", "googlemail.com", "outlook.com",
 /** How a Person's addresses are stored: `identifiers: [{ kind: email, value }]`, value lowercased. */
 export type PersonIdentifier = { kind: "email"; value: string };
 
+/** #214: the address already belongs to another person, who is named so the UI can offer a merge instead. */
+export class PersonEmailTakenError extends Error {
+  override name = "PersonEmailTakenError";
+  constructor(readonly email: string, readonly otherPersonId: string, readonly otherPersonName: string) { super(`${email} belongs to ${otherPersonName}`); }
+}
+
 export function normalizeEmail(value: unknown) {
   if (typeof value !== "string") return undefined;
   const email = value.trim().toLowerCase();
@@ -263,6 +269,41 @@ export class PeopleModule {
     const now = new Date().toISOString();
     const updated = await ctx.update(person, { is_external_override: override, is_external: isExternal }, { expectedHash, now });
     await ctx.writeAudit("person.external-changed", id, now, { from: before, to: value, is_external: isExternal });
+    await ctx.rebuildIndex();
+    return updated;
+  }
+
+  /**
+   * #214: adds an address to a person, lowercased. An address already on this person writes nothing; one on another
+   * person who is not deleted (merged-away people are deleted) is refused with PersonEmailTakenError. Other identifiers stay.
+   */
+  async addEmail(id: string, value: unknown, expectedHash: string) {
+    const { ctx } = this;
+    const email = normalizeEmail(value);
+    if (!email) throw new Error("Enter a valid email address");
+    const person = ctx.required(id, "person");
+    if (personEmails(person).includes(email)) return person;
+    const holder = ctx.index.all().find((other) => other.frontmatter.type === "person" && other.frontmatter.id !== id && !other.frontmatter.deleted_at && personEmails(other).includes(email));
+    if (holder) throw new PersonEmailTakenError(email, holder.frontmatter.id, String(holder.frontmatter.title));
+    const identifiers = [...(Array.isArray(person.frontmatter.identifiers) ? person.frontmatter.identifiers : []), { kind: "email", value: email } satisfies PersonIdentifier];
+    const now = new Date().toISOString();
+    const updated = await ctx.update(person, { identifiers }, { expectedHash, now });
+    await ctx.writeAudit("person.email-added", id, now, {});
+    await ctx.rebuildIndex();
+    return updated;
+  }
+
+  /** #214: removes an address from a person (any casing). One that is not there writes nothing. */
+  async removeEmail(id: string, value: unknown, expectedHash: string) {
+    const { ctx } = this;
+    const email = normalizeEmail(value);
+    if (!email) throw new Error("Enter a valid email address");
+    const person = ctx.required(id, "person");
+    if (!personEmails(person).includes(email)) return person;
+    const identifiers = (person.frontmatter.identifiers as unknown[]).filter((identifier) => personEmails({ frontmatter: { identifiers: [identifier] } } as unknown as LifeOSObject)[0] !== email);
+    const now = new Date().toISOString();
+    const updated = await ctx.update(person, { identifiers }, { expectedHash, now });
+    await ctx.writeAudit("person.email-removed", id, now, {});
     await ctx.rebuildIndex();
     return updated;
   }
