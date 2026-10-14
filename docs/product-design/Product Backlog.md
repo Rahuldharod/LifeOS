@@ -1,6 +1,6 @@
 # LifeOS Product Backlog
 
-Last reviewed: 2026-10-13
+Last reviewed: 2026-10-14
 
 This file is the durable product-level backlog for LifeOS. It captures problems and opportunities before they are detailed enough to become implementation work.
 
@@ -45,6 +45,8 @@ High-value capabilities to address after the current version is stable.
 | PB-031 | Split Legacy shared Notes | One-time reviewed split of each Legacy shared Note (ADR 0019 format) into one Note per occurrence, backup first, originals kept until confirmed, so the Visual editor and the collapsible series view work on old data. Known case: the Weekly Prio note; [TBD] count any others. See *Analysis* below. | 3 | Medium | 3 | — | — |
 | PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
+| PB-032 | App version numbering | Every build carries an App version `YY.MM.DD.N` (Paris date of the merge to main, Nth merge that day), worked out from git; non-main builds add `-dev+<commit>`. No bot, no tags. | 2 | High | 1 | agent | #208 |
+| PB-033 | Show the App version | "About LifeOS" card on System (UI and server App version, build date, commit, "run update-app" warning when they differ) and a muted App version in the nav footer. App Feedback already stamps it. Depends on PB-032. | 2 | High | 1 | agent | #208 |
 
 ## Later
 
@@ -74,7 +76,6 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 | 2026-10-13 | Inbox: accepting a task proposal can also mark it closed. Implies a task life cycle with defined statuses (To do, In progress, Done, Abandoned). Needs a check of today's task statuses and of existing tasks, the transitions allowed (can Done reopen?), and how status shows in lists and filters (PB-005, PB-013). Today's statuses are Inbox, Next, Waiting, Done, Cancelled (`packages/domain`), so this is mostly a mapping and naming question. Decided 2026-10-13: show To do (stored as Next), add In progress, show Abandoned (stored as Cancelled). Open: whether to rename stored values (needs a migration of existing task files) or only relabel in the UI (recommended: relabel, add In progress). | Rahul, Inbox + Tasks |
 | 2026-10-13 | Delete button beside the Save button on every object editor (notes, tasks, projects, clients, products, people). One consistent place, same look. | Rahul, UX consistency |
 | 2026-10-13 | Cmd+Enter saves the object being edited, in every editor. Related to PB-014 (command palette and shortcuts); this one is a small standalone slice. | Rahul, keyboard flow |
-| 2026-10-13 | App version in `X.X.X` format, bumped on every merge to main and shown in the UI. See *Analysis: app version* below. | Rahul, traceability |
 | 2026-10-13 | Create a note without a meeting. Choose the project, client, product, people and other metadata at creation (PB-006's header pickers already exist after first edit). | Rahul, Notes tab |
 | 2026-10-13 | `@` tagging in note and task editors. Typing `@` plus a character (for example `@P`) opens a list under the text, grouped by type across all objects, for example *Person:* Paul; *Product:* P.Promo, P.Picks. Up/Down arrows move through the options; Enter or Space picks one, puts the value in the text and sets that metadata on the object. The `@` text is not kept: once picked it disappears and only the metadata is set (decided 2026-10-13). | Rahul, capture speed |
 | 2026-10-13 | Settings has no Area manager. `areaOptions` is a fixed list in code, so the user cannot add or edit area values. Add an Areas card beside the other reference-data cards. | Rahul, Settings |
@@ -82,11 +83,7 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 
 ### Analysis notes for the 2026-10-13 items
 
-**App version.**
-- Where: System page, a new "About LifeOS" card at the top showing `Version 0.4.2` and the build date. Also a small muted version in the nav-bar footer, next to Settings, so it is visible without opening a page.
-- Source of truth: the `version` field in the root `package.json`, injected into the build.
-- Bumping: a GitHub Action on merge to main raises the patch number (`X.X.Z`); the minor number is raised by hand for a notable feature. A bump commit by a bot avoids forgetting it.
-- [TBD] Does the stable app (4310) show the version of its snapshot? It should, since `update-app` serves a snapshot.
+**App version.** Promoted on 2026-10-14 to PB-032 and PB-033 (spec #208). Calendar versioning was chosen over semver: one user and no outside consumers, so a date says more than major/minor; the counter is computed from git so there is no bot commit.
 
 **Recurring meeting notes.**
 - What changed: ADR 0019 (one shared Note per series) caused the 2026-10-12 overwrite incident, so ADR 0021 replaced it with one Note per occurrence, shown as the last 4 occurrences, collapsed, newest first.
