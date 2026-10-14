@@ -301,9 +301,9 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!isCalendarDay(request.body?.date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
     return application.requestReplan(request.body.date);
   });
-  // #47: one change to the date's Top 3 (pin, unpin, replace, dismiss, restore, reset); 409 when expectedHash is stale.
   // ADR 0022 (PB-018): one App Feedback file in `_inbox/feedback/`; not an object, so no lease is needed.
   route(server, "POST /api/v1/feedback", async (request) => application.submitFeedback({ label: request.body?.label, text: request.body?.text, page: request.body?.page, object: request.body?.object }));
+  // #47: one change to the date's Top 3 (pin, unpin, replace, dismiss, restore, reset); 409 when expectedHash is stale.
   route(server, "POST /api/v1/focus/overrides", async (request, reply) => {
     const { date, action, taskId, replacementId, expectedHash } = request.body ?? {};
     if (!isCalendarDay(date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });

@@ -61,7 +61,7 @@ import { GlobalSearchOverlay } from "./GlobalSearchOverlay.js";
 import { calendarSearchRange, recordRecentSearchId } from "./globalSearch.js";
 import { CapturePanel, type CaptureRequest } from "./CapturePanel.js";
 import { OverlayDialog } from "./OverlayDialog.js";
-import { FeedbackDialog, type FeedbackRequest } from "./FeedbackDialog.js";
+import { FeedbackDialog, useAppFeedback } from "./FeedbackDialog.js";
 import { TaskWorkspace, createStructuredEditorGuard } from "./TaskWorkspace.js";
 import { SeriesView } from "./SeriesView.js";
 import { noteSeriesRoute } from "./noteSeriesLink.js";
@@ -212,13 +212,6 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchCalendar, setSearchCalendar] = useState<CalendarDay & { unavailable?: true }>({ events: [] });
   const [captureOpen, setCaptureOpen] = useState(false);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [feedbackToast, setFeedbackToast] = useState("");
-  useEffect(() => {
-    if (!feedbackToast) return;
-    const timer = setTimeout(() => setFeedbackToast(""), 4000);
-    return () => clearTimeout(timer);
-  }, [feedbackToast]);
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
@@ -946,12 +939,7 @@ function App() {
 
   const pendingReviews = reviews.filter((review) => review.frontmatter.status === "pending");
 
-  // PB-018 / ADR 0022: App Feedback carries the current tab and, when the URL names a loaded object, its lifeos:// link.
-  const feedbackObject = route?.id && objectLinks.some((object) => object.frontmatter.id === route.id) ? `lifeos://object/${route.id}` : undefined;
-  const sendFeedback = async (request: FeedbackRequest) => {
-    const saved = await api("POST /api/v1/feedback", { body: request });
-    setFeedbackToast(saved.message);
-  };
+  const feedback = useAppFeedback({ page: view, openObjectId: route?.id, knownObjectIds: objectLinks.map((object) => object.frontmatter.id) });
 
   return <ApplicationShell
     activeView={view}
@@ -961,10 +949,10 @@ function App() {
     onNavigate={(item) => void go(tabRoute(item))}
     onSearch={openSearch}
     onCapture={() => setCaptureOpen(true)}
-    onFeedback={() => setFeedbackOpen(true)}
+    onFeedback={feedback.open}
   >
-      <FeedbackDialog open={feedbackOpen} page={view} object={feedbackObject} onClose={() => setFeedbackOpen(false)} onSend={sendFeedback} />
-      {feedbackToast && <div className="feedback-toast" role="status">{feedbackToast}</div>}
+      <FeedbackDialog {...feedback.dialog} />
+      {feedback.toast && <div className="feedback-toast" role="status">{feedback.toast}</div>}
       <GlobalSearchOverlay open={searchOpen} tasks={tasks} notes={notes} calendar={searchCalendar.events} calendarOffline={searchCalendar.offline} calendarUnavailable={searchCalendar.unavailable} timeZone={displayTimeZone} onClose={() => setSearchOpen(false)} onOpen={(target) => void go(target)} />
       <OverlayDialog open={captureOpen} label="Global Capture" onClose={() => setCaptureOpen(false)}>
         <header className="global-search-header"><div><span>GLOBAL CAPTURE</span><h2>Capture a task</h2></div><button type="button" aria-label="Close Capture" onClick={() => setCaptureOpen(false)}>×</button></header>
