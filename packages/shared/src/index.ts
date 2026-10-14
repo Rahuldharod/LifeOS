@@ -1,3 +1,5 @@
+import { foldForSearch } from "./person-match.js";
+
 export const LIFEOS_SCHEMA_VERSION = 1;
 
 // Rules both the server and the browser bundle need (#75). This package has no Node dependencies, so the web app
@@ -58,7 +60,6 @@ export function acceptedSummaryText(body: string) {
   if (end < 0) return "";
   return lines.slice(start + 1, end).join("\n").replace(/^\s*##\s+Summary\s*\n/i, "").trim();
 }
-const foldForSearch = (value: string) => value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 /** Email addresses and aliases recorded on a Person (#211): what People search matches besides the name. Hand-edited files may list plain strings. */
 export function personSearchTerms(frontmatter: Readonly<Record<string, unknown>>): string[] {
@@ -76,4 +77,5 @@ export function personMatchesQuery(frontmatter: Readonly<Record<string, unknown>
   return words.every((word) => haystack.includes(word));
 }
 
+export { emailFitsName, emailNameMatch, foldForSearch, isUnreviewedPerson, type EmailNameMatchKind, type NameCandidate } from "./person-match.js";
 export { appVersion, unknownAppInfo, type AppInfo, type BuildHistory, type MainCommit } from "./app-version.js";

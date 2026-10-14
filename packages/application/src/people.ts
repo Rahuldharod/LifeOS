@@ -1,4 +1,5 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { isUnreviewedPerson } from "@lifeos/shared";
 import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
 import { byIdentifier, isLive, OneAtATime } from "./support.js";
@@ -162,7 +163,7 @@ export function personDisplayLabels(objects: ReadonlyArray<Pick<LifeOSObject, "f
 }
 
 /** #87: created automatically (calendar, adoption) and not yet saved or confirmed by the user (PRD story 72). */
-export const isUnreviewed = (person: Pick<LifeOSObject, "frontmatter">) => person.frontmatter.review_state === "unreviewed";
+export const isUnreviewed = (person: Pick<LifeOSObject, "frontmatter">) => isUnreviewedPerson(person.frontmatter);
 
 /** One attendee as the matcher sees it. Name-only connectors give strings; a bare address counts as an email. */
 function attendeesOf(event: CalendarEvent): CalendarAttendee[] {

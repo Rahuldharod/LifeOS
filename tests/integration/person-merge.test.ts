@@ -112,7 +112,7 @@ describe("person-merge suggestions (#40)", () => {
   it("suggests a merge when the email local part matches across internal domains, but not across other domains", async () => {
     const { root, calendar, application } = await setup();
     await application.saveInternalDomains(["example.com", "example.org"], undefined);
-    calendar.events = [event("e1", [{ email: "joel.smith@example.com" }, { email: "sam.lee@acme.com" }])];
+    calendar.events = [event("e1", [{ email: "joel.smith@example.com" }, { email: "sam.lee@acme.com", displayName: "SL" }])];
     await application.createMeetingFromEvent("e1");
     await dropDraft(root, "j.md", { draft_key: "j", title: "J. Smith", email: "Joel.Smith@example.org" });
     await dropDraft(root, "s.md", { draft_key: "s", title: "S. Lee", email: "sam.lee@other.com" });
