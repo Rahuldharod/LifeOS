@@ -363,8 +363,11 @@ function App() {
     : { view: target };
   const calendarRoute = (date: string): Route => ({ view: "Calendar", date, id: route?.view === "Calendar" ? route.id : undefined });
 
-  const refreshWorkspace = async (meetingId: string) => {
+  const refreshWorkspace = async (meetingId: string, options: { opened?: boolean } = {}) => {
     const next = await api("GET /api/v1/meetings/:id/workspace", { params: { id: meetingId } });
+    // #192: an opened meeting gets its fresh editor in the same render as its own draft. Bumped before the fetch, the
+    // editor was created over the previous meeting's draft and kept showing (and saving) that text in this meeting.
+    if (options.opened) { setEditorMode("visual"); setEditorSession((session) => session + 1); }
     setWorkspace(next);
     if (next.note) meetingController.open(next.note, readCachedDraft(next.note)); else if (!previewTarget.current) meetingController.reset();
   };
@@ -475,8 +478,7 @@ function App() {
       if (target.kind === "redirect") { followRoute(target.route, { replace: true }); return; }
       if (target.kind !== "ok") { close(); return; }
       previewTarget.current = undefined;
-      setEditorMode("visual"); setEditorSession((session) => session + 1);
-      await run(() => refreshWorkspace(meetingId), "Meeting opened");
+      await run(() => refreshWorkspace(meetingId, { opened: true }), "Meeting opened");
     })();
   }, [location.pathname, collectionsLoaded]);
 
@@ -1002,7 +1004,7 @@ function App() {
                 {workspace.note
                   ? <NoteHeader note={workspace.note} kind="CANONICAL NOTE" {...headerOptions} disabled={busy || readOnly || meetingController.autoSaving} onSave={saveMeetingNoteDetails}><ModeSwitch mode={editorMode} onChange={setEditorMode} visualDisabled={hasRawAnchorLines(meetingController.draft)} /><HistoryLink objectId={workspace.note.frontmatter.id} title={workspace.note.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={() => refreshWorkspace(workspace.meeting.frontmatter.id)} /></NoteHeader>
                   : <NoteHeader note={pendingHeaderNote(workspace)} kind={workspace.seriesView ? "NEW OCCURRENCE" : "NEW NOTE"} {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { pendingDetails.current = { ...pendingDetails.current, ...changes }; return true; }}><ModeSwitch mode={editorMode} onChange={setEditorMode} /></NoteHeader>}
-                <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraft} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage />
+                <MarkdownEditor mode={editorMode} editorKey={`meeting:${editorSession}`} draft={meetingController.draft} onChange={meetingController.setDraftFor(meetingController.target)} readOnly={readOnly} busy={busy} ready={editorReady} owner={meetingOwner} ensureOwner={ensureMeetingNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} onImageStored={refresh} placeholder="Capture meeting notes… Paste or drop an image here." codeLanguagePrompt="Code language (for example: typescript, python, sql)" caretAfterInsert={false} refocusAfterImage />
                 <div className="editor-footer">
                   <SaveState dirty={meetingController.dirty} autoSaving={meetingController.autoSaving} pending={meetingController.pending} undoAvailable={meetingController.undoAvailable} undoDisabled={busy || readOnly} onUndo={() => withBusy(meetingController.undoKeepDiskVersion)} />
                   <MeetingNoteActions canDelete={Boolean(workspace.note)} deleteDisabled={busy || readOnly || meetingController.autoSaving} saveDisabled={!editorReady || busy || !meetingController.dirty || readOnly} onDelete={deleteMeetingNote} onSave={saveNote} />
@@ -1053,7 +1055,7 @@ function App() {
         renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
               <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
               {seriesRoute && <p className="series-link"><a href={routePath(seriesRoute)} onClick={(event) => { event.preventDefault(); followRoute(seriesRoute); }}>Show series</a></p>}
-              <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraft} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
+              <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraftFor(selectedNote.frontmatter.id)} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
               <div className="editor-footer"><SaveState dirty={notesController.dirty} autoSaving={notesController.autoSaving} undoAvailable={notesController.undoAvailable} undoDisabled={busy || readOnly} onUndo={() => withBusy(notesController.undoKeepDiskVersion)} /><div className="actions"><button className="danger" disabled={busy || readOnly || notesController.autoSaving} onClick={deleteSelectedNote}>Delete note</button><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedNote.frontmatter.created_at)} /><Meta label="Updated" value={formatDate(selectedNote.frontmatter.updated_at)} /><Meta label="Revision" value={String(selectedNote.frontmatter.revision)} /><Meta label="File" value={selectedNote.relativePath} /></div>
             </EditorFrame>}

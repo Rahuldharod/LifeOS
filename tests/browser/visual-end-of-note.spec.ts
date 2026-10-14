@@ -148,3 +148,26 @@ test("opening another Note without typing writes nothing, even for a Note the Vi
   expect(writes).toEqual([]);
   expect(await noteBody(request, solo("07").note)).toBe(before);
 });
+
+// #192 review: a switch that does not move focus (Back / Forward, a programmatic open) gives the editor no blur to
+// flush on. The typing must still reach the Note it was typed in, never the next one. The clock is paused as above.
+test("typing in Visual and going Back to another Note without leaving the editor saves the typing to the original Note", async ({ page, request }) => {
+  await seed(request);
+  const other = await noteBody(request, solo("05").note);
+  await page.clock.install();
+  await page.goto(`/notes/${solo("05").note}`);
+  await page.getByText("Solo notes 06", { exact: true }).first().click();
+  const editor = page.locator("[contenteditable='true']").first();
+  await expect(editor.getByRole("heading", { name: "Solo image" })).toBeVisible();
+  await editor.focus();
+  await page.keyboard.press(END_OF_DOCUMENT);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await page.keyboard.type("Z192B");
+  await page.goBack();
+  await expect(page.locator("[contenteditable='true']").first().getByRole("heading", { name: "Solo summary" })).toBeVisible();
+  await expect(page.locator("[contenteditable='true']").first()).not.toContainText("Z192B");
+  await page.clock.resume();
+  await expect.poll(() => noteBody(request, solo("06").note), { timeout: 15000 }).toContain("Z192B");
+  await page.clock.runFor(5000); // well past the editor debounce and the 1.8 s autosave
+  expect(await noteBody(request, solo("05").note)).toBe(other);
+});

@@ -55,7 +55,7 @@ export function MarkdownEditor(props: MarkdownEditorProps) {
 
   if (mode !== "write") {
     return mode === "visual" && ready
-      ? <VisualMarkdownEditor linkObjects={linkObjects} editorKey={editorKey} owner={owner} ensureOwner={ensureOwner} markdown={draft} readOnly={busy || readOnly} onChange={onChange} />
+      ? <VisualMarkdownEditor linkObjects={linkObjects} editorKey={editorKey} owner={owner} ensureOwner={ensureOwner} markdown={draft} readOnly={readOnly} busy={busy} onChange={onChange} />
       : <MarkdownPreview markdown={draft} empty="_Nothing to preview yet._" />;
   }
 
