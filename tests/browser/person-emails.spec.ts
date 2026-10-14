@@ -22,6 +22,7 @@ test("adds and removes an email, warns before removing, and offers a merge for a
   await emails.getByLabel("Add email address").fill("ada.emailtest@example.com");
   await emails.getByRole("button", { name: "Add email" }).click();
   await expect(emails.getByRole("alert")).toContainText("This belongs to Ada Emailtest — merge instead?");
+  await expect(page.getByText("ada.emailtest@example.com belongs to Ada Emailtest")).toBeVisible();
   await expect(emails.getByText("ada.emailtest@example.com")).toHaveCount(0);
   await emails.getByRole("button", { name: "Merge with Ada Emailtest" }).click();
   const dialog = page.getByRole("dialog", { name: /Merge Grace Emailtest with another person/ });
