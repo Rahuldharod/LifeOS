@@ -1,8 +1,13 @@
 // Maps thrown errors to HTTP responses. Errors are matched by name so the server needs no adapter classes.
-export function httpError(error: unknown): { statusCode: number; body: { error: string; reconnect?: true; reason?: string; references?: unknown } } {
+export function httpError(error: unknown): { statusCode: number; body: { error: string; reconnect?: true; reason?: string; references?: unknown; existingPerson?: { id: string; name: string } } } {
   const failure = error instanceof Error ? error : new Error("Unknown server error");
   // PB-030: a permanent delete refused while other objects reference the note; the UI lists them as links.
   if (failure.name === "NoteReferencedError") return { statusCode: 409, body: { error: failure.message, references: (failure as { references?: unknown }).references ?? [] } };
+  // #214: the address is on another person; the UI offers to merge the two.
+  if (failure.name === "PersonEmailTakenError") {
+    const taken = failure as unknown as { otherPersonId: string; otherPersonName: string };
+    return { statusCode: 409, body: { error: failure.message, existingPerson: { id: taken.otherPersonId, name: taken.otherPersonName } } };
+  }
   if (failure.name === "GoogleAuthError") {
     // PB-022a: Google rejected the tokens; the UI must offer Reconnect instead of showing an empty calendar.
     return { statusCode: 401, body: { error: failure.message, reconnect: true, reason: String((failure as { reason?: unknown }).reason ?? "expired") } };

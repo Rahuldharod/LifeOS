@@ -7,7 +7,7 @@ import { useSyncExternalStore } from "react";
 import type { Endpoint, QueryOf, RequestOf, ResponseOf } from "@lifeos/contracts";
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  constructor(message: string, readonly status: number, readonly existingPerson?: { id: string; name: string }) { super(message); }
 }
 
 /** `reconnects` increments each time the server comes back, so effects can retry on it. */
@@ -88,6 +88,6 @@ async function request(url: string, method: string, body: string | undefined): P
     throw new ApiError(`Request failed: ${response.status}`, response.status);
   }
   markOnline();
-  if (!response.ok) throw new ApiError(payload.error ?? `Request failed: ${response.status}`, response.status);
+  if (!response.ok) throw new ApiError(payload.error ?? `Request failed: ${response.status}`, response.status, payload.existingPerson);
   return payload;
 }

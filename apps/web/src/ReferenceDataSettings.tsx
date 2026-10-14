@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { LifeObject, PersonLabel } from "@lifeos/contracts";
-import { entityLinkFields } from "@lifeos/shared";
+import type { LifeObject, PersonLabel, PersonMergeChoice, PersonMergePreview } from "@lifeos/contracts";
+import { entityLinkFields, personMatchesQuery } from "@lifeos/shared";
 import { CopyLink } from "./CopyLink.js";
 import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { EnvelopeBadges } from "./EnvelopeBadges.js";
@@ -9,6 +9,8 @@ import { formatDate } from "./dateFormat.js";
 import { HistoryLink } from "./HistoryPanel.js";
 import { withOpenedArchived, type LinkedObject } from "./lifeosLinks.js";
 import { PersonName } from "./PersonName.js";
+import { PersonEmails, type AddEmailOutcome } from "./PersonEmails.js";
+import { PersonMergeDialog } from "./PersonMerge.js";
 import { PersonReviewControl } from "./PersonReview.js";
 import { externalChoiceOf, personLabel, type ExternalChoice } from "./personLabels.js";
 import { foldText } from "./searchOptions.js";
@@ -60,11 +62,17 @@ export type ReferenceDataSettingsProps = {
   onDelete: (object: LifeObject) => Promise<boolean>;
   onSetExternal?: (object: LifeObject, choice: ExternalChoice) => Promise<boolean>;
   onConfirmReviewed?: (object: LifeObject) => Promise<boolean>;
+  /** #213: Manual merge. Without both, the People card shows no "Merge with…" button. */
+  onPreviewMerge?: (person: LifeObject, choice: PersonMergeChoice) => Promise<PersonMergePreview>;
+  onMergePeople?: (person: LifeObject, choice: PersonMergeChoice) => Promise<LifeObject | undefined>;
+  /** #214: edit a person's emails. The card shows the list only when all four merge and email props are given. */
+  onAddEmail?: (person: LifeObject, email: string) => Promise<AddEmailOutcome>;
+  onRemoveEmail?: (person: LifeObject, email: string) => Promise<boolean>;
   run: (action: () => Promise<void>, success: string) => Promise<boolean>;
   onRestored: () => Promise<void>;
 };
 
-export function ReferenceDataSettings({ type, objects: listed, linkables, personLabels, selectedId, busy, readOnly, onOpen, onCreate, onSave, onDelete, onSetExternal, onConfirmReviewed, run, onRestored }: ReferenceDataSettingsProps) {
+export function ReferenceDataSettings({ type, objects: listed, linkables, personLabels, selectedId, busy, readOnly, onOpen, onCreate, onSave, onDelete, onSetExternal, onConfirmReviewed, onPreviewMerge, onMergePeople, onAddEmail, onRemoveEmail, run, onRestored }: ReferenceDataSettingsProps) {
   const objects = useMemo(() => withOpenedArchived(listed, linkables as LinkedObject[], type, selectedId) as LifeObject[], [listed, linkables, type, selectedId]);
   const selected = selectedId && selectedId !== "new" ? objects.find((object) => object.frontmatter.id === selectedId) : undefined;
   const creating = selectedId === "new";
@@ -75,6 +83,9 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [pending, setPending] = useState<(() => void) | undefined>();
+  const [merging, setMerging] = useState(false);
+  /** #214: set when the merge opens from "merge instead?", so the dialog starts on that person's preview. */
+  const [mergeOtherId, setMergeOtherId] = useState<string>();
   useEffect(() => { setBaseline(sourceDraft); setDraft(sourceDraft); setSaved(false); setSaveError(""); }, [sourceDraft]);
 
   const dirty = !sameDraft(draft, baseline);
@@ -105,8 +116,9 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
 
   const words = foldText(query).split(/\s+/).filter(Boolean);
   const visible = objects.filter((object) => {
-    const name = type === "person" ? personLabel(personLabels, object).label : String(object.frontmatter.title);
-    return words.every((word) => foldText(name).includes(word));
+    // #211: People are also found by email address and alias.
+    if (type === "person") return personMatchesQuery(object.frontmatter, personLabel(personLabels, object).label, query);
+    return words.every((word) => foldText(String(object.frontmatter.title)).includes(word));
   }).sort((left, right) => String(left.frontmatter.title).localeCompare(String(right.frontmatter.title)));
   const choose = (id?: string) => leave(() => onOpen(id));
 
@@ -131,7 +143,10 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
           <label><small>Area</small><select aria-label="Area" value={draft.area} disabled={busy || readOnly} onChange={(event) => set("area", event.target.value)}>{["", ...areaOptions].map((option) => <option value={option} key={option}>{option || "None"}</option>)}</select></label>
           <label><small>Sensitivity</small><select aria-label="Sensitivity" value={draft.sensitivity} disabled={busy || readOnly} onChange={(event) => set("sensitivity", event.target.value)}><option value="normal">Normal</option><option value="restricted">Restricted</option></select></label>
         </div>
-        {selected && type === "person" && <div className="reference-person-controls"><PersonExternalControl person={selected} labels={personLabels} disabled={busy || readOnly || dirty} onChange={onSetExternal} />{onConfirmReviewed && <PersonReviewControl person={selected} disabled={busy || readOnly || dirty} onConfirm={() => { void onConfirmReviewed(selected); }} />}</div>}
+        {selected && type === "person" && <div className="reference-person-controls"><PersonExternalControl person={selected} labels={personLabels} disabled={busy || readOnly || dirty} onChange={onSetExternal} />{onConfirmReviewed && <PersonReviewControl person={selected} disabled={busy || readOnly || dirty} onConfirm={() => { void onConfirmReviewed(selected); }} />}
+          {onPreviewMerge && onMergePeople && <button type="button" className="person-merge-open" disabled={busy || readOnly || dirty} onClick={() => { setMergeOtherId(undefined); setMerging(true); }}>Merge with…</button>}</div>}
+        {selected && type === "person" && onAddEmail && onRemoveEmail && onPreviewMerge && onMergePeople && <PersonEmails person={selected} disabled={busy || readOnly || dirty} onAdd={(email) => onAddEmail(selected, email)} onRemove={(email) => onRemoveEmail(selected, email)} onMergeInstead={(otherId) => { setMergeOtherId(otherId); setMerging(true); }} />}
+        {merging && selected && onPreviewMerge && onMergePeople && <PersonMergeDialog key={mergeOtherId ?? "pick"} person={selected} initialOtherPersonId={mergeOtherId} people={listed} personLabels={personLabels} onPreview={(choice) => onPreviewMerge(selected, choice)} onMerge={(choice) => onMergePeople(selected, choice)} onClose={() => { setMerging(false); setMergeOtherId(undefined); }} onMerged={(kept) => onOpen(kept.frontmatter.id)} />}
         {selected && <div className="reference-record-meta"><EnvelopeBadges frontmatter={selected.frontmatter} />{Boolean(selected.frontmatter.archived_at) && <small className="archived-tag">Archived</small>}<small>Revision {selected.frontmatter.revision} · {formatDate(selected.frontmatter.updated_at)}</small></div>}
         {selected && <details className="record-more"><summary>More</summary><div>{dirty ? <button type="button" className="link-button" disabled>History</button> : <HistoryLink objectId={selected.frontmatter.id} title={String(selected.frontmatter.title)} disabled={busy || readOnly} run={run} onRestored={onRestored} />}<CopyLink object={selected} disabled={busy} /><button className="danger" disabled={busy || readOnly || dirty || selected.frontmatter.is_self === true} onClick={() => { if (window.confirm(`Soft-delete ${selected.frontmatter.title}? The Markdown file will be retained.`)) void onDelete(selected).then((deleted) => { if (deleted) onOpen(undefined); }); }}>Delete {singular[type]}</button></div></details>}
         {saveError && <p className="field-error" role="alert">{saveError}</p>}

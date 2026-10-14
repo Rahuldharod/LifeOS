@@ -15,10 +15,7 @@ function slugify(value: string) {
     .slice(0, 80) || "untitled";
 }
 
-/** Lowercase and strip accents so "reunion" finds "Réunion". */
-export function foldForSearch(value: string) {
-  return value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
+export { foldForSearch } from "@lifeos/shared";
 
 function timestampPrefix(timestamp: string, timeZone = "UTC") {
   const parts = new Intl.DateTimeFormat("en-CA", {

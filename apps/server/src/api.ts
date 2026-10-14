@@ -127,6 +127,30 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required" });
     return application.confirmPersonReviewed(request.params.id, request.body.expectedHash);
   });
+  // #214: edit a person's emails. An address on another person answers 409 with `existingPerson` so the UI can offer the merge.
+  route(server, "POST /api/v1/people/:id/emails", async (request, reply) => {
+    if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required" });
+    return application.addPersonEmail(request.params.id, String(request.body.email ?? ""), request.body.expectedHash);
+  });
+  route(server, "POST /api/v1/people/:id/emails/remove", async (request, reply) => {
+    if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required" });
+    return application.removePersonEmail(request.params.id, String(request.body.email ?? ""), request.body.expectedHash);
+  });
+  // #213: Manual merge from the People card. Errors from the application (Self, already merged) answer 4xx via the shared handler.
+  const mergeOptions = (id: string, choice: { otherPersonId?: unknown; keepPersonId?: unknown; nameFromPersonId?: unknown } | undefined) => {
+    const optional = (value: unknown) => typeof value === "string" && value ? value : undefined;
+    return typeof choice?.otherPersonId === "string" && choice.otherPersonId ? { personId: id, otherPersonId: choice.otherPersonId, keepPersonId: optional(choice.keepPersonId), nameFromPersonId: optional(choice.nameFromPersonId) } : undefined;
+  };
+  route(server, "GET /api/v1/people/:id/merge-preview", async (request, reply) => {
+    const options = mergeOptions(request.params.id, request.query);
+    if (!options) return reply.status(400).send({ error: "otherPersonId is required" });
+    return application.previewPersonMerge(options);
+  });
+  route(server, "POST /api/v1/people/:id/merge", async (request, reply) => {
+    const options = mergeOptions(request.params.id, request.body);
+    if (!options) return reply.status(400).send({ error: "otherPersonId is required" });
+    return application.mergePeople(options);
+  });
   route(server, "POST /api/v1/index/rebuild", async () => application.rebuildIndex());
 
   route(server, "GET /api/v1/calendar/events", async (request, reply) => {

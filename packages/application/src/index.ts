@@ -16,6 +16,7 @@ import { NotesModule, type NoteFilters } from "./notes.js";
 import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
 import { PeopleModule } from "./people.js";
+import type { ManualMergeOptions } from "./person-merge.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AgentIndexWriter, AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
 import { ReviewModule, type ReviewEdits } from "./review.js";
@@ -28,8 +29,9 @@ export type { OpenPointFilters } from "./open-points.js";
 export { NoteReferencedError } from "./notes.js";
 export type { NoteFilters, ObjectReference, PurgeCheck } from "./notes.js";
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
-export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
+export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, PersonEmailTakenError, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
+export type { ManualMergeOptions, PersonMergePreview } from "./person-merge.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarEventReference, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
 export { inboxFolders, operationKinds } from "./ports.js";
 export type { FeedbackInput, FeedbackLabel } from "./feedback.js";
@@ -188,7 +190,18 @@ export class LifeOSApplication {
   // People (#39): display labels (also the Agent Index's source, #43), the External override, internal domains
   personLabels() { return this.people.labels(); }
   setPersonExternal(id: string, isExternal: boolean | null, expectedHash: string) { return this.people.setExternal(id, isExternal, expectedHash); }
+  /** #214: adds an email to a person; refused with PersonEmailTakenError when another person has it. */
+  addPersonEmail(id: string, email: string, expectedHash: string) { return this.people.addEmail(id, email, expectedHash); }
+  /** #214: removes an email from a person. */
+  removePersonEmail(id: string, email: string, expectedHash: string) { return this.people.removeEmail(id, email, expectedHash); }
   confirmPersonReviewed(id: string, expectedHash: string) { return this.people.confirmReviewed(id, expectedHash); }
+  /** #213: what a Manual merge of two people would do (defaults filled in); writes nothing. */
+  previewPersonMerge(options: ManualMergeOptions) { return this.review.merges.previewManual(options); }
+  /** #213: merges two people on the user's say-so, through the same crash-safe merge as an accepted suggestion. Returns the kept person. */
+  async mergePeople(options: ManualMergeOptions) {
+    const review = await this.review.merges.proposeManual(options);
+    return this.acceptReviewItem(review.frontmatter.id);
+  }
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
   getSelfEmails() { return this.people.getSelfEmails(); }

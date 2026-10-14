@@ -1,3 +1,5 @@
+import { foldForSearch } from "./person-match.js";
+
 export const LIFEOS_SCHEMA_VERSION = 1;
 
 // Rules both the server and the browser bundle need (#75). This package has no Node dependencies, so the web app
@@ -63,4 +65,27 @@ export function acceptedSummaryText(body: string) {
   if (end < 0) return "";
   return lines.slice(start + 1, end).join("\n").replace(/^\s*##\s+Summary\s*\n/i, "").trim();
 }
+
+/** Email addresses recorded on a Person, as stored (#211, #214). Hand-edited files may list plain strings. */
+export function personEmailAddresses(frontmatter: Readonly<Record<string, unknown>>): string[] {
+  const identifiers = Array.isArray(frontmatter.identifiers) ? frontmatter.identifiers as unknown[] : [];
+  return identifiers.map((identifier) => typeof identifier === "string" ? identifier
+    : identifier && typeof identifier === "object" && (identifier as { kind?: unknown }).kind === "email" ? (identifier as { value?: unknown }).value : undefined)
+    .filter((email): email is string => typeof email === "string" && email.trim() !== "");
+}
+
+/** Email addresses and aliases recorded on a Person (#211): what People search matches besides the name. */
+export function personSearchTerms(frontmatter: Readonly<Record<string, unknown>>): string[] {
+  const aliases = Array.isArray(frontmatter.aliases) ? frontmatter.aliases as unknown[] : [];
+  return [...personEmailAddresses(frontmatter), ...aliases].filter((term): term is string => typeof term === "string" && term.trim() !== "");
+}
+
+/** People search (#211): every typed word must appear in the name, an email address or an alias, ignoring case and accents. An empty query matches everyone. */
+export function personMatchesQuery(frontmatter: Readonly<Record<string, unknown>>, name: string, query: string): boolean {
+  const words = foldForSearch(query).split(/\s+/).filter(Boolean);
+  const haystack = foldForSearch([name, ...personSearchTerms(frontmatter)].join("\n"));
+  return words.every((word) => haystack.includes(word));
+}
+
+export { emailFitsName, emailNameMatch, foldForSearch, isUnreviewedPerson, type EmailNameMatchKind, type NameCandidate } from "./person-match.js";
 export { appVersion, unknownAppInfo, type AppInfo, type BuildHistory, type MainCommit } from "./app-version.js";
