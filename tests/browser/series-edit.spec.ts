@@ -4,11 +4,12 @@ import { seed } from "./fixtures.js";
 // #173: earlier occurrences are edited in place. Real local API, no mocked saves (except the one deliberately
 // blocked request in the draft-reload test). Uses the "retro" / "audit" series from serve.mjs: 3 occurrences each
 // (Jan to Mar, one Note per occurrence) that only these tests change.
-const ids = (letter: "5" | "f" | "7" | "8" | "6" | "4", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
+const ids = (letter: "5" | "f" | "7" | "8" | "6" | "4" | "3", month: string) => ({ meeting: `${letter}1000000-0000-4000-8000-0000000000${month}`, note: `${letter}2000000-0000-4000-8000-0000000000${month}` });
 const RETRO = (month: string) => ids("5", month);
 const AUDIT = (month: string) => ids("f", month);
 const GUARD = (month: string) => ids("7", month);
 const TYPING = (month: string) => ids("8", month);
+const SWITCH = (month: string) => ids("3", month);
 const LEDGER = { own: "92000000-0000-4000-8000-000000000003", shared: "91000000-0000-4000-8000-000000000001" };
 
 type Earlier = { note: { body: string; contentHash: string } };
@@ -263,4 +264,30 @@ test("a Legacy shared Note block follows the Visual / Markdown switch", async ({
   await expect(shared.getByRole("heading", { name: "Shared heading" })).toBeVisible();
   await page.getByRole("button", { name: "Markdown", exact: true }).click();
   await expect(shared.locator("textarea")).toHaveValue("# Shared heading\n\n- shared item\n");
+});
+
+// #192: Visual typing in an earlier occurrence, then at once opening another occurrence (the Series view remounts), must
+// reach that occurrence's own file. The page clock is paused while typing and switching, so the editor's debounce cannot
+// fire first: only the editor's own flush can carry the typing.
+test("Visual typing in an earlier occurrence, then opening another occurrence at once, saves to that occurrence only", async ({ page, request }) => {
+  await seed(request);
+  const note = async (id: string) => ((await (await request.get(`/api/v1/notes/${id}`)).json()) as { body: string }).body;
+  const [february, march] = [await note(SWITCH("02").note), await note(SWITCH("03").note)];
+  await page.clock.install();
+  await page.goto(`/calendar/2026-02-10/${SWITCH("02").meeting}`);
+  const series = page.getByRole("region", { name: "Earlier occurrences" });
+  const january = series.locator("details").nth(0);
+  await january.locator("summary").click();
+  const visual = january.locator("[contenteditable='true']").first();
+  await expect(visual).toContainText("switch words for 2026-01.");
+  await visual.click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End");
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await page.keyboard.type(" Z192");
+  await series.getByRole("button", { name: /Open the latest/ }).click();
+  await expect(page).toHaveURL(new RegExp(SWITCH("03").meeting));
+  await page.clock.resume();
+  await expect.poll(() => note(SWITCH("01").note), { timeout: 15000 }).toContain("Z192");
+  await page.clock.runFor(5000); // well past the editor debounce and the 1.8 s autosave
+  expect([await note(SWITCH("02").note), await note(SWITCH("03").note)]).toEqual([february, march]);
 });

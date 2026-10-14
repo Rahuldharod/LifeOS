@@ -111,8 +111,9 @@ await objectFile("meetings", prio.ownNote, { ...stamped(prio.ownNote, "meeting-n
 const noteBody = (name, month) => name === "modes" ? `# Modes heading ${month}\n\n- first item ${month}\n- second item\n\n[a link](https://example.com/${month}) and <!-- keep me -->\n` : `${name} words for 2026-${month}.\n`;
 // #173 edit-in-place: two small series (3 occurrences each, a Note per occurrence) that only the edit tests change,
 // so the read-only #179 tests above keep their text. "retro" is edited; "audit" is used for the conflict test.
-// "guard" tests the leave-page save, "typing" the caret while another Note saves, "ledger" a Legacy shared Note (below).
-for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"], ["6", "scroll"], ["4", "modes"]]) {
+// "guard" tests the leave-page save, "typing" the caret while another Note saves, "ledger" a Legacy shared Note (below),
+// "switch" Visual typing just before opening another occurrence (#192).
+for (const [letter, name] of [["5", "retro"], ["f", "audit"], ["7", "guard"], ["8", "typing"], ["6", "scroll"], ["4", "modes"], ["3", "switch"]]) {
   const series = `mock:mock-calendar:${name}`;
   for (const month of ["01", "02", "03"]) {
     const meetingId = `${letter}1000000-0000-4000-8000-0000000000${month}`;

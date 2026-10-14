@@ -37,22 +37,26 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
   const [lost, setLost] = useState<string[]>();
   const blocked = useRef(false);
   // The editor reports changes after a short delay (Crepe debounces markdownUpdated), so typing made just before the editor
-  // goes away (the Visual / Markdown switch) would never reach the draft. Closing flushes it (#183), but only a real change
-  // of the document: `reported` is the last text Crepe produced that the draft already accounts for (its load-time output
-  // at first), so Crepe merely re-formatting a Note the user focused never becomes an edit or a save.
+  // goes away would never reach the draft. `flush` reports it at once, but only a real change of the document: `reported`
+  // is the last text Crepe produced that the draft already accounts for (its load-time output at first), so Crepe merely
+  // re-formatting a Note the user focused never becomes an edit or a save.
   const created = useRef(false);
   const reported = useRef("");
   const shown = useRef(markdown);
   shown.current = markdown;
-  // Declared before the mount effect so its cleanup runs first, while the editor still exists. Runs on unmount only,
-  // so a note switch (a new editorKey) never reports into the next note's draft.
-  useEffect(() => () => {
+  const flush = () => {
     if (!crepe.current || !created.current || !engaged.current || blocked.current || latest.current.readOnly) return;
     try {
       const current = crepe.current.getMarkdown();
-      if (current !== reported.current) latest.current.onChange(storedMarkdown(current, ownerPath(latest.current.owner), shown.current));
+      if (current === reported.current) return;
+      reported.current = current;
+      latest.current.onChange(storedMarkdown(current, ownerPath(latest.current.owner), shown.current));
     } catch { /* the editor is already gone: nothing to flush */ }
-  }, []);
+  };
+  // Closing the editor (the Visual / Markdown switch) flushes (#183). Declared before the mount effect so its cleanup runs
+  // first, while the editor still exists. Runs on unmount only: on a note switch (a new editorKey) `onChange` already
+  // belongs to the next note, so that typing is flushed earlier, when focus leaves the editor (#192).
+  useEffect(() => flush, []);
 
   useEffect(() => {
     if (!root.current) return;
@@ -83,7 +87,8 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
       // target on a data attribute so the app's click handler can still follow it (PB-007).
       instance.editor.config((ctx) => ctx.set("linkAttr", (mark: { attrs: { href?: string } }) => (lifeosLinkId(mark.attrs.href) ? { "data-lifeos-href": mark.attrs.href } : {})));
       instance.on((listener) => listener.markdownUpdated((_context, nextMarkdown) => {
-        if (!engaged.current || blocked.current) return;
+        // `active`: a closed editor's late report (its debounce firing after a note switch) belongs to the previous note.
+        if (!active || !engaged.current || blocked.current) return;
         reported.current = nextMarkdown;
         latest.current.onChange(storedMarkdown(nextMarkdown, ownerPath(latest.current.owner), markdown));
       }));
@@ -102,5 +107,5 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
   }, [editorKey]);
 
   useEffect(() => { crepe.current?.setReadonly(readOnly || blocked.current); }, [readOnly]);
-  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onFocusCapture={() => { engaged.current = true; }} onPointerDownCapture={() => { engaged.current = true; }} /></>;
+  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onFocusCapture={() => { engaged.current = true; }} onBlurCapture={flush} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }

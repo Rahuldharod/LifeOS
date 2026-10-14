@@ -114,3 +114,52 @@ describe("VisualMarkdownEditor closing", () => {
     expect(changes).toEqual([]);
   });
 });
+
+// #192: switching to another Note keeps this editor mounted with the next Note's change handler, so the typing must be
+// reported while the original Note is still the open one: when focus leaves the editor (the click on the other Note).
+const leave = (area: Element) => act(() => { area.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+
+describe("VisualMarkdownEditor leaving for another note", () => {
+  it("typing that was not reported yet is reported to the original note when focus leaves the editor", async () => {
+    fake.output = "- star bullet\n";
+    const changes: string[] = [];
+    const area = await mount({ onChange: (markdown) => changes.push(markdown) });
+    focus(area);
+    fake.output = "- star bullet typed\n";
+    leave(area);
+    expect(changes).toEqual(["- star bullet typed\n"]);
+  });
+
+  it("the previous note's late change report never reaches the next note, even once the next note is focused", async () => {
+    fake.output = "- star bullet\n";
+    const area = await mount({});
+    focus(area);
+    const previousListener = fake.listener!;
+    const next: string[] = [];
+    await act(async () => { root!.render(<VisualMarkdownEditor {...props({ editorKey: "b", markdown: "other\n", onChange: (markdown) => next.push(markdown) })} />); });
+    await flushLoad();
+    focus(area);
+    // Crepe's debounce for the previous note fires only now, after the switch.
+    act(() => previousListener({}, "- star bullet typed\n", "- star bullet\n"));
+    expect(next).toEqual([]);
+  });
+
+  it("leaving the editor without typing reports nothing", async () => {
+    fake.output = "- star bullet\n";
+    const changes: string[] = [];
+    const area = await mount({ onChange: (markdown) => changes.push(markdown) });
+    focus(area);
+    leave(area);
+    expect(changes).toEqual([]);
+  });
+
+  it("a read-only editor (lease lost or busy) never reports when focus leaves it", async () => {
+    fake.output = "- star bullet\n";
+    const changes: string[] = [];
+    const area = await mount({ readOnly: true, onChange: (markdown) => changes.push(markdown) });
+    focus(area);
+    fake.output = "- star bullet typed\n";
+    leave(area);
+    expect(changes).toEqual([]);
+  });
+});
