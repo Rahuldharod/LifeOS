@@ -23,17 +23,15 @@ Use a lightweight score rather than false precision:
 
 ## Now
 
-Items required to make the current version dependable for regular use. Ticketed under Phase B (#90) on 2026-10-09.
+Items required to make the current version dependable for regular use. Reviewed 2026-10-14: the 2026-10-09 Now items (#100–#107), PB-018, PB-032 and PB-033 shipped. Each item below needs grilling and a GitHub Issue before it is built.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-027 | URLs and the Back button | Each tab and open item has its own URL so Back/Forward, reload and bookmarks work. Unblocks PB-026 and PB-029. | 4 | High | 3 | agent | #100 |
-| PB-010 | Relationship pickers in the other forms | Searchable pickers on the Tasks, Projects, Clients, Products and People forms; tasks gain project, client and product fields. | 4 | High | 2 | agent | #101 |
-| PB-005 | Note filters | Narrow the notes list by type, last-edited date, project, client, product or person, combined with keyword search. | 4 | High | 2 | agent | #105 |
-| PB-028 | One editor layout everywhere | Every note editor shares the Notes-tab layout: capped line length, fills the height, one remembered size per device. | 3 | High | 2 | agent | #102 |
-| PB-030 | Hard delete from the Deleted tab | Remove a tombstoned note's file and versions; refused while frontmatter references it; audited; needs the lease. | 3 | High | 3 | agent | #103 |
-| PB-026 | Breadcrumbs | Show where the user is; each crumb is a real URL. | 2 | High | 1 | agent | #106 |
-| PB-029 | Copy link to an object | Copy `[Title](lifeos://object/<id>)` from any object; a pasted bare address becomes a titled link. Markdown only. | 3 | High | 2 | agent | #107 |
+| PB-034 | Create a Standalone Note | A "New note" button on the Notes tab opens the editor at once; the full header (title, Project, Client, Product, People, Restricted) works before the file exists, and nothing is written until the first real edit. New type `standalone-note` in `notes/`, origin `app`, title auto-filled as "Note <date time>" and renamable. Grilled 2026-10-14, ADR 0023. | 4 | High | 2 | agent | — |
+| PB-031 | Split Legacy shared Notes | One-time reviewed split of each Legacy shared Note (ADR 0019 format) into one Note per occurrence, backup first, originals kept until confirmed, so the Visual editor and the collapsible series view work on old data. Known case: the Weekly Prio note; [TBD] count any others. See *Analysis* below. | 3 | Medium | 3 | — | — |
+| PB-035 | Inbox auto-advance | After a decision on a recommendation (accept, edit, reject, snooze), move to the next item so a batch is processed faster. Open: what happens at the last item (empty state), and a way to go back one step. From the 2026-10-13 Inbox. | 3 | Medium | 1 | — | — |
+| PB-036 | Dyslexia-friendly font and dark theme | Optional reading font and dark theme (PRD stories 88–91), moved from Phase A to Phase B (#90). | 3 | High | 2 | — | — |
+| PB-037 | `@` tagging in note and task editors | Typing `@` plus a character (for example `@P`) opens a list under the text, grouped by type across all objects, for example *Person:* Paul; *Product:* P.Promo, P.Picks. Up/Down arrows move through the options; Enter or Space picks one and sets that metadata on the object. The `@` text is not kept: once picked it disappears and only the metadata is set (decided 2026-10-13). Build after PB-034, which shares the pickers. From the 2026-10-13 Inbox. | 4 | Medium | 4 | — | — |
 
 ## Next
 
@@ -41,12 +39,9 @@ High-value capabilities to address after the current version is stable.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Opens as a popup with a Bug/Feature toggle, resizable from a bottom-right handle (size remembered per device). Submitting writes one App Feedback file to `_inbox/feedback/` in the data root; an Agent later promotes items into this backlog's Inbox with a PB ID (ADR 0022). Supersedes the 2026-09-21 feedback idea. | 3 | High | 2 | — | — |
-| PB-031 | Split Legacy shared Notes | One-time reviewed split of each Legacy shared Note (ADR 0019 format) into one Note per occurrence, backup first, originals kept until confirmed, so the Visual editor and the collapsible series view work on old data. Known case: the Weekly Prio note; [TBD] count any others. See *Analysis* below. | 3 | Medium | 3 | — | — |
 | PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
-| PB-032 | App version numbering | Every build carries an App version `YY.MM.DD.N` (Paris date of the merge to main, Nth merge that day), worked out from git; non-main builds add `-dev+<commit>`. No bot, no tags. | 2 | High | 1 | agent | #208 |
-| PB-033 | Show the App version | "About LifeOS" card on System (UI and server App version, build date, commit, "run update-app" warning when they differ) and a muted App version in the nav footer. App Feedback already stamps it. Depends on PB-032. | 2 | High | 1 | agent | #208 |
+| PB-038 | macOS launcher and start at login | Open LifeOS without the terminal and start it at login (PRD story 85, ADR 0006), moved from Phase A (#90). | 3 | Medium | 3 | — | — |
 
 ## Later
 
@@ -72,14 +67,12 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 | 2026-09-21 | Add configurable autosave timing and a visible “browser draft recovered” history. | Note reliability |
 | 2026-10-03 | CI: bump `actions/checkout`, `actions/setup-node` and `pnpm/action-setup` to versions that target Node 24; GitHub is retiring Node 20 for actions. Warning only, CI still passes. | CI run 37099945764 annotation |
 | 2026-10-03 | CI: on or after **19 Oct 2026**, check the first CI run on Ubuntu 26 (`ubuntu-latest` migrates that day); pin `ubuntu-24.04` if anything breaks. | CI run 37099945764 annotation |
-| 2026-10-13 | Inbox: after the user decides on a recommendation (accept, edit, reject, snooze), move automatically to the next item so a batch is processed faster. Open: what happens at the last item (empty state), and a way to go back one step. | Rahul, Inbox speed |
 | 2026-10-13 | Inbox: accepting a task proposal can also mark it closed. Implies a task life cycle with defined statuses (To do, In progress, Done, Abandoned). Needs a check of today's task statuses and of existing tasks, the transitions allowed (can Done reopen?), and how status shows in lists and filters (PB-005, PB-013). Today's statuses are Inbox, Next, Waiting, Done, Cancelled (`packages/domain`), so this is mostly a mapping and naming question. Decided 2026-10-13: show To do (stored as Next), add In progress, show Abandoned (stored as Cancelled). Open: whether to rename stored values (needs a migration of existing task files) or only relabel in the UI (recommended: relabel, add In progress). | Rahul, Inbox + Tasks |
 | 2026-10-13 | Delete button beside the Save button on every object editor (notes, tasks, projects, clients, products, people). One consistent place, same look. | Rahul, UX consistency |
 | 2026-10-13 | Cmd+Enter saves the object being edited, in every editor. Related to PB-014 (command palette and shortcuts); this one is a small standalone slice. | Rahul, keyboard flow |
-| 2026-10-13 | Create a note without a meeting. Choose the project, client, product, people and other metadata at creation (PB-006's header pickers already exist after first edit). | Rahul, Notes tab |
-| 2026-10-13 | `@` tagging in note and task editors. Typing `@` plus a character (for example `@P`) opens a list under the text, grouped by type across all objects, for example *Person:* Paul; *Product:* P.Promo, P.Picks. Up/Down arrows move through the options; Enter or Space picks one, puts the value in the text and sets that metadata on the object. The `@` text is not kept: once picked it disappears and only the metadata is set (decided 2026-10-13). | Rahul, capture speed |
 | 2026-10-13 | Settings has no Area manager. `areaOptions` is a fixed list in code, so the user cannot add or edit area values. Add an Areas card beside the other reference-data cards. | Rahul, Settings |
-| 2026-10-13 | Review the "Copy link" buttons: the URL now points to the object (PB-027), so they may be redundant. **Conflicts with PB-029 (Now, #107).** See *Analysis: copy link* below. | Rahul, UI clean-up |
+| 2026-10-13 | Review the "Copy link" buttons: the URL now points to the object (PB-027), so they may be redundant. PB-029 shipped as #107 on 2026-10-09, so this would change built behaviour. See *Analysis: copy link* below. | Rahul, UI clean-up |
+| 2026-10-14 | Let Agents send Standalone Notes to the Inbox: a new Inbox Draft kind for the capture skill (contract and skill fixtures change together). Left out of PB-034. | PB-034 grilling |
 
 ### Analysis notes for the 2026-10-13 items
 
@@ -95,7 +88,7 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 **Copy link.**
 - Reasons to remove: the address bar already holds the object URL (PB-027), and the button adds clutter to every editor.
 - Reasons to keep: (1) `lifeos://object/...` is the only form that works inside Markdown, so a link pasted into another note survives; (2) the browser URL depends on the device and port (dev 5174, stable 4310) and the link does not; (3) the title-plus-link format saves typing in notes and email.
-- Recommendation: remove the button from the editor toolbar and keep the function as one item in a per-object "more" menu; or keep only the `lifeos://` copy. Decide before #107 is built.
+- Recommendation: remove the button from the editor toolbar and keep the function as one item in a per-object "more" menu; or keep only the `lifeos://` copy. #107 is already built, so this needs its own ticket if pursued.
 
 ## Completed
 
@@ -124,6 +117,16 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-003 | Visual-editor round-trip suite in CI; an "Unproven formatting" label names Markdown the editor would rewrite; images are never lost; LifeOS's Summary section round-trips (#89, #91, #96). Remaining rewrites are a PRD *Known gap* | 2026-10-04 |
 | PB-022b | Calendar offline fallback: Today and the calendar view list meetings already stored in LifeOS under an Offline banner with Retry; never demo meetings (#88, #94). Built from stored meetings, not a separate cache | 2026-10-04 |
 | PB-011 | History panel on every object with "Restore this version"; restore keeps sensitivity and review state and is refused if the object changed since the panel opened (#85, #92) | 2026-10-04 |
+| PB-027 | Every tab and open item has its own URL; Back/Forward, reload and bookmarks work (#100) | 2026-10-09 |
+| PB-010 | Searchable relationship pickers on the Tasks, Projects, Clients, Products and People forms (#101) | 2026-10-09 |
+| PB-028 | One editor layout everywhere (#102) | 2026-10-09 |
+| PB-030 | Delete a note permanently from the Deleted tab (#103) | 2026-10-09 |
+| PB-005 | Filter the notes list by type, date, project, client, product and person (#105) | 2026-10-09 |
+| PB-026 | Breadcrumbs (#106) | 2026-10-09 |
+| PB-029 | Copy a LifeOS link to any object (#107) | 2026-10-09 |
+| PB-018 | App Feedback: nav-bar button opens a resizable popup with a Bug/Feature toggle; each item is a file in `_inbox/feedback/`, promoted into this backlog by an Agent (ADR 0022; #199, #200, #201) | 2026-10-14 |
+| PB-032 | App version `YY.MM.DD.N` worked out from git history (#208) | 2026-10-14 |
+| PB-033 | App version shown in the nav footer and an "About LifeOS" card on System (#208) | 2026-10-14 |
 
 ## Decision log
 
@@ -143,3 +146,5 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-04 | Phase A build decisions and known gaps are recorded in the PRD (*Decisions made during the build*, *Known gaps*) and Solution Design v0.7 (13.10, 13.11), not duplicated here. | One place per decision; the backlog keeps intent and priority only. |
 | 2026-10-09 | Phase A closed (#99 merged, #21 closed). Grilled the backlog: PB-027, PB-010, PB-005, PB-028, PB-030, PB-026 and PB-029 ticketed under Phase B (#90) as #100–#107; Rahul's manual steps in #104. PB-018 stays in Next. | PB-027 unblocks breadcrumbs and copy link; the I=4/E=2 items reuse PB-006's picker. Decisions are recorded in each issue. |
 | 2026-10-02 | PB-023/024: group by last-edited date (matches the sort); the divider width is a per-device browser preference (ADR 0005); the stable app now serves a snapshot of the build. | Headers must follow the list order; 13-inch and 4K screens need different widths; a plain `pnpm build` was silently changing the running app. |
+| 2026-10-14 | Backlog cleanup: #100–#107, PB-018, PB-032 and PB-033 moved to Completed. Now: PB-034, PB-031, PB-035, PB-036, PB-037. Next: PB-008, PB-009, PB-038. PB-034, PB-035 and PB-037 promoted from the 2026-10-13 Inbox; PB-036 and PB-038 come from the Phase B list in #90. Impact and effort of the promoted items are estimates until grilled. | No user-facing bugs are open (#192 and #195 fixed), so Now is the features that remove daily friction, quickest wins first. |
+| 2026-10-14 | PB-034 grilled: a Standalone Note is a third note type (`standalone-note`), not a relaxed Knowledge note or a Meeting Note without a Meeting (ADR 0023). Out of scope: Agent-created Standalone Notes (Inbox idea), converting to a Meeting Note, tags (PB-037). | Keeps the meaning of Meeting Note and Knowledge note intact; reuses the existing pending-header pattern, so effort stays at 2. |

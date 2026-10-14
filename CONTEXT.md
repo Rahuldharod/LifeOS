@@ -193,6 +193,10 @@ _Avoid_: Calendar event, meeting page
 A Note linked to a Meeting record and initiated from a Calendar event. It can be edited from the Calendar event workspace or opened independently in Notes.
 _Avoid_: Meeting, calendar note
 
+**Standalone Note**:
+A Note the user starts from the Notes tab, with no Meeting record and no Source. It carries the same Project, Client, Product, People and Sensitivity as a Meeting Note and never turns into one (ADR 0023).
+_Avoid_: Ad-hoc note, manual note, plain note
+
 **Recurring series**:
 The Calendar occurrences that share one provider recurrence identity. Each occurrence keeps its own Meeting record and its own Meeting Note; the series is shown together but never stored together (ADR 0021).
 _Avoid_: Repeated meeting, recurring Meeting record
