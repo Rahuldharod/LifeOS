@@ -8,13 +8,22 @@ export type BoxSize = { width: number; height: number };
 const MIN_WIDTH = 360;
 const MIN_HEIGHT = 280;
 
-/** Never narrower or shorter than the minimum, never wider than the column it sits in. */
-export function clampBoxSize(size: BoxSize, maxWidth: number): BoxSize {
+/** Per-box limits. Without `maxHeight` the height is free to grow (the Notes editor scrolls inside its column). */
+export type BoxLimits = { minWidth?: number; minHeight?: number; maxHeight?: number };
+
+/** Never narrower or shorter than the minimum, never wider than the column it sits in (nor taller than `maxHeight`). */
+export function clampBoxSize(size: BoxSize, maxWidth: number, limits: BoxLimits = {}): BoxSize {
+  const minWidth = limits.minWidth ?? MIN_WIDTH;
+  const minHeight = limits.minHeight ?? MIN_HEIGHT;
+  const height = Math.max(size.height, minHeight);
   return {
-    width: Math.round(Math.min(Math.max(size.width, MIN_WIDTH), Math.max(MIN_WIDTH, maxWidth))),
-    height: Math.round(Math.max(size.height, MIN_HEIGHT))
+    width: Math.round(Math.min(Math.max(size.width, minWidth), Math.max(minWidth, maxWidth))),
+    height: Math.round(limits.maxHeight === undefined ? height : Math.min(height, Math.max(minHeight, limits.maxHeight)))
   };
 }
+
+/** How a box is anchored and limited: a popup is centred and must stay inside the window; the editor is neither. */
+export type ResizableBoxOptions = BoxLimits & { centered?: boolean; fitWindow?: boolean };
 
 function readSize(key: string): BoxSize | undefined {
   try {
@@ -45,7 +54,7 @@ export function readRememberedSize(key: string, legacyKeys: readonly string[] = 
   return undefined;
 }
 
-export function useResizableBox(storageKey: string, legacyKeys: readonly string[] = []) {
+export function useResizableBox(storageKey: string, legacyKeys: readonly string[] = [], options: ResizableBoxOptions = {}) {
   const [size, setSize] = useState(() => readRememberedSize(storageKey, legacyKeys));
   const update = (next: BoxSize | undefined) => { setSize(next); writeSize(storageKey, next); };
 
@@ -58,7 +67,11 @@ export function useResizableBox(storageKey: string, legacyKeys: readonly string[
     handle.setPointerCapture(event.pointerId);
     const start = box.getBoundingClientRect();
     const move = (moveEvent: globalThis.PointerEvent) => {
-      update(clampBoxSize({ width: moveEvent.clientX - start.left, height: moveEvent.clientY - start.top }, column.clientWidth));
+      // A centred box grows on both sides, so the pointer sits half the width from its centre.
+      const width = options.centered ? 2 * (moveEvent.clientX - (start.left + start.width / 2)) : moveEvent.clientX - start.left;
+      update(clampBoxSize({ width, height: moveEvent.clientY - start.top }, column.clientWidth, {
+        ...options, ...(options.fitWindow ? { maxHeight: column.clientHeight - start.top } : {})
+      }));
     };
     const stop = () => { handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", stop); handle.removeEventListener("pointercancel", stop); };
     handle.addEventListener("pointermove", move);

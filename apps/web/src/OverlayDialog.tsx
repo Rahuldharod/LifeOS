@@ -1,9 +1,13 @@
-import React, { useEffect, useRef, type ReactNode } from "react";
+import React, { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 const focusable = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
 /** Shared modal behaviour for Search, Capture and the narrow navigation sheet: focus enters, stays inside, then returns to its trigger. */
-export function OverlayDialog({ open, label, variant = "panel", onClose, children }: { open: boolean; label: string; variant?: "panel" | "sheet"; onClose: () => void; children: ReactNode }) {
+export function OverlayDialog({ open, label, variant = "panel", onClose, children, className, style, decoration }: {
+  open: boolean; label: string; variant?: "panel" | "sheet"; onClose: () => void; children: ReactNode;
+  /** Extra class, inline size and a child placed on the dialog box itself (a resize handle), for dialogs that resize. */
+  className?: string; style?: CSSProperties; decoration?: ReactNode;
+}) {
   const dialog = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -26,6 +30,6 @@ export function OverlayDialog({ open, label, variant = "panel", onClose, childre
   }, [open]);
   if (!open) return null;
   return <div className={`overlay-backdrop${variant === "sheet" ? " overlay-sheet" : ""}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div ref={dialog} className="overlay-dialog" role="dialog" aria-modal="true" aria-label={label}>{children}</div>
+    <div ref={dialog} className={className ? `overlay-dialog ${className}` : "overlay-dialog"} style={style} role="dialog" aria-modal="true" aria-label={label}>{children}{decoration}</div>
   </div>;
 }
