@@ -17,8 +17,19 @@ import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./s
  */
 
 export const personMergeReviewType = "person-merge";
-export type PersonMergeMatch = "email" | "email-local-part" | "name" | "name-email";
-export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string }
+export type PersonMergeMatch = "email" | "email-local-part" | "name" | "name-email" | "manual";
+/** `name_from_person_id` (manual merges, #213) says whose name the kept person ends up with; absent means the kept person's own. */
+export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string; name_from_person_id?: string }
+/** A Manual merge (#213): the two people and, optionally, who survives and whose name is kept. */
+export interface ManualMergeOptions { personId: string; otherPersonId: string; keepPersonId?: string; nameFromPersonId?: string }
+/** What a Manual merge would do, worked out without writing anything. */
+export interface PersonMergePreview {
+  keepPersonId: string; nameFromPersonId: string;
+  /** True when one of the two is the Self person: it always survives, so who survives is fixed. */
+  keepLocked: boolean;
+  keep: { id: string; title: string }; merge: { id: string; title: string };
+  keptName: string; aliases: string[]; emails: string[]; referenceCount: number;
+}
 
 /** One file's change. `null` means "field absent"; `$body` stands for the Markdown body. */
 interface PlanEntry { id: string; before: Record<string, unknown>; after: Record<string, unknown> }
@@ -39,7 +50,7 @@ const namesOf = (person: LifeOSObject) => [person.frontmatter.title, `${String(p
 const candidateOf = (person: LifeOSObject): NameCandidate => ({ id: person.frontmatter.id, names: namesOf(person) });
 const localPart = (email: string) => email.split("@")[0]!.replace(/\+.*$/, "");
 
-const matchReasons: Record<PersonMergeMatch, string> = { email: "Both have the same email address.", "email-local-part": "Their email addresses match on two internal domains.", "name-email": "An email address of one fits the name of the other.", name: "Their names match." };
+const matchReasons: Record<PersonMergeMatch, string> = { email: "Both have the same email address.", "email-local-part": "Their email addresses match on two internal domains.", "name-email": "An email address of one fits the name of the other.", name: "Their names match.", manual: "You asked for this merge." };
 
 export class PersonMergeConflictError extends Error { override name = "PersonMergeConflictError"; }
 
@@ -126,6 +137,83 @@ export class PersonMergeModule {
     return created;
   }
 
+  /**
+   * Manual merge (#213), step one: the Review Item that carries the merge, so the crash-safe accept of ADR 0013 does the work.
+   * A pending suggestion for the same pair is rewritten to the user's choice instead of leaving a stale twin behind; a retry
+   * after a crash finds the item (and its stored plan) the first attempt wrote.
+   */
+  proposeManual(options: ManualMergeOptions): Promise<LifeOSObject> {
+    const queue = sweeps.get(this.ctx) ?? new OneAtATime();
+    sweeps.set(this.ctx, queue);
+    return queue.run("sweep", async () => {
+      const { ctx } = this;
+      await ctx.rebuildIndex();
+      const choice = this.manualChoice(options);
+      const now = new Date().toISOString();
+      const key = pairKey(choice.keep.frontmatter.id, choice.merge.frontmatter.id);
+      const pending = ctx.index.all().find((review) => review.frontmatter.type === "review-item" && review.frontmatter.review_type === personMergeReviewType && review.frontmatter.status === "pending"
+        && pairKey(String((review.frontmatter.proposed_fields as Partial<PersonMergeProposal>).keep_person_id), String((review.frontmatter.proposed_fields as Partial<PersonMergeProposal>).merge_person_id)) === key);
+      if (!pending) {
+        const id = await this.writeSuggestion(choice.keep, choice.merge, "manual", now, () => uuidV7(), choice.nameFrom.frontmatter.id);
+        await ctx.rebuildIndex();
+        return ctx.required(id);
+      }
+      // A merge already under way keeps its stored plan: accepting finishes that one.
+      if ((await ctx.objects.incompleteOperations?.())?.some((operation) => operation.id === pending.frontmatter.operation_id)) return pending;
+      const proposal = this.manualProposal(choice);
+      const updated = await ctx.update(pending, { title: this.suggestionTitle(choice.keep, choice.merge), proposed_fields: { ...proposal }, confidence_label: "High" }, { expectedHash: pending.contentHash, now, body: this.suggestionBody(choice.keep, choice.merge, "manual") });
+      await ctx.rebuildIndex();
+      return updated;
+    });
+  }
+
+  /** What a Manual merge would do, worked out from the same plan the merge itself uses; nothing is written. */
+  async previewManual(options: ManualMergeOptions): Promise<PersonMergePreview> {
+    await this.ctx.rebuildIndex();
+    const choice = this.manualChoice(options);
+    const plan = this.plan(this.manualProposal(choice));
+    const { keep, merge, nameFrom } = choice;
+    const afterKeep = plan.find((entry) => entry.id === keep.frontmatter.id)?.after ?? {};
+    const emails = Array.isArray(afterKeep.identifiers) ? afterKeep.identifiers.flatMap((identifier: { kind?: string; value?: string }) => identifier.kind === "email" && identifier.value ? [identifier.value] : []) : personEmails(keep);
+    const aliases = Array.isArray(afterKeep.aliases) ? afterKeep.aliases as string[] : Array.isArray(keep.frontmatter.aliases) ? keep.frontmatter.aliases as string[] : [];
+    return {
+      keepPersonId: keep.frontmatter.id, nameFromPersonId: nameFrom.frontmatter.id, keepLocked: keep.frontmatter.is_self === true || merge.frontmatter.is_self === true,
+      keep: { id: keep.frontmatter.id, title: keep.frontmatter.title }, merge: { id: merge.frontmatter.id, title: merge.frontmatter.title },
+      keptName: String(afterKeep.title ?? keep.frontmatter.title), aliases, emails,
+      referenceCount: plan.filter((entry) => entry.id !== keep.frontmatter.id && entry.id !== merge.frontmatter.id).length
+    };
+  }
+
+  private manualProposal({ keep, merge, nameFrom }: { keep: LifeOSObject; merge: LifeOSObject; nameFrom: LifeOSObject }): PersonMergeProposal {
+    return { keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match: "manual", keep_title: keep.frontmatter.title, merge_title: merge.frontmatter.title, name_from_person_id: nameFrom.frontmatter.id };
+  }
+
+  /**
+   * Validates a Manual merge and fills the defaults: the existing survivor rule (Self, reviewed, older) and the name that has a
+   * family name. The Self person always survives, whatever was asked (enforced here, not only in the screen).
+   */
+  private manualChoice(options: ManualMergeOptions) {
+    const { ctx } = this;
+    if (options.personId === options.otherPersonId) throw new Error("A person cannot be merged into itself");
+    const left = ctx.index.get(options.personId), right = ctx.index.get(options.otherPersonId);
+    if (!mergeable(left) || !mergeable(right)) throw new Error(`${mergeable(left) ? options.otherPersonId : options.personId} no longer exists or was already merged`);
+    const both = [left, right];
+    const pick = (id: string | undefined, field: string) => {
+      if (id === undefined) return undefined;
+      const person = both.find((candidate) => candidate.frontmatter.id === id);
+      if (!person) throw new Error(`${field} must be one of the two people`);
+      return person;
+    };
+    const self = both.find((person) => person.frontmatter.is_self === true);
+    const asked = pick(options.keepPersonId, "keepPersonId");
+    if (self && asked && asked !== self) throw new Error("The Self person always survives; it cannot be merged into someone else");
+    const keep = self ?? asked ?? this.order(left, right)[0];
+    const merge = keep === left ? right : left;
+    const hasFamilyName = (person: LifeOSObject) => (typeof person.frontmatter.family_name === "string" && person.frontmatter.family_name.trim() !== "") || String(person.frontmatter.title).trim().split(/\s+/).length > 1;
+    const nameFrom = pick(options.nameFromPersonId, "nameFromPersonId") ?? (keep !== self && !hasFamilyName(keep) && hasFamilyName(merge) ? merge : keep);
+    return { keep, merge, nameFrom };
+  }
+
   /** Same address; same local part on two internal domains; the same full name; or an address that fits the other's name (case and accents ignored). */
   private match(left: LifeOSObject, right: LifeOSObject, candidates: readonly NameCandidate[]): PersonMergeMatch | undefined {
     const leftEmails = personEmails(left), rightEmails = personEmails(right);
@@ -148,15 +236,18 @@ export class PersonMergeModule {
     return left.frontmatter.created_at <= right.frontmatter.created_at ? [left, right] : [right, left];
   }
 
-  private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: (role: ReplayRole) => string) {
+  private suggestionTitle(keep: LifeOSObject, merge: LifeOSObject) { return `Merge ${merge.frontmatter.title} into ${keep.frontmatter.title}`; }
+
+  private suggestionBody(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch) {
+    return `# Possible duplicate person\n\n${matchReasons[match]} Accepting moves every reference from ${merge.frontmatter.title} to ${keep.frontmatter.title} and deletes ${merge.frontmatter.title}. Nothing changes until you accept.\n`;
+  }
+
+  private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: (role: ReplayRole) => string, nameFromId?: string) {
     const role = replayRoles.merge(pairKey(keep.frontmatter.id, merge.frontmatter.id));
-    const title = `Merge ${merge.frontmatter.title} into ${keep.frontmatter.title}`;
-    const reason = matchReasons[match];
-    const proposal: PersonMergeProposal = { keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match, keep_title: keep.frontmatter.title, merge_title: merge.frontmatter.title };
+    const proposal: PersonMergeProposal = { keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match, keep_title: keep.frontmatter.title, merge_title: merge.frontmatter.title, ...(nameFromId ? { name_from_person_id: nameFromId } : {}) };
     const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now, newId }, {
-      role, reviewType: personMergeReviewType, title, target: { type: "person" }, proposed: { ...proposal }, confidence: match === "name" || match === "name-email" ? "Medium" : "High",
-      readsFrom: [keep.frontmatter.id, merge.frontmatter.id],
-      body: `# Possible duplicate person\n\n${reason} Accepting moves every reference from ${merge.frontmatter.title} to ${keep.frontmatter.title} and deletes ${merge.frontmatter.title}. Nothing changes until you accept.\n`
+      role, reviewType: personMergeReviewType, title: this.suggestionTitle(keep, merge), target: { type: "person" }, proposed: { ...proposal }, confidence: match === "name" || match === "name-email" ? "Medium" : "High",
+      readsFrom: [keep.frontmatter.id, merge.frontmatter.id], body: this.suggestionBody(keep, merge, match)
     });
     await this.auditSuggestion(id, proposal, now);
     return id;
@@ -244,10 +335,24 @@ export class PersonMergeModule {
     const identifiers = Array.isArray(keep.frontmatter.identifiers) ? keep.frontmatter.identifiers : [];
     const missing = personEmails(merge).filter((email) => !personEmails(keep).includes(email));
     if (missing.length) { keepBefore.identifiers = keep.frontmatter.identifiers ?? null; keepAfter.identifiers = [...identifiers, ...missing.map((value) => ({ kind: "email", value }))]; }
+    // #213: the kept name is the kept person's own unless the user chose the merged person's; either way the name set aside becomes an alias.
+    const takesMergedName = proposal.name_from_person_id === merge.frontmatter.id && merge.frontmatter.title !== keep.frontmatter.title;
+    const finalTitle = takesMergedName ? merge.frontmatter.title : keep.frontmatter.title;
+    if (takesMergedName) {
+      keepBefore.title = keep.frontmatter.title; keepAfter.title = merge.frontmatter.title;
+      for (const field of ["given_name", "family_name"]) if (merge.frontmatter[field] !== keep.frontmatter[field]) { keepBefore[field] = keep.frontmatter[field] ?? null; keepAfter[field] = merge.frontmatter[field] ?? null; }
+    }
     const aliases = Array.isArray(keep.frontmatter.aliases) ? keep.frontmatter.aliases as unknown[] : [];
-    const newAliases = [merge.frontmatter.title, ...(Array.isArray(merge.frontmatter.aliases) ? merge.frontmatter.aliases : [])].filter((alias) => typeof alias === "string" && nameKey(alias) !== nameKey(keep.frontmatter.title) && !aliases.some((existing) => nameKey(existing) === nameKey(alias)));
-    if (newAliases.length) { keepBefore.aliases = keep.frontmatter.aliases ?? null; keepAfter.aliases = [...aliases, ...new Set(newAliases)]; }
-    for (const field of fillFields) if (keep.frontmatter[field] === undefined && merge.frontmatter[field] !== undefined) { keepBefore[field] = null; keepAfter[field] = merge.frontmatter[field]; }
+    const known: unknown[] = [finalTitle, ...aliases];
+    const newAliases: string[] = [];
+    for (const alias of [keep.frontmatter.title, merge.frontmatter.title, ...(Array.isArray(merge.frontmatter.aliases) ? merge.frontmatter.aliases : [])]) {
+      if (typeof alias !== "string" || known.some((existing) => nameKey(existing) === nameKey(alias))) continue;
+      known.push(alias); newAliases.push(alias);
+    }
+    if (newAliases.length) { keepBefore.aliases = keep.frontmatter.aliases ?? null; keepAfter.aliases = [...aliases, ...newAliases]; }
+    for (const field of fillFields) if (!(field in keepAfter) && keep.frontmatter[field] === undefined && merge.frontmatter[field] !== undefined) { keepBefore[field] = null; keepAfter[field] = merge.frontmatter[field]; }
+    // #213: a merge is the user's call (their own, or accepting a suggestion), so the person who stays counts as reviewed.
+    if (keep.frontmatter.is_self !== true && keep.frontmatter.review_state !== "reviewed") { keepBefore.review_state = keep.frontmatter.review_state ?? null; keepAfter.review_state = "reviewed"; }
     if (Object.keys(keepBefore).length) entries.push({ id: to, before: keepBefore, after: keepAfter });
 
     entries.push({ id: from, before: { deleted_at: null, merged_into_person_id: merge.frontmatter.merged_into_person_id ?? null }, after: { deleted_at: new Date().toISOString(), merged_into_person_id: to } });

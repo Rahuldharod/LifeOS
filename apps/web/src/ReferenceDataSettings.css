@@ -17,3 +17,18 @@
 .reference-fields input, .reference-fields select { width: 100%; }
 .reference-person-controls, .reference-record-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .reference-detail .record-more { margin: var(--space-4) 0 72px; }
+
+/* #213: Manual merge dialog (PersonMerge.tsx) */
+.person-merge { display: grid; gap: var(--space-3); }
+.person-merge h3 { margin: 0; }
+.person-merge > input[type="search"] { width: 100%; }
+.person-merge-list { display: grid; gap: var(--space-1); max-height: 320px; overflow: auto; }
+.person-merge-list > button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; padding: var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); text-align: left; }
+.person-merge-list small { color: var(--color-text-muted); overflow-wrap: anywhere; }
+.person-merge fieldset { display: grid; gap: var(--space-2); margin: 0; padding: var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); }
+.person-merge legend { padding: 0 var(--space-1); font-weight: 700; }
+.person-merge fieldset label { display: flex; align-items: center; gap: var(--space-2); }
+.person-merge-result { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; }
+.person-merge-result dt { color: var(--color-text-muted); }
+.person-merge-result dd { margin: 0; overflow-wrap: anywhere; }
+.person-merge-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }

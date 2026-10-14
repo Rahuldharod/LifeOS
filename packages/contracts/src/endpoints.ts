@@ -51,6 +51,10 @@ export interface Endpoints {
   "GET /api/v1/people/labels": { response: W.PersonLabel[] };
   "PUT /api/v1/people/:id/external": { body: { isExternal: boolean | null; expectedHash: string }; response: W.LifeObject };
   "POST /api/v1/people/:id/reviewed": Guarded & { response: W.LifeObject };
+  // #213: Manual merge of the person in the path with `otherPersonId`. Both endpoints fill the same defaults
+  // (the survivor rule, the name with a family name); the Self person always survives. The merge answers the kept person.
+  "GET /api/v1/people/:id/merge-preview": { query: W.PersonMergeChoice; response: W.PersonMergePreview };
+  "POST /api/v1/people/:id/merge": { body: W.PersonMergeChoice; response: W.LifeObject };
 
   // Calendar (#88)
   "GET /api/v1/calendar/events": { query: Range; response: W.CalendarEvent[] };
