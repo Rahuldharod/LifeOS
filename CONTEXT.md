@@ -124,8 +124,19 @@ _Avoid_: Me, owner (owner is a task field)
 The synced setting listing the email domains of the user's own organisations. With none set, nobody is marked External.
 
 **Unreviewed person**:
-A Person LifeOS created automatically (from a calendar invite or an adopted draft) that the user has not yet confirmed. Shown with the text "unreviewed" until the user confirms or saves it. A merge suggestion always involves at least one unreviewed person.
+A Person LifeOS created automatically (from a calendar invite or an adopted draft) that the user has not yet confirmed, including one created from an attendee name alone. Shown with the text "unreviewed" until the user confirms, saves or merges it. People the user creates are never unreviewed.
 _Avoid_: New contact, pending person
+
+**Merge suggestion**:
+An Inbox proposal that two People are the same person, matched by a shared email, an email that fits the other's name (`john.doe@` for John Doe), or the same full name. It always involves at least one unreviewed person, never merges by itself, and is not proposed again once the user keeps the pair separate.
+_Avoid_: Duplicate alert
+
+**Manual merge**:
+The user joining any two People from the People card. The user chooses which Person and which name to keep; the Self person always survives. The other Person's emails move across and its name becomes an alias.
+_Avoid_: Link, combine
+
+**Alias**:
+Another name a Person is known by, usually the name of a Person merged into it. Found by search; never shown as the Display label.
 
 **Display label**:
 How a Person is shown everywhere: first name, or full name when another live person shares the first name, plus " - ext" for an External person.
