@@ -16,6 +16,10 @@
           {
             "type": "command",
             "command": "cd \"$CLAUDE_PROJECT_DIR\" && node scripts/prune-worktrees.mjs --check"
+          },
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && node scripts/hooks/feedback-nudge.mjs"
           }
         ]
       }

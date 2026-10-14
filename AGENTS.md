@@ -107,6 +107,10 @@ Agent worktrees live under `.claude/worktrees/` (ignored by Git) and are tempora
 
 A skill missing from your skill list is usually one only the user can start (`disable-model-invocation`, e.g. `implement`, `to-tickets`, `grill-with-docs`), not uninstalled. Ask the user to run `/mattpocock-skills:<name>`; never re-create its steps by hand or hand it to a subagent.
 
+### App Feedback
+
+When the user says "process app feedback", or the session start reports App Feedback items waiting, follow `docs/agents/app-feedback.md` (ADR 0022).
+
 ### Review
 
 Reviewers check the diff against `CODING_STANDARDS.md` as well as the rules above.
