@@ -92,10 +92,31 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
   const closed = useRef(new Map<string, NoteDraftBase | "pending">());
   const adopted = useRef(new Map<string, string>());
   const closedSaves = useRef(new Map<string, Promise<void>>());
-  const current = useRef({ note, base, conflict, readOnly, onSaved, onMessage });
-  current.current = { note, base, conflict, readOnly, onSaved, onMessage };
+  const current = useRef({ note, base, conflict, readOnly, busy, onSaved, onMessage });
+  current.current = { note, base, conflict, readOnly, busy, onSaved, onMessage };
 
   useEffect(() => { activeDraft.current = draft; }, [draft]);
+
+  // #204: unmounting (a Series view's earlier-occurrence editor, when the route changes) leaves no later render to
+  // autosave from. The editor reports its last typing during the same unmount, possibly after this cleanup, so the
+  // unsaved draft is saved to its own Note in a microtask, through the same path a later `open` uses. While busy, or in a
+  // conflict (which cannot be saved), it is only kept in the browser.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      queueMicrotask(() => {
+        if (mounted.current) return; // a development remount, not a real unmount
+        const { note: openNote, base: openBase, busy: isBusy, conflict: isConflict } = current.current;
+        if ((isBusy || isConflict) && openNote && openBase?.noteId === openNote.frontmatter.id && restoredId.current === openNote.frontmatter.id && activeDraft.current !== openNote.body) {
+          cacheDraft(openBase.noteId, activeDraft.current, openBase.hash);
+          return;
+        }
+        closeCurrent(undefined);
+      });
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Typing is a draft-affecting action: it always retires a pending "Keep disk version" undo
    * offer, same as saving or opening a different note. */

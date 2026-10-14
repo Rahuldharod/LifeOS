@@ -30,8 +30,8 @@ let saved: DraftControllerNote[];
 beforeEach(() => { calls.length = 0; saved = []; localStorage.clear(); });
 afterEach(() => { act(() => root?.unmount()); root = undefined; host?.remove(); });
 
-function Harness({ note, readOnly }: { note: DraftControllerNote | undefined; readOnly: boolean }) {
-  controller = useNoteDraftController({ note, readOnly, busy: false, onMessage: () => undefined, onSaved: (updated) => saved.push(updated), fetchLatest: async () => note });
+function Harness({ note, readOnly, busy = false }: { note: DraftControllerNote | undefined; readOnly: boolean; busy?: boolean }) {
+  controller = useNoteDraftController({ note, readOnly, busy, onMessage: () => undefined, onSaved: (updated) => saved.push(updated), fetchLatest: async () => note });
   return null;
 }
 async function render(note: DraftControllerNote | undefined, readOnly = false) {
@@ -111,5 +111,63 @@ describe("useNoteDraftController: a change reported for a Note", () => {
     await settle();
     expect(calls).toEqual([]);
     expect(controller.draft).toBe("beta\n");
+  });
+});
+
+// #204: the Series view's earlier-occurrence editors unmount with the view (Back / Forward). The editor flushes its last
+// typing as it goes, in the same commit; the controller must still save it to its Note, and write nothing if there is none.
+describe("useNoteDraftController: unmounting with a draft open", () => {
+  async function openAndGetReport(options: { readOnly?: boolean; busy?: boolean }) {
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    const element = <Harness note={noteA} readOnly={options.readOnly ?? false} busy={options.busy ?? false} />;
+    await act(async () => { root!.render(element); });
+    act(() => { controller.open(noteA); });
+    await act(async () => { root!.render(element); });
+    return controller.setDraftFor(controller.target);
+  }
+  async function unmount() {
+    await act(async () => { root!.unmount(); });
+    root = undefined;
+    await settle();
+  }
+
+  it("saves typing not yet autosaved to its own Note", async () => {
+    const report = await openAndGetReport({});
+    act(() => report("alpha typed\n"));
+    await unmount();
+    expect(calls).toEqual([{ endpoint: "PUT /api/v1/objects/:id/body", id: "a", body: "alpha typed\n", expectedHash: "a-hash" }]);
+    expect(localStorage.getItem("lifeos.draft.a")).toBeNull();
+  });
+
+  it("saves a report made in the same unmount, after the controller's own cleanup ran", async () => {
+    const report = await openAndGetReport({});
+    await act(async () => { root!.unmount(); report("alpha late\n"); });
+    root = undefined;
+    await settle();
+    expect(calls.map(({ id, body }) => [id, body])).toEqual([["a", "alpha late\n"]]);
+  });
+
+  it("without typing writes nothing", async () => {
+    await openAndGetReport({});
+    await unmount();
+    expect(calls).toEqual([]);
+  });
+
+  it("on a read-only device keeps the text in the browser and never saves", async () => {
+    const report = await openAndGetReport({ readOnly: true });
+    act(() => report("alpha typed\n"));
+    await unmount();
+    expect(calls).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("lifeos.draft.a")!)).toMatchObject({ body: "alpha typed\n", baseHash: "a-hash" });
+  });
+
+  it("while busy only keeps the text in the browser", async () => {
+    const report = await openAndGetReport({ busy: true });
+    act(() => report("alpha typed\n"));
+    await unmount();
+    expect(calls).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("lifeos.draft.a")!)).toMatchObject({ body: "alpha typed\n", baseHash: "a-hash" });
   });
 });

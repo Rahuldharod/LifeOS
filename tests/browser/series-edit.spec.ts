@@ -327,3 +327,48 @@ test("Visual typing in the opened meeting Note, then going Back to another meeti
   await page.clock.runFor(5000);
   expect(await note(SWITCH("02").note)).toBe(february);
 });
+
+// #204: Back / Forward moves no focus, so no blur flushes the earlier occurrence's editor, and the Series view unmounts
+// with the route. The page clock is paused, so only the editor's unmount flush and the draft controller's save can carry it.
+test("Visual typing in an earlier occurrence, then going Back at once, saves to that occurrence only", async ({ page, request }) => {
+  await seed(request);
+  const note = async (id: string) => ((await (await request.get(`/api/v1/notes/${id}`)).json()) as { body: string }).body;
+  const [february, march] = [await note(SWITCH("02").note), await note(SWITCH("03").note)];
+  await page.clock.install();
+  await page.goto(`/calendar/2026-02-10/${SWITCH("02").meeting}`);
+  const series = page.getByRole("region", { name: "Earlier occurrences" });
+  await series.getByRole("button", { name: /Open the latest/ }).click();
+  await expect(page).toHaveURL(new RegExp(SWITCH("03").meeting));
+  const january = page.getByRole("region", { name: "Earlier occurrences" }).locator("details").nth(1);
+  await january.locator("summary").click();
+  const visual = january.locator("[contenteditable='true']").first();
+  await expect(visual).toContainText("switch words for 2026-01.");
+  await visual.click();
+  await page.keyboard.press(END_OF_DOCUMENT);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await page.keyboard.type(" Z204");
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(SWITCH("02").meeting));
+  await expect(page.locator("[contenteditable='true']").first()).toContainText("switch words for 2026-02.");
+  await page.clock.resume();
+  await expect.poll(() => note(SWITCH("01").note), { timeout: 15000 }).toContain("Z204");
+  await page.clock.runFor(5000);
+  expect([await note(SWITCH("02").note), await note(SWITCH("03").note)]).toEqual([february, march]);
+});
+
+test("going Back from an earlier occurrence without typing leaves its file untouched", async ({ page, request }) => {
+  await seed(request);
+  const note = async (id: string) => ((await (await request.get(`/api/v1/notes/${id}`)).json()) as { body: string; contentHash: string }).contentHash;
+  const before = await note(SWITCH("01").note);
+  await page.clock.install();
+  await page.goto(`/calendar/2026-02-10/${SWITCH("02").meeting}`);
+  await page.getByRole("region", { name: "Earlier occurrences" }).getByRole("button", { name: /Open the latest/ }).click();
+  await expect(page).toHaveURL(new RegExp(SWITCH("03").meeting));
+  const january = page.getByRole("region", { name: "Earlier occurrences" }).locator("details").nth(1);
+  await january.locator("summary").click();
+  await expect(january.locator("[contenteditable='true']").first()).toContainText("switch words for 2026-01.");
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(SWITCH("02").meeting));
+  await page.clock.runFor(5000); // well past the editor debounce and the 1.8 s autosave
+  expect(await note(SWITCH("01").note)).toBe(before);
+});
