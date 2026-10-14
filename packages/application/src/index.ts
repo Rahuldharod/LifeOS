@@ -244,6 +244,8 @@ export class LifeOSApplication {
   rejectReviewItem(reviewId: string) { return this.review.rejectReviewItem(reviewId); }
   /** #40: proposes `person-merge` Review Items for likely duplicate people; never merges by itself. */
   suggestPersonMerges() { return this.review.merges.suggest(); }
+  /** #215: the pairs `suggestPersonMerges` would propose now, with the match reason; writes nothing. */
+  previewPersonMergeSuggestions() { return this.review.merges.candidates(); }
 
   // Capture and knowledge
   quickCapture(text: string, details?: QuickCaptureInput) { return this.capture.quickCapture(text, details); }
