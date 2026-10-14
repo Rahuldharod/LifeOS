@@ -108,9 +108,9 @@ export class PersonMergeModule {
   }
 
   /** The likely duplicate pairs a sweep would propose right now, with why; nothing is written (#215). */
-  async candidates(options: { personIds?: string[] } = {}): Promise<PersonMergeCandidate[]> {
+  async candidates(): Promise<PersonMergeCandidate[]> {
     await this.ctx.rebuildIndex();
-    return this.scan(options.personIds).flatMap(({ match, keep, merge }) => match ? [{ keepPersonId: keep.frontmatter.id, mergePersonId: merge.frontmatter.id, keepTitle: String(keep.frontmatter.title), mergeTitle: String(merge.frontmatter.title), match }] : []);
+    return this.scan(undefined).flatMap(({ match, keep, merge }) => match ? [{ keepPersonId: keep.frontmatter.id, mergePersonId: merge.frontmatter.id, keepTitle: String(keep.frontmatter.title), mergeTitle: String(merge.frontmatter.title), match }] : []);
   }
 
   /**
@@ -127,7 +127,6 @@ export class PersonMergeModule {
       return [pairKey(String(fields.keep_person_id), String(fields.merge_person_id)), review] as const;
     }));
     const candidates = people.map(candidateOf);
-    const seen = new Set<string>();
     const pairs: Array<{ key: string; existing?: LifeOSObject; match?: PersonMergeMatch; keep: LifeOSObject; merge: LifeOSObject }> = [];
     for (const [index, left] of people.entries()) {
       for (const right of people.slice(index + 1)) {
@@ -136,8 +135,7 @@ export class PersonMergeModule {
         if (left.frontmatter.is_self === true && right.frontmatter.is_self === true) continue;
         const key = pairKey(left.frontmatter.id, right.frontmatter.id);
         const existing = suggestions.get(key);
-        const match = existing || seen.has(key) ? undefined : this.match(left, right, candidates);
-        if (match) seen.add(key);
+        const match = existing ? undefined : this.match(left, right, candidates);
         const [keep, merge] = this.order(left, right);
         pairs.push({ key, existing, match, keep, merge });
       }
