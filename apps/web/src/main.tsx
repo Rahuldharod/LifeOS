@@ -794,10 +794,11 @@ function App() {
       } catch (error) {
         if (!(error instanceof ApiError && error.existingPerson)) throw error;
         result.outcome = { kind: "taken", person: error.existingPerson };
+        // Reported as run's failure so "Email added" never shows for a refused address.
+        throw new Error(`${email.trim().toLowerCase()} belongs to ${error.existingPerson.name}`);
       }
     }, "Email added");
-    if (result.outcome.kind === "taken") setMessage(`${email.trim().toLowerCase()} belongs to ${result.outcome.person.name}`);
-    return ok ? result.outcome : { kind: "failed" };
+    return ok || result.outcome.kind === "taken" ? result.outcome : { kind: "failed" };
   };
   const removePersonEmail = (person: LifeObject, email: string) => run(async () => {
     await api("POST /api/v1/people/:id/emails/remove", { params: { id: person.frontmatter.id }, body: { email, expectedHash: person.contentHash } });
