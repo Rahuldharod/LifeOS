@@ -9,7 +9,7 @@ const daily = ["Today", "Calendar", "Tasks", "Notes", "Inbox"] as const satisfie
 const knowledge = ["Decisions", "Open Points", "Knowledge"] as const satisfies readonly View[];
 
 type ShellDestination = (typeof daily)[number] | (typeof knowledge)[number] | "System" | "Settings";
-type ShellIconName = ShellDestination | "Search" | "Capture" | "Collapse" | "Expand" | "Menu";
+type ShellIconName = ShellDestination | "Search" | "Capture" | "Feedback" | "Collapse" | "Expand" | "Menu";
 
 function ShellIcon({ name }: { name: ShellIconName }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -26,6 +26,7 @@ function ShellIcon({ name }: { name: ShellIconName }) {
       case "System": return <><path d="M3 12h4l2-5 4 10 2-5h6" /><path d="M4 4h16v16H4z" /></>;
       case "Settings": return <><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></>;
       case "Search": return <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" /></>;
+      case "Feedback": return <><path d="M4 5h16v11H9l-5 4z" /><path d="M8 9h8M8 12.5h5" /></>;
       case "Capture": return <><path d="M12 4v16M4 12h16" /></>;
       case "Collapse": return <><path d="m14 7-5 5 5 5" /><path d="M19 4v16" /></>;
       case "Expand": return <><path d="m10 7 5 5-5 5" /><path d="M5 4v16" /></>;
@@ -40,7 +41,7 @@ function readCollapsedPreference() {
   catch { return false; }
 }
 
-export function ApplicationShell({ activeView, pendingReviewCount = 0, status, readOnly = false, contentClassName, onNavigate, onSearch, onCapture, children }: {
+export function ApplicationShell({ activeView, pendingReviewCount = 0, status, readOnly = false, contentClassName, onNavigate, onSearch, onCapture, onFeedback, children }: {
   activeView: View;
   pendingReviewCount?: number;
   status: string;
@@ -49,6 +50,8 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
   onNavigate: (view: View) => void;
   onSearch: () => void;
   onCapture: () => void;
+  /** PB-018: opens the App Feedback popup; the button beside Settings shows only when this is given. */
+  onFeedback?: () => void;
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(readCollapsedPreference);
@@ -92,7 +95,10 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
     </nav>
     <div className="shell-sidebar-footer">
       {destination("System")}
-      {destination("Settings")}
+      <div className="shell-footer-pair">
+        {destination("Settings")}
+        {onFeedback && <button type="button" className="shell-feedback" aria-label="Send feedback" title="Send feedback" onClick={() => { setMenuOpen(false); onFeedback(); }}><ShellIcon name="Feedback" /></button>}
+      </div>
       <p className="connection" role="status" title={status}><i className={readOnly ? "warning-dot" : ""} /> <span className="shell-label">{status}</span></p>
     </div>
   </>;
