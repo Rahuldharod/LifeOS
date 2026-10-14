@@ -29,7 +29,7 @@ export type { OpenPointFilters } from "./open-points.js";
 export { NoteReferencedError } from "./notes.js";
 export type { NoteFilters, ObjectReference, PurgeCheck } from "./notes.js";
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
-export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, personEmails } from "./people.js";
+export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, PersonEmailTakenError, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { ManualMergeOptions, PersonMergePreview } from "./person-merge.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarEventReference, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
@@ -189,6 +189,10 @@ export class LifeOSApplication {
   // People (#39): display labels (also the Agent Index's source, #43), the External override, internal domains
   personLabels() { return this.people.labels(); }
   setPersonExternal(id: string, isExternal: boolean | null, expectedHash: string) { return this.people.setExternal(id, isExternal, expectedHash); }
+  /** #214: adds an email to a person; refused with PersonEmailTakenError when another person has it. */
+  addPersonEmail(id: string, email: string, expectedHash: string) { return this.people.addEmail(id, email, expectedHash); }
+  /** #214: removes an email from a person. */
+  removePersonEmail(id: string, email: string, expectedHash: string) { return this.people.removeEmail(id, email, expectedHash); }
   confirmPersonReviewed(id: string, expectedHash: string) { return this.people.confirmReviewed(id, expectedHash); }
   /** #213: what a Manual merge of two people would do (defaults filled in); writes nothing. */
   previewPersonMerge(options: ManualMergeOptions) { return this.review.merges.previewManual(options); }

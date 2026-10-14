@@ -43,6 +43,7 @@ import { TodayPage } from "./TodayPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { createSettingsEditorGuard, type SettingsSection } from "./SettingsWorkspace.js";
 import { ReferenceDataSettings } from "./ReferenceDataSettings.js";
+import type { AddEmailOutcome } from "./PersonEmails.js";
 import { parseReferenceSettingsId, referenceCardIdFromRoute, referenceRouteInSettings, referenceSettingsCardId, referenceSettingsId, type ReferenceEntityType } from "./referenceSettingsRoutes.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
@@ -782,6 +783,28 @@ function App() {
     await refresh();
   }, `${object.frontmatter.title} confirmed`);
 
+  // #214: edit a person's emails. An address on another person comes back named, so the card can offer the merge.
+  const addPersonEmail = async (person: LifeObject, email: string): Promise<AddEmailOutcome> => {
+    const result: { outcome: AddEmailOutcome } = { outcome: { kind: "failed" } };
+    const ok = await run(async () => {
+      try {
+        await api("POST /api/v1/people/:id/emails", { params: { id: person.frontmatter.id }, body: { email, expectedHash: person.contentHash } });
+        result.outcome = { kind: "saved" };
+        await refresh();
+      } catch (error) {
+        if (!(error instanceof ApiError && error.existingPerson)) throw error;
+        result.outcome = { kind: "taken", person: error.existingPerson };
+        // Reported as run's failure so "Email added" never shows for a refused address.
+        throw new Error(`${email.trim().toLowerCase()} belongs to ${error.existingPerson.name}`);
+      }
+    }, "Email added");
+    return ok || result.outcome.kind === "taken" ? result.outcome : { kind: "failed" };
+  };
+  const removePersonEmail = (person: LifeObject, email: string) => run(async () => {
+    await api("POST /api/v1/people/:id/emails/remove", { params: { id: person.frontmatter.id }, body: { email, expectedHash: person.contentHash } });
+    await refresh();
+  }, "Email removed");
+
   // #213: Manual merge. The preview is read-only; the merge goes through the same crash-safe merge as an Inbox suggestion and answers the kept person.
   const previewPersonMerge = (person: LifeObject, choice: PersonMergeChoice) => api("GET /api/v1/people/:id/merge-preview", { params: { id: person.frontmatter.id }, query: choice });
   const mergePeople = async (person: LifeObject, choice: PersonMergeChoice) => {
@@ -1170,7 +1193,7 @@ function App() {
           const plural = type === "person" ? "people" : `${type}s`;
           const label = plural[0]!.toUpperCase() + plural.slice(1);
           const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
-          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} run={run} onRestored={refresh} /> }] };
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> }] };
         })}
       />}
   </ApplicationShell>;

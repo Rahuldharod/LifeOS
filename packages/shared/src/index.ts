@@ -61,13 +61,18 @@ export function acceptedSummaryText(body: string) {
   return lines.slice(start + 1, end).join("\n").replace(/^\s*##\s+Summary\s*\n/i, "").trim();
 }
 
-/** Email addresses and aliases recorded on a Person (#211): what People search matches besides the name. Hand-edited files may list plain strings. */
-export function personSearchTerms(frontmatter: Readonly<Record<string, unknown>>): string[] {
+/** Email addresses recorded on a Person, as stored (#211, #214). Hand-edited files may list plain strings. */
+export function personEmailAddresses(frontmatter: Readonly<Record<string, unknown>>): string[] {
   const identifiers = Array.isArray(frontmatter.identifiers) ? frontmatter.identifiers as unknown[] : [];
-  const emails = identifiers.map((identifier) => typeof identifier === "string" ? identifier
-    : identifier && typeof identifier === "object" && (identifier as { kind?: unknown }).kind === "email" ? (identifier as { value?: unknown }).value : undefined);
+  return identifiers.map((identifier) => typeof identifier === "string" ? identifier
+    : identifier && typeof identifier === "object" && (identifier as { kind?: unknown }).kind === "email" ? (identifier as { value?: unknown }).value : undefined)
+    .filter((email): email is string => typeof email === "string" && email.trim() !== "");
+}
+
+/** Email addresses and aliases recorded on a Person (#211): what People search matches besides the name. */
+export function personSearchTerms(frontmatter: Readonly<Record<string, unknown>>): string[] {
   const aliases = Array.isArray(frontmatter.aliases) ? frontmatter.aliases as unknown[] : [];
-  return [...emails, ...aliases].filter((term): term is string => typeof term === "string" && term.trim() !== "");
+  return [...personEmailAddresses(frontmatter), ...aliases].filter((term): term is string => typeof term === "string" && term.trim() !== "");
 }
 
 /** People search (#211): every typed word must appear in the name, an email address or an alias, ignoring case and accents. An empty query matches everyone. */
