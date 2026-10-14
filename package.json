@@ -9,6 +9,7 @@
     "status": "node scripts/lifeos.mjs status",
     "update-app": "node scripts/lifeos.mjs update",
     "reconcile-meetings": "node --import tsx scripts/reconcile-meetings.mts",
+    "people-cleanup": "node --import tsx scripts/people-cleanup.mts",
     "worktrees:prune": "node scripts/prune-worktrees.mjs",
     "worktrees:check": "node scripts/prune-worktrees.mjs --check",
     "dev": "node scripts/seed-dev-data.mjs && corepack pnpm --parallel --filter @lifeos/server --filter @lifeos/web dev",

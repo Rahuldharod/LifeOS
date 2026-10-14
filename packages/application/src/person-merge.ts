@@ -20,6 +20,8 @@ export const personMergeReviewType = "person-merge";
 export type PersonMergeMatch = "email" | "email-local-part" | "name" | "name-email" | "manual";
 /** `name_from_person_id` (manual merges, #213) says whose name the kept person ends up with; absent means the kept person's own. */
 export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string; name_from_person_id?: string }
+/** A likely duplicate pair and why it was found (#215). `keep` is the person who would survive. */
+export interface PersonMergeCandidate { keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: PersonMergeMatch }
 /** A Manual merge (#213): the two people and, optionally, who survives and whose name is kept. */
 export interface ManualMergeOptions { personId: string; otherPersonId: string; keepPersonId?: string; nameFromPersonId?: string }
 /** What a Manual merge would do, worked out without writing anything. */
@@ -105,9 +107,19 @@ export class PersonMergeModule {
     return queue.run("sweep", () => this.suggestSerialized(options.now ?? new Date().toISOString(), options.personIds, options.newId ?? (() => uuidV7())));
   }
 
-  private async suggestSerialized(now: string, only: string[] | undefined, newId: (role: ReplayRole) => string) {
+  /** The likely duplicate pairs a sweep would propose right now, with why; nothing is written (#215). */
+  async candidates(): Promise<PersonMergeCandidate[]> {
+    await this.ctx.rebuildIndex();
+    return this.scan(undefined).flatMap(({ match, keep, merge }) => match ? [{ keepPersonId: keep.frontmatter.id, mergePersonId: merge.frontmatter.id, keepTitle: String(keep.frontmatter.title), mergeTitle: String(merge.frontmatter.title), match }] : []);
+  }
+
+  /**
+   * The one place that decides which pairs are considered: live people only, at least one unreviewed, never two Self
+   * people, `personIds` narrowing. `match` is undefined for a pair that matches nothing or was already proposed (any status);
+   * `existing` is that earlier suggestion. Used by the live sweep and by `candidates`, so both always agree.
+   */
+  private scan(only: string[] | undefined) {
     const { ctx } = this;
-    await ctx.rebuildIndex();
     // Suggestions match by name, so they consider live people only.
     const people = ctx.index.all().filter((object) => mergeable(object) && isLive(object));
     const suggestions = new Map(ctx.index.all().filter((object) => object.frontmatter.type === "review-item" && object.frontmatter.review_type === personMergeReviewType).map((review) => {
@@ -115,23 +127,31 @@ export class PersonMergeModule {
       return [pairKey(String(fields.keep_person_id), String(fields.merge_person_id)), review] as const;
     }));
     const candidates = people.map(candidateOf);
-    const proposed = new Set(suggestions.keys());
-    const created: string[] = [];
+    const pairs: Array<{ key: string; existing?: LifeOSObject; match?: PersonMergeMatch; keep: LifeOSObject; merge: LifeOSObject }> = [];
     for (const [index, left] of people.entries()) {
       for (const right of people.slice(index + 1)) {
         if (!isUnreviewedPerson(left.frontmatter) && !isUnreviewedPerson(right.frontmatter)) continue;
         if (only && !only.includes(left.frontmatter.id) && !only.includes(right.frontmatter.id)) continue;
         if (left.frontmatter.is_self === true && right.frontmatter.is_self === true) continue;
         const key = pairKey(left.frontmatter.id, right.frontmatter.id);
-        // #74: a crash replay finds the suggestion its first attempt wrote (same replayable ID); its audit may be missing.
-        const ours = suggestions.get(key);
-        if (ours && ours.frontmatter.id === newId(replayRoles.merge(key))) await this.auditSuggestion(ours.frontmatter.id, ours.frontmatter.proposed_fields as PersonMergeProposal, now);
-        const match = proposed.has(key) ? undefined : this.match(left, right, candidates);
-        if (!match) continue;
-        proposed.add(key);
+        const existing = suggestions.get(key);
+        const match = existing ? undefined : this.match(left, right, candidates);
         const [keep, merge] = this.order(left, right);
-        created.push(await this.writeSuggestion(keep, merge, match, now, newId));
+        pairs.push({ key, existing, match, keep, merge });
       }
+    }
+    return pairs;
+  }
+
+  private async suggestSerialized(now: string, only: string[] | undefined, newId: (role: ReplayRole) => string) {
+    const { ctx } = this;
+    await ctx.rebuildIndex();
+    const created: string[] = [];
+    for (const { key, existing, match, keep, merge } of this.scan(only)) {
+      // #74: a crash replay finds the suggestion its first attempt wrote (same replayable ID); its audit may be missing.
+      if (existing && existing.frontmatter.id === newId(replayRoles.merge(key))) await this.auditSuggestion(existing.frontmatter.id, existing.frontmatter.proposed_fields as PersonMergeProposal, now);
+      if (!match) continue;
+      created.push(await this.writeSuggestion(keep, merge, match, now, newId));
     }
     if (created.length) await ctx.rebuildIndex();
     return created;
