@@ -360,6 +360,7 @@ test("going Back from an earlier occurrence without typing leaves its file untou
   await seed(request);
   const note = async (id: string) => ((await (await request.get(`/api/v1/notes/${id}`)).json()) as { body: string; contentHash: string }).contentHash;
   const before = await note(SWITCH("01").note);
+  await page.clock.install();
   await page.goto(`/calendar/2026-02-10/${SWITCH("02").meeting}`);
   await page.getByRole("region", { name: "Earlier occurrences" }).getByRole("button", { name: /Open the latest/ }).click();
   await expect(page).toHaveURL(new RegExp(SWITCH("03").meeting));
@@ -368,6 +369,6 @@ test("going Back from an earlier occurrence without typing leaves its file untou
   await expect(january.locator("[contenteditable='true']").first()).toContainText("switch words for 2026-01.");
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(SWITCH("02").meeting));
-  await page.waitForTimeout(2500);
+  await page.clock.runFor(5000); // well past the editor debounce and the 1.8 s autosave
   expect(await note(SWITCH("01").note)).toBe(before);
 });

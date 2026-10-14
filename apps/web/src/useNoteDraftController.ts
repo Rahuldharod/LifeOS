@@ -99,8 +99,8 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
 
   // #204: unmounting (a Series view's earlier-occurrence editor, when the route changes) leaves no later render to
   // autosave from. The editor reports its last typing during the same unmount, possibly after this cleanup, so the
-  // unsaved draft is saved to its own Note in a microtask, through the same path a later `open` uses. While busy it is
-  // only kept in the browser.
+  // unsaved draft is saved to its own Note in a microtask, through the same path a later `open` uses. While busy, or in a
+  // conflict (which cannot be saved), it is only kept in the browser.
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -108,8 +108,8 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
       mounted.current = false;
       queueMicrotask(() => {
         if (mounted.current) return; // a development remount, not a real unmount
-        const { note: openNote, base: openBase, busy: isBusy } = current.current;
-        if (isBusy && openNote && openBase?.noteId === openNote.frontmatter.id && restoredId.current === openNote.frontmatter.id && activeDraft.current !== openNote.body) {
+        const { note: openNote, base: openBase, busy: isBusy, conflict: isConflict } = current.current;
+        if ((isBusy || isConflict) && openNote && openBase?.noteId === openNote.frontmatter.id && restoredId.current === openNote.frontmatter.id && activeDraft.current !== openNote.body) {
           cacheDraft(openBase.noteId, activeDraft.current, openBase.hash);
           return;
         }
