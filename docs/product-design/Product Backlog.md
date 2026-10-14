@@ -1,6 +1,6 @@
 # LifeOS Product Backlog
 
-Last reviewed: 2026-10-13
+Last reviewed: 2026-10-14
 
 This file is the durable product-level backlog for LifeOS. It captures problems and opportunities before they are detailed enough to become implementation work.
 
@@ -23,17 +23,15 @@ Use a lightweight score rather than false precision:
 
 ## Now
 
-Items required to make the current version dependable for regular use. Ticketed under Phase B (#90) on 2026-10-09.
+Items required to make the current version dependable for regular use. Reviewed 2026-10-14: the 2026-10-09 Now items (#100–#107) shipped; bugs first, then the top of Next.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-027 | URLs and the Back button | Each tab and open item has its own URL so Back/Forward, reload and bookmarks work. Unblocks PB-026 and PB-029. | 4 | High | 3 | agent | #100 |
-| PB-010 | Relationship pickers in the other forms | Searchable pickers on the Tasks, Projects, Clients, Products and People forms; tasks gain project, client and product fields. | 4 | High | 2 | agent | #101 |
-| PB-005 | Note filters | Narrow the notes list by type, last-edited date, project, client, product or person, combined with keyword search. | 4 | High | 2 | agent | #105 |
-| PB-028 | One editor layout everywhere | Every note editor shares the Notes-tab layout: capped line length, fills the height, one remembered size per device. | 3 | High | 2 | agent | #102 |
-| PB-030 | Hard delete from the Deleted tab | Remove a tombstoned note's file and versions; refused while frontmatter references it; audited; needs the lease. | 3 | High | 3 | agent | #103 |
-| PB-026 | Breadcrumbs | Show where the user is; each crumb is a real URL. | 2 | High | 1 | agent | #106 |
-| PB-029 | Copy link to an object | Copy `[Title](lifeos://object/<id>)` from any object; a pasted bare address becomes a titled link. Markdown only. | 3 | High | 2 | agent | #107 |
+| — | Visual editor keeps typing on a Note switch | Typing then opening another Note within the debounce (~0.2 s) loses the last keystrokes. Data loss. | 4 | High | 2 | agent | #192 |
+| — | Inbox summary proposal editable | Accept summary is disabled and the proposed text cannot be edited; fix it or say why. Diagnose first. | 4 | Medium | 2 | agent | #195 |
+| PB-032 | Dyslexia-friendly font and dark theme | Optional reading font and dark theme (PRD stories 88–91), moved from Phase A to Phase B (#90). Needs grilling and a ticket. | 3 | High | 2 | — | — |
+| PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Submitting appends a formatted row to the Inbox of this Product Backlog (Captured date, Idea with Bug/Feature label and next PB ID, Source/context with the current page). Supersedes the 2026-09-21 feedback idea. Opens as a popup with a Bug/Feature toggle. Needs grilling. Needs a decision on writing into the code repo at runtime, see ADR 0001. | 3 | High | 2 | — | — |
+| PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. Needs grilling. | 3 | High | 3 | — | — |
 
 ## Next
 
@@ -41,10 +39,9 @@ High-value capabilities to address after the current version is stable.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Submitting appends a formatted row to the Inbox of this Product Backlog (Captured date, Idea with Bug/Feature label and next PB ID, Source/context with the current page). Supersedes the 2026-09-21 feedback idea. Opens as a popup with a Bug/Feature toggle. Needs a decision on writing into the code repo at runtime, see ADR 0001. | 3 | High | 2 | — | — |
 | PB-031 | Split Legacy shared Notes | One-time reviewed split of each Legacy shared Note (ADR 0019 format) into one Note per occurrence, backup first, originals kept until confirmed, so the Visual editor and the collapsible series view work on old data. Known case: the Weekly Prio note; [TBD] count any others. See *Analysis* below. | 3 | Medium | 3 | — | — |
-| PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
+| PB-033 | macOS launcher and start at login | Open LifeOS without the terminal and start it at login (PRD story 85, ADR 0006), moved from Phase A (#90). | 3 | Medium | 3 | — | — |
 
 ## Later
 
@@ -78,7 +75,7 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 | 2026-10-13 | Create a note without a meeting. Choose the project, client, product, people and other metadata at creation (PB-006's header pickers already exist after first edit). | Rahul, Notes tab |
 | 2026-10-13 | `@` tagging in note and task editors. Typing `@` plus a character (for example `@P`) opens a list under the text, grouped by type across all objects, for example *Person:* Paul; *Product:* P.Promo, P.Picks. Up/Down arrows move through the options; Enter or Space picks one, puts the value in the text and sets that metadata on the object. The `@` text is not kept: once picked it disappears and only the metadata is set (decided 2026-10-13). | Rahul, capture speed |
 | 2026-10-13 | Settings has no Area manager. `areaOptions` is a fixed list in code, so the user cannot add or edit area values. Add an Areas card beside the other reference-data cards. | Rahul, Settings |
-| 2026-10-13 | Review the "Copy link" buttons: the URL now points to the object (PB-027), so they may be redundant. **Conflicts with PB-029 (Now, #107).** See *Analysis: copy link* below. | Rahul, UI clean-up |
+| 2026-10-13 | Review the "Copy link" buttons: the URL now points to the object (PB-027), so they may be redundant. PB-029 shipped as #107 on 2026-10-09, so this is now a change to built behaviour. See *Analysis: copy link* below. | Rahul, UI clean-up |
 
 ### Analysis notes for the 2026-10-13 items
 
@@ -98,7 +95,7 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 **Copy link.**
 - Reasons to remove: the address bar already holds the object URL (PB-027), and the button adds clutter to every editor.
 - Reasons to keep: (1) `lifeos://object/...` is the only form that works inside Markdown, so a link pasted into another note survives; (2) the browser URL depends on the device and port (dev 5174, stable 4310) and the link does not; (3) the title-plus-link format saves typing in notes and email.
-- Recommendation: remove the button from the editor toolbar and keep the function as one item in a per-object "more" menu; or keep only the `lifeos://` copy. Decide before #107 is built.
+- Recommendation: remove the button from the editor toolbar and keep the function as one item in a per-object "more" menu; or keep only the `lifeos://` copy. #107 is already built, so this needs its own ticket if pursued.
 
 ## Completed
 
@@ -127,6 +124,13 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-003 | Visual-editor round-trip suite in CI; an "Unproven formatting" label names Markdown the editor would rewrite; images are never lost; LifeOS's Summary section round-trips (#89, #91, #96). Remaining rewrites are a PRD *Known gap* | 2026-10-04 |
 | PB-022b | Calendar offline fallback: Today and the calendar view list meetings already stored in LifeOS under an Offline banner with Retry; never demo meetings (#88, #94). Built from stored meetings, not a separate cache | 2026-10-04 |
 | PB-011 | History panel on every object with "Restore this version"; restore keeps sensitivity and review state and is refused if the object changed since the panel opened (#85, #92) | 2026-10-04 |
+| PB-027 | Every tab and open item has its own URL; Back/Forward, reload and bookmarks work (#100) | 2026-10-09 |
+| PB-010 | Searchable relationship pickers on the Tasks, Projects, Clients, Products and People forms (#101) | 2026-10-09 |
+| PB-028 | One editor layout everywhere (#102) | 2026-10-09 |
+| PB-030 | Delete a note permanently from the Deleted tab (#103) | 2026-10-09 |
+| PB-005 | Filter the notes list by type, date, project, client, product and person (#105) | 2026-10-09 |
+| PB-026 | Breadcrumbs (#106) | 2026-10-09 |
+| PB-029 | Copy a LifeOS link to any object (#107) | 2026-10-09 |
 
 ## Decision log
 
@@ -146,3 +150,4 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | 2026-10-04 | Phase A build decisions and known gaps are recorded in the PRD (*Decisions made during the build*, *Known gaps*) and Solution Design v0.7 (13.10, 13.11), not duplicated here. | One place per decision; the backlog keeps intent and priority only. |
 | 2026-10-09 | Phase A closed (#99 merged, #21 closed). Grilled the backlog: PB-027, PB-010, PB-005, PB-028, PB-030, PB-026 and PB-029 ticketed under Phase B (#90) as #100–#107; Rahul's manual steps in #104. PB-018 stays in Next. | PB-027 unblocks breadcrumbs and copy link; the I=4/E=2 items reuse PB-006's picker. Decisions are recorded in each issue. |
 | 2026-10-02 | PB-023/024: group by last-edited date (matches the sort); the divider width is a per-device browser preference (ADR 0005); the stable app now serves a snapshot of the build. | Headers must follow the list order; 13-inch and 4K screens need different widths; a plain `pnpm build` was silently changing the running app. |
+| 2026-10-14 | Backlog cleanup: #100–#107 moved to Completed. Now: #192, #195, PB-032 (new), PB-018, PB-008. Next: PB-031, PB-009, PB-033 (new). PB-032 and PB-033 come from the Phase B list in #90. The copy-link note is updated because #107 has shipped. | Bugs that lose data or block review come first; the three feature items go through grill-with-docs before they are ticketed. |
