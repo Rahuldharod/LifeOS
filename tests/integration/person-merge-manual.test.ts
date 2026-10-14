@@ -122,6 +122,8 @@ describe("manual merge (#213)", () => {
     const kept = await application.mergePeople({ personId: other.frontmatter.id, otherPersonId: self.frontmatter.id });
     expect(kept.frontmatter.id).toBe(self.frontmatter.id);
     expect(kept.frontmatter.is_self).toBe(true);
+    // The default name rule never renames the Self person.
+    expect(kept.frontmatter.title).toBe(self.frontmatter.title);
     expect(application.object(other.frontmatter.id).frontmatter.merged_into_person_id).toBe(self.frontmatter.id);
   });
 

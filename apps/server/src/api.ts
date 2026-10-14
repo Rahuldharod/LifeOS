@@ -142,7 +142,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!options) return reply.status(400).send({ error: "otherPersonId is required" });
     return application.mergePeople(options);
   });
-  route(server, "POST /api/v1/index/rebuild",async () => application.rebuildIndex());
+  route(server, "POST /api/v1/index/rebuild", async () => application.rebuildIndex());
 
   route(server, "GET /api/v1/calendar/events", async (request, reply) => {
     const range = calendarRange(request.query);

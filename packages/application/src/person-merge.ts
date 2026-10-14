@@ -210,7 +210,7 @@ export class PersonMergeModule {
     const keep = self ?? asked ?? this.order(left, right)[0];
     const merge = keep === left ? right : left;
     const hasFamilyName = (person: LifeOSObject) => (typeof person.frontmatter.family_name === "string" && person.frontmatter.family_name.trim() !== "") || String(person.frontmatter.title).trim().split(/\s+/).length > 1;
-    const nameFrom = pick(options.nameFromPersonId, "nameFromPersonId") ?? (!hasFamilyName(keep) && hasFamilyName(merge) ? merge : keep);
+    const nameFrom = pick(options.nameFromPersonId, "nameFromPersonId") ?? (keep !== self && !hasFamilyName(keep) && hasFamilyName(merge) ? merge : keep);
     return { keep, merge, nameFrom };
   }
 

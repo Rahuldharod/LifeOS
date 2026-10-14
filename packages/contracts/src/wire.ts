@@ -118,7 +118,7 @@ export type PersonMergePreview = {
   keptName: string; aliases: string[]; emails: string[]; referenceCount: number;
 };
 
-export type FocusItem ={ id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
+export type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
 /** #47: one change to the date's Top 3. */
 export type FocusChange = { action: "pin" | "unpin" | "replace" | "dismiss" | "restore" | "reset"; taskId?: string; replacementId?: string };
 /** #46: the Daily Focus brief with live status. */
