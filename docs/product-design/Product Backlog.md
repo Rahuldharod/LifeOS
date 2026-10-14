@@ -1,6 +1,6 @@
 # LifeOS Product Backlog
 
-Last reviewed: 2026-10-09
+Last reviewed: 2026-10-13
 
 This file is the durable product-level backlog for LifeOS. It captures problems and opportunities before they are detailed enough to become implementation work.
 
@@ -41,7 +41,8 @@ High-value capabilities to address after the current version is stable.
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Submitting appends a formatted row to the Inbox of this Product Backlog (Captured date, Idea with Bug/Feature label and next PB ID, Source/context with the current page). Supersedes the 2026-09-21 feedback idea. Needs a decision on writing into the code repo at runtime, see ADR 0001. | 3 | High | 2 | — | — |
+| PB-018 | In-app feedback button | Feedback button beside Settings at the bottom of the nav bar. Single user, text only. Submitting appends a formatted row to the Inbox of this Product Backlog (Captured date, Idea with Bug/Feature label and next PB ID, Source/context with the current page). Supersedes the 2026-09-21 feedback idea. Opens as a popup with a Bug/Feature toggle. Needs a decision on writing into the code repo at runtime, see ADR 0001. | 3 | High | 2 | — | — |
+| PB-031 | Split Legacy shared Notes | One-time reviewed split of each Legacy shared Note (ADR 0019 format) into one Note per occurrence, backup first, originals kept until confirmed, so the Visual editor and the collapsible series view work on old data. Known case: the Weekly Prio note; [TBD] count any others. See *Analysis* below. | 3 | Medium | 3 | — | — |
 | PB-008 | Image management panel | Edit alternative text, inspect usage, replace images, and safely remove orphaned managed assets. | 3 | High | 3 | — | — |
 | PB-009 | Complete Google Drive connection | Turn the stored Drive credentials into a working source/synchronization connector with clear scope and health reporting. | 4 | Medium | 4 | — | — |
 
@@ -69,6 +70,35 @@ Capture raw ideas here. Promote them only after the problem and expected outcome
 | 2026-09-21 | Add configurable autosave timing and a visible “browser draft recovered” history. | Note reliability |
 | 2026-10-03 | CI: bump `actions/checkout`, `actions/setup-node` and `pnpm/action-setup` to versions that target Node 24; GitHub is retiring Node 20 for actions. Warning only, CI still passes. | CI run 37099945764 annotation |
 | 2026-10-03 | CI: on or after **19 Oct 2026**, check the first CI run on Ubuntu 26 (`ubuntu-latest` migrates that day); pin `ubuntu-24.04` if anything breaks. | CI run 37099945764 annotation |
+| 2026-10-13 | Inbox: after the user decides on a recommendation (accept, edit, reject, snooze), move automatically to the next item so a batch is processed faster. Open: what happens at the last item (empty state), and a way to go back one step. | Rahul, Inbox speed |
+| 2026-10-13 | Inbox: accepting a task proposal can also mark it closed. Implies a task life cycle with defined statuses (To do, In progress, Done, Abandoned). Needs a check of today's task statuses and of existing tasks, the transitions allowed (can Done reopen?), and how status shows in lists and filters (PB-005, PB-013). Today's statuses are Inbox, Next, Waiting, Done, Cancelled (`packages/domain`), so this is mostly a mapping and naming question. Decided 2026-10-13: show To do (stored as Next), add In progress, show Abandoned (stored as Cancelled). Open: whether to rename stored values (needs a migration of existing task files) or only relabel in the UI (recommended: relabel, add In progress). | Rahul, Inbox + Tasks |
+| 2026-10-13 | Delete button beside the Save button on every object editor (notes, tasks, projects, clients, products, people). One consistent place, same look. | Rahul, UX consistency |
+| 2026-10-13 | Cmd+Enter saves the object being edited, in every editor. Related to PB-014 (command palette and shortcuts); this one is a small standalone slice. | Rahul, keyboard flow |
+| 2026-10-13 | App version in `X.X.X` format, bumped on every merge to main and shown in the UI. See *Analysis: app version* below. | Rahul, traceability |
+| 2026-10-13 | Create a note without a meeting. Choose the project, client, product, people and other metadata at creation (PB-006's header pickers already exist after first edit). | Rahul, Notes tab |
+| 2026-10-13 | `@` tagging in note and task editors. Typing `@` plus a character (for example `@P`) opens a list under the text, grouped by type across all objects, for example *Person:* Paul; *Product:* P.Promo, P.Picks. Up/Down arrows move through the options; Enter or Space picks one, puts the value in the text and sets that metadata on the object. The `@` text is not kept: once picked it disappears and only the metadata is set (decided 2026-10-13). | Rahul, capture speed |
+| 2026-10-13 | Settings has no Area manager. `areaOptions` is a fixed list in code, so the user cannot add or edit area values. Add an Areas card beside the other reference-data cards. | Rahul, Settings |
+| 2026-10-13 | Review the "Copy link" buttons: the URL now points to the object (PB-027), so they may be redundant. **Conflicts with PB-029 (Now, #107).** See *Analysis: copy link* below. | Rahul, UI clean-up |
+
+### Analysis notes for the 2026-10-13 items
+
+**App version.**
+- Where: System page, a new "About LifeOS" card at the top showing `Version 0.4.2` and the build date. Also a small muted version in the nav-bar footer, next to Settings, so it is visible without opening a page.
+- Source of truth: the `version` field in the root `package.json`, injected into the build.
+- Bumping: a GitHub Action on merge to main raises the patch number (`X.X.Z`); the minor number is raised by hand for a notable feature. A bump commit by a bot avoids forgetting it.
+- [TBD] Does the stable app (4310) show the version of its snapshot? It should, since `update-app` serves a snapshot.
+
+**Recurring meeting notes.**
+- What changed: ADR 0019 (one shared Note per series) caused the 2026-10-12 overwrite incident, so ADR 0021 replaced it with one Note per occurrence, shown as the last 4 occurrences, collapsed, newest first.
+- Why you still see a single file: Notes created under ADR 0019 are stored as one Legacy shared Note. They open as one whole Note, and the Visual editor is disabled for them because the section anchors would be rewritten (the "Opened in Markdown" message). Preview works because it only reads.
+- Pros of per-occurrence containers: one week's edit cannot damage another; each has its own save status and history; matches Calendar and enrichment, which are per occurrence.
+- Cons: more files; the series view needs its own loading rules; old Notes need migrating.
+- Alternative (now PB-031): a one-time, reviewed split of each Legacy shared Note into per-occurrence Notes (backup first, originals kept until confirmed), so the Visual editor and the collapsible view work on old data. Known so far: the Weekly Prio note; [TBD] check for others.
+
+**Copy link.**
+- Reasons to remove: the address bar already holds the object URL (PB-027), and the button adds clutter to every editor.
+- Reasons to keep: (1) `lifeos://object/...` is the only form that works inside Markdown, so a link pasted into another note survives; (2) the browser URL depends on the device and port (dev 5174, stable 4310) and the link does not; (3) the title-plus-link format saves typing in notes and email.
+- Recommendation: remove the button from the editor toolbar and keep the function as one item in a per-object "more" menu; or keep only the `lifeos://` copy. Decide before #107 is built.
 
 ## Completed
 
