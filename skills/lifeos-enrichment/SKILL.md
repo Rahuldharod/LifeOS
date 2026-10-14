@@ -2,7 +2,7 @@
 name: lifeos-enrichment
 description: Runs LifeOS enrichment after meetings. Reads one occurrence target from each enrichment Work Order entry, fetches only its Meet, Drive, Gong and Gmail material, compares only that occurrence's own Note, and writes an occurrence-specific meeting-material Inbox Draft. Never edits LifeOS objects. Skips restricted meetings and refuses client meetings while the IT/legal policy gate is blocked. Use when the user says "run LifeOS enrichment", "enrich my meetings" or "process the Work Order".
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
   skill_pack: 1
   draft_contract: 1
   work_order_contract: 1

@@ -72,6 +72,7 @@ import { useSeriesEditorGuard } from "./seriesEditorGuard.js";
 import { meetingSummary } from "./meetingSummary.js";
 import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
+import { useNewStandaloneNote } from "./useNewStandaloneNote.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
@@ -276,13 +277,27 @@ function App() {
   // when a first edit turns the preview into a persisted workspace.
   const [editorSession, setEditorSession] = useState(0);
   const server = useServerConnection();
+  // PB-034: the first edit of an unsaved Standalone Note creates it; the Notes list then shows it like any other note.
+  // The note a first edit just created, until the URL names it (the open note changes a render before the URL does).
+  const createdNoteId = useRef<string | undefined>(undefined);
+  const newNote = useNewStandaloneNote({
+    timeZone: displayTimeZone,
+    onCreated: (created) => {
+      updateNotes((current) => [created as LifeObject, ...current.filter((note) => note.frontmatter.id !== created.frontmatter.id)]);
+      createdNoteId.current = created.frontmatter.id;
+      setSelectedNoteId(created.frontmatter.id);
+      followRoute({ view: "Notes", noteTab: "open", id: created.frontmatter.id }, { replace: true });
+      void refresh();
+    }
+  });
   const notesController = useNoteDraftController({
     note: selectedNote,
     readOnly,
     busy,
     onMessage: setMessage,
     onSaved: (updated) => updateNotes((current) => current.map((note) => note.frontmatter.id === updated.frontmatter.id ? updated as LifeObject : note).sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at))),
-    fetchLatest: fetchLatestNote
+    fetchLatest: fetchLatestNote,
+    createNote: newNote.createNote
   });
   const meetingController = useNoteDraftController({
     note: workspace?.note,
@@ -447,6 +462,11 @@ function App() {
   // This is the only place a note change primes the notes controller.
   useEffect(() => {
     if (!collectionsLoaded || route?.view !== "Notes") return;
+    if (createdNoteId.current) {
+      const waiting = createdNoteId.current;
+      if (!route.id && route.noteTab === "open" && selectedNoteId === waiting) return;
+      if (route.id) createdNoteId.current = undefined;
+    }
     const target = routeTarget(route, routeData);
     if (target.kind === "redirect") { followRoute(target.route, { replace: true }); return; }
     const id = target.kind === "ok" ? route.id : undefined;
@@ -902,8 +922,36 @@ function App() {
     calendar.updateEvents((current) => current.map((event) => event.noteId === noteId ? { ...event, hasNote: false, noteId: undefined } : event));
   });
 
+  // PB-034: "New note" opens an editor over an unsaved Standalone Note; nothing is written until the first real edit.
+  const startNewNote = async () => {
+    if (!(await leaveEditors())) return;
+    setSelectedNoteId(undefined);
+    const next = newNote.begin();
+    notesController.openPending(next.key);
+    followRoute({ view: "Notes", noteTab: "open" });
+  };
+  // An unsaved new note is dropped as soon as the URL leaves the empty Notes page (its text, if any, was saved first).
+  useEffect(() => {
+    if (!newNote.draft || (route?.view === "Notes" && route.noteTab === "open" && !route.id)) return;
+    if (notesController.pending) notesController.reset();
+    newNote.clear();
+  }, [location.pathname]);
+  // A header choice on an unsaved Standalone Note is the first real edit (ADR 0023): hold it, then create the note.
+  // On failure the choice stays held (and on screen) with the controller's error message; the next edit retries.
+  const saveNewNoteDetails = async (changes: Record<string, unknown>) => {
+    newNote.hold(changes);
+    await notesController.saveNow({ allowEmpty: true });
+    return true;
+  };
+  // Inserting an image is a real edit: create the note first, then store the image against it.
+  async function ensureNewNote(): Promise<EditorOwner | undefined> {
+    if (!(await notesController.saveNow({ allowEmpty: true }))) return undefined;
+    const created = newNote.created.current;
+    return created ? { id: created.frontmatter.id, relativePath: created.relativePath } : undefined;
+  }
+
   const saveSelectedNote = async () => {
-    if (!selectedNote) return false;
+    if (!selectedNote && !notesController.pending) return false;
     setBusy(true);
     try {
       if (!(await notesController.saveNow())) return false;
@@ -1080,7 +1128,9 @@ function App() {
         readOnly={readOnly}
         conflictedNoteIds={conflictedNoteIds}
         emptyMessage={emptyNotesMessage(noteTab, noteQuery, noteFilters)}
-        detailState={noteTab === "deleted" ? (selectedDeleted ? "deleted" : "empty") : selectedNote && notesController.conflict ? "conflict" : selectedNote ? "open" : "empty"}
+        creating={Boolean(newNote.draft)}
+        onNewNote={() => void startNewNote()}
+        detailState={noteTab === "deleted" ? (selectedDeleted ? "deleted" : "empty") : selectedNote && notesController.conflict ? "conflict" : selectedNote || newNote.draft ? "open" : "empty"}
         onQueryChange={setNoteQuery}
         onFiltersChange={setNoteFilters}
         onTabChange={(tab) => void go({ view: "Notes", noteTab: tab, id: tab === "open" ? selectedNoteId : selectedDeletedId })}
@@ -1093,7 +1143,11 @@ function App() {
               <div className="metadata-strip"><Meta label="Created" value={formatDate(selectedDeleted.frontmatter.created_at)} /><Meta label="Deleted" value={formatDate(String(selectedDeleted.frontmatter.deleted_at))} /><Meta label="Revision" value={String(selectedDeleted.frontmatter.revision)} /><Meta label="File" value={selectedDeleted.relativePath} /></div>
             </article>}
         conflictDetail={selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> : null}
-        renderOpenNote={(notesMode) => !selectedNote ? null : <EditorFrame>
+        renderOpenNote={(notesMode) => !selectedNote ? (newNote.draft ? <EditorFrame>
+              <NoteHeader note={{ contentHash: PENDING_NOTE_HASH, frontmatter: { id: newNote.draft.id, type: "standalone-note", title: newNote.draft.title } }} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={saveNewNoteDetails} />
+              <MarkdownEditor mode={notesMode} editorKey={newNote.draft.id} draft={notesController.draft} onChange={notesController.setDraftFor(notesController.target)} readOnly={readOnly} busy={busy} ensureOwner={ensureNewNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
+              <div className="editor-footer"><SaveState dirty={notesController.dirty} autoSaving={notesController.autoSaving} pending={notesController.pending} undoAvailable={false} undoDisabled onUndo={() => undefined} /><div className="actions"><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
+            </EditorFrame> : null) : <EditorFrame>
               <NoteHeader note={selectedNote} kind={selectedNote.frontmatter.type.replace("-", " ").toUpperCase()} {...headerOptions} disabled={busy || readOnly || notesController.autoSaving} onSave={saveNotesDetails}><HistoryLink objectId={selectedNote.frontmatter.id} title={selectedNote.frontmatter.title} disabled={busy || readOnly} run={run} onRestored={refresh} /></NoteHeader>
               {seriesRoute && <p className="series-link"><a href={routePath(seriesRoute)} onClick={(event) => { event.preventDefault(); followRoute(seriesRoute); }}>Show series</a></p>}
               <MarkdownEditor mode={notesMode} editorKey={selectedNote.frontmatter.id} draft={notesController.draft} onChange={notesController.setDraftFor(selectedNote.frontmatter.id)} readOnly={readOnly} busy={busy} owner={{ id: selectedNote.frontmatter.id, relativePath: selectedNote.relativePath }} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />

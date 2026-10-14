@@ -69,14 +69,14 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
           </div>
         </div>
         {/* The unsaved "NEW NOTE" header carries the meeting's id, not a note id, so it cannot be linked yet. */}
-        <CopyLink object={isUnsavedNote(note) ? undefined : note} />
+        {!(isUnsavedNote(note) && note.frontmatter.type === "standalone-note") && <CopyLink object={isUnsavedNote(note) ? undefined : note} />}
         {children}
       </div>
       <div className="note-header-links">
         <SearchSelect label="Project" options={projects} value={form.projectId} disabled={disabled} onChange={(projectId) => void change({ ...form, projectId })} />
         <SearchSelect label="Client" options={clients} value={form.clientId} disabled={disabled} onChange={(clientId) => void change({ ...form, clientId })} />
         <SearchSelect label="Product" options={products} value={form.productId} disabled={disabled} onChange={(productId) => void change({ ...form, productId })} />
-        {note.frontmatter.type === "meeting-note" && <SearchSelect multi label="People" options={people} value={form.peopleIds} placeholder="Add people" disabled={disabled} onChange={(peopleIds) => void change({ ...form, peopleIds })} />}
+        {(note.frontmatter.type === "meeting-note" || note.frontmatter.type === "standalone-note") && <SearchSelect multi label="People" options={people} value={form.peopleIds} placeholder="Add people" disabled={disabled} onChange={(peopleIds) => void change({ ...form, peopleIds })} />}
       </div>
     </div>
   );

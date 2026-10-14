@@ -2,7 +2,7 @@
 name: lifeos-capture
 description: Captures things into the user's LifeOS by writing Inbox Drafts and Patch Drafts - tasks, decisions, open points, knowledge notes, sources, and changes to existing items (mark done, new due date, add a note). Use when the user says "remind me to", "add a task", "note that we decided", "open point", "save this article", "mark it done", "move it to Friday", or asks to pull actions out of an email, transcript or document into LifeOS.
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
   skill_pack: 1
   draft_contract: 1
   patch_contract: 1

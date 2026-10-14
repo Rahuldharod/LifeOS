@@ -21,7 +21,7 @@ const baseProps = {
   openCount: 2, deletedCount: 1, tab: "open" as const, selectedId: "one", query: "", filters: noNoteFilters,
   projects: [{ id: "project", title: "Project Alpha" }], clients: [], products: [], people: [{ id: "person", title: "Sam Example" }],
   timeZone: "Europe/Paris", loading: false, readOnly: false, conflictedNoteIds: new Set<string>(),
-  onQueryChange: vi.fn(), onFiltersChange: vi.fn(), onTabChange: vi.fn(), onOpen: vi.fn(), onBack: vi.fn(),
+  onQueryChange: vi.fn(), onFiltersChange: vi.fn(), onTabChange: vi.fn(), onNewNote: vi.fn(), onOpen: vi.fn(), onBack: vi.fn(),
   emptyMessage: "No notes have been created yet.",
   renderOpenNote: (mode: NoteEditorMode, readOnly: boolean) => <div data-editor-mode={mode}><textarea aria-label="Note body" disabled={readOnly} /></div>,
   deletedDetail: <article>Deleted note detail</article>, conflictDetail: <article>Conflict detail</article>

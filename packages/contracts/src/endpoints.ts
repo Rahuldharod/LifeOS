@@ -27,6 +27,8 @@ export interface Endpoints {
 
   // Notes (PB-025, #105, PB-030)
   "GET /api/v1/notes": { query: { q?: string; state?: string; type?: string | string[]; projectId?: string; clientId?: string; productId?: string; personId?: string; from?: string; to?: string }; response: W.LifeObject[] };
+  /** PB-034: the first edit of a Standalone Note. `id` is made by the browser, so a retry returns the same note. */
+  "POST /api/v1/notes": { body: { id: string; body: string; title?: string; metadata?: Record<string, unknown>; timeZone?: string }; response: W.LifeObject };
   "GET /api/v1/notes/:id": { response: W.LifeObject };
   "PATCH /api/v1/notes/:id": { body: { changes: Record<string, unknown>; expectedHash: string }; response: W.LifeObject };
   "POST /api/v1/notes/:id/restore": Guarded & { response: W.LifeObject };

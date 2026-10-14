@@ -1,10 +1,11 @@
 // Notes list filters (#105) as state, as the API query string, and as text for the empty state.
 // Dates are whole local days in the display timezone, both ends inclusive, as in the Decisions filters (#41).
+import type { NoteType } from "@lifeos/shared";
 import { dayRangeQuery } from "./zonedTime.js";
 
 export type NoteFilterState = { types: string[]; projectId: string; clientId: string; productId: string; personId: string; fromDay: string; toDay: string };
 export const noNoteFilters: NoteFilterState = { types: [], projectId: "", clientId: "", productId: "", personId: "", fromDay: "", toDay: "" };
-export const noteTypeLabels: Record<string, string> = { "meeting-note": "Meeting notes", "knowledge-note": "Knowledge notes" };
+export const noteTypeLabels: Record<NoteType, string> = { "meeting-note": "Meeting notes", "knowledge-note": "Knowledge notes", "standalone-note": "Standalone notes" };
 
 const contextKeys = ["projectId", "clientId", "productId", "personId"] as const;
 

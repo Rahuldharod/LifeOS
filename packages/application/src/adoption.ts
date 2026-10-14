@@ -745,7 +745,8 @@ export class AdoptionModule {
     if (byId && !byId.frontmatter.deleted_at) return byId.frontmatter.id; // an explicit ID reaches an archived object (#118)
     const folded = foldForSearch(reference);
     // A title matches live objects only; a URL is an identifier, so like an ID it also reaches archived ones (decision 2026-10-10).
-    const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && ["source", "meeting", "meeting-note", "knowledge-note"].includes(object.frontmatter.type)
+    // Standalone Notes are deliberately not draft sources: Agents cannot create or reference them via drafts yet (ADR 0023).
+    const matches = this.ctx.index.all().filter((object) => !object.frontmatter.deleted_at && (["source", "meeting", "meeting-note", "knowledge-note"] as string[]).includes(object.frontmatter.type)
       && ((isLive(object) && foldForSearch(object.frontmatter.title) === folded) || object.frontmatter.url === reference || (!!webUrl(reference) && webUrl(object.frontmatter.url) === webUrl(reference))) || (object.frontmatter.type === "source" && object.frontmatter.external_id === reference));
     return matches.length === 1 ? matches[0]!.frontmatter.id : undefined;
   }

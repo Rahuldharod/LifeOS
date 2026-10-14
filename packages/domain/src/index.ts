@@ -1,9 +1,8 @@
-import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
 export const objectTypes = [
   "person", "client", "product", "project", "meeting", "meeting-note",
-  "knowledge-note", "task", "decision", "open-point", "source", "review-item",
+  "knowledge-note", "standalone-note", "task", "decision", "open-point", "source", "review-item",
   "agent-run", "audit-event", "connector-account", "sync-run", "daily-focus", "recurring-item", "app-setting",
   "focus-override"
 ] as const;
@@ -97,6 +96,8 @@ const schemas: Partial<Record<(typeof objectTypes)[number], z.ZodType>> = {
   project: envelopeSchema.extend({ type: z.literal("project"), status: z.string().min(1), owner_person_id: id.optional(), ...contextFields }),
   meeting: envelopeSchema.extend({ type: z.literal("meeting"), status: z.string().min(1), starts_at: z.iso.datetime(), ends_at: z.iso.datetime(), timezone: z.string().min(1), attendee_ids: ids, recurrence_series_id: z.string().min(1).optional(), recurrence_series_uid: z.string().min(1).optional(), previous_recurrence_series_id: z.string().min(1).optional(), recurrence_occurrence_id: z.string().min(1).optional(), original_occurrence_starts_at: z.iso.datetime().optional(), redirect_to_meeting_id: id.optional(), redirect_to_section_id: z.string().min(1).optional(), ...contextFields }),
   "meeting-note": envelopeSchema.extend({ type: z.literal("meeting-note"), meeting_id: id, meeting_ids: ids.optional(), recurrence_series_id: z.string().min(1).optional(), recurrence_series_uid: z.string().min(1).optional(), generated_title: z.string().min(1).optional(), title_manually_renamed: z.boolean().optional(), previous_recurrence_series_id: z.string().min(1).optional(), previous_recurrence_series_source: z.enum(["provider", "series-uid", "user"]).optional(), previous_series_note_id: id.optional(), redirect_to_note_id: id.optional(), redirect_to_section_id: z.string().min(1).optional(), occurrence_sections: z.array(z.object({ occurrence_id: z.string().min(1), section_id: z.string().min(1), meeting_id: id, original_starts_at: z.iso.datetime(), starts_at: z.iso.datetime().optional() }).loose()).optional(), people_ids: ids.optional(), source_ids: ids.optional(), asset_ids: ids.optional(), ...contextFields }),
+  // PB-034 (ADR 0023): a note the user starts without a meeting or a source; same context fields as a meeting note.
+  "standalone-note": envelopeSchema.extend({ type: z.literal("standalone-note"), people_ids: ids.optional(), asset_ids: ids.optional(), ...contextFields }),
   "knowledge-note": envelopeSchema.extend({ type: z.literal("knowledge-note"), source_ids: ids.min(1), related_object_ids: ids.optional() }),
   source: envelopeSchema.extend({ type: z.literal("source"), source_type: z.string().min(1), captured_at: z.iso.datetime(), ingestion_status: z.enum(["captured", "processed", "failed"]), fragments: z.array(z.object({ id: z.string().min(1), text: z.string(), locator: z.record(z.string(), z.unknown()).optional() })).optional() }),
   decision: envelopeSchema.extend({ type: z.literal("decision"), status: z.enum(decisionStatuses), decision_text: z.string().min(1), rationale: z.string().optional(), decided_at: z.iso.datetime(), supersedes_decision_id: id.optional(), superseded_by_decision_id: id.optional(), source_meeting_id: id.optional(), source_ids: ids.optional(), people_ids: ids.optional(), ...contextFields }).superRefine((value, context) => {
@@ -183,18 +184,7 @@ function openPointWriteProblem(next: Record<string, unknown>, previous?: Record<
   return undefined;
 }
 
-export function uuidV7(now = Date.now()): string {
-  const bytes = randomBytes(16);
-  let timestamp = BigInt(now);
-  for (let index = 5; index >= 0; index -= 1) {
-    bytes[index] = Number(timestamp & 0xffn);
-    timestamp >>= 8n;
-  }
-  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
+export { uuidV7 } from "@lifeos/shared";
 
 /** True for a UUID whose version nibble is 7 (time-ordered). New objects must use these. */
 export function isUuidV7(value: string) {

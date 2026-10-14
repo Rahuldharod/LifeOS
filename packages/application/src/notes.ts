@@ -1,9 +1,12 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
-import { foldForSearch, ObjectConflictError, type AppContext } from "./context.js";
+import { isNoteType, noteTypes, standaloneNoteTitle } from "@lifeos/shared";
+import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { isLive, liveMeetingNote, OneAtATime, parseInstantRange, sameValue } from "./support.js";
+import { isLive, liveMeetingNote, objectIdPattern, OneAtATime, parseInstantRange, sameValue } from "./support.js";
 
-const noteTypes = ["meeting-note", "knowledge-note"];
+
+/** What createStandaloneNote takes (PB-034). */
+export interface NewStandaloneNote { id: string; body: string; title?: string; metadata?: Record<string, unknown>; timeZone?: string; now?: string }
 
 /** Another object that points at a note, as the permanent-delete check lists it (PB-030). */
 export interface ObjectReference { id: string; type: string; title: string }
@@ -35,29 +38,31 @@ function referencesInFrontmatter(frontmatter: ObjectEnvelope, id: string) {
  */
 export type NoteFilters = { types?: string[]; projectId?: string; clientId?: string; productId?: string; personId?: string; from?: string; to?: string };
 
-/** Meeting and knowledge notes: listing, search, body and metadata edits, delete and restore. */
+/** Meeting, knowledge and standalone notes: creating (standalone), listing, search, body and metadata edits, delete and restore. */
 export class NotesModule {
   /** PB-030: one permanent delete per note at a time (double-click, two tabs; ADR 0013). */
   private readonly purges = new OneAtATime();
+  /** PB-034: one create per note id at a time, so a double-submitted first edit finds the note the first one wrote. */
+  private readonly creates = new OneAtATime();
 
   constructor(private readonly ctx: AppContext) {}
 
   /** One Note by id, live or deleted (#173); undefined when the id is not a Note. */
   note(id: string) {
     const object = this.ctx.index.get(id);
-    return object && noteTypes.includes(object.frontmatter.type) ? object : undefined;
+    return object && isNoteType(object.frontmatter.type) ? object : undefined;
   }
 
   notes() {
     return this.ctx.index.all()
-      .filter((object) => noteTypes.includes(object.frontmatter.type) && isLive(object))
+      .filter((object) => isNoteType(object.frontmatter.type) && isLive(object))
       .sort((left, right) => Date.parse(right.frontmatter.updated_at) - Date.parse(left.frontmatter.updated_at));
   }
 
   /** Tombstoned notes (PB-021), most recently deleted first. */
   deletedNotes() {
     return this.ctx.index.all()
-      .filter((object) => noteTypes.includes(object.frontmatter.type) && object.frontmatter.deleted_at && !object.frontmatter.archived_at)
+      .filter((object) => isNoteType(object.frontmatter.type) && object.frontmatter.deleted_at && !object.frontmatter.archived_at)
       .sort((left, right) => Date.parse(String(right.frontmatter.deleted_at)) - Date.parse(String(left.frontmatter.deleted_at)));
   }
 
@@ -68,14 +73,14 @@ export class NotesModule {
    */
   searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) {
     const types = filters.types ?? [];
-    if (types.some((type) => !noteTypes.includes(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
+    if (types.some((type) => !isNoteType(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
     const { from, to } = parseInstantRange(filters.from, filters.to);
     const dateField = state === "deleted" ? "deleted_at" : "updated_at";
-    const needsMeetingNote = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
+    const needsContextFields = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
     const notes = (state === "deleted" ? this.deletedNotes() : this.notes()).filter(({ frontmatter }) => {
       const stamp = Date.parse(String(frontmatter[dateField]));
       return (!types.length || types.includes(frontmatter.type))
-        && (!needsMeetingNote || frontmatter.type === "meeting-note")
+        && (!needsContextFields || frontmatter.type === "meeting-note" || frontmatter.type === "standalone-note")
         && (!filters.projectId || frontmatter.primary_project_id === filters.projectId)
         && (!filters.clientId || frontmatter.primary_client_id === filters.clientId)
         && (!filters.productId || frontmatter.primary_product_id === filters.productId)
@@ -109,17 +114,65 @@ export class NotesModule {
    */
   async updateNoteMetadata(id: string, changes: Record<string, unknown>, expectedHash: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be edited here");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be edited here");
     if (current.frontmatter.deleted_at) throw new Error("This note was deleted; it can no longer be edited");
+    const selected = this.validatedChanges(current.frontmatter.type, changes);
+    if (current.frontmatter.type === "meeting-note" && current.frontmatter.recurrence_series_id && typeof selected.title === "string" && selected.title !== current.frontmatter.title) {
+      // A recurring Note follows Calendar renames only until the user deliberately names it.
+      // This durable marker also protects the title from later syncs and retries.
+      selected.title_manually_renamed = true;
+    }
+    const unchanged = Object.entries(selected).every(([key, value]) => sameValue(current.frontmatter[key], value));
+    if (unchanged) return current;
+    const now = new Date().toISOString();
+    const updated = await this.ctx.update(current, selected, { expectedHash, now });
+    await this.ctx.writeAudit("note.metadata-updated", id, now, { fields: Object.keys(selected) });
+    await this.ctx.rebuildIndex();
+    return updated;
+  }
+
+  /**
+   * Creates a Standalone Note (PB-034, ADR 0023): no meeting, no source, in `notes/`. The browser picks the id before
+   * anything exists, so a retried first edit finds the note by id and returns it instead of writing a second file.
+   * `metadata` holds the header choices made before the first edit (title, project, client, product, people,
+   * sensitivity); they are checked like a metadata edit and written in the same single file write. `title` defaults to
+   * `Note <date time>` in `timeZone` (UTC when not given), which also sets the time in the file name (ADR 0002).
+   */
+  async createStandaloneNote(input: NewStandaloneNote) {
+    if (!objectIdPattern.test(input.id)) throw new Error("Note id must be a UUID");
+    return this.creates.run(input.id, () => this.writeStandaloneNote(input));
+  }
+
+  private async writeStandaloneNote(input: NewStandaloneNote) {
+    const existing = this.ctx.index.get(input.id);
+    if (existing) {
+      if (existing.frontmatter.type !== "standalone-note") throw new Error(`Object ${input.id} already exists and is not a standalone note`);
+      return existing;
+    }
+    const now = input.now ?? new Date().toISOString();
+    const timeZone = input.timeZone ?? "UTC";
+    try { standaloneNoteTitle(now, timeZone); } catch { throw new Error("timeZone is not a valid time zone"); }
+    const held = this.validatedChanges("standalone-note", { ...input.metadata, ...(input.title !== undefined ? { title: input.title } : {}) });
+    const title = typeof held.title === "string" ? held.title : standaloneNoteTitle(now, timeZone);
+    const created = await this.ctx.objects.write({
+      relativePath: `notes/${markdownFileName(title, input.id, now, timeZone)}`,
+      frontmatter: { ...this.ctx.envelope(input.id, "standalone-note", title, now, "app"), ...held, title },
+      body: input.body
+    });
+    await this.ctx.rebuildIndex();
+    return created;
+  }
+
+  /**
+   * Checks a title and relationship change set (PB-006) and returns only the fields that move. Links must point at a
+   * live object of the right type, so a stale picker cannot write a dangling id. Shared by edits and by creating
+   * a Standalone Note with held header choices.
+   */
+  private validatedChanges(noteType: string, changes: Record<string, unknown>) {
     const selected: Record<string, unknown> = {};
     if ("title" in changes) {
       if (typeof changes.title !== "string" || !changes.title.trim()) throw new Error("Title is required");
       selected.title = changes.title.trim();
-      if (current.frontmatter.type === "meeting-note" && current.frontmatter.recurrence_series_id && selected.title !== current.frontmatter.title) {
-        // A recurring Note follows Calendar renames only until the user deliberately names it.
-        // This durable marker also protects the title from later syncs and retries.
-        selected.title_manually_renamed = true;
-      }
     }
     const live = (linkId: string, type: ObjectEnvelope["type"], label: string) => {
       const target = this.ctx.index.get(linkId);
@@ -136,20 +189,14 @@ export class NotesModule {
     // #30: Area and sensitivity are validated centrally on write (AppContext.assertEnvelope); origin is never editable.
     if ("area" in changes) selected.area = changes.area === null || changes.area === "" ? undefined : changes.area;
     if ("sensitivity" in changes) selected.sensitivity = changes.sensitivity;
-    if (current.frontmatter.type === "meeting-note" && "people_ids" in changes) {
+    if ((noteType === "meeting-note" || noteType === "standalone-note") && "people_ids" in changes) {
       const value = changes.people_ids;
       if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) throw new Error("People must be a list of ids");
       const people = [...new Set(value as string[])];
       people.forEach((personId) => live(personId, "person", "Person"));
       selected.people_ids = people;
     }
-    const unchanged = Object.entries(selected).every(([key, value]) => sameValue(current.frontmatter[key], value));
-    if (unchanged) return current;
-    const now = new Date().toISOString();
-    const updated = await this.ctx.update(current, selected, { expectedHash, now });
-    await this.ctx.writeAudit("note.metadata-updated", id, now, { fields: Object.keys(selected) });
-    await this.ctx.rebuildIndex();
-    return updated;
+    return selected;
   }
 
   /**
@@ -160,7 +207,7 @@ export class NotesModule {
    */
   async deleteNote(id: string, expectedHash: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be deleted here");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be deleted here");
     if (current.frontmatter.deleted_at) return current;
     const now = new Date().toISOString();
     const updated = await this.ctx.update(current, { deleted_at: now }, { expectedHash, now });
@@ -176,7 +223,7 @@ export class NotesModule {
    */
   async restoreNote(id: string, expectedHash: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be restored here");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be restored here");
     if (!current.frontmatter.deleted_at) return current;
     const meetingId = current.frontmatter.meeting_id;
     const seriesId = current.frontmatter.recurrence_series_id;
@@ -266,7 +313,7 @@ export class NotesModule {
 
   private tombstoned(id: string) {
     const current = this.ctx.required(id);
-    if (!noteTypes.includes(current.frontmatter.type)) throw new Error("Only notes can be deleted permanently");
+    if (!isNoteType(current.frontmatter.type)) throw new Error("Only notes can be deleted permanently");
     if (!current.frontmatter.deleted_at) throw new Error("Only deleted notes can be deleted permanently; delete the note first");
     return current;
   }

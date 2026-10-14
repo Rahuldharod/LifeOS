@@ -288,6 +288,14 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!mimeType) return reply.status(404).send({ error: "Unsupported asset" });
     return reply.type(mimeType).send(await assets.read(relativePath));
   });
+  route(server, "POST /api/v1/notes", async (request, reply) => {
+    const { id, body, title, metadata, timeZone } = request.body ?? {};
+    if (typeof id !== "string" || typeof body !== "string") return reply.status(400).send({ error: "id and body are required to create a note" });
+    if (title !== undefined && typeof title !== "string") return reply.status(400).send({ error: "title must be text" });
+    if (metadata !== undefined && (typeof metadata !== "object" || metadata === null || Array.isArray(metadata))) return reply.status(400).send({ error: "metadata must be an object" });
+    if (timeZone !== undefined && typeof timeZone !== "string") return reply.status(400).send({ error: "timeZone must be text" });
+    return application.createStandaloneNote({ id, body, title, metadata, timeZone });
+  });
   route(server, "PATCH /api/v1/notes/:id", async (request, reply) => {
     if (!hasExpectedHash(request.body)) return reply.status(400).send({ error: "expectedHash is required to edit a note" });
     if (!request.body.changes || typeof request.body.changes !== "object") return reply.status(400).send({ error: "changes are required" });
