@@ -76,7 +76,7 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
         <SearchSelect label="Project" options={projects} value={form.projectId} disabled={disabled} onChange={(projectId) => void change({ ...form, projectId })} />
         <SearchSelect label="Client" options={clients} value={form.clientId} disabled={disabled} onChange={(clientId) => void change({ ...form, clientId })} />
         <SearchSelect label="Product" options={products} value={form.productId} disabled={disabled} onChange={(productId) => void change({ ...form, productId })} />
-        {note.frontmatter.type === "meeting-note" && <SearchSelect multi label="People" options={people} value={form.peopleIds} placeholder="Add people" disabled={disabled} onChange={(peopleIds) => void change({ ...form, peopleIds })} />}
+        {(note.frontmatter.type === "meeting-note" || note.frontmatter.type === "standalone-note") && <SearchSelect multi label="People" options={people} value={form.peopleIds} placeholder="Add people" disabled={disabled} onChange={(peopleIds) => void change({ ...form, peopleIds })} />}
       </div>
     </div>
   );

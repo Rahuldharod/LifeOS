@@ -1,4 +1,4 @@
-import React, { type ReactNode, useEffect, useState } from "react";
+import React, { type ReactNode, useEffect, useRef, useState } from "react";
 import type { LifeObject } from "@lifeos/contracts";
 import { LockBadge } from "./EnvelopeBadges.js";
 import { ConflictBadge } from "./NoteConflictPanel.js";
@@ -31,10 +31,13 @@ export type NotesWorkspaceProps = {
   readOnly: boolean;
   conflictedNoteIds: ReadonlySet<string>;
   emptyMessage: string;
+  /** PB-034: an unsaved Standalone Note is open in the editor (it has no id in the list yet). */
+  creating?: boolean;
   detailState?: NoteDetailState;
   onQueryChange: (query: string) => void;
   onFiltersChange: (filters: NoteFilterState) => void;
   onTabChange: (tab: "open" | "deleted") => void;
+  onNewNote: () => void;
   onOpen: (id: string) => void;
   onBack: () => void;
   renderOpenNote: (mode: NoteEditorMode, readOnly: boolean) => ReactNode;
@@ -43,7 +46,7 @@ export type NotesWorkspaceProps = {
 };
 
 const preview = (body: string) => body.replace(/[#>*_`[\]-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110) || "Empty note";
-const noteType = (note: LifeObject) => note.frontmatter.type === "meeting-note" ? "Meeting note" : "Knowledge note";
+const noteType = (note: LifeObject) => note.frontmatter.type === "meeting-note" ? "Meeting note" : note.frontmatter.type === "standalone-note" ? "Note" : "Knowledge note";
 const timeIn = (value: unknown, timeZone: string) => {
   if (typeof value !== "string") return "—";
   try { return new Date(value).toLocaleTimeString([], { timeStyle: "short", timeZone }); }
@@ -60,16 +63,21 @@ export function NotesWorkspace(props: NotesWorkspaceProps) {
   const [mode, setMode] = useState<NoteEditorMode>("visual");
   const split = useSplitPane("notes");
   const narrow = useNarrowWorkspace();
-  const detailOpen = Boolean(props.selectedId) || props.loading;
-  const ref = useListDetailReturn(detailOpen ? props.selectedId ?? "loading" : undefined);
-  const state = props.detailState ?? (props.selectedId ? (props.tab === "deleted" ? "deleted" : "open") : "empty");
+  const detailOpen = Boolean(props.selectedId) || Boolean(props.creating) || props.loading;
+  const ref = useListDetailReturn(detailOpen ? props.selectedId ?? (props.creating ? "new" : "loading") : undefined);
+  const state = props.detailState ?? (props.selectedId || props.creating ? (props.tab === "deleted" ? "deleted" : "open") : "empty");
 
-  // A note never inherits the previous note's raw or preview mode.
-  useEffect(() => { setMode("visual"); }, [props.selectedId]);
+  // A note never inherits the previous note's raw or preview mode. With no note open the mode is already "visual", so
+  // an unsaved new note keeps the mode the user chose when its first edit creates the note and gives it an id.
+  const previousId = useRef(props.selectedId);
+  useEffect(() => {
+    if (previousId.current !== undefined) setMode("visual");
+    previousId.current = props.selectedId;
+  }, [props.selectedId]);
 
   return <div ref={ref} className={`notes-workspace split-layout pane-workspace${detailOpen ? " detail-open" : ""}`} data-workspace="notes" style={split.style}>
     <article className="notes-workspace-list" data-pane="list" aria-label="Notes list" hidden={narrow && detailOpen}>
-      <div className="workspace-heading"><div><span>NOTES</span><h2>Notes</h2><p className="muted">Meeting and knowledge notes</p></div></div>
+      <div className="workspace-heading"><div><span>NOTES</span><h2>Notes</h2><p className="muted">Meeting, knowledge and standalone notes</p></div><button className="primary" disabled={props.readOnly} onClick={props.onNewNote}>New note</button></div>
       <div className="workspace-tabs" role="tablist" aria-label="Notes">
         <button role="tab" aria-selected={props.tab === "open"} className={props.tab === "open" ? "selected" : ""} onClick={() => props.onTabChange("open")}>Open <small>{props.openCount}</small></button>
         <button role="tab" aria-selected={props.tab === "deleted"} className={props.tab === "deleted" ? "selected" : ""} onClick={() => props.onTabChange("deleted")}>Deleted <small>{props.deletedCount}</small></button>

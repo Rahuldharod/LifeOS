@@ -139,6 +139,7 @@ export class LifeOSApplication {
   notes() { return this.notesModule.notes(); }
   deletedNotes() { return this.notesModule.deletedNotes(); }
   searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) { return this.notesModule.searchNotes(query, state, filters); }
+  createStandaloneNote(input: Parameters<NotesModule["createStandaloneNote"]>[0]) { return this.notesModule.createStandaloneNote(input); }
   updateBody(id: string, body: string, expectedHash: string) { return this.notesModule.updateBody(id, body, expectedHash); }
   updateNoteMetadata(id: string, changes: Record<string, unknown>, expectedHash: string) { return this.notesModule.updateNoteMetadata(id, changes, expectedHash); }
   deleteNote(id: string, expectedHash: string) { return this.notesModule.deleteNote(id, expectedHash); }

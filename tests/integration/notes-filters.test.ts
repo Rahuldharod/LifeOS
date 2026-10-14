@@ -179,7 +179,7 @@ describe("GET /api/v1/notes filters (#105)", () => {
     const { server } = await serve();
     const badType = await server.inject({ method: "GET", url: "/api/v1/notes?type=task" });
     expect(badType.statusCode).toBe(400);
-    expect(badType.json()).toEqual({ error: "Note type must be one of meeting-note, knowledge-note" });
+    expect(badType.json()).toEqual({ error: "Note type must be one of meeting-note, knowledge-note, standalone-note" });
     const badDate = await server.inject({ method: "GET", url: "/api/v1/notes?state=deleted&from=not-a-date" });
     expect(badDate.statusCode).toBe(400);
     expect(badDate.json()).toEqual({ error: "Enter a valid date range" });

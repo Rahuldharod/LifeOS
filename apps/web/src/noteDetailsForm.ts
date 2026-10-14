@@ -26,6 +26,6 @@ export function noteDetailsChanges(frontmatter: NoteFrontmatter, form: NoteDetai
   if (form.projectId !== saved.projectId) changes.primary_project_id = form.projectId || null;
   if (form.clientId !== saved.clientId) changes.primary_client_id = form.clientId || null;
   if (form.productId !== saved.productId) changes.primary_product_id = form.productId || null;
-  if (frontmatter.type === "meeting-note" && [...form.peopleIds].sort().join() !== [...saved.peopleIds].sort().join()) changes.people_ids = form.peopleIds;
+  if ((frontmatter.type === "meeting-note" || frontmatter.type === "standalone-note") && [...form.peopleIds].sort().join() !== [...saved.peopleIds].sort().join()) changes.people_ids = form.peopleIds;
   return changes;
 }

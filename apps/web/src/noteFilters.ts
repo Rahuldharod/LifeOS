@@ -4,7 +4,7 @@ import { dayRangeQuery } from "./zonedTime.js";
 
 export type NoteFilterState = { types: string[]; projectId: string; clientId: string; productId: string; personId: string; fromDay: string; toDay: string };
 export const noNoteFilters: NoteFilterState = { types: [], projectId: "", clientId: "", productId: "", personId: "", fromDay: "", toDay: "" };
-export const noteTypeLabels: Record<string, string> = { "meeting-note": "Meeting notes", "knowledge-note": "Knowledge notes" };
+export const noteTypeLabels: Record<string, string> = { "meeting-note": "Meeting notes", "knowledge-note": "Knowledge notes", "standalone-note": "Standalone notes" };
 
 const contextKeys = ["projectId", "clientId", "productId", "personId"] as const;
 
