@@ -5,7 +5,7 @@ import { checkEntityLinks } from "./entity-links.js";
 import { openPointPeopleIds } from "./open-points.js";
 import { dueDate, isLive, isRestricted } from "./support.js";
 
-import type { EntityType } from "@lifeos/shared";
+import { isUnreviewedPerson, type EntityType } from "@lifeos/shared";
 export type { EntityType };
 
 const entityTypes: EntityType[] = ["task", "project", "client", "product", "person"];
@@ -102,7 +102,7 @@ export class EntitiesModule {
       applyTaskLifecycle(current, selected, now);
     }
     // #87: saving an automatically created person counts as reviewing it.
-    if (type === "person" && current.frontmatter.review_state === "unreviewed") selected.review_state = "reviewed";
+    if (type === "person" && isUnreviewedPerson(current.frontmatter)) selected.review_state = "reviewed";
     const updated = await this.ctx.update(current, selected, { expectedHash, now });
     await this.ctx.writeAudit(`${type}.updated`, id, now, { fields: Object.keys(selected) });
     await this.ctx.rebuildIndex();

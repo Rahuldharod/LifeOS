@@ -1,4 +1,5 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
+import { emailNameMatch, isUnreviewedPerson, type NameCandidate } from "@lifeos/shared";
 import { foldForSearch, type AppContext } from "./context.js";
 import { internalDomainsOf, personEmails } from "./people.js";
 import { operationKinds, type Operation } from "./ports.js";
@@ -16,7 +17,7 @@ import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./s
  */
 
 export const personMergeReviewType = "person-merge";
-export type PersonMergeMatch = "email" | "email-local-part" | "name";
+export type PersonMergeMatch = "email" | "email-local-part" | "name" | "name-email";
 export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string }
 
 /** One file's change. `null` means "field absent"; `$body` stands for the Markdown body. */
@@ -33,6 +34,8 @@ const isAt = (object: LifeOSObject, side: Record<string, unknown>) => Object.ent
 const mergeable = (object: LifeOSObject | undefined): object is LifeOSObject => Boolean(object && object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
 const pairKey = (a: string, b: string) => [a, b].sort().join("|");
 const nameKey = (value: unknown) => typeof value === "string" ? foldForSearch(value.normalize("NFC")).trim().replace(/\s+/g, " ") : "";
+/** Every name a person is known by, for matching an email address against: title, given + family name, aliases. */
+const namesOf = (person: LifeOSObject) => [person.frontmatter.title, `${String(person.frontmatter.given_name ?? "")} ${String(person.frontmatter.family_name ?? "")}`, ...(Array.isArray(person.frontmatter.aliases) ? person.frontmatter.aliases : [])].filter((name): name is string => typeof name === "string" && name.trim() !== "");
 const localPart = (email: string) => email.split("@")[0]!.replace(/\+.*$/, "");
 
 export class PersonMergeConflictError extends Error { override name = "PersonMergeConflictError"; }
@@ -78,7 +81,7 @@ export class PersonMergeModule {
 
   /**
    * Proposes merges for likely duplicates and returns the new Review Item IDs. Pairs need at least one
-   * unreviewed person (calendar- or agent-created), so deliberate look-alikes the user made are left alone;
+   * unreviewed person (calendar- or agent-created and never confirmed, including attendees known by name alone), so deliberate look-alikes the user made are left alone;
    * `personIds` narrows the sweep to those people. A pair already proposed (in any status) is never re-proposed.
    */
   suggest(options: { now?: string; personIds?: string[]; newId?: (role: ReplayRole) => string } = {}): Promise<string[]> {
@@ -97,18 +100,19 @@ export class PersonMergeModule {
       const fields = review.frontmatter.proposed_fields as Partial<PersonMergeProposal>;
       return [pairKey(String(fields.keep_person_id), String(fields.merge_person_id)), review] as const;
     }));
+    const candidates: NameCandidate[] = people.map((person) => ({ id: person.frontmatter.id, names: namesOf(person) }));
     const proposed = new Set(suggestions.keys());
     const created: string[] = [];
     for (const [index, left] of people.entries()) {
       for (const right of people.slice(index + 1)) {
-        if (left.frontmatter.review_state !== "unreviewed" && right.frontmatter.review_state !== "unreviewed") continue;
+        if (!isUnreviewedPerson(left.frontmatter) && !isUnreviewedPerson(right.frontmatter)) continue;
         if (only && !only.includes(left.frontmatter.id) && !only.includes(right.frontmatter.id)) continue;
         if (left.frontmatter.is_self === true && right.frontmatter.is_self === true) continue;
         const key = pairKey(left.frontmatter.id, right.frontmatter.id);
         // #74: a crash replay finds the suggestion its first attempt wrote (same replayable ID); its audit may be missing.
         const ours = suggestions.get(key);
         if (ours && ours.frontmatter.id === newId(replayRoles.merge(key))) await this.auditSuggestion(ours.frontmatter.id, ours.frontmatter.proposed_fields as PersonMergeProposal, now);
-        const match = proposed.has(key) ? undefined : this.match(left, right);
+        const match = proposed.has(key) ? undefined : this.match(left, right, candidates);
         if (!match) continue;
         proposed.add(key);
         const [keep, merge] = this.order(left, right);
@@ -119,8 +123,8 @@ export class PersonMergeModule {
     return created;
   }
 
-  /** Same address; same local part on two internal domains; or the same full name (case and accents ignored). */
-  private match(left: LifeOSObject, right: LifeOSObject): PersonMergeMatch | undefined {
+  /** Same address; same local part on two internal domains; the same full name; or an address that fits the other's name (case and accents ignored). */
+  private match(left: LifeOSObject, right: LifeOSObject, candidates: readonly NameCandidate[]): PersonMergeMatch | undefined {
     const leftEmails = personEmails(left), rightEmails = personEmails(right);
     if (leftEmails.some((email) => rightEmails.includes(email))) return "email";
     const internal = (emails: string[]) => emails.filter((email) => internalDomainsOf(this.ctx.index).includes(email.split("@")[1]!));
@@ -128,12 +132,14 @@ export class PersonMergeModule {
     if (internal(leftEmails).some((email) => rightInternal.some((other) => other.split("@")[1] !== email.split("@")[1] && localPart(other) === localPart(email)))) return "email-local-part";
     const names = (person: LifeOSObject) => [nameKey(person.frontmatter.title), nameKey(`${String(person.frontmatter.given_name ?? "")} ${String(person.frontmatter.family_name ?? "")}`)].filter(Boolean);
     const rightNames = names(right);
-    return names(left).some((name) => rightNames.includes(name)) ? "name" : undefined;
+    if (names(left).some((name) => rightNames.includes(name))) return "name";
+    const fits = (emails: string[], person: LifeOSObject) => emails.some((email) => emailNameMatch(email, { id: person.frontmatter.id, names: namesOf(person) }, candidates));
+    return fits(leftEmails, right) || fits(rightEmails, left) ? "name-email" : undefined;
   }
 
   /** Which one survives: the self person, then a reviewed (user-known) person, then the older one. */
   private order(left: LifeOSObject, right: LifeOSObject): [LifeOSObject, LifeOSObject] {
-    const rank = (person: LifeOSObject) => person.frontmatter.is_self === true ? 0 : person.frontmatter.review_state === "unreviewed" ? 2 : 1;
+    const rank = (person: LifeOSObject) => person.frontmatter.is_self === true ? 0 : isUnreviewedPerson(person.frontmatter) ? 2 : 1;
     const byRank = rank(left) - rank(right);
     if (byRank) return byRank < 0 ? [left, right] : [right, left];
     return left.frontmatter.created_at <= right.frontmatter.created_at ? [left, right] : [right, left];
@@ -142,10 +148,10 @@ export class PersonMergeModule {
   private async writeSuggestion(keep: LifeOSObject, merge: LifeOSObject, match: PersonMergeMatch, now: string, newId: (role: ReplayRole) => string) {
     const role = replayRoles.merge(pairKey(keep.frontmatter.id, merge.frontmatter.id));
     const title = `Merge ${merge.frontmatter.title} into ${keep.frontmatter.title}`;
-    const reason = match === "email" ? "Both have the same email address." : match === "email-local-part" ? "Their email addresses match on two internal domains." : "Their names match.";
+    const reason = match === "email" ? "Both have the same email address." : match === "email-local-part" ? "Their email addresses match on two internal domains." : match === "name-email" ? "An email address of one fits the name of the other." : "Their names match.";
     const proposal: PersonMergeProposal = { keep_person_id: keep.frontmatter.id, merge_person_id: merge.frontmatter.id, match, keep_title: keep.frontmatter.title, merge_title: merge.frontmatter.title };
     const { frontmatter: { id } } = await proposeReviewItem(this.ctx, { now, newId }, {
-      role, reviewType: personMergeReviewType, title, target: { type: "person" }, proposed: { ...proposal }, confidence: match === "name" ? "Medium" : "High",
+      role, reviewType: personMergeReviewType, title, target: { type: "person" }, proposed: { ...proposal }, confidence: match === "name" || match === "name-email" ? "Medium" : "High",
       readsFrom: [keep.frontmatter.id, merge.frontmatter.id],
       body: `# Possible duplicate person\n\n${reason} Accepting moves every reference from ${merge.frontmatter.title} to ${keep.frontmatter.title} and deletes ${merge.frontmatter.title}. Nothing changes until you accept.\n`
     });
