@@ -185,4 +185,10 @@ describe("InboxWorkspace", () => {
     await click("Accept task");
     expect(document.querySelector("[aria-label='Review detail']")?.textContent).toMatch(/Restricted.*Accepted|Accepted.*Restricted/s);
   });
+  it("enables Accept summary when the stored title has surrounding spaces (#195)", async () => {
+    await render({ reviews: [review("r3", "Summary: Weekly sync ", { review_type: "summary", target_object_type: "meeting", proposed_fields: { summary: "A concise summary." } })], selectedId: "r3" });
+    const button = (name: string) => [...document.querySelectorAll("button")].find((item) => item.textContent === name) as HTMLButtonElement;
+    expect(button("Accept summary").disabled).toBe(false);
+    expect(button("Save edits").disabled).toBe(true);
+  });
 });
