@@ -902,6 +902,13 @@ function App() {
     if (notesController.pending) notesController.reset();
     newNote.clear();
   }, [location.pathname]);
+  // A header choice on an unsaved Standalone Note is the first real edit (ADR 0023): hold it, then create the note.
+  // On failure the choice stays held (and on screen) with the controller's error message; the next edit retries.
+  const saveNewNoteDetails = async (changes: Record<string, unknown>) => {
+    newNote.hold(changes);
+    await notesController.saveNow({ allowEmpty: true });
+    return true;
+  };
   // Inserting an image is a real edit: create the note first, then store the image against it.
   async function ensureNewNote(): Promise<EditorOwner | undefined> {
     if (!(await notesController.saveNow({ allowEmpty: true }))) return undefined;
@@ -1103,7 +1110,7 @@ function App() {
             </article>}
         conflictDetail={selectedNote && notesController.conflict ? <NoteConflictPanel noteTitle={selectedNote.frontmatter.title} draftText={notesController.draft} diskText={selectedNote.body} disabled={busy || readOnly} onKeepBrowserVersion={() => withBusy(notesController.keepBrowserVersion)} onKeepDiskVersion={() => withBusy(notesController.keepDiskVersion)} /> : null}
         renderOpenNote={(notesMode) => !selectedNote ? (newNote.draft ? <EditorFrame>
-              <NoteHeader note={{ contentHash: PENDING_NOTE_HASH, frontmatter: { id: newNote.draft.id, type: "standalone-note", title: newNote.draft.title } }} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={async (changes) => { newNote.hold(changes); return true; }} />
+              <NoteHeader note={{ contentHash: PENDING_NOTE_HASH, frontmatter: { id: newNote.draft.id, type: "standalone-note", title: newNote.draft.title } }} kind="NEW NOTE" {...headerOptions} disabled={busy || readOnly} onSave={saveNewNoteDetails} />
               <MarkdownEditor mode={notesMode} editorKey={newNote.draft.id} draft={notesController.draft} onChange={notesController.setDraftFor(notesController.target)} readOnly={readOnly} busy={busy} ensureOwner={ensureNewNote} linkObjects={objectLinks} setBusy={setBusy} notify={setMessage} placeholder="Write Markdown… Paste or drop an image here." codeLanguagePrompt="Code language" caretAfterInsert refocusAfterImage={false} />
               <div className="editor-footer"><SaveState dirty={notesController.dirty} autoSaving={notesController.autoSaving} pending={notesController.pending} undoAvailable={false} undoDisabled onUndo={() => undefined} /><div className="actions"><button className="primary" disabled={busy || readOnly || !notesController.dirty} onClick={saveSelectedNote}>Save now</button></div></div>
             </EditorFrame> : null) : <EditorFrame>

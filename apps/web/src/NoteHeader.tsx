@@ -69,7 +69,7 @@ export function NoteHeader({ note, kind, projects, clients, products, people, di
           </div>
         </div>
         {/* The unsaved "NEW NOTE" header carries the meeting's id, not a note id, so it cannot be linked yet. */}
-        <CopyLink object={isUnsavedNote(note) ? undefined : note} />
+        {!(isUnsavedNote(note) && note.frontmatter.type === "standalone-note") && <CopyLink object={isUnsavedNote(note) ? undefined : note} />}
         {children}
       </div>
       <div className="note-header-links">
