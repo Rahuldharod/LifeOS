@@ -281,7 +281,7 @@ test("Visual typing in an earlier occurrence, then opening another occurrence at
   const visual = january.locator("[contenteditable='true']").first();
   await expect(visual).toContainText("switch words for 2026-01.");
   await visual.click();
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End");
+  await page.keyboard.press(END_OF_DOCUMENT);
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await page.keyboard.type(" Z192");
   await series.getByRole("button", { name: /Open the latest/ }).click();
@@ -290,4 +290,40 @@ test("Visual typing in an earlier occurrence, then opening another occurrence at
   await expect.poll(() => note(SWITCH("01").note), { timeout: 15000 }).toContain("Z192");
   await page.clock.runFor(5000); // well past the editor debounce and the 1.8 s autosave
   expect([await note(SWITCH("02").note), await note(SWITCH("03").note)]).toEqual([february, march]);
+});
+
+// #192 review: opening another meeting from its URL (here "Open the latest") created the Visual editor before that
+// meeting's Note had loaded, so it kept showing the previous meeting's text, and typing there saved it into this meeting.
+test("opening another occurrence from the Series view shows that occurrence's own Note in the Visual editor", async ({ page, request }) => {
+  await seed(request);
+  await page.goto(`/calendar/2026-02-10/${SWITCH("02").meeting}`);
+  await expect(page.locator("[contenteditable='true']").first()).toContainText("switch words for 2026-02.");
+  await page.getByRole("region", { name: "Earlier occurrences" }).getByRole("button", { name: /Open the latest/ }).click();
+  await expect(page).toHaveURL(new RegExp(SWITCH("03").meeting));
+  await expect(page.locator("[contenteditable='true']").first()).toContainText("switch words for 2026-03.");
+});
+
+// #192 review: the meeting Note editor stays mounted when another meeting opens. Going Back moves no focus (no blur
+// to flush on), and the editor's debounce cannot fire under the paused clock: the typing must still reach its own file.
+test("Visual typing in the opened meeting Note, then going Back to another meeting at once, saves to that meeting's Note only", async ({ page, request }) => {
+  await seed(request);
+  const note = async (id: string) => ((await (await request.get(`/api/v1/notes/${id}`)).json()) as { body: string }).body;
+  const february = await note(SWITCH("02").note);
+  await page.clock.install();
+  await page.goto(`/calendar/2026-02-10/${SWITCH("02").meeting}`);
+  await page.getByRole("region", { name: "Earlier occurrences" }).getByRole("button", { name: /Open the latest/ }).click();
+  await expect(page).toHaveURL(new RegExp(SWITCH("03").meeting));
+  const opened = page.locator("[contenteditable='true']").first();
+  await expect(opened).toContainText("switch words for 2026-03.");
+  await opened.focus();
+  await page.keyboard.press(END_OF_DOCUMENT);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await page.keyboard.type(" Z192M");
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(SWITCH("02").meeting));
+  await expect(page.locator("[contenteditable='true']").first()).toContainText("switch words for 2026-02.");
+  await page.clock.resume();
+  await expect.poll(() => note(SWITCH("03").note), { timeout: 15000 }).toContain("Z192M");
+  await page.clock.runFor(5000);
+  expect(await note(SWITCH("02").note)).toBe(february);
 });

@@ -22,6 +22,11 @@ export function clearCachedDraft(id: string) {
   try { localStorage.removeItem(draftKey(id)); } catch { /* ignored */ }
 }
 
+/** The text of the browser draft kept for `id`, if any. */
+export function readCachedBody(id: string): string | undefined {
+  try { return (JSON.parse(localStorage.getItem(draftKey(id)) ?? "null") as CachedDraft | null)?.body; } catch { return undefined; }
+}
+
 /** Draft typed over a calendar event that has no note on disk yet (PB-020). Keyed by an opaque
  * string rather than a note id; `baseHash` is always "" because there is no file to conflict with. */
 export function readCachedPendingDraft(key: string): CachedDraft | undefined {
