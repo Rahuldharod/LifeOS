@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { LifeObject, PersonLabel } from "@lifeos/contracts";
-import { entityLinkFields } from "@lifeos/shared";
+import { entityLinkFields, personMatchesQuery } from "@lifeos/shared";
 import { CopyLink } from "./CopyLink.js";
 import { EntityLinkPicker, type Linkable } from "./EntityLinkPicker.js";
 import { EnvelopeBadges } from "./EnvelopeBadges.js";
@@ -105,8 +105,9 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
 
   const words = foldText(query).split(/\s+/).filter(Boolean);
   const visible = objects.filter((object) => {
-    const name = type === "person" ? personLabel(personLabels, object).label : String(object.frontmatter.title);
-    return words.every((word) => foldText(name).includes(word));
+    // #211: People are also found by email address and alias.
+    if (type === "person") return personMatchesQuery(object.frontmatter, personLabel(personLabels, object).label, query);
+    return words.every((word) => foldText(String(object.frontmatter.title)).includes(word));
   }).sort((left, right) => String(left.frontmatter.title).localeCompare(String(right.frontmatter.title)));
   const choose = (id?: string) => leave(() => onOpen(id));
 
