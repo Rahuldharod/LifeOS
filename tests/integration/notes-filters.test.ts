@@ -81,6 +81,20 @@ async function serve() {
 }
 
 describe("notes list filters (#105)", () => {
+  it("returns a Standalone Note under each context filter and still leaves knowledge notes out (#224)", async () => {
+    const { application, knowledge, ada, client, project, product, id } = await setup();
+    const note = await application.createStandaloneNote({
+      id: "0190a1b2-0000-7000-8000-0000000000c1", body: "Linked idea\n", now: "2026-10-14T12:05:00.000Z",
+      metadata: { primary_project_id: id(project), primary_client_id: id(client), primary_product_id: id(product), people_ids: [id(ada)] }
+    });
+    await knowledge("Unlinked knowledge");
+
+    expect(ids(application.searchNotes("", "open", { projectId: id(project) }))).toEqual([id(note)]);
+    expect(ids(application.searchNotes("", "open", { clientId: id(client) }))).toEqual([id(note)]);
+    expect(ids(application.searchNotes("", "open", { productId: id(product) }))).toEqual([id(note)]);
+    expect(ids(application.searchNotes("", "open", { personId: id(ada) }))).toEqual([id(note)]);
+  });
+
   it("filters by type (multi-select), each context filter alone, and combined with AND", async () => {
     const { application, events, meeting, knowledge, ada, bob, client, project, product, id } = await setup();
     expect(events.length).toBeGreaterThanOrEqual(2);

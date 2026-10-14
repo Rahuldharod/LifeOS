@@ -12,7 +12,7 @@ import { DailyFocusModule } from "./focus.js";
 import { FeedbackModule, type FeedbackInput } from "./feedback.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
-import { NotesModule, type NoteFilters } from "./notes.js";
+import { NotesModule, type NewStandaloneNote, type NoteFilters } from "./notes.js";
 import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
 import { PeopleModule } from "./people.js";
@@ -27,7 +27,7 @@ import { unknownAppInfo, type AppInfo } from "@lifeos/shared";
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
 export { NoteReferencedError } from "./notes.js";
-export type { NoteFilters, ObjectReference, PurgeCheck } from "./notes.js";
+export type { NewStandaloneNote, NoteFilters, ObjectReference, PurgeCheck } from "./notes.js";
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, PersonEmailTakenError, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
@@ -141,7 +141,7 @@ export class LifeOSApplication {
   notes() { return this.notesModule.notes(); }
   deletedNotes() { return this.notesModule.deletedNotes(); }
   searchNotes(query: string, state: "open" | "deleted" = "open", filters: NoteFilters = {}) { return this.notesModule.searchNotes(query, state, filters); }
-  createStandaloneNote(input: Parameters<NotesModule["createStandaloneNote"]>[0]) { return this.notesModule.createStandaloneNote(input); }
+  createStandaloneNote(input: NewStandaloneNote) { return this.notesModule.createStandaloneNote(input); }
   updateBody(id: string, body: string, expectedHash: string) { return this.notesModule.updateBody(id, body, expectedHash); }
   updateNoteMetadata(id: string, changes: Record<string, unknown>, expectedHash: string) { return this.notesModule.updateNoteMetadata(id, changes, expectedHash); }
   deleteNote(id: string, expectedHash: string) { return this.notesModule.deleteNote(id, expectedHash); }

@@ -89,3 +89,24 @@ export function personMatchesQuery(frontmatter: Readonly<Record<string, unknown>
 
 export { emailFitsName, emailNameMatch, foldForSearch, isUnreviewedPerson, type EmailNameMatchKind, type NameCandidate } from "./person-match.js";
 export { appVersion, unknownAppInfo, type AppInfo, type BuildHistory, type MainCommit } from "./app-version.js";
+
+/** `Note 14 Oct 2026 14:05`: the auto title of a Standalone Note, in the user's time zone (throws on an invalid zone). */
+export function standaloneNoteTitle(instant: Date | string, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `Note ${part("day")} ${part("month")} ${part("year")} ${part("hour")}:${part("minute")}`;
+}
+
+/** A time-ordered UUIDv7. Uses Web Crypto (Node and browsers), so the server and the browser share one algorithm. */
+export function uuidV7(now = Date.now()): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  let timestamp = BigInt(now);
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = Number(timestamp & 0xffn);
+    timestamp >>= 8n;
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}

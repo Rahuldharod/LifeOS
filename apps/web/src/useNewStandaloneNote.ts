@@ -3,16 +3,9 @@
 import { useRef, useState } from "react";
 import type { LifeObject } from "@lifeos/contracts";
 import { api } from "./api.js";
-import { uuidV7 } from "./uuid.js";
+import { standaloneNoteTitle, uuidV7 } from "@lifeos/shared";
 
 export type NewNoteDraft = { id: string; title: string; key: string };
-
-/** `Note 14 Oct 2026 14:05`: the same auto title the server would pick, in the display time zone. */
-export function newNoteTitle(now: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value ?? "";
-  return `Note ${part("day")} ${part("month")} ${part("year")} ${part("hour")}:${part("minute")}`;
-}
 
 export function useNewStandaloneNote({ timeZone, onCreated }: { timeZone: string; onCreated: (note: LifeObject) => void }) {
   const [draft, setDraft] = useState<NewNoteDraft>();
@@ -25,7 +18,7 @@ export function useNewStandaloneNote({ timeZone, onCreated }: { timeZone: string
 
   const begin = () => {
     const id = uuidV7();
-    const next = { id, title: newNoteTitle(new Date(), timeZone), key: `new-note:${id}` };
+    const next = { id, title: standaloneNoteTitle(new Date(), timeZone), key: `new-note:${id}` };
     current.current = next; held.current = {}; created.current = undefined; setDraft(next);
     return next;
   };

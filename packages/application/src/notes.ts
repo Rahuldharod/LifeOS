@@ -1,18 +1,12 @@
 import { uuidV7, type ObjectEnvelope } from "@lifeos/domain";
-import { isNoteType, noteTypes } from "@lifeos/shared";
+import { isNoteType, noteTypes, standaloneNoteTitle } from "@lifeos/shared";
 import { foldForSearch, markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { operationKinds, type Operation } from "./ports.js";
-import { isLive, liveMeetingNote, OneAtATime, parseInstantRange, sameValue } from "./support.js";
+import { isLive, liveMeetingNote, objectIdPattern, OneAtATime, parseInstantRange, sameValue } from "./support.js";
 
 
-const isUuid = (value: unknown) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-
-/** `14 Oct 2026 14:05`: the auto title's date and time in the user's time zone. */
-function formatNoteStamp(timestamp: string, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(timestamp));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((candidate) => candidate.type === type)?.value ?? "";
-  return `${part("day")} ${part("month")} ${part("year")} ${part("hour")}:${part("minute")}`;
-}
+/** What createStandaloneNote takes (PB-034). */
+export interface NewStandaloneNote { id: string; body: string; title?: string; metadata?: Record<string, unknown>; timeZone?: string; now?: string }
 
 /** Another object that points at a note, as the permanent-delete check lists it (PB-030). */
 export interface ObjectReference { id: string; type: string; title: string }
@@ -82,11 +76,11 @@ export class NotesModule {
     if (types.some((type) => !isNoteType(type))) throw new Error(`Note type must be one of ${noteTypes.join(", ")}`);
     const { from, to } = parseInstantRange(filters.from, filters.to);
     const dateField = state === "deleted" ? "deleted_at" : "updated_at";
-    const needsMeetingNote = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
+    const needsContextFields = Boolean(filters.projectId || filters.clientId || filters.productId || filters.personId);
     const notes = (state === "deleted" ? this.deletedNotes() : this.notes()).filter(({ frontmatter }) => {
       const stamp = Date.parse(String(frontmatter[dateField]));
       return (!types.length || types.includes(frontmatter.type))
-        && (!needsMeetingNote || frontmatter.type === "meeting-note")
+        && (!needsContextFields || frontmatter.type === "meeting-note" || frontmatter.type === "standalone-note")
         && (!filters.projectId || frontmatter.primary_project_id === filters.projectId)
         && (!filters.clientId || frontmatter.primary_client_id === filters.clientId)
         && (!filters.productId || frontmatter.primary_product_id === filters.productId)
@@ -144,12 +138,12 @@ export class NotesModule {
    * sensitivity); they are checked like a metadata edit and written in the same single file write. `title` defaults to
    * `Note <date time>` in `timeZone` (UTC when not given), which also sets the time in the file name (ADR 0002).
    */
-  async createStandaloneNote(input: { id: string; body: string; title?: string; metadata?: Record<string, unknown>; timeZone?: string; now?: string }) {
-    if (!isUuid(input.id)) throw new Error("Note id must be a UUID");
+  async createStandaloneNote(input: NewStandaloneNote) {
+    if (!objectIdPattern.test(input.id)) throw new Error("Note id must be a UUID");
     return this.creates.run(input.id, () => this.writeStandaloneNote(input));
   }
 
-  private async writeStandaloneNote(input: { id: string; body: string; title?: string; metadata?: Record<string, unknown>; timeZone?: string; now?: string }) {
+  private async writeStandaloneNote(input: NewStandaloneNote) {
     const existing = this.ctx.index.get(input.id);
     if (existing) {
       if (existing.frontmatter.type !== "standalone-note") throw new Error(`Object ${input.id} already exists and is not a standalone note`);
@@ -157,9 +151,9 @@ export class NotesModule {
     }
     const now = input.now ?? new Date().toISOString();
     const timeZone = input.timeZone ?? "UTC";
-    try { formatNoteStamp(now, timeZone); } catch { throw new Error("timeZone is not a valid time zone"); }
+    try { standaloneNoteTitle(now, timeZone); } catch { throw new Error("timeZone is not a valid time zone"); }
     const held = this.validatedChanges("standalone-note", { ...input.metadata, ...(input.title !== undefined ? { title: input.title } : {}) });
-    const title = typeof held.title === "string" ? held.title : `Note ${formatNoteStamp(now, timeZone)}`;
+    const title = typeof held.title === "string" ? held.title : standaloneNoteTitle(now, timeZone);
     const created = await this.ctx.objects.write({
       relativePath: `notes/${markdownFileName(title, input.id, now, timeZone)}`,
       frontmatter: { ...this.ctx.envelope(input.id, "standalone-note", title, now, "app"), ...held, title },

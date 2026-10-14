@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import { uuidV7 } from "../../apps/web/src/uuid.js";
+import { uuidV7 } from "@lifeos/shared";
 import { seed } from "./fixtures.js";
 
 // PB-034 (#222): "New note" writes nothing until the first real edit. Real local API, synthetic data from serve.mjs.
