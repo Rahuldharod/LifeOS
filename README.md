@@ -189,6 +189,8 @@ The skills that let Claude capture, answer questions, enrich meetings and write 
 | --- | --- |
 | `corepack pnpm reconcile-meetings` | Reports meetings duplicated for the same calendar event; changes nothing |
 | `corepack pnpm reconcile-meetings --apply` | Run after `corepack pnpm stop`. Backs up, then archives the empty extra copies (files are kept and marked `archived_at`) and audits them. Copies that both hold notes are left for a manual merge |
+| `corepack pnpm people-cleanup` | Lists likely duplicate people and why (same matching as the live suggestions); changes nothing |
+| `corepack pnpm people-cleanup --apply` | Run after `corepack pnpm stop`. Backs up, then adds one Merge suggestion to the Inbox per pair. Never merges; pairs already suggested or kept separate are skipped, so a second run adds nothing |
 | `corepack pnpm worktrees:prune` | Lists Claude agent worktrees in `.claude/worktrees` and which can go; changes nothing. Add `--apply` to remove them. Claude also runs this by itself at the end of each session |
 | `corepack pnpm worktrees:check` | Warns if there are more than 10 agent worktrees |
 
