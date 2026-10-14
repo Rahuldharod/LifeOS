@@ -165,8 +165,8 @@ export interface SecretStore {
   set(reference: string, value: string): Promise<void>;
 }
 
-/** The `_inbox/` subfolders (ADR 0007). Agents write drafts, patches and requests; the application files outcomes. */
-export const inboxFolders = ["drafts", "patches", "requests", "processed", "failed"] as const;
+/** The `_inbox/` subfolders (ADR 0007). Agents write drafts, patches and requests; the application files outcomes and writes App Feedback (ADR 0022); adoption never reads `feedback`. */
+export const inboxFolders = ["drafts", "patches", "requests", "processed", "failed", "feedback"] as const;
 export type InboxFolder = typeof inboxFolders[number];
 
 export interface InboxFile {

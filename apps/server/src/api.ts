@@ -11,7 +11,7 @@ import path from "node:path";
 import { watch } from "node:fs";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { LifeOSApplication, type AutoBackups, type CalendarConnector } from "@lifeos/application";
+import { LifeOSApplication, type AppInfo, type AutoBackups, type CalendarConnector } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { MemoryIndex } from "@lifeos/index-memory";
@@ -56,6 +56,8 @@ export interface ApiOptions {
   /** The production web build served for every non-API URL. */
   webRoot: string;
   logger?: boolean;
+  /** ADR 0022: the running build's version and short git commit, written into each App Feedback file. */
+  appInfo?: AppInfo;
   /** ADR 0020: where the bundled contract files are read from; defaults to the repository's `contract/`. */
   contractRoot?: string;
   /** ADR 0020: where the installable skills are read from; defaults to the repository's `skills/`. */
@@ -85,7 +87,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   // #98: no AI provider; Claude does the AI work through the skills (ADR 0008). The mock AI is for tests only.
   // The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild, only by the lease holder and only for files
   // whose summary changed; the watcher ignores `_agent/`.
-  const application = new LifeOSApplication(store, new MemoryIndex(), calendars.calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease(), contract: await loadContractFiles(options.contractRoot) });
+  const application = new LifeOSApplication(store, new MemoryIndex(), calendars.calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease(), contract: await loadContractFiles(options.contractRoot), appInfo: options.appInfo });
   const server = Fastify({ logger: options.logger ?? false, bodyLimit: 15 * 1024 * 1024 });
   // #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
   let autoBackups: AutoBackups | undefined;
@@ -300,6 +302,8 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return application.requestReplan(request.body.date);
   });
   // #47: one change to the date's Top 3 (pin, unpin, replace, dismiss, restore, reset); 409 when expectedHash is stale.
+  // ADR 0022 (PB-018): one App Feedback file in `_inbox/feedback/`; not an object, so no lease is needed.
+  route(server, "POST /api/v1/feedback", async (request) => application.submitFeedback({ label: request.body?.label, text: request.body?.text, page: request.body?.page, object: request.body?.object }));
   route(server, "POST /api/v1/focus/overrides", async (request, reply) => {
     const { date, action, taskId, replacementId, expectedHash } = request.body ?? {};
     if (!isCalendarDay(date)) return reply.status(400).send({ error: "date (YYYY-MM-DD) is required" });
