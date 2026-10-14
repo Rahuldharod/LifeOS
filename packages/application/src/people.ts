@@ -29,12 +29,16 @@ export function normalizeEmail(value: unknown) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
 }
 
-/** Email addresses recorded on a person; hand-edited files may list plain strings. */
+/** The address in one stored identifier; hand-edited files may list plain strings. */
+function identifierEmail(identifier: unknown) {
+  if (typeof identifier === "string") return normalizeEmail(identifier);
+  return typeof identifier === "object" && identifier && (identifier as { kind?: unknown }).kind === "email" ? normalizeEmail((identifier as { value?: unknown }).value) : undefined;
+}
+
+/** Email addresses recorded on a person. */
 export function personEmails(person: LifeOSObject) {
   const identifiers = Array.isArray(person.frontmatter.identifiers) ? person.frontmatter.identifiers as unknown[] : [];
-  return identifiers.map((identifier) => typeof identifier === "string" ? normalizeEmail(identifier)
-    : typeof identifier === "object" && identifier && (identifier as { kind?: unknown }).kind === "email" ? normalizeEmail((identifier as { value?: unknown }).value) : undefined)
-    .filter((email): email is string => Boolean(email));
+  return identifiers.map(identifierEmail).filter((email): email is string => Boolean(email));
 }
 
 /** "jean-pierre" → "Jean-Pierre", "élodie" → "Élodie": title case per hyphen-separated part. */
@@ -300,7 +304,7 @@ export class PeopleModule {
     if (!email) throw new Error("Enter a valid email address");
     const person = ctx.required(id, "person");
     if (!personEmails(person).includes(email)) return person;
-    const identifiers = (person.frontmatter.identifiers as unknown[]).filter((identifier) => personEmails({ frontmatter: { identifiers: [identifier] } } as unknown as LifeOSObject)[0] !== email);
+    const identifiers = (person.frontmatter.identifiers as unknown[]).filter((identifier) => identifierEmail(identifier) !== email);
     const now = new Date().toISOString();
     const updated = await ctx.update(person, { identifiers }, { expectedHash, now });
     await ctx.writeAudit("person.email-removed", id, now, {});
