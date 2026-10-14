@@ -7,7 +7,7 @@
 // draft was opened with, never a hash a background refresh happened to pick up).
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, useServerConnection } from "./api.js";
-import { cacheDraft, clearCachedDraft, type CachedDraft } from "./draftStorage.js";
+import { cacheDraft, clearCachedDraft, readCachedBody, type CachedDraft } from "./draftStorage.js";
 import { noteDraftBase, noteSaveRequest, openNoteDraft, reconcileNoteDraft, type NoteDraftBase } from "./noteDraft.js";
 
 export type DraftControllerNote = { frontmatter: { id: string }; body: string; contentHash: string };
@@ -15,6 +15,12 @@ export type DraftControllerNote = { frontmatter: { id: string }; body: string; c
 export type NoteDraftController = {
   draft: string;
   setDraft: (value: string) => void;
+  /** What the open draft belongs to: the note id, or the pending key of a draft with no file yet. */
+  target: string | undefined;
+  /** #192: a change handler bound to one draft `target`. While that draft is open it edits it, like `setDraft`. A late
+   * report arriving after another note opened (an editor flushing typing on the switch) never touches the open draft:
+   * it is kept in the browser for its own note and saved there (a pending draft is only kept in the browser). */
+  setDraftFor: (target: string | undefined) => (value: string) => void;
   base: NoteDraftBase | undefined;
   conflict: boolean;
   autoSaving: boolean;
@@ -81,6 +87,13 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
   const pendingKeyRef = useRef<string | undefined>(undefined);
   // A failed autosave is retried when the server comes back after a restart (PB-001).
   const { reconnects } = useServerConnection();
+  // #192: drafts this controller had open before the current one, by target, with the base their saves are pinned to
+  // ("pending" for a draft with no file yet); a pending draft that became a note maps to it in `adopted`.
+  const closed = useRef(new Map<string, NoteDraftBase | "pending">());
+  const adopted = useRef(new Map<string, string>());
+  const closedSaves = useRef(new Map<string, Promise<void>>());
+  const current = useRef({ note, base, conflict, readOnly, onSaved, onMessage });
+  current.current = { note, base, conflict, readOnly, onSaved, onMessage };
 
   useEffect(() => { activeDraft.current = draft; }, [draft]);
 
@@ -88,10 +101,60 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
    * offer, same as saving or opening a different note. */
   function setDraft(value: string) {
     setUndoable(undefined);
+    activeDraft.current = value;
     setDraftState(value);
   }
 
+  /** #192: remembers the draft being replaced, so a late report for it still has somewhere to go, and saves it to its
+   * own note when it has unsaved text (typing the editor reported just before the switch, with no time to autosave). */
+  function closeCurrent(next: string | undefined) {
+    if (next) closed.current.delete(next);
+    const pending = pendingKeyRef.current;
+    if (pending) { if (pending !== next) closed.current.set(pending, "pending"); return; }
+    const { note: openNote, base: openBase, conflict: openConflict } = current.current;
+    const id = restoredId.current;
+    if (!id || id === next || openBase?.noteId !== id) return;
+    closed.current.set(id, openBase);
+    // A conflicted draft cannot be saved; it is already kept in the browser.
+    if (!openConflict && openNote?.frontmatter.id === id && activeDraft.current !== openNote.body) keepClosedDraft(id, activeDraft.current);
+  }
+
+  function setDraftFor(target: string | undefined) {
+    return (value: string) => {
+      const id = target && (adopted.current.get(target) ?? target);
+      if (id === undefined || id === (restoredId.current ?? pendingKeyRef.current)) setDraft(value); else keepClosedDraft(id, value);
+    };
+  }
+
+  /** Keeps text for a draft that is no longer open in the browser, and saves it to its note (never a pending one). */
+  function keepClosedDraft(id: string, value: string) {
+    const closedBase = closed.current.get(id);
+    if (closedBase === "pending") { if (value.trim() !== "") cacheDraft(id, value, ""); return; }
+    if (!closedBase) return;
+    cacheDraft(id, value, closedBase.hash);
+    if (current.current.readOnly) return;
+    // One save at a time per note, each pinned to the hash the previous one produced.
+    const saved = (closedSaves.current.get(id) ?? Promise.resolve()).then(() => saveClosed(id, value));
+    closedSaves.current.set(id, saved);
+  }
+
+  /** Saves a late report for a note that is no longer open. On failure (a conflict, the server down) the text stays in
+   * the browser draft for that note, which opening it again offers. Never touches the open draft. */
+  async function saveClosed(id: string, body: string) {
+    const saveBase = closed.current.get(id);
+    if (!saveBase || saveBase === "pending") return;
+    try {
+      const updated = await api("PUT /api/v1/objects/:id/body", { params: { id }, body: noteSaveRequest(saveBase, body) });
+      if (closed.current.get(id) === saveBase) closed.current.set(id, noteDraftBase(updated));
+      current.current.onSaved(updated);
+      if (readCachedBody(id) === body) clearCachedDraft(id);
+    } catch (error) {
+      current.current.onMessage(`Browser draft is safe; the previous note could not be saved yet: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
   function open(target: DraftControllerNote, cached?: CachedDraft) {
+    closeCurrent(target.frontmatter.id);
     const opened = openNoteDraft(target, cached);
     restoredId.current = target.frontmatter.id;
     pendingKeyRef.current = undefined; setPendingKey(undefined);
@@ -100,12 +163,14 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
   }
 
   function openPending(key: string, cached?: CachedDraft) {
+    closeCurrent(key);
     restoredId.current = undefined;
     pendingKeyRef.current = key; setPendingKey(key);
     setBase(undefined); setDraftState(cached?.body ?? ""); setConflict(false); setUndoable(undefined);
   }
 
   function reset() {
+    closeCurrent(undefined);
     restoredId.current = undefined;
     pendingKeyRef.current = undefined; setPendingKey(undefined);
     setBase(undefined); setDraftState(""); setConflict(false); setUndoable(undefined);
@@ -143,6 +208,7 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
     try {
       const created = await createNote(bodyToSave);
       if (!created) return false;
+      adopted.current.set(key, created.frontmatter.id);
       if (pendingKeyRef.current !== key) return true;
       restoredId.current = created.frontmatter.id;
       pendingKeyRef.current = undefined; setPendingKey(undefined);
@@ -296,5 +362,5 @@ export function useNoteDraftController({ note, readOnly, busy, onMessage, onSave
 
   const dirty = note ? draft !== note.body : Boolean(pendingKey && draft.trim() !== "");
 
-  return { draft, setDraft, base, conflict, autoSaving, dirty, open, openPending, pending: Boolean(pendingKey && !note), reset, saveNow, keepDiskVersion, keepBrowserVersion, undoAvailable: undoable !== undefined, undoKeepDiskVersion };
+  return { draft, setDraft, target: restoredId.current ?? pendingKey, setDraftFor, base, conflict, autoSaving, dirty, open, openPending, pending: Boolean(pendingKey && !note), reset, saveNow, keepDiskVersion, keepBrowserVersion, undoAvailable: undoable !== undefined, undoKeepDiskVersion };
 }
