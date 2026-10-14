@@ -54,7 +54,7 @@ Valuable ideas that are not prerequisites for dependable daily use.
 | PB-014 | Command palette and keyboard shortcuts | Navigate, create, link, and format content efficiently without leaving the keyboard. | 3 | Medium | 3 | — | — |
 | PB-015 | Backlog inside LifeOS | Represent product ideas as first-class LifeOS objects, with prioritization and links to projects or GitHub Issues. | 3 | Medium | 4 | — | — |
 | PB-016 | Mobile/read-only companion | Provide a safe way to review notes and tasks from a smaller device without creating concurrent-write risk. | 3 | Low | 5 | — | — |
-| PB-034 | Keep calendar organizer and attendee RSVP status | Today a synced meeting keeps its attendees but not who organised it or who accepted, declined or has not answered. Store the organizer (as a Person) and each attendee's RSVP status on the meeting, so the user can see who is really coming and the Agent Index can use it. Deliberately out of scope of #211. [TBD: check what the Google Calendar connector returns and whether RSVP changes should refresh on sync.] | 3 | Medium | 3 | — | — |
+| PB-039 | Keep calendar organizer and attendee RSVP status | Today a synced meeting keeps its attendees but not who organised it or who accepted, declined or has not answered. Store the organizer (as a Person) and each attendee's RSVP status on the meeting, so the user can see who is really coming and the Agent Index can use it. Deliberately out of scope of #211. [TBD: check what the Google Calendar connector returns and whether RSVP changes should refresh on sync.] | 3 | Medium | 3 | — | — |
 
 ## Inbox
 
