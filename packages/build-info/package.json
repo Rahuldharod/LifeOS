@@ -1,0 +1,1 @@
+{"name":"@lifeos/build-info","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lifeos/shared":"workspace:*"}}

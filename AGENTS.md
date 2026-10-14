@@ -30,6 +30,7 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - `packages/secrets`: macOS Keychain and test secret stores.
 - `packages/contracts`: API request and response types.
 - `packages/shared`: rules both the server and the browser need (no Node dependencies).
+- `packages/build-info`: reads the App version from git (Node only), for the server at start and the web build.
 - `schemas`: portable schemas and fixtures.
 - `skills`: the thin Claude skills pack (`lifeos-object-contract`, `lifeos-capture`, `lifeos-ask`, `lifeos-enrichment`, `lifeos-morning`) and `INSTALL.md` (install and dry-run steps for the user). The skills keep the safety rules; formats and examples are in `contract/`. Every example draft, patch, brief and gate case in either is a CI fixture (`tests/integration/skill-fixtures.test.ts`, run by plain `pnpm test`); change skill text and adoption code together. Never open the enrichment skill's client-content gate: only the user does that, with the IT/legal sign-off record.
 - `contract`: the contract files LifeOS writes into `_agent/contract/` with the Agent Index (ADR 0020); each starts with `lifeos_contract: 1` and one shared `contract_version`. The thin skills follow them, but their safety rules always win.

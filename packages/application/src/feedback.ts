@@ -1,4 +1,5 @@
 import { randomInt } from "node:crypto";
+import type { AppInfo } from "@lifeos/shared";
 import type { InboxStore } from "./ports.js";
 
 /**
@@ -20,8 +21,6 @@ export interface FeedbackInput {
   object?: string;
 }
 
-/** The running build: `version` from the root `package.json`, `commit` the short git commit. */
-export interface AppInfo { version: string; commit: string }
 
 /** Same name the HTTP layer maps to a 500: the request was fine, the file could not be written. */
 export class FeedbackWriteError extends Error { override name = "FeedbackWriteError"; }

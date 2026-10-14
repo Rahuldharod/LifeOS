@@ -12,7 +12,7 @@ One file per item in `<LIFEOS_DATA_ROOT>/_inbox/feedback/`. It is not a LifeOS o
 | `captured_at` | When the user submitted it |
 | `page`, `object` | Where in the app; `object` is an optional `lifeos://` link |
 | `device` | Which Mac or device |
-| `app_version` | Version from the root `package.json` |
+| `app_version` | App version, `YY.MM.DD.N` (ends `-dev+<commit>` off main; older files say `0.1.0`) |
 | `app_commit` | Git commit the app ran from (older files may only have `app_version`) |
 | body | The user's text as typed |
 
@@ -29,7 +29,7 @@ If `LIFEOS_DATA_ROOT` is unset in your shell, ask the user for it. Never guess a
    | --- | --- |
    | Captured | The feedback date, `YYYY-MM-DD`, in the user's local time zone. `captured_at` is UTC (`Z`): convert it. The filename already shows local time |
    | Idea | `[Bug] PB-0xx — …` or `[Feature] PB-0xx — …`, from `label` |
-   | Source / context | Page, device, `app_version` and `app_commit`; for example `App Feedback: Tasks page, laptop, 0.4.2 (a1b2c3d)` |
+   | Source / context | Page, device, `app_version` and `app_commit`; for example `App Feedback: Tasks page, laptop, 26.10.14.2 (a1b2c3d)` |
 
 5. Rewrite each item in plain words. Never paste the user's text. Replace client names with "a client" and real emails with `example.com` addresses. The repo is Git history; real data stays out (`AGENTS.md`).
 6. Open a docs PR to `main`. In the body, list every rewrite (original wording against new wording) so the user can check the privacy changes. Do not merge it.

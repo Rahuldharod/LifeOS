@@ -1,6 +1,10 @@
 // #121: the JSON shapes the localhost API sends and receives, as the browser sees them after `JSON.parse`.
 // Types only; no Node dependencies, so the web app can import them. The server's routes are checked against
 // these (apps/server/src/route.ts), so a use case whose result stops matching breaks the server's typecheck.
+import type { AppInfo } from "@lifeos/shared";
+
+/** #208: the server's App version and short commit, as the health check reports it. */
+export type { AppInfo };
 
 export type EntityType = "task" | "project" | "client" | "product" | "person";
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
@@ -71,8 +75,6 @@ export type BackupWarningKind = "backup-failed" | "off-drive-failed" | "overdue"
 /** #84: a backup or the off-Drive copy failed, or none succeeded in 26 hours. */
 export type BackupWarning = { kind: BackupWarningKind; message: string; reason: string; at?: string };
 export type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; idleReleaseMinutes: number; setupWarning?: SetupWarning; backupWarning?: BackupWarning; appInfo: AppInfo };
-/** #208: the server's App version (`YY.MM.DD.N`, `-dev+<commit>` off main) and short commit. */
-export type AppInfo = { version: string; commit: string };
 
 /** ADR 0007: Inbox Drafts plus Patch Drafts waiting to be adopted, and the ones that failed. */
 export type InboxStatus = { awaiting: number; drafts: number; patches: number; failed: Array<{ path: string; reason: string }> };

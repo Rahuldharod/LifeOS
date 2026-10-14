@@ -11,6 +11,7 @@
     "@lifeos/application": "workspace:*",
     "@lifeos/assets-filesystem": "workspace:*",
     "@lifeos/backup-filesystem": "workspace:*",
+    "@lifeos/build-info": "workspace:*",
     "@lifeos/connectors": "workspace:*",
     "@lifeos/contracts": "workspace:*",
     "@lifeos/index-memory": "workspace:*",

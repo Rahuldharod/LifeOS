@@ -181,6 +181,9 @@ importers:
       '@lifeos/backup-filesystem':
         specifier: workspace:*
         version: link:packages/backup-filesystem
+      '@lifeos/build-info':
+        specifier: workspace:*
+        version: link:packages/build-info
       '@lifeos/connectors':
         specifier: workspace:*
         version: link:packages/connectors
@@ -247,6 +250,9 @@ importers:
       '@lifeos/backup-filesystem':
         specifier: workspace:*
         version: link:../../packages/backup-filesystem
+      '@lifeos/build-info':
+        specifier: workspace:*
+        version: link:../../packages/build-info
       '@lifeos/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors
@@ -308,6 +314,9 @@ importers:
         specifier: ^7.0.0
         version: 7.3.6(@types/node@24.13.6)(tsx@4.23.13)(yaml@2.9.1)
     devDependencies:
+      '@lifeos/build-info':
+        specifier: workspace:*
+        version: link:../../packages/build-info
       '@types/react':
         specifier: ^19.0.0
         version: 19.3.0
@@ -334,13 +343,23 @@ importers:
 
   packages/backup-filesystem: {}
 
+  packages/build-info:
+    dependencies:
+      '@lifeos/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/connectors:
     dependencies:
       '@lifeos/application':
         specifier: workspace:*
         version: link:../application
 
-  packages/contracts: {}
+  packages/contracts:
+    dependencies:
+      '@lifeos/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/domain:
     dependencies:

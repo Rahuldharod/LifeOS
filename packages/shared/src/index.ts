@@ -58,4 +58,4 @@ export function acceptedSummaryText(body: string) {
   if (end < 0) return "";
   return lines.slice(start + 1, end).join("\n").replace(/^\s*##\s+Summary\s*\n/i, "").trim();
 }
-export { appVersion, type MainCommit } from "./app-version.js";
+export { appVersion, unknownAppInfo, type AppInfo, type BuildHistory, type MainCommit } from "./app-version.js";
