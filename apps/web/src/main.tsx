@@ -49,6 +49,7 @@ import { MeetingNoteActions } from "./MeetingNoteActions.js";
 import { takeoverCaution } from "./LeaseBanner.js";
 import { AppStatusBanners } from "./ConnectionDeviceSettings.js";
 import { useActivityHeartbeat } from "./activityHeartbeat.js";
+import { AboutLifeOS } from "./AboutLifeOS.js";
 import { BackupWarning } from "./BackupWarning.js";
 import { SensitivityToggle } from "./SensitivityToggle.js";
 import { PermanentDeleteButton } from "./PermanentDelete.js";
@@ -1110,6 +1111,7 @@ function App() {
       />}
 
       {view === "System" && <><PageHeader eyebrow="SYSTEM" title="Health and device handoff" description="Integrity checks and an advisory lease protect the Markdown root during sequential two-device use." />
+        <AboutLifeOS server={health?.appInfo} timeZone={displayTimeZone} />
         <div className="summary">
           <Summary label="Object graph" value={health?.diagnostics.length ? "Attention" : "Healthy"} detail={`${health?.objectCount ?? 0} indexed objects`} />
           <Summary label="Write access" value={readOnly ? "Read-only" : "Enabled"} detail={readOnly ? (releasedAfterIdle ? "released after inactivity" : "another device lease is active") : "revision checks remain active"} />

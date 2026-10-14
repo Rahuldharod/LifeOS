@@ -64,6 +64,10 @@ _Avoid_: Job, task (a Task is a user commitment)
 A Bug or Feature note about LifeOS itself, typed into the app's feedback button. Not an object: it never appears in Notes or the Agent Index, and it gets a backlog ID only when promoted into the Product Backlog.
 _Avoid_: Inbox item, idea (the backlog's Inbox is where it lands after promotion)
 
+**App version**:
+The calendar version of the LifeOS code that is running, as `YY.MM.DD.N`: the Paris date of a merge to main and which merge of that day it was (`26.10.14.2`). A build of anything other than main adds `-dev+` and its commit (`26.10.14.2-dev+abc1234`). The UI and the server each have one, and they can differ until `update-app` runs.
+_Avoid_: Version (alone), release, build number; not a Version copy, schema version, Skills pack version or contract version
+
 **Work Order filing rule**:
 The one exception to "Agents never write into `_inbox/processed/`": when an Agent finishes a Work Order, it moves that file from `_inbox/requests/` to `_inbox/processed/`, and nothing else. A Work Order still in `requests/` counts as not done.
 

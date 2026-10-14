@@ -13,6 +13,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { LifeOSApplication, type AppInfo, type AutoBackups, type CalendarConnector } from "@lifeos/application";
 import { FilesystemAssetStore } from "@lifeos/assets-filesystem";
+import { unknownAppInfo } from "@lifeos/shared";
 import { FilesystemBackupService } from "@lifeos/backup-filesystem";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemAgentIndexWriter, FilesystemInboxStore, FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
@@ -87,7 +88,8 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   // #98: no AI provider; Claude does the AI work through the skills (ADR 0008). The mock AI is for tests only.
   // The Agent Index (#43) is rewritten in `_agent/` 1.5 s after the last index rebuild, only by the lease holder and only for files
   // whose summary changed; the watcher ignores `_agent/`.
-  const application = new LifeOSApplication(store, new MemoryIndex(), calendars.calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease(), contract: await loadContractFiles(options.contractRoot), appInfo: options.appInfo });
+  const appInfo = options.appInfo ?? unknownAppInfo;
+  const application = new LifeOSApplication(store, new MemoryIndex(), calendars.calendar, undefined, deviceId, new FilesystemInboxStore(dataRoot), new FilesystemAgentIndexWriter(dataRoot), { agentIndexCanWrite: () => session.holdsLease(), contract: await loadContractFiles(options.contractRoot), appInfo });
   const server = Fastify({ logger: options.logger ?? false, bodyLimit: 15 * 1024 * 1024 });
   // #84: automatic backups start with the server; the start backup runs in the background (never blocks start-up or the UI).
   let autoBackups: AutoBackups | undefined;
@@ -105,7 +107,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   const idle = new IdleRelease(session, options.idleReleaseMs);
   registerLease(server, { session, idle, stopping: () => stopping });
 
-  route(server, "GET /api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning() }));
+  route(server, "GET /api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning(), appInfo }));
   route(server, "GET /api/v1/objects", async () => application.listObjects());
   registerNotesList(server, application);
   route(server, "GET /api/v1/entities/:type", async (request) => application.entities(request.params.type));

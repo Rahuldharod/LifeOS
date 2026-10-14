@@ -6,7 +6,7 @@ import { GoogleCalendarConnector, MockCalendarConnector, mockEventsFromEnv } fro
 import { exitUnlessDataRoot, resolveBackupRoot, resolveDataRoot } from "@lifeos/object-store-markdown";
 import { KnownSecrets, MacOSKeychainSecretStore } from "@lifeos/secrets";
 import { buildApi } from "./api.js";
-import { readAppInfo } from "./app-info.js";
+import { readAppInfo } from "@lifeos/build-info";
 import { calendarSource } from "./calendar-source.js";
 import { secretRefs } from "./connections.js";
 import { idleReleaseMs } from "./lease.js";
@@ -37,7 +37,7 @@ const api = await buildApi({
   dataRoot,
   backupRoot: resolveBackupRoot(),
   deviceId,
-  appInfo: readAppInfo(),
+  appInfo: readAppInfo({ dev: process.env.NODE_ENV !== "production" }),
   secrets,
   calendars,
   idleReleaseMs: idleReleaseMs(),

@@ -9,7 +9,7 @@ import { EnrichmentModule } from "./enrichment.js";
 import { DecisionsModule, type DecisionFilters } from "./decisions.js";
 import { EntitiesModule, type EntityType } from "./entities.js";
 import { DailyFocusModule } from "./focus.js";
-import { FeedbackModule, type AppInfo, type FeedbackInput } from "./feedback.js";
+import { FeedbackModule, type FeedbackInput } from "./feedback.js";
 import { HistoryModule } from "./history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule, type NoteFilters } from "./notes.js";
@@ -21,6 +21,7 @@ import type { AgentIndexWriter, AiProvider, CalendarConnector, IndexStore, Inbox
 import { ReviewModule, type ReviewEdits } from "./review.js";
 import { SystemModule } from "./system.js";
 import { TodayModule, type TodaySettings } from "./today.js";
+import { unknownAppInfo, type AppInfo } from "@lifeos/shared";
 
 export type { DecisionEvidence, DecisionFilters } from "./decisions.js";
 export type { OpenPointFilters } from "./open-points.js";
@@ -31,7 +32,8 @@ export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, per
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarEventReference, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
 export { inboxFolders, operationKinds } from "./ports.js";
-export type { AppInfo, FeedbackInput, FeedbackLabel } from "./feedback.js";
+export type { FeedbackInput, FeedbackLabel } from "./feedback.js";
+export type { AppInfo } from "@lifeos/shared";
 export { feedbackLabels } from "./feedback.js";
 export type { AdoptionBatch, AutoAdoption, AutoAdoptionOptions, DraftOutcome, DraftResult, InboxStatus, SkillPackStatus } from "./adoption.js";
 export { currentSkillPack, oldestAcceptedSkillPack } from "./skill-pack.js";
@@ -100,7 +102,7 @@ export class LifeOSApplication {
     this.system = new SystemModule(ctx, this.meetings, this.review, this.adoption, this.decisionsModule, this.capture, this.enrichment, this.openPointsModule, this.patches, this.notesModule);
     this.entitiesModule = new EntitiesModule(ctx);
     this.focus = new DailyFocusModule(ctx, inbox);
-    this.feedback = new FeedbackModule(inbox, deviceId, options.appInfo ?? { version: "unknown", commit: "unknown" }, options.timeZone);
+    this.feedback = new FeedbackModule(inbox, deviceId, options.appInfo ?? unknownAppInfo, options.timeZone);
     this.todayModule = new TodayModule(ctx, this.entitiesModule, this.adoption, this.enrichment, this.meetings, this.calendarModule, this.people);
     this.history = new HistoryModule(ctx);
     const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite, contract: options.contract };

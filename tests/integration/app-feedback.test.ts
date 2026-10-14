@@ -123,6 +123,12 @@ describe("POST /api/v1/feedback", () => {
     expect((await send("POST", "/api/v1/feedback", { label: "bug", text: "", page: "Notes" })).statusCode).toBe(400);
   });
 
+  it("reports the server's App version on the health check (#208)", async () => {
+    const { call, start } = await testApi({ appInfo: { version: "26.10.14.2", commit: "abc1234" } });
+    await start();
+    expect((await call("GET /api/v1/health")).appInfo).toEqual({ version: "26.10.14.2", commit: "abc1234" });
+  });
+
   it("answers an error when the file cannot be written", async () => {
     const { root, send, start } = await testApi();
     await start();

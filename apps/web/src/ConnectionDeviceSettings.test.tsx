@@ -21,7 +21,7 @@ const connected: ConnectionSettings = {
   keychain: "ok"
 };
 const health: SystemHealth = {
-  status: "healthy", objectCount: 12, diagnostics: [], idleReleaseMinutes: 15,
+  status: "healthy", objectCount: 12, diagnostics: [], idleReleaseMinutes: 15, appInfo: { version: "26.10.14.1", commit: "abc1234" },
   session: { currentDeviceId: "desk-mac", activeDeviceId: "desk-mac", startedAt: "2026-10-11T07:00:00.000Z", lastActivityAt: "2026-10-11T08:00:00.000Z", leaseExpiresAt: "2026-10-11T08:15:00.000Z", writeAllowed: true }
 };
 const verification: BackupVerification = { backupId: "backup-1", createdAt: "2026-10-11T08:10:00.000Z", fileCount: 21, totalBytes: 4096, valid: true, restoredToTemporaryDirectory: true, diagnostics: [] };

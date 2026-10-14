@@ -78,6 +78,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .connection { margin: 0; padding: 0 var(--space-2); overflow: hidden; color: var(--color-sidebar-muted); font-size: var(--font-size-xs); line-height: 1.4; overflow-wrap: anywhere; }
 .connection > i { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--color-success-border); }
 .connection > i.warning-dot { background: var(--color-warning-border); }
+.shell-version { margin: 0; padding: 0 var(--space-2); color: var(--color-sidebar-muted); font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .navigation-collapsed .shell-sidebar { padding-inline: 10px; }
 .navigation-collapsed .shell-brand-row { flex-direction: column; height: 92px; }
 .navigation-collapsed .shell-sidebar button { justify-content: center; padding-inline: 8px; }
@@ -749,3 +750,11 @@ h2, h3 { overflow-wrap: anywhere; }
 .feedback-error { margin: 0; color: var(--color-error); }
 .feedback-hint { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .feedback-toast { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 70; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-success-surface); color: var(--color-success); box-shadow: var(--shadow-overlay); font-weight: 700; }
+/* #208: About LifeOS card at the top of System. */
+.about-lifeos { margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4); border: var(--border-thin) solid var(--color-border); border-radius: 12px; background: var(--color-surface); }
+.about-lifeos h3 { margin: 0 0 var(--space-2); font-size: var(--font-size-md); }
+.about-lifeos p { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.about-lifeos-versions { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); font-variant-numeric: tabular-nums; }
+.about-lifeos-versions span { color: var(--color-text); font-weight: 700; }
+.about-lifeos .about-lifeos-warning { margin-top: var(--space-2); color: var(--color-warning); }
+.about-lifeos-warning::before { margin-right: var(--space-2); content: "⚠" / ""; }
