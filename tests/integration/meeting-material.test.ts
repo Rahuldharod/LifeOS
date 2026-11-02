@@ -135,6 +135,19 @@ describe("meeting-material adoption", () => {
     expect(await ofType(application, "meeting-note")).toHaveLength(0);
   });
 
+  it("says the calendar event is gone, not that it is not recurring, when a recurring draft's event left the calendar", async () => {
+    const { root, application } = await vault([]);
+    await dropDraft(root, "gone.md", material({
+      key: "event-gone", meeting: "recurring-gone", sources: ["drive-doc"], proposals: "proposals: []", summary: "",
+      extra: `recurrence_occurrence_id: google:work:weekly-series:${startedAt}`
+    }));
+
+    const result = (await application.adoptDrafts()).drafts[0]!;
+    expect(result).toMatchObject({ outcome: "failed", reason: expect.stringContaining(`calendar event "recurring-gone"`) });
+    expect(result.reason).not.toContain("not a recurring occurrence");
+    expect(await ofType(application, "meeting")).toHaveLength(0);
+  });
+
   it("accepts an older draft that still carries occurrence_section_id and ignores it (#176)", async () => {
     const occurrence = event("recurring-old-draft", { seriesId: "weekly-series", originalOccurrenceStartsAt: startedAt });
     const { root, application } = await vault([occurrence]);
