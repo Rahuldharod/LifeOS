@@ -1,6 +1,7 @@
 // The Duplicate clean-up (CONTEXT.md) on the People settings: every likely duplicate at once, sure matches pre-ticked,
 // a backup first, then only the ticked rows change. Nothing is written until the user presses the apply button.
 import React, { useState } from "react";
+import "./ReferenceDataSettings.css";
 import type { DuplicateCleanupChoice, DuplicateCleanupResult, DuplicateCleanupRow } from "@lifeos/contracts";
 
 const reasons: Record<Extract<DuplicateCleanupRow, { kind: "merge" }>["match"], string> = {
@@ -59,8 +60,8 @@ export function DuplicateCleanupCard({ disabled, onLoad, onApply, onApplied }: D
   const toggle = (key: string) => setTicked((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const count = rows?.filter((row) => ticked.has(rowKey(row))).length ?? 0;
 
-  return <section className="duplicate-cleanup" aria-label="Clean up duplicates">
-    <p>Finds likely duplicate People. Sure matches are ticked for you; check the others yourself. LifeOS takes a backup before it changes anything.</p>
+  return <section className="duplicate-cleanup internal-domains-setting" aria-label="Clean up duplicates"><span>PEOPLE</span><h3>Clean up duplicates</h3>
+    <p className="muted">Finds likely duplicate People. Sure matches are ticked for you; check the others yourself. LifeOS takes a backup before it changes anything.</p>
     {!rows && <button type="button" disabled={disabled || working} onClick={() => void find()}>{working ? "Looking…" : "Find duplicates"}</button>}
     {rows && rows.length === 0 && <p role="status">No duplicates found.</p>}
     {rows && rows.length > 0 && <>
