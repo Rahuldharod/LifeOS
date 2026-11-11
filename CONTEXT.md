@@ -144,7 +144,7 @@ An email address the user marked "Not a person" (a mailing list or shared mailbo
 _Avoid_: Blocked address, group contact
 
 **Manual merge**:
-The user joining any two People from the People card. The user chooses which Person and which name to keep; the Self person always survives. The other Person's emails move across and its name becomes an alias.
+The user joining any two People from the People card. The user chooses which Person and which name to keep; the Self person always survives. The other Person's emails move across and its name becomes an Alias, unless it is an Email-only person's made-up name.
 _Avoid_: Link, combine
 
 **Alias**:

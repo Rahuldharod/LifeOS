@@ -1,7 +1,7 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { emailNameMatch, isUnreviewedPerson, type NameCandidate } from "@lifeos/shared";
 import { foldForSearch, type AppContext } from "./context.js";
-import { internalDomainsOf, personEmails } from "./people.js";
+import { addressInName, internalDomainsOf, personEmails } from "./people.js";
 import { operationKinds, type Operation } from "./ports.js";
 import { proposeReviewItem } from "./review-items.js";
 import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./support.js";
@@ -17,7 +17,7 @@ import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./s
  */
 
 export const personMergeReviewType = "person-merge";
-export type PersonMergeMatch = "email" | "email-local-part" | "name" | "name-email" | "manual";
+export type PersonMergeMatch = "email" | "name-address" | "email-local-part" | "name" | "name-email" | "manual";
 /** `name_from_person_id` (manual merges, #213) says whose name the kept person ends up with; absent means the kept person's own. */
 export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string; name_from_person_id?: string }
 /** A likely duplicate pair and why it was found (#215). `keep` is the person who would survive. */
@@ -51,8 +51,15 @@ const nameKey = (value: unknown) => typeof value === "string" ? foldForSearch(va
 const namesOf = (person: LifeOSObject) => [person.frontmatter.title, `${String(person.frontmatter.given_name ?? "")} ${String(person.frontmatter.family_name ?? "")}`, ...(Array.isArray(person.frontmatter.aliases) ? person.frontmatter.aliases : [])].filter((name): name is string => typeof name === "string" && name.trim() !== "");
 const candidateOf = (person: LifeOSObject): NameCandidate => ({ id: person.frontmatter.id, names: namesOf(person) });
 const localPart = (email: string) => email.split("@")[0]!.replace(/\+.*$/, "");
+/** An Email-only person's made-up name: an address, or exactly the local part of one of its own emails ("Jdoe"). */
+const hasMadeUpName = (person: LifeOSObject) => {
+  if (person.frontmatter.is_self === true) return false;
+  if (addressInName(person.frontmatter.title)) return true;
+  const title = nameKey(person.frontmatter.title);
+  return personEmails(person).some((email) => nameKey(localPart(email)) === title);
+};
 
-const matchReasons: Record<PersonMergeMatch, string> = { email: "Both have the same email address.", "email-local-part": "Their email addresses match on two internal domains.", "name-email": "An email address of one fits the name of the other.", name: "Their names match.", manual: "You asked for this merge." };
+const matchReasons: Record<PersonMergeMatch, string> = { email: "Both have the same email address.", "name-address": "The name of one is an email address of the other.", "email-local-part": "Their email addresses match on two internal domains.", "name-email": "An email address of one fits the name of the other.", name: "Their names match.", manual: "You asked for this merge." };
 
 export class PersonMergeConflictError extends Error { override name = "PersonMergeConflictError"; }
 
@@ -238,6 +245,8 @@ export class PersonMergeModule {
   private match(left: LifeOSObject, right: LifeOSObject, candidates: readonly NameCandidate[]): PersonMergeMatch | undefined {
     const leftEmails = personEmails(left), rightEmails = personEmails(right);
     if (leftEmails.some((email) => rightEmails.includes(email))) return "email";
+    const nameAddress = (person: LifeOSObject) => addressInName(person.frontmatter.title)?.email;
+    if ((nameAddress(left) && rightEmails.includes(nameAddress(left)!)) || (nameAddress(right) && leftEmails.includes(nameAddress(right)!))) return "name-address";
     const internal = (emails: string[]) => emails.filter((email) => internalDomainsOf(this.ctx.index).includes(email.split("@")[1]!));
     const rightInternal = internal(rightEmails);
     if (internal(leftEmails).some((email) => rightInternal.some((other) => other.split("@")[1] !== email.split("@")[1] && localPart(other) === localPart(email)))) return "email-local-part";
@@ -248,9 +257,9 @@ export class PersonMergeModule {
     return fits(leftEmails, right) || fits(rightEmails, left) ? "name-email" : undefined;
   }
 
-  /** Which one survives: the self person, then a reviewed (user-known) person, then the older one. */
+  /** Which one survives: the self person, then a person with a real name, then a reviewed (user-known) person, then the older one. */
   private order(left: LifeOSObject, right: LifeOSObject): [LifeOSObject, LifeOSObject] {
-    const rank = (person: LifeOSObject) => person.frontmatter.is_self === true ? 0 : isUnreviewedPerson(person.frontmatter) ? 2 : 1;
+    const rank = (person: LifeOSObject) => person.frontmatter.is_self === true ? 0 : hasMadeUpName(person) ? 3 : isUnreviewedPerson(person.frontmatter) ? 2 : 1;
     const byRank = rank(left) - rank(right);
     if (byRank) return byRank < 0 ? [left, right] : [right, left];
     return left.frontmatter.created_at <= right.frontmatter.created_at ? [left, right] : [right, left];
@@ -365,8 +374,10 @@ export class PersonMergeModule {
     const aliases = Array.isArray(keep.frontmatter.aliases) ? keep.frontmatter.aliases as unknown[] : [];
     const known: unknown[] = [finalTitle, ...aliases];
     const newAliases: string[] = [];
+    // A made-up name (an address, or the bare local part of one) is dropped, never kept as an Alias.
+    const madeUp = new Set([keep, merge].filter(hasMadeUpName).map((person) => nameKey(person.frontmatter.title)));
     for (const alias of [keep.frontmatter.title, merge.frontmatter.title, ...(Array.isArray(merge.frontmatter.aliases) ? merge.frontmatter.aliases : [])]) {
-      if (typeof alias !== "string" || known.some((existing) => nameKey(existing) === nameKey(alias))) continue;
+      if (typeof alias !== "string" || madeUp.has(nameKey(alias)) || known.some((existing) => nameKey(existing) === nameKey(alias))) continue;
       known.push(alias); newAliases.push(alias);
     }
     if (newAliases.length) { keepBefore.aliases = keep.frontmatter.aliases ?? null; keepAfter.aliases = [...aliases, ...newAliases]; }
