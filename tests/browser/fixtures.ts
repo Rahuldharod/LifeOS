@@ -33,6 +33,9 @@ export function recordUrl(view: View, id?: string): string {
   return routePath({ view, ...(id ? { id } : {}) });
 }
 
+/** PB-035: Review Items reserved for inbox-auto-advance.spec.ts, which accepts and rejects them. */
+export const AUTO_ADVANCE_PREFIX = "Auto-advance proposal";
+
 export const LONG_TASK_TITLE = "Prepare the quarterly alignment review for the example.com platform migration including budget, staffing, risks, dependencies, vendor contracts and the communication plan for every affected team";
 
 type Obj = { frontmatter: { id: string; title: string } };
@@ -99,7 +102,7 @@ async function seedOnce(request: APIRequestContext): Promise<SeedData> {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     await post("/api/v1/inbox/adopt");
     const [notes, reviews] = await Promise.all([get<Obj[]>("/api/v1/knowledge"), get<Obj[]>("/api/v1/review-items")]);
-    if (notes.length >= 12 && reviews.length >= 3) break;
+    if (notes.length >= 12 && reviews.length >= 6) break;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   const rest = await readBack(get);
@@ -114,5 +117,5 @@ async function readBack(get: <T>(url: string) => Promise<T>): Promise<SeedData> 
   const long = knowledgeNotes.find((note) => note.title === "Browser knowledge note 1");
   const longTitleTask = tasks.find((task) => task.title === LONG_TASK_TITLE);
   if (!long || !longTitleTask) throw new Error("Seed data is incomplete");
-  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems, recurringNote: RECURRING_NOTE };
+  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems: reviewItems.filter((item) => !item.title.startsWith(AUTO_ADVANCE_PREFIX)), recurringNote: RECURRING_NOTE };
 }

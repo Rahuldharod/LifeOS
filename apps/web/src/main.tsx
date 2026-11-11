@@ -360,7 +360,7 @@ function App() {
   const routeAlreadyShown = useRef<string | undefined>(undefined);
   const followRoute = (next: Route, options: { replace?: boolean; shown?: boolean } = {}) => {
     const path = routePath(next);
-    if (path === `${locationRef.current.pathname}${locationRef.current.hash}`) return;
+    if (path === (guarded.pending.current ?? `${locationRef.current.pathname}${locationRef.current.hash}`)) return;
     if (options.shown) routeAlreadyShown.current = path;
     guarded.follow(path, options);
   };
@@ -1175,7 +1175,7 @@ function App() {
           busy={busy}
           readOnly={readOnly}
           displayTimeZone={displayTimeZone}
-          onOpen={(id) => void go({ view: "Inbox", id })}
+          onOpen={(id, options) => void go({ view: "Inbox", id }, options)}
           onBack={() => void go({ view: "Inbox" })}
           onAccept={accept}
           onReject={(review) => reject(review.frontmatter.id)}

@@ -11,7 +11,7 @@ import "./InboxWorkspace.css";
 
 export type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
 export type InboxReview = LifeObject & { evidence?: Record<string, ReviewEvidence[]> };
-type Completion = { review: InboxReview; outcome: "accepted" | "rejected" };
+type Outcome = "accepted" | "rejected";
 type ActionResult = boolean | void;
 type CreatedPeriod = "" | "today" | "7d" | "30d";
 type ProposalCategory = "Tasks" | "Decisions" | "Open points" | "Updates";
@@ -43,7 +43,7 @@ const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string) => {
 export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, linkActionsFor }: {
   reviews: InboxReview[]; objects: Array<LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices;
   selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; displayTimeZone: string; now?: Date;
-  onOpen?: (id: string) => void; onBack?: () => void;
+  onOpen?: (id: string, options?: { replace?: boolean }) => void; onBack?: () => void;
   onAccept: (review: InboxReview) => Promise<ActionResult>; onReject: (review: InboxReview) => Promise<ActionResult>; onSave: (review: InboxReview, edits: ReviewEdits) => Promise<ActionResult>;
   linkActionsFor?: (reviewId: string) => LinkCardActions;
 }) {
@@ -52,9 +52,10 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const split = useSplitPane("inbox");
   const [query, setQuery] = useState(""); const [type, setType] = useState(""); const [advanced, setAdvanced] = useState(false);
   const [meetingId, setMeetingId] = useState(""); const [period, setPeriod] = useState<CreatedPeriod>("");
-  const [completion, setCompletion] = useState<Completion>(); const [notification, setNotification] = useState(""); const [actionError, setActionError] = useState("");
+  const [deciding, setDeciding] = useState<InboxReview>(); const [notification, setNotification] = useState(""); const [actionError, setActionError] = useState("");
   const [activeId, setActiveId] = useState<string>(); const active = useRef(new Set<string>()); const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  const openedRef = useRef(openedId); openedRef.current = openedId;
   useEffect(() => { if (selectedId !== undefined) setOpenedId(selectedId); }, [selectedId]);
   useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current); }, []);
 
@@ -76,26 +77,59 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     setOpenedId(visible[0]!.frontmatter.id);
   }, [narrow, openedId, visible]);
 
-  const selected = reviews.find((review) => review.frontmatter.id === openedId) ?? (completion && completion.review.frontmatter.id === openedId ? completion.review : undefined);
-  const selectedCompletion = completion && completion.review.frontmatter.id === selected?.frontmatter.id ? completion.outcome : undefined;
-  const open = (id: string) => { setOpenedId(id); setCompletion(undefined); setActionError(""); onOpen?.(id); };
-  const back = () => { setOpenedId(undefined); setCompletion(undefined); setActionError(""); onBack?.(); };
+  // While a decision saves, the refresh drops the item from `reviews`; keep showing it until the Inbox moves on (no "Select a proposal" flash).
+  const selected = reviews.find((review) => review.frontmatter.id === openedId) ?? (deciding?.frontmatter.id === openedId ? deciding : undefined);
+  const open = (id: string, options?: { replace?: boolean }) => { setOpenedId(id); setActionError(""); onOpen?.(id, options); };
+  const back = () => { setOpenedId(undefined); setActionError(""); onBack?.(); };
+  const clearFilters = () => { setQuery(""); setType(""); setMeetingId(""); setPeriod(""); };
   const notify = (message: string) => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     setNotification(message); noticeTimer.current = setTimeout(() => setNotification(""), 3000);
   };
-  const decide = async (review: InboxReview, outcome: Completion["outcome"], action: () => Promise<ActionResult>) => {
+  const visibleIds = visible.map((review) => review.frontmatter.id);
+  /** PB-035: the item below in the list, or the one above when the decided item was the bottom one. */
+  const nextAfter = (id: string) => {
+    const index = visibleIds.indexOf(id);
+    if (index < 0) return visibleIds[0];
+    return visibleIds[index + 1] ?? visibleIds[index - 1];
+  };
+  /** PB-035: once a decision is recorded, open the next waiting item; after the last one, show the empty list state. */
+  const advanceFrom = (id: string, nextId: string | undefined) => {
+    if (openedRef.current !== undefined && openedRef.current !== id) return; // the user already moved on while the decision was saving
+    if (nextId) { open(nextId, { replace: true }); return; }
+    setOpenedId(undefined); setActionError("");
+  };
+  const decide = async (review: InboxReview, outcome: Outcome, action: () => Promise<ActionResult>) => {
     const id = review.frontmatter.id;
     if (active.current.has(id) || busy || readOnly) return;
-    active.current.add(id); setActiveId(id); setActionError("");
+    const nextId = nextAfter(id);
+    active.current.add(id); setActiveId(id); setActionError(""); setDeciding(review);
     try {
       const result = await action();
       if (result === false) return;
-      setCompletion({ review, outcome });
       notify(`Proposal ${outcome}`);
+      advanceFrom(id, nextId);
     } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Something went wrong"); }
-    finally { active.current.delete(id); setActiveId((current) => current === id ? undefined : current); }
+    finally { active.current.delete(id); setActiveId((current) => current === id ? undefined : current); setDeciding((current) => current?.frontmatter.id === id ? undefined : current); }
   };
+  /** Link-resolution cards run their own requests; once one finishes, the Inbox moves on the same way. */
+  const linkFinished = (review: InboxReview, nextId: string | undefined, outcome: Outcome) => { notify(`Proposal ${outcome}`); advanceFrom(review.frontmatter.id, nextId); };
+  const position = selected ? visibleIds.indexOf(selected.frontmatter.id) : -1;
+  const previousId = position > 0 ? visibleIds[position - 1] : undefined;
+  const followingId = position >= 0 ? visibleIds[position + 1] : undefined;
+  const step = useRef<(direction: -1 | 1) => boolean>(() => false);
+  step.current = (direction) => { const target = direction < 0 ? previousId : followingId; if (target) open(target); return Boolean(target); };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
+      if (step.current(event.key === "ArrowUp" ? -1 : 1)) event.preventDefault();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   const itemBusy = Boolean(busy || (selected && activeId === selected.frontmatter.id));
 
   const ref = useListDetailReturn(selected?.frontmatter.id);
@@ -112,22 +146,22 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
         <label>Created<select aria-label="Filter by created period" value={period} onChange={(event) => setPeriod(event.target.value as CreatedPeriod)}><option value="">Any time</option><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
         <button onClick={() => { setMeetingId(""); setPeriod(""); }}>Clear advanced filters</button>
       </div>}
-      {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviews.length ? "No matching proposals" : "Inbox clear"}</h3><p>{reviews.length ? "Change or clear the filters." : "No proposals require your attention."}</p></div> : <div className="inbox-rows">{visible.map((review) => <button className={openedId === review.frontmatter.id ? "inbox-row selected" : "inbox-row"} aria-label={`Open proposal: ${review.frontmatter.title}`} aria-pressed={openedId === review.frontmatter.id} key={review.frontmatter.id} onClick={() => open(review.frontmatter.id)}><span><strong>{review.frontmatter.title}</strong><small>{proposalLabel(review)} · {dateInTimeZone(new Date(review.frontmatter.created_at), displayTimeZone)}</small></span><LockBadge frontmatter={review.frontmatter} /></button>)}</div>}
+      {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviews.length ? "No matching proposals" : "Inbox clear"}</h3>{reviews.length ? <><p>{reviews.length === 1 ? "1 proposal is hidden by the filters." : `${reviews.length} proposals are hidden by the filters.`}</p><button onClick={clearFilters}>Clear filters</button></> : <p>No proposals require your attention.</p>}</div> : <div className="inbox-rows">{visible.map((review) => <button className={openedId === review.frontmatter.id ? "inbox-row selected" : "inbox-row"} aria-label={`Open proposal: ${review.frontmatter.title}`} aria-pressed={openedId === review.frontmatter.id} key={review.frontmatter.id} onClick={() => open(review.frontmatter.id)}><span><strong>{review.frontmatter.title}</strong><small>{proposalLabel(review)} · {dateInTimeZone(new Date(review.frontmatter.created_at), displayTimeZone)}</small></span><LockBadge frontmatter={review.frontmatter} /></button>)}</div>}
     </section>
     {!narrow && <div {...split.dividerProps} />}
     <section className="inbox-detail" data-pane="detail" aria-label="Review detail" hidden={narrow && !selected}>
       {!selected ? <div className="inbox-state"><h3>Select a proposal</h3><p>Choose a row to review its source, evidence and proposed change.</p></div> : <>
-        <header className="inbox-record-header"><button className="narrow-back" aria-label="Back to review queue" onClick={back}>Back</button><div><span>{proposalLabel(selected)}</span><h2 data-detail-heading tabIndex={-1}>{selected.frontmatter.title}</h2><div className="inbox-record-meta"><LockBadge frontmatter={selected.frontmatter} /><small>{String(selected.frontmatter.confidence_label ?? "Unrated")} confidence</small></div></div></header>
+        <header className="inbox-record-header"><button className="narrow-back" aria-label="Back to review queue" onClick={back}>Back</button><div><span>{proposalLabel(selected)}</span><h2 data-detail-heading tabIndex={-1}>{selected.frontmatter.title}</h2><div className="inbox-record-meta"><LockBadge frontmatter={selected.frontmatter} /><small>{String(selected.frontmatter.confidence_label ?? "Unrated")} confidence</small></div></div>
+          <nav className="inbox-step" aria-label="Move between proposals">{position >= 0 && <small>{position + 1} of {visibleIds.length}</small>}<button aria-label="Previous proposal" title="Previous proposal (↑)" disabled={!previousId} onClick={() => step.current(-1)}>↑ Previous</button><button aria-label="Next proposal" title="Next proposal (↓)" disabled={!followingId} onClick={() => step.current(1)}>↓ Next</button></nav></header>
         {readOnly && <p className="inbox-read-only">Read-only on this Mac. Take back the write lease before accepting, editing or rejecting proposals.</p>}
-        {selectedCompletion && <div className={`inbox-completion ${selectedCompletion}`}><strong>{selectedCompletion === "accepted" ? "Accepted" : "Rejected"}</strong><span>This decision is recorded. The proposal remains here until you choose another item.</span></div>}
         {actionError && <p className="review-error" role="alert">{actionError}</p>}
-        <ReviewDetail key={`${selected.frontmatter.id}:${selected.contentHash}`} review={selected} objectById={objectById} labels={labels} choices={choices} busy={itemBusy || readOnly} completed={Boolean(selectedCompletion)} onAccept={() => decide(selected, "accepted", () => onAccept(selected))} onReject={() => decide(selected, "rejected", () => onReject(selected))} onSave={async (edits) => {
+        <ReviewDetail key={`${selected.frontmatter.id}:${selected.contentHash}`} review={selected} objectById={objectById} labels={labels} choices={choices} busy={itemBusy || readOnly} onAccept={() => decide(selected, "accepted", () => onAccept(selected))} onReject={() => decide(selected, "rejected", () => onReject(selected))} onSave={async (edits) => {
           if (active.current.has(selected.frontmatter.id) || busy || readOnly) return;
           active.current.add(selected.frontmatter.id); setActiveId(selected.frontmatter.id); setActionError("");
           try { const result = await onSave(selected, edits); if (result !== false) notify("Proposal updated"); }
           catch (caught) { setActionError(caught instanceof Error ? caught.message : "Something went wrong"); }
           finally { active.current.delete(selected.frontmatter.id); setActiveId(undefined); }
-        }} linkActions={linkActionsFor?.(selected.frontmatter.id)} onLinkCompletion={(outcome) => { setCompletion({ review: selected, outcome }); notify(`Proposal ${outcome}`); }} />
+        }} linkActions={linkActionsFor?.(selected.frontmatter.id)} onLinkCompletion={(outcome, nextId) => linkFinished(selected, nextId, outcome)} nextId={nextAfter(selected.frontmatter.id)} />
       </>}
     </section>
   </div>;
@@ -147,9 +181,9 @@ function Evidence({ entry }: { entry: ReviewEvidence }) {
   return <li><em>{entry.field}</em> {entry.resolved ? <span>{entry.source_title}</span> : <span className="unresolved">Unresolved source: {entry.source_ref ?? entry.source_id}</span>}{entry.locator ? ` · ${entry.locator}` : ""}{entry.quote ? <q>{entry.quote}</q> : null}</li>;
 }
 
-function ReviewDetail({ review, objectById, labels, choices, busy, completed, onAccept, onReject, onSave, linkActions, onLinkCompletion }: {
-  review: InboxReview; objectById: Map<string, LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices; busy: boolean; completed: boolean;
-  onAccept: () => void; onReject: () => void; onSave: (edits: ReviewEdits) => void; linkActions?: LinkCardActions; onLinkCompletion: (outcome: Completion["outcome"]) => void;
+function ReviewDetail({ review, objectById, labels, choices, busy, nextId, onAccept, onReject, onSave, linkActions, onLinkCompletion }: {
+  review: InboxReview; objectById: Map<string, LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices; busy: boolean; nextId?: string;
+  onAccept: () => void; onReject: () => void; onSave: (edits: ReviewEdits) => void; linkActions?: LinkCardActions; onLinkCompletion: (outcome: Outcome, nextId: string | undefined) => void;
 }) {
   const proposed = (review.frontmatter.proposed_fields ?? {}) as Record<string, unknown>; const target = text(review.frontmatter.target_object_type) || "item";
   const editable = reviewType(review) === "create" ? editableByTarget[target] ?? [] : [];
@@ -157,23 +191,23 @@ function ReviewDetail({ review, objectById, labels, choices, busy, completed, on
   const [title, setTitle] = useState(review.frontmatter.title);
   const [fields, setFields] = useState<Record<string, string>>(() => Object.fromEntries(editable.map((key) => [key, current(key)])));
   const edits: ReviewEdits = Object.fromEntries([...(title.trim() !== review.frontmatter.title.trim() ? [["title", title]] : []), ...editable.filter((key) => fields[key] !== current(key)).map((key) => [key, fields[key] || null])]);
-  const select = (key: string, label: string, options: Array<{ id: string; title: string }>) => <label key={key}>{label}<select value={fields[key] ?? ""} disabled={busy || completed} onChange={(event) => setFields({ ...fields, [key]: event.target.value })}><option value="">{key === "owner_person_id" ? "Me" : "None"}</option>{options.map((option) => <option value={option.id} key={option.id}>{option.title}</option>)}</select></label>;
+  const select = (key: string, label: string, options: Array<{ id: string; title: string }>) => <label key={key}>{label}<select value={fields[key] ?? ""} disabled={busy} onChange={(event) => setFields({ ...fields, [key]: event.target.value })}><option value="">{key === "owner_person_id" ? "Me" : "None"}</option>{options.map((option) => <option value={option.id} key={option.id}>{option.title}</option>)}</select></label>;
   const type = reviewType(review);
 
   if (type === "link-resolution" && linkActions) {
-    const wrapped: LinkCardActions = { onCreate: linkActions.onCreate, onLink: async (id) => { await linkActions.onLink(id); onLinkCompletion("accepted"); }, onReject: async () => { await linkActions.onReject(); onLinkCompletion("rejected"); } };
-    return <div className="inbox-review-flow"><SourceAndEvidence review={review} objectById={objectById} /><section className="inbox-detail-section"><h3>Decision</h3><LinkResolutionCard review={review} labels={labels} busy={busy || completed} actions={wrapped} /></section></div>;
+    const wrapped: LinkCardActions = { onCreate: linkActions.onCreate, onLink: async (id) => { await linkActions.onLink(id); onLinkCompletion("accepted", nextId); }, onReject: async () => { await linkActions.onReject(); onLinkCompletion("rejected", nextId); } };
+    return <div className="inbox-review-flow"><SourceAndEvidence review={review} objectById={objectById} /><section className="inbox-detail-section"><h3>Decision</h3><LinkResolutionCard review={review} labels={labels} busy={busy} actions={wrapped} /></section></div>;
   }
   const changes = proposed.changes as Array<{ field: string; current: unknown; proposed: unknown }> | undefined;
   return <div className="inbox-review-flow">
     <SourceAndEvidence review={review} objectById={objectById} />
     <section className="inbox-detail-section"><h3>{type === "update" ? "Proposed changes" : "Proposed item"}</h3>
       {type === "summary" ? <><div className="inbox-proposal-copy">{text(proposed.summary)}</div><p className="muted">To change the wording, accept it, then edit the Summary section in the meeting note.</p></> : type === "update" ? <table className="review-changes"><thead><tr><th>Field</th><th>Current</th><th>Proposed</th></tr></thead><tbody>{(changes ?? []).map((change) => <tr key={change.field}><td>{change.field}</td><td>{String(change.current ?? "(none)")}</td><td>{String(change.proposed ?? "(none)")}</td></tr>)}{proposed.append_note ? <tr><td>note</td><td>(none)</td><td>{String(proposed.append_note)}</td></tr> : null}</tbody></table> : type === "person-merge" ? <p className="inbox-proposal-copy">{review.body.replace(/^# .*\n+/, "").trim()}</p> : <>
-        <label>Title<input aria-label="Proposed title" value={title} disabled={busy || completed} onChange={(event) => setTitle(event.target.value)} /></label>
-        {editable.length > 0 && <div className="review-fields">{editable.includes("owner_person_id") && select("owner_person_id", "Owner", choices.people)}{editable.includes("due_on") && <label>Due<input type="date" value={fields.due_on ?? ""} disabled={busy || completed} onChange={(event) => setFields({ ...fields, due_on: event.target.value })} /></label>}{editable.includes("priority") && select("priority", "Priority", ["High", "Medium", "Low"].map((value) => ({ id: value, title: value })))}{editable.includes("primary_project_id") && select("primary_project_id", "Project", choices.projects)}{editable.includes("primary_client_id") && select("primary_client_id", "Client", choices.clients)}{editable.includes("primary_product_id") && select("primary_product_id", "Product", choices.products)}</div>}
+        <label>Title<input aria-label="Proposed title" value={title} disabled={busy} onChange={(event) => setTitle(event.target.value)} /></label>
+        {editable.length > 0 && <div className="review-fields">{editable.includes("owner_person_id") && select("owner_person_id", "Owner", choices.people)}{editable.includes("due_on") && <label>Due<input type="date" value={fields.due_on ?? ""} disabled={busy} onChange={(event) => setFields({ ...fields, due_on: event.target.value })} /></label>}{editable.includes("priority") && select("priority", "Priority", ["High", "Medium", "Low"].map((value) => ({ id: value, title: value })))}{editable.includes("primary_project_id") && select("primary_project_id", "Project", choices.projects)}{editable.includes("primary_client_id") && select("primary_client_id", "Client", choices.clients)}{editable.includes("primary_product_id") && select("primary_product_id", "Product", choices.products)}</div>}
       </>}
       {review.body.replace(/^# .*\n+/, "").trim() && !["summary", "person-merge"].includes(type) && <p className="inbox-proposal-copy">{review.body.replace(/^# .*\n+/, "").trim()}</p>}
     </section>
-    {!completed && <footer className="inbox-decision-actions"><button disabled={busy || !Object.keys(edits).length} onClick={() => onSave(edits)}>Save edits</button><button className="primary" disabled={busy || Object.keys(edits).length > 0} title={Object.keys(edits).length ? "Save your edits first" : undefined} onClick={onAccept}>{type === "summary" ? "Accept summary" : type === "update" ? "Apply change" : type === "person-merge" ? "Merge" : `Accept ${target}`}</button><button className="danger" disabled={busy} onClick={onReject}>{type === "person-merge" ? "Keep separate" : "Reject"}</button></footer>}
+    <footer className="inbox-decision-actions"><button disabled={busy || !Object.keys(edits).length} onClick={() => onSave(edits)}>Save edits</button><button className="primary" disabled={busy || Object.keys(edits).length > 0} title={Object.keys(edits).length ? "Save your edits first" : undefined} onClick={onAccept}>{type === "summary" ? "Accept summary" : type === "update" ? "Apply change" : type === "person-merge" ? "Merge" : `Accept ${target}`}</button><button className="danger" disabled={busy} onClick={onReject}>{type === "person-merge" ? "Keep separate" : "Reject"}</button></footer>
   </div>;
 }

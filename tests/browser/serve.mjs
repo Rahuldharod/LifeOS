@@ -181,6 +181,8 @@ for (let i = 1; i <= 12; i += 1) {
 draft("review-task-1", { kind: "task", draft_key: "browser-review-task-1", origin: "agent-extracted", confidence: "High", title: "Browser review: send the example.com agenda" }, "Extracted from a synthetic email.");
 draft("review-task-2", { kind: "task", draft_key: "browser-review-task-2", origin: "agent-extracted", confidence: "Medium", title: "Browser review: confirm the pilot date" }, "Extracted from a synthetic transcript.");
 draft("review-decision-1", { kind: "decision", draft_key: "browser-review-decision-1", origin: "agent-extracted", confidence: "Medium", title: "Browser review: adopt weekly reviews" }, "Extracted from a synthetic meeting.");
+// PB-035: proposals that only inbox-auto-advance.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const n of [1, 2, 3]) draft(`auto-advance-${n}`, { kind: "task", draft_key: `browser-auto-advance-${n}`, origin: "agent-extracted", confidence: "High", title: `Auto-advance proposal ${n}` }, "Extracted for the auto-advance test.");
 for (const [name, content] of Object.entries(files)) {
   const file = path.join(drafts, name);
   await writeFile(file, content);

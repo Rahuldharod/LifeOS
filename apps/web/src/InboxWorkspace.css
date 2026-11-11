@@ -15,6 +15,9 @@
 .inbox-record-header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-4); padding-bottom: var(--space-4); border-bottom: var(--border-thin) solid var(--color-border); }
 .inbox-record-header > div > span { color: var(--color-accent); font-size: var(--font-size-xs); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .inbox-record-header h2 { margin: var(--space-1) 0; }
+.inbox-step { display: flex; flex: none; align-items: center; gap: var(--space-2); margin-left: auto; }
+.inbox-step small { color: var(--color-text-muted); white-space: nowrap; }
+.inbox-step button { white-space: nowrap; }
 .inbox-record-meta { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-muted); }
 .inbox-review-flow { display: grid; gap: var(--space-4); padding-top: var(--space-4); }
 .inbox-detail-section { padding: var(--space-4); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
@@ -25,7 +28,5 @@
 .inbox-detail-section > label input { width: 100%; }
 .inbox-proposal-copy { margin-top: var(--space-3) !important; padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-quiet); white-space: pre-wrap; }
 .inbox-decision-actions { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-surface) 94%, transparent); box-shadow: var(--shadow-surface); }
-.inbox-completion { display: grid; gap: var(--space-1); margin-top: var(--space-4); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-success-surface); color: var(--color-success); }
-.inbox-completion.rejected { background: var(--color-surface-quiet); color: var(--color-text-muted); }
 .inbox-read-only { margin: var(--space-4) 0 0; padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-warning-surface); color: var(--color-warning); }
 .inbox-toast { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 50; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-primary); color: var(--color-text-inverse); box-shadow: var(--shadow-overlay); }

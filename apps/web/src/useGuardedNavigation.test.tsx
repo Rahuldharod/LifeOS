@@ -34,6 +34,21 @@ async function setup(initial: string[]) {
 }
 
 describe("useGuardedNavigation (PB-027)", () => {
+  it("does not drop a move back to the rendered page while another move is still landing (PB-035)", async () => {
+    const page = await setup(["/inbox/a"]);
+    await act(async () => { page.nav().follow("/inbox/b"); });
+    await page.settle();
+    // Two quick moves before the next render: the second goes back to the page still on screen.
+    act(() => { page.nav().follow("/inbox/c"); page.nav().follow("/inbox/b"); });
+    await page.settle();
+    expect(page.path()).toBe("/inbox/b");
+    // A move to the page we are already on is still skipped (no duplicate history entry).
+    const before = page.router.state.historyAction;
+    act(() => { page.nav().follow("/inbox/b"); });
+    await page.settle();
+    expect(page.router.state.historyAction).toBe(before);
+  });
+
   it("saves unsaved edits before an in-app move", async () => {
     const page = await setup(["/notes/a"]);
     page.editor.dirty = true;
