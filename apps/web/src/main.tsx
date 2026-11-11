@@ -76,6 +76,7 @@ import { useNewStandaloneNote } from "./useNewStandaloneNote.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
+import { firstEditPeopleIds, headerPeopleIds } from "./firstEditPeople.js";
 import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, PersonMergeChoice, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
@@ -318,7 +319,7 @@ function App() {
         // Attendees the header could not show (LifeOS had no matching person yet) were just created from the
         // event; keep them when the user adds people, rather than replacing the whole list.
         const defaults = Array.isArray(next.note.frontmatter.people_ids) ? next.note.frontmatter.people_ids as string[] : [];
-        held.people_ids = [...new Set([...(held.people_ids as string[]), ...defaults.filter((id) => !headerOptions.people.some((option) => option.id === id))])];
+        held.people_ids = firstEditPeopleIds(held.people_ids as string[], defaults, headerOptions.people);
       }
       if (next.note && Object.keys(held).length) {
         // A failure here leaves a valid note with the calendar's defaults; say so rather than lose it silently.
@@ -1000,7 +1001,7 @@ function App() {
   const headerOptions = { projects: entityOptions(projects.map(({ project }) => project)), clients: entityOptions(clients.map(({ entity }) => entity)), products: entityOptions(products.map(({ entity }) => entity)), people: people.map(({ entity }) => personOption(labels, entity)) };
 
   // The header of a note that does not exist yet: the event's own project, client, product and
-  // attendees are shown when they match an object LifeOS already has (by name), and the rest stay
+  // attendees are shown when they match an object LifeOS already has (attendees by id, the rest by name), and the rest stay
   // blank until the first edit creates them. The id and hash are fixed so the form is not re-seeded.
   const pendingHeaderNote = (current: Workspace) => {
     const match = (options: { id: string; title: string }[], object?: LifeObject) => object ? options.find((option) => foldText(option.title) === foldText(object.frontmatter.title))?.id ?? "" : "";
@@ -1009,7 +1010,7 @@ function App() {
       frontmatter: {
         id: current.meeting.frontmatter.id, type: "meeting-note", title: `${current.meeting.frontmatter.title} notes`,
         primary_project_id: match(headerOptions.projects, current.context.project), primary_client_id: match(headerOptions.clients, current.context.client), primary_product_id: match(headerOptions.products, current.context.product),
-        people_ids: current.context.people.map((person) => match(headerOptions.people, person)).filter(Boolean)
+        people_ids: headerPeopleIds(headerOptions.people, current.context.people)
       }
     };
   };
