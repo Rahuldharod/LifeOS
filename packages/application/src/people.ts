@@ -1,6 +1,6 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { isUnreviewedPerson } from "@lifeos/shared";
-import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
+import { markdownFileName, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
 import { byIdentifier, isLive, OneAtATime } from "./support.js";
 import { SyncedSetting, type SyncedSettingSpec } from "./synced-settings.js";
@@ -120,7 +120,6 @@ export function externalStatus(person: Pick<LifeOSObject, "frontmatter">, intern
  */
 export type PersonLabel = { id: string; name: string; label: string; suffix?: typeof EXTERNAL_SUFFIX; isExternal: boolean; externalSource: ExternalSource; unreviewed: boolean };
 
-const isActivePerson = (person: Pick<LifeOSObject, "frontmatter">) => person.frontmatter.type === "person" && isLive(person);
 const cleanText = (value: unknown) => typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 
 /**
@@ -155,18 +154,11 @@ export function peopleSetupWarning(index: Pick<AppContext["index"], "all">): Peo
 
 export function personDisplayLabels(objects: ReadonlyArray<Pick<LifeOSObject, "frontmatter">>, internalDomains: readonly string[]): PersonLabel[] {
   const people = objects.filter((object) => object.frontmatter.type === "person");
-  const firstName = (person: Pick<LifeOSObject, "frontmatter">) => cleanText(person.frontmatter.given_name) || cleanText(person.frontmatter.title).split(" ")[0] || "Unnamed";
-  const holders = new Map<string, Set<string>>();
-  for (const person of people.filter(isActivePerson)) {
-    const key = foldForSearch(firstName(person));
-    holders.set(key, (holders.get(key) ?? new Set<string>()).add(person.frontmatter.id));
-  }
   return people.map((person) => {
-    const first = firstName(person);
-    const shared = [...holders.get(foldForSearch(first)) ?? []].some((id) => id !== person.frontmatter.id);
+    // Full name (first + family); without a family name the title is the best full name there is (it may be one word).
+    const first = cleanText(person.frontmatter.given_name);
     const family = cleanText(person.frontmatter.family_name);
-    // Without a family name, the title is the best longer name there is (it may equal the first name).
-    const name = !shared ? first : family ? `${first} ${family}` : cleanText(person.frontmatter.title) || first;
+    const name = first && family ? `${first} ${family}` : cleanText(person.frontmatter.title) || first || "Unnamed";
     const { isExternal, source } = externalStatus(person, internalDomains);
     return { id: person.frontmatter.id, name, label: isExternal ? name + EXTERNAL_SUFFIX : name, ...(isExternal ? { suffix: EXTERNAL_SUFFIX } : {}), isExternal, externalSource: source, unreviewed: isUnreviewed(person) };
   });

@@ -117,14 +117,14 @@ describe("Today task panels", () => {
 
     const groups = (await panels(application)).waitingByPerson;
     expect(groups.map((group) => [group.label, group.isExternal, titles(group.tasks).sort()])).toEqual([
-      ["Joel - ext", true, ["Pilot data", "Signed DPA"]],
-      ["Anna", false, ["Budget sign-off"]],
+      ["Joel Martin - ext", true, ["Pilot data", "Signed DPA"]],
+      ["Anna Roux", false, ["Budget sign-off"]],
       ["No person recorded", false, ["Vendor quote"]]
     ]);
     expect(groups[0]!.personId).toBe(joel);
     expect(groups[2]!.personId).toBeUndefined();
     // #64: the standard person label parts, so the web renders the " - ext" marker as styled text.
-    expect(groups.map((group) => [group.name, group.suffix])).toEqual([["Joel", " - ext"], ["Anna", undefined], ["No person recorded", undefined]]);
+    expect(groups.map((group) => [group.name, group.suffix])).toEqual([["Joel Martin", " - ext"], ["Anna Roux", undefined], ["No person recorded", undefined]]);
   });
 });
 

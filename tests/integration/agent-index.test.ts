@@ -181,7 +181,7 @@ describe("Agent Index (#43)", () => {
     expect(tasks).not.toContain(ids.waiting.id);
 
     const waiting = await read(root, "waiting-on.md");
-    expect(waiting).toContain("## Joel - ext");
+    expect(waiting).toContain("## Joel Martin - ext");
     expect(waiting).toContain(`id: ${ids.waiting.id}`);
     expect(waiting).toContain("age: 5d");
 
@@ -203,8 +203,8 @@ describe("Agent Index (#43)", () => {
     expect(section(work, "## Products")).toContain("Promotions Engine");
 
     const people = await read(root, "people.md");
-    expect(people).toMatch(/\*\*Joel - ext\*\*\n {2}id: [^\n]+ · name: Joel Martin · emails: joel@acme\.fr · external: yes/);
-    expect(people).toMatch(/\*\*Anna\*\*\n {2}id: [^\n]+ · emails: anna\.lee@example\.com · external: no/);
+    expect(people).toMatch(/\*\*Joel Martin - ext\*\*\n {2}id: [^\n]+ · emails: joel@acme\.fr · external: yes/);
+    expect(people).toMatch(/\*\*Anna Lee\*\*\n {2}id: [^\n]+ · emails: anna\.lee@example\.com · external: no/);
     expect(people).toContain("self: yes");
 
     const meetings = await read(root, "meetings.md");
@@ -212,7 +212,7 @@ describe("Agent Index (#43)", () => {
     expect(section(meetings, "## Last 14 days")).toContain("enrichment: partial");
     expect(section(meetings, "## Last 14 days")).toContain(`note: ${ids.note.relativePath}`);
     expect(section(meetings, "## Last 14 days")).toContain("calendar_event: evt-1");
-    expect(section(meetings, "## Last 14 days")).toContain("attendees: Robin, Joel - ext");
+    expect(section(meetings, "## Last 14 days")).toContain("attendees: Robin Doe, Joel Martin - ext");
     expect(section(meetings, "## Next 7 days")).toContain(ids.next.id);
     expect(section(meetings, "## Next 7 days")).toContain("enrichment: none");
     expect(meetings).not.toContain("Too old");
