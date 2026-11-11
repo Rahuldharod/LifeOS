@@ -805,6 +805,11 @@ function App() {
     await refresh();
   }, `${object.frontmatter.title} confirmed`);
 
+  const markNotAPerson = (person: LifeObject) => run(async () => {
+    await api("POST /api/v1/people/:id/not-a-person", { params: { id: person.frontmatter.id }, body: { expectedHash: person.contentHash } });
+    await refresh();
+  }, `${person.frontmatter.title} archived; its address is now ignored`);
+
   // #214: edit a person's emails. An address on another person comes back named, so the card can offer the merge.
   const addPersonEmail = async (person: LifeObject, email: string): Promise<AddEmailOutcome> => {
     const result: { outcome: AddEmailOutcome } = { outcome: { kind: "failed" } };
@@ -1249,7 +1254,7 @@ function App() {
           const plural = type === "person" ? "people" : `${type}s`;
           const label = plural[0]!.toUpperCase() + plural.slice(1);
           const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
-          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> },
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onNotAPerson={type === "person" ? markNotAPerson : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> },
             ...(type === "person" ? [{ id: "settings-people-duplicates", label: "Clean up duplicates", content: <DuplicateCleanupCard disabled={readOnly || busy} onLoad={() => api("GET /api/v1/people/duplicates")} onApply={(choice) => api("POST /api/v1/people/duplicates/clean-up", { body: choice })} onApplied={() => void refresh()} /> }] : [])] };
         })}
       />}

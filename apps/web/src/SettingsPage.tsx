@@ -47,6 +47,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [internalDomains, setInternalDomains] = useState<InternalDomains>();
   const [selfEmails, setSelfEmails] = useState<SelfEmails>();
+  const [ignoredAddresses, setIgnoredAddresses] = useState<SelfEmails>();
   const [claudeSkills, setClaudeSkills] = useState<ClaudeSkillsStatus | "unavailable">();
   const [focusSettings, setFocusSettings] = useState<FocusSettings>();
   const [loadFailed, setLoadFailed] = useState(false);
@@ -93,6 +94,21 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     }
   };
 
+  const loadIgnoredAddresses = async () => {
+    try { setIgnoredAddresses(await api("GET /api/v1/settings/ignored-addresses")); }
+    catch { setLoadFailed(true); }
+  };
+  /** Ignored addresses: resolves to an error message, or undefined on success. */
+  const saveIgnoredAddresses = async (emails: string[]): Promise<string | undefined> => {
+    try {
+      setIgnoredAddresses(await api("PUT /api/v1/settings/ignored-addresses", { body: { emails, expectedHash: ignoredAddresses?.contentHash } }));
+      return undefined;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) return "The ignored addresses changed on another device. Your input is still here; reload Settings before trying again.";
+      return error instanceof Error ? error.message : "Could not save the ignored addresses";
+    }
+  };
+
   const loadTodaySettings = async () => {
     try { setTodaySettings(await api("GET /api/v1/settings/today")); }
     catch { setLoadFailed(true); }
@@ -126,7 +142,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   };
 
   // Opening Settings reloads every setting it shows, since another device may have changed them.
-  useEffect(() => { void onLoadCalendars().catch(() => setLoadFailed(true)); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); void loadClaudeSkills(); }, []);
+  useEffect(() => { void onLoadCalendars().catch(() => setLoadFailed(true)); void loadInternalDomains(); void loadSelfEmails(); void loadIgnoredAddresses(); void loadFocusSettings(); void loadTodaySettings(); void loadClaudeSkills(); }, []);
 
   if ((import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV && new URLSearchParams(window.location.search).has("variant")) return <SettingsDesignPrototype />;
 
@@ -138,7 +154,8 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     ] },
     { id: "identity", group: "My LifeOS", label: "Identity", cards: [
       { id: selfEmailsCardId, label: "My email addresses", content: <SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /> },
-      { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> }
+      { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> },
+      { id: ignoredAddressesCardId, label: "Ignored addresses", content: <IgnoredAddressesCard setting={ignoredAddresses} disabled={readOnly} onSave={saveIgnoredAddresses} /> }
     ] },
     { id: "claude", group: "My LifeOS", label: "Claude skills", cards: [
       { id: "settings-claude-skills", label: "Claude skills", safeStatus: claudeSkillsSummary(claudeSkills), content: <ClaudeSkillsCard status={claudeSkills} displayTimeZone={displayTimeZone} /> }
@@ -322,6 +339,32 @@ function SelfEmailsCard({ setting, disabled, onSave }: { setting?: { emails: str
     <p className="muted">Every address you use, separated by commas. Calendar attendees with one of these addresses are linked to you instead of creating a new person.</p>
     {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div>}
     {setting && !setting.emails.length && !status && <p className="muted" role="status">Not set yet: no attendee is recognised as you by email.</p>}
+    <SaveStatus status={status} />
+  </article>;
+}
+
+const ignoredAddressesCardId = "settings-ignored-addresses";
+/** Addresses marked "Not a person" (mailing lists, shared mailboxes). Removing one lets invites use it again. */
+function IgnoredAddressesCard({ setting, disabled, onSave }: { setting?: { emails: string[]; contentHash?: string }; disabled: boolean; onSave: (emails: string[]) => Promise<string | undefined> }) {
+  const saved = setting?.emails.join(", ") ?? "";
+  const [text, setText] = useState(saved);
+  const [status, setStatus] = useState<SaveState>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setText(saved), [saved]);
+  const emails = parseEmails(text);
+  const dirty = emails.map((email) => email.toLowerCase()).join("|") !== (setting?.emails ?? []).join("|");
+  const save = async (): Promise<boolean> => {
+    setSaving(true);
+    const error = await onSave(emails);
+    setSaving(false);
+    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: "Saved. Future invites skip these addresses." });
+    return !error;
+  };
+  useSettingsCardGuard(ignoredAddressesCardId, { dirty, save, discard: () => { setText(saved); setStatus(undefined); } });
+  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>Ignored addresses</h3>
+    <p className="muted">Mailing lists and shared mailboxes, separated by commas. Calendar invites never turn these into people. Use "Not a person" on a person to add one.</p>
+    {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="Ignored addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="team@example.com" /><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div>}
+    {setting && !setting.emails.length && !status && <p className="muted" role="status">None yet.</p>}
     <SaveStatus status={status} />
   </article>;
 }

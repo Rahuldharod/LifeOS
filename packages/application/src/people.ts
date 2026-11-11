@@ -9,6 +9,7 @@ import { SyncedSetting, type SyncedSettingSpec } from "./synced-settings.js";
 const internalDomainsKey = "internal-domains";
 /** The synced self-email setting (#54): every address of the user, all resolving to the single self person (PRD story 73). Unset means none. */
 const selfEmailsKey = "self-emails";
+const ignoredAddressesKey = "ignored-addresses";
 /** Appended to an External person's label. The words are always there, so red styling is never the only signal. */
 export const EXTERNAL_SUFFIX = " - ext";
 /** Personal mail providers: the domain names a mailbox, not an organisation. */
@@ -103,6 +104,11 @@ function selfEmailsFrom(frontmatter: ObjectEnvelope | undefined) {
 }
 
 /** #75: a list-valued synced setting; a missing file is "<name> setting was removed". */
+function ignoredAddressesFrom(frontmatter: ObjectEnvelope | undefined) {
+  const raw = Array.isArray(frontmatter?.ignored_addresses) ? frontmatter.ignored_addresses as unknown[] : [];
+  return [...new Set(raw.map(normalizeEmail).filter((email): email is string => Boolean(email)))];
+}
+
 function listSetting(ctx: AppContext, spec: SyncedSettingSpec) {
   return new SyncedSetting(ctx, { ...spec, removedMessage: `${spec.name} setting was removed; reload and try again` });
 }
@@ -150,6 +156,11 @@ export function isExternalDomain(internalDomains: readonly string[], domain: str
 }
 
 /** The user's own addresses from the indexed setting file; empty when unset (#54). */
+/** Ignored addresses (mailing lists, shared mailboxes): invites never turn them into Attendees. */
+export function ignoredAddressesOf(index: Pick<AppContext["index"], "all">) {
+  return ignoredAddressesFrom(settingIn(index, SyncedSetting.relativePathOf(ignoredAddressesKey))?.frontmatter);
+}
+
 export function selfEmailsOf(index: Pick<AppContext["index"], "all">) {
   return selfEmailsFrom(settingIn(index, SyncedSetting.relativePathOf(selfEmailsKey))?.frontmatter);
 }
@@ -198,6 +209,7 @@ export class PeopleModule {
 
   private readonly internalDomainsSetting: SyncedSetting;
   private readonly selfEmailsSetting: SyncedSetting;
+  private readonly ignoredAddressesSetting: SyncedSetting;
 
   constructor(private readonly ctx: AppContext) {
     this.internalDomainsSetting = listSetting(ctx, {
@@ -207,6 +219,10 @@ export class PeopleModule {
     this.selfEmailsSetting = listSetting(ctx, {
       key: selfEmailsKey, title: "My email addresses", name: "Your email addresses",
       body: "# My email addresses\n\nEvery address you use. Calendar attendees with one of these addresses are you (the self person).\n"
+    });
+    this.ignoredAddressesSetting = listSetting(ctx, {
+      key: ignoredAddressesKey, title: "Ignored addresses", name: "Ignored addresses",
+      body: "# Ignored addresses\n\nAddresses marked \"Not a person\" (mailing lists, shared mailboxes). Calendar invites never turn them into Attendees.\n"
     });
   }
 
@@ -243,6 +259,42 @@ export class PeopleModule {
       field: "self_emails", normalize: normalizeEmail, invalid: "Not an email address"
     }, input, expectedHash);
     return { emails, contentHash };
+  }
+
+  /** The Ignored addresses, read from disk like the other list settings. Empty when unset. */
+  async getIgnoredAddresses(): Promise<{ emails: string[]; contentHash?: string }> {
+    const current = await this.ignoredAddressesSetting.read();
+    return { emails: ignoredAddressesFrom(current?.frontmatter), ...(current ? { contentHash: current.contentHash } : {}) };
+  }
+
+  /** Saves the Ignored addresses (lowercased, de-duplicated). An empty list is allowed. */
+  async saveIgnoredAddresses(input: unknown[], expectedHash?: string) {
+    const { values: emails, contentHash } = await this.saveListSetting(this.ignoredAddressesSetting, {
+      field: "ignored_addresses", normalize: normalizeEmail, invalid: "Not an email address"
+    }, input, expectedHash);
+    return { emails, contentHash };
+  }
+
+  /**
+   * "Not a person": the Person's addresses join the Ignored addresses, then the Person is archived. Two files, each write
+   * idempotent and in this order, so a retry after a crash between them finishes the job (no journal needed).
+   */
+  async markNotAPerson(id: string, expectedHash: string) {
+    const { ctx } = this;
+    const person = ctx.required(id, "person");
+    if (person.frontmatter.is_self === true) throw new Error("This is you; you cannot mark yourself as not a person");
+    if (person.contentHash !== expectedHash) throw new Error("This person changed since you opened it; reload and try again");
+    const address = addressInName(person.frontmatter.title)?.email;
+    const emails = [...new Set([...personEmails(person), ...(address ? [address] : [])])];
+    if (!emails.length) throw new Error("This person has no email address to ignore");
+    const current = await this.getIgnoredAddresses();
+    if (emails.some((email) => !current.emails.includes(email))) await this.saveIgnoredAddresses([...current.emails, ...emails], current.contentHash);
+    if (person.frontmatter.archived_at) return person;
+    const now = new Date().toISOString();
+    const updated = await ctx.update(person, { archived_at: now }, { expectedHash, now });
+    await ctx.writeAudit("person.not-a-person", id, now, { emails: emails.length });
+    await ctx.rebuildIndex();
+    return updated;
   }
 
   /** Saves the internal domains (lowercased, "@" stripped, de-duplicated). Blank entries are ignored; invalid ones are named in the error. */
@@ -367,9 +419,12 @@ export class PeopleModule {
     }
     const byEmail = this.peopleByEmail();
     const selfEmails = this.selfEmails();
+    const ignored = ignoredAddressesOf(ctx.index);
     const people: LifeOSObject[] = [];
     for (const attendee of attendees) {
       const email = normalizeEmail(attendee.email);
+      // An Ignored address is never an Attendee (it names a mailing list or shared mailbox, not a person).
+      if (email && !attendee.self && ignored.includes(email) && !selfEmails.includes(email)) continue;
       let person = attendee.self || (email && selfEmails.includes(email)) ? self : email ? byEmail.get(email) : undefined;
       if (!person && email) {
         person = await this.createPerson(email, attendee.displayName, timestamp);

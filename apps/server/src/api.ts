@@ -190,6 +190,17 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!Array.isArray(emails)) return reply.status(400).send({ error: "emails must be a list" });
     return application.saveSelfEmails(emails, expectedHash);
   });
+  route(server, "GET /api/v1/settings/ignored-addresses", async () => application.getIgnoredAddresses());
+  route(server, "PUT /api/v1/settings/ignored-addresses", async (request, reply) => {
+    const { emails, expectedHash } = request.body ?? {};
+    if (!Array.isArray(emails)) return reply.status(400).send({ error: "emails must be a list" });
+    return application.saveIgnoredAddresses(emails, expectedHash);
+  });
+  route(server, "POST /api/v1/people/:id/not-a-person", async (request, reply) => {
+    const expectedHash = request.body?.expectedHash;
+    if (typeof expectedHash !== "string" || !expectedHash) return reply.status(400).send({ error: "expectedHash is required" });
+    return application.markNotAPerson(request.params.id, expectedHash);
+  });
   // #48: meeting-hours threshold and brief time; invalid values answer 400 with every problem named.
   route(server, "GET /api/v1/settings/today", async () => application.getTodaySettings());
   route(server, "PUT /api/v1/settings/today", async (request) => {
