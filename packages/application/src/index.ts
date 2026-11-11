@@ -16,6 +16,7 @@ import { NotesModule, type NewStandaloneNote, type NoteFilters } from "./notes.j
 import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
 import { PeopleModule } from "./people.js";
+import type { DuplicateCleanupChoice } from "./person-merge.js";
 import type { ManualMergeOptions } from "./person-merge.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AgentIndexWriter, AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
@@ -31,7 +32,7 @@ export type { NewStandaloneNote, NoteFilters, ObjectReference, PurgeCheck } from
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, PersonEmailTakenError, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
-export type { ManualMergeOptions, PersonMergePreview } from "./person-merge.js";
+export type { DuplicateCleanupChoice, DuplicateCleanupRow, ManualMergeOptions, PersonMergePreview } from "./person-merge.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarEventReference, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
 export { inboxFolders, operationKinds } from "./ports.js";
 export type { FeedbackInput, FeedbackLabel } from "./feedback.js";
@@ -202,9 +203,20 @@ export class LifeOSApplication {
     const review = await this.review.merges.proposeManual(options);
     return this.acceptReviewItem(review.frontmatter.id);
   }
+  /** The Duplicate clean-up list (sure matches pre-ticked, repairs for Email-only people); writes nothing. */
+  duplicateCleanup() { return this.review.merges.cleanupRows(); }
+  /** Applies the ticked Duplicate clean-up rows after `backUp` succeeds; each merge goes through `mergePeople`. */
+  applyDuplicateCleanup(input: DuplicateCleanupChoice, backUp: () => Promise<{ backupId: string }>) {
+    return this.review.merges.applyCleanup(input, backUp, (options) => this.mergePeople(options));
+  }
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
   getSelfEmails() { return this.people.getSelfEmails(); }
+  /** Ignored addresses, one entry per "Not a person" Person. */
+  ignoredAddresses() { return this.people.ignoredAddresses(); }
+  /** "Not a person": archive the Person and ignore its addresses in future invites. */
+  markNotAPerson(id: string, expectedHash: string) { return this.people.markNotAPerson(id, expectedHash); }
+  undoNotAPerson(id: string, expectedHash: string) { return this.people.undoNotAPerson(id, expectedHash); }
   saveSelfEmails(emails: unknown[], expectedHash?: string) { return this.people.saveSelfEmails(emails, expectedHash); }
 
   // Open Points (#42)

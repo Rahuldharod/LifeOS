@@ -76,6 +76,8 @@ import { useNewStandaloneNote } from "./useNewStandaloneNote.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
+import { firstEditPeopleIds, headerPeopleIds } from "./firstEditPeople.js";
+import { DuplicateCleanupCard } from "./DuplicateCleanupCard.js";
 import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, PersonMergeChoice, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
@@ -318,7 +320,7 @@ function App() {
         // Attendees the header could not show (LifeOS had no matching person yet) were just created from the
         // event; keep them when the user adds people, rather than replacing the whole list.
         const defaults = Array.isArray(next.note.frontmatter.people_ids) ? next.note.frontmatter.people_ids as string[] : [];
-        held.people_ids = [...new Set([...(held.people_ids as string[]), ...defaults.filter((id) => !headerOptions.people.some((option) => option.id === id))])];
+        held.people_ids = firstEditPeopleIds(held.people_ids as string[], defaults, headerOptions.people);
       }
       if (next.note && Object.keys(held).length) {
         // A failure here leaves a valid note with the calendar's defaults; say so rather than lose it silently.
@@ -803,6 +805,11 @@ function App() {
     await refresh();
   }, `${object.frontmatter.title} confirmed`);
 
+  const markNotAPerson = (person: LifeObject) => run(async () => {
+    await api("POST /api/v1/people/:id/not-a-person", { params: { id: person.frontmatter.id }, body: { expectedHash: person.contentHash } });
+    await refresh();
+  }, `${person.frontmatter.title} archived; its address is now ignored`);
+
   // #214: edit a person's emails. An address on another person comes back named, so the card can offer the merge.
   const addPersonEmail = async (person: LifeObject, email: string): Promise<AddEmailOutcome> => {
     const result: { outcome: AddEmailOutcome } = { outcome: { kind: "failed" } };
@@ -1000,7 +1007,7 @@ function App() {
   const headerOptions = { projects: entityOptions(projects.map(({ project }) => project)), clients: entityOptions(clients.map(({ entity }) => entity)), products: entityOptions(products.map(({ entity }) => entity)), people: people.map(({ entity }) => personOption(labels, entity)) };
 
   // The header of a note that does not exist yet: the event's own project, client, product and
-  // attendees are shown when they match an object LifeOS already has (by name), and the rest stay
+  // attendees are shown when they match an object LifeOS already has (attendees by id, the rest by name), and the rest stay
   // blank until the first edit creates them. The id and hash are fixed so the form is not re-seeded.
   const pendingHeaderNote = (current: Workspace) => {
     const match = (options: { id: string; title: string }[], object?: LifeObject) => object ? options.find((option) => foldText(option.title) === foldText(object.frontmatter.title))?.id ?? "" : "";
@@ -1009,7 +1016,7 @@ function App() {
       frontmatter: {
         id: current.meeting.frontmatter.id, type: "meeting-note", title: `${current.meeting.frontmatter.title} notes`,
         primary_project_id: match(headerOptions.projects, current.context.project), primary_client_id: match(headerOptions.clients, current.context.client), primary_product_id: match(headerOptions.products, current.context.product),
-        people_ids: current.context.people.map((person) => match(headerOptions.people, person)).filter(Boolean)
+        people_ids: headerPeopleIds(headerOptions.people, current.context.people)
       }
     };
   };
@@ -1247,7 +1254,8 @@ function App() {
           const plural = type === "person" ? "people" : `${type}s`;
           const label = plural[0]!.toUpperCase() + plural.slice(1);
           const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
-          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> }] };
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onNotAPerson={type === "person" ? markNotAPerson : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> },
+            ...(type === "person" ? [{ id: "settings-people-duplicates", label: "Clean up duplicates", content: <DuplicateCleanupCard disabled={readOnly || busy} onLoad={() => api("GET /api/v1/people/duplicates")} onApply={(choice) => api("POST /api/v1/people/duplicates/clean-up", { body: choice })} onApplied={() => void refresh()} /> }] : [])] };
         })}
       />}
   </ApplicationShell>;

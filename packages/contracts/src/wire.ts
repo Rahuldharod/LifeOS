@@ -1,3 +1,4 @@
+import type { PersonMergeMatch } from "@lifeos/shared";
 // #121: the JSON shapes the localhost API sends and receives, as the browser sees them after `JSON.parse`.
 // Types only; no Node dependencies, so the web app can import them. The server's routes are checked against
 // these (apps/server/src/route.ts), so a use case whose result stops matching breaks the server's typecheck.
@@ -117,6 +118,16 @@ export type PersonMergePreview = {
   keep: { id: string; title: string }; merge: { id: string; title: string };
   keptName: string; aliases: string[]; emails: string[]; referenceCount: number;
 };
+
+/** The Duplicate clean-up: a pair to merge (`preTicked` for sure matches), or an Email-only person to repair in place. */
+export type DuplicateCleanupRow =
+  | { kind: "merge"; keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: PersonMergeMatch; preTicked: boolean }
+  | { kind: "repair"; personId: string; title: string; email: string };
+/** The rows the user ticked. */
+export type DuplicateCleanupChoice = { merges: Array<{ keepPersonId: string; mergePersonId: string }>; repairs: string[] };
+/** One "Not a person" Person and the addresses invites now skip (an Ignored address each). */
+export type IgnoredAddress = { personId: string; title: string; emails: string[]; contentHash: string };
+export type DuplicateCleanupResult = { backupId: string; merged: number; repaired: number; skipped: number };
 
 export type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
 /** #47: one change to the date's Top 3. */

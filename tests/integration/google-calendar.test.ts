@@ -21,7 +21,8 @@ describe("Google Calendar connector", () => {
     await connector.completeAuthorization("code", authorizationUrl.searchParams.get("state")!);
     expect((await connector.status()).connected).toBe(true);
     const events = await connector.listEvents(new Date("2026-09-22T00:00:00Z"), new Date("2026-09-23T00:00:00Z"));
-    expect(events[0]).toMatchObject({ externalId: "event-1", calendarId: "primary", calendarName: "Work", calendarColor: "#4f7cac", title: "Planning", startsAt: "2026-09-22T09:00:00.000Z", endsAt: "2026-09-22T10:00:00.000Z", timezone: "Europe/Paris", location: "Room Atlas", joinUrl: "https://meet.example.com/planning", attendees: ["alex@example.com", "Me", "Room 4"], attendeeDetails: [{ email: "alex@example.com" }, { email: "me@example.com", displayName: "Me", self: true }] });
+    // Rooms are not Attendees (CONTEXT.md): "Room 4" is in neither list.
+    expect(events[0]).toMatchObject({ externalId: "event-1", calendarId: "primary", calendarName: "Work", calendarColor: "#4f7cac", title: "Planning", startsAt: "2026-09-22T09:00:00.000Z", endsAt: "2026-09-22T10:00:00.000Z", timezone: "Europe/Paris", location: "Room Atlas", joinUrl: "https://meet.example.com/planning", attendees: ["alex@example.com", "Me"], attendeeDetails: [{ email: "alex@example.com" }, { email: "me@example.com", displayName: "Me", self: true }] });
     // #44: an invitation the user declined is flagged so enrichment skips it.
     expect(events.map((event) => event.declined)).toEqual([false, true]);
     expect(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]?.[0])).toContain("singleEvents=true");

@@ -2,7 +2,7 @@
 // this page uses are loaded and saved here; App passes in what other pages share (timezone, calendars, connections).
 import React, { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api.js";
-import type { BackupSummary, BackupVerification, CalendarOption, ClaudeSkillsStatus, CalendarPreferences as CalendarPrefs, FocusSettings, InternalDomains, SelfEmails, SystemHealth, TodaySettings, Weekday } from "@lifeos/contracts";
+import type { BackupSummary, BackupVerification, CalendarOption, ClaudeSkillsStatus, CalendarPreferences as CalendarPrefs, FocusSettings, IgnoredAddress, InternalDomains, SelfEmails, SystemHealth, TodaySettings, Weekday } from "@lifeos/contracts";
 import type { ConnectionsState } from "./connections.js";
 import { parseDomains, parseEmails } from "./personLabels.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
@@ -47,6 +47,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   const [todaySettings, setTodaySettings] = useState<TodaySettings>();
   const [internalDomains, setInternalDomains] = useState<InternalDomains>();
   const [selfEmails, setSelfEmails] = useState<SelfEmails>();
+  const [ignoredAddresses, setIgnoredAddresses] = useState<IgnoredAddress[]>();
   const [claudeSkills, setClaudeSkills] = useState<ClaudeSkillsStatus | "unavailable">();
   const [focusSettings, setFocusSettings] = useState<FocusSettings>();
   const [loadFailed, setLoadFailed] = useState(false);
@@ -93,6 +94,20 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     }
   };
 
+  const loadIgnoredAddresses = async () => {
+    try { setIgnoredAddresses(await api("GET /api/v1/people/ignored-addresses")); }
+    catch { setLoadFailed(true); }
+  };
+  /** Undoes "Not a person": resolves to an error message, or undefined on success. */
+  const undoNotAPerson = async (entry: IgnoredAddress): Promise<string | undefined> => {
+    try {
+      await api("POST /api/v1/people/:id/not-a-person/undo", { params: { id: entry.personId }, body: { expectedHash: entry.contentHash } });
+      await loadIgnoredAddresses();
+      await onChanged();
+      return undefined;
+    } catch (error) { return error instanceof Error ? error.message : "Could not undo"; }
+  };
+
   const loadTodaySettings = async () => {
     try { setTodaySettings(await api("GET /api/v1/settings/today")); }
     catch { setLoadFailed(true); }
@@ -126,7 +141,7 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
   };
 
   // Opening Settings reloads every setting it shows, since another device may have changed them.
-  useEffect(() => { void onLoadCalendars().catch(() => setLoadFailed(true)); void loadInternalDomains(); void loadSelfEmails(); void loadFocusSettings(); void loadTodaySettings(); void loadClaudeSkills(); }, []);
+  useEffect(() => { void onLoadCalendars().catch(() => setLoadFailed(true)); void loadInternalDomains(); void loadSelfEmails(); void loadIgnoredAddresses(); void loadFocusSettings(); void loadTodaySettings(); void loadClaudeSkills(); }, []);
 
   if ((import.meta as ImportMeta & { env: { DEV: boolean } }).env.DEV && new URLSearchParams(window.location.search).has("variant")) return <SettingsDesignPrototype />;
 
@@ -138,7 +153,8 @@ export function SettingsPage({ displayTimeZone, onDisplayTimeZoneChange, calenda
     ] },
     { id: "identity", group: "My LifeOS", label: "Identity", cards: [
       { id: selfEmailsCardId, label: "My email addresses", content: <SelfEmailsCard setting={selfEmails} disabled={readOnly} onSave={saveSelfEmails} /> },
-      { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> }
+      { id: internalDomainsCardId, label: "Internal domains", content: <InternalDomainsCard setting={internalDomains} disabled={readOnly} onSave={saveInternalDomains} /> },
+      { id: ignoredAddressesCardId, label: "Ignored addresses", content: <IgnoredAddressesCard entries={ignoredAddresses} disabled={readOnly} onUndo={undoNotAPerson} /> }
     ] },
     { id: "claude", group: "My LifeOS", label: "Claude skills", cards: [
       { id: "settings-claude-skills", label: "Claude skills", safeStatus: claudeSkillsSummary(claudeSkills), content: <ClaudeSkillsCard status={claudeSkills} displayTimeZone={displayTimeZone} /> }
@@ -322,6 +338,26 @@ function SelfEmailsCard({ setting, disabled, onSave }: { setting?: { emails: str
     <p className="muted">Every address you use, separated by commas. Calendar attendees with one of these addresses are linked to you instead of creating a new person.</p>
     {!setting ? <p className="muted">Loading…</p> : <div className="capture-row"><input aria-label="My email addresses" value={text} disabled={disabled} onChange={(event) => { setText(event.target.value); setStatus(undefined); }} placeholder="me@example.com, me@example.org" /><button type="button" disabled={disabled || saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button></div>}
     {setting && !setting.emails.length && !status && <p className="muted" role="status">Not set yet: no attendee is recognised as you by email.</p>}
+    <SaveStatus status={status} />
+  </article>;
+}
+
+const ignoredAddressesCardId = "settings-ignored-addresses";
+/** Ignored addresses: one entry per "Not a person" Person. Undo makes the Person live again, so invites use it again. */
+function IgnoredAddressesCard({ entries, disabled, onUndo }: { entries?: IgnoredAddress[]; disabled: boolean; onUndo: (entry: IgnoredAddress) => Promise<string | undefined> }) {
+  const [status, setStatus] = useState<SaveState>();
+  const [working, setWorking] = useState<string>();
+  const undo = async (entry: IgnoredAddress) => {
+    setWorking(entry.personId);
+    const error = await onUndo(entry);
+    setWorking(undefined);
+    setStatus(error ? { kind: "error", text: error } : { kind: "saved", text: `${entry.emails.join(", ")} is no longer ignored.` });
+  };
+  return <article className="internal-domains-setting"><span>PEOPLE</span><h3>Ignored addresses</h3>
+    <p className="muted">Mailing lists and shared mailboxes you marked "Not a person". Calendar invites never turn these into people.</p>
+    {!entries ? <p className="muted">Loading…</p> : !entries.length ? <p className="muted" role="status">None yet. Use "Not a person" on a person to add one.</p>
+      : <ul className="ignored-addresses">{entries.map((entry) => <li key={entry.personId}><span>{entry.emails.join(", ")}</span>
+        <button type="button" disabled={disabled || Boolean(working)} onClick={() => void undo(entry)}>{working === entry.personId ? "Undoing…" : "Undo"}</button></li>)}</ul>}
     <SaveStatus status={status} />
   </article>;
 }

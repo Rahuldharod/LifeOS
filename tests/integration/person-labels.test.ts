@@ -36,28 +36,24 @@ const labelOf = (application: LifeOSApplication, id: string) => application.pers
 const personId = async (application: LifeOSApplication, title: string) => (await application.listObjects()).find((object) => object.frontmatter.type === "person" && object.frontmatter.title === title)!.frontmatter.id;
 
 describe("display labels (#39)", () => {
-  it("shows the first name, and first + last only while another active person shares the first name", async () => {
+  it("shows the full name, recomputed live, and keeps it for a deleted person's old references", async () => {
     const { calendar, application } = await setup();
     await application.saveInternalDomains(["example.com"], undefined);
     calendar.events = [event("e1", [{ email: "jean.dupont@example.com" }, { email: "marie.curie@example.com" }])];
     await application.createMeetingFromEvent("e1");
     const jean = await personId(application, "Jean Dupont");
-    expect(labelOf(application, jean)).toMatchObject({ name: "Jean", label: "Jean", isExternal: false });
+    expect(labelOf(application, jean)).toMatchObject({ name: "Jean Dupont", label: "Jean Dupont", isExternal: false });
     expect(labelOf(application, jean)!.suffix).toBeUndefined();
+    expect(labelOf(application, await personId(application, "Marie Curie"))!.name).toBe("Marie Curie");
 
-    // A second Jean appears: both switch to first + last, recomputed live.
     const other = await application.createEntity("person", { title: "Jean Martin", given_name: "Jean", family_name: "Martin" });
-    expect(labelOf(application, jean)!.name).toBe("Jean Dupont");
     expect(labelOf(application, other.frontmatter.id)!.name).toBe("Jean Martin");
-    expect(labelOf(application, await personId(application, "Marie Curie"))!.name).toBe("Marie");
-
-    // Deleting the other Jean makes "Jean" unambiguous again; the deleted one keeps a full label for old references.
     await application.deleteEntity(other.frontmatter.id, application.object(other.frontmatter.id).contentHash);
-    expect(labelOf(application, jean)!.name).toBe("Jean");
+    expect(labelOf(application, jean)!.name).toBe("Jean Dupont");
     expect(labelOf(application, other.frontmatter.id)!.name).toBe("Jean Martin");
   });
 
-  it("treats first names that differ only by case or accents as shared, and falls back to the title without a family name", () => {
+  it("joins first and family name, and falls back to the title without a family name", () => {
     const person = (id: string, title: string, extra: Record<string, unknown> = {}) => ({ frontmatter: { id, type: "person" as const, title, schema_version: 1, revision: 1, created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", updated_by_device: "t", ...extra } });
     const labels = personDisplayLabels([
       person("a", "Élodie Roux", { given_name: "Élodie", family_name: "Roux" }),
@@ -73,7 +69,7 @@ describe("display labels (#39)", () => {
     await application.saveInternalDomains(["example.org"], undefined);
     calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }, { email: "lea@example.org" }])];
     await application.createMeetingFromEvent("e1");
-    expect(labelOf(application, await personId(application, "Kim Lee"))).toMatchObject({ name: "Kim", label: "Kim - ext", suffix: " - ext", isExternal: true });
+    expect(labelOf(application, await personId(application, "Kim Lee"))).toMatchObject({ name: "Kim Lee", label: "Kim Lee - ext", suffix: " - ext", isExternal: true });
     expect(labelOf(application, await personId(application, "lea"))).toMatchObject({ label: "lea", isExternal: false });
   });
 
@@ -93,13 +89,13 @@ describe("display labels (#39)", () => {
       await writeFile(path.join(root, "people", `alex--${id}.md`), `---\nid: ${id}\ntype: person\nschema_version: 1\nrevision: 1\ntitle: Alex Morgan\ncreated_at: 2026-10-01T08:00:00Z\nupdated_at: 2026-10-01T08:00:00Z\nupdated_by_device: test\ngiven_name: Alex\nis_external: true\nidentifiers:\n  - alex@gmail.com\n  - kind: email\n    value: Alex.Morgan@Example.com\n---\n# Alex Morgan\n`);
     });
     await application.saveInternalDomains(["example.com"], undefined);
-    expect(labelOf(application, id)).toMatchObject({ label: "Alex", isExternal: false });
+    expect(labelOf(application, id)).toMatchObject({ label: "Alex Morgan", isExternal: false });
   });
 
   it("falls back to the stored flag for a person without any email", async () => {
     const { application } = await setup();
     const created = await application.createEntity("person", { title: "Paul Plumber" });
-    expect(labelOf(application, created.frontmatter.id)).toMatchObject({ label: "Paul", isExternal: false });
+    expect(labelOf(application, created.frontmatter.id)).toMatchObject({ label: "Paul Plumber", isExternal: false });
   });
 });
 
@@ -113,7 +109,7 @@ describe("manual external override (#39)", () => {
 
     const internal = await application.setPersonExternal(kim, false, application.object(kim).contentHash);
     expect(internal.frontmatter).toMatchObject({ is_external_override: false, is_external: false });
-    expect(labelOf(application, kim)).toMatchObject({ label: "Kim", isExternal: false });
+    expect(labelOf(application, kim)).toMatchObject({ label: "Kim Lee", isExternal: false });
     const file = await readFile(path.join(root, internal.relativePath), "utf8");
     expect(file).toContain("is_external_override: false");
     const audits = (await application.listObjects()).filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.action === "person.external-changed");
@@ -128,7 +124,7 @@ describe("manual external override (#39)", () => {
     expect(cleared.frontmatter.is_external_override).toBeUndefined();
     expect(cleared.frontmatter.is_external).toBe(true);
     expect(await readFile(path.join(root, cleared.relativePath), "utf8")).not.toContain("is_external_override");
-    expect(labelOf(application, kim)!.label).toBe("Kim - ext");
+    expect(labelOf(application, kim)!.label).toBe("Kim Lee - ext");
 
     // An internal colleague can be marked external (e.g. a contractor on a company address).
     const forced = await application.setPersonExternal(kim, true, cleared.contentHash);
@@ -157,7 +153,7 @@ describe("internal-domains setting (#39)", () => {
     calendar.events = [event("e1", [{ email: "kim.lee@acme.fr" }])];
     const workspace = await application.createMeetingFromEvent("e1");
     expect(workspace.context.people[0]!.frontmatter.is_external).toBe(false);
-    expect(labelOf(application, workspace.context.people[0]!.frontmatter.id)).toMatchObject({ label: "Kim", isExternal: false });
+    expect(labelOf(application, workspace.context.people[0]!.frontmatter.id)).toMatchObject({ label: "Kim Lee", isExternal: false });
     await expect(readFile(path.join(root, "settings", "internal-domains.md"), "utf8")).rejects.toThrow();
   });
 
@@ -173,8 +169,8 @@ describe("internal-domains setting (#39)", () => {
     const file = await readFile(path.join(root, "settings", "internal-domains.md"), "utf8");
     expect(file).toContain("setting_key: internal-domains");
     expect(file).toMatch(/internal_domains:\n\s+- example.com\n\s+- acme.fr/);
-    expect(labelOf(application, kim)).toMatchObject({ label: "Kim", isExternal: false });
-    expect(labelOf(application, lea)).toMatchObject({ label: "Lea - ext", isExternal: true });
+    expect(labelOf(application, kim)).toMatchObject({ label: "Kim Lee", isExternal: false });
+    expect(labelOf(application, lea)).toMatchObject({ label: "Lea Roux - ext", isExternal: true });
 
     // New people are flagged against the saved setting too.
     calendar.events = [event("e2", [{ email: "zoe.hart@acme.fr" }])];

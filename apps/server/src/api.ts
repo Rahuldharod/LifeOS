@@ -25,6 +25,7 @@ import { connectionSettings, googleConnectionStatus } from "./connections.js";
 import { httpError } from "./http-errors.js";
 import { IdleRelease, registerLease } from "./lease.js";
 import { registerNotePurge } from "./note-purge-routes.js";
+import { registerDuplicateCleanup } from "./duplicate-cleanup-route.js";
 import { registerNotesList } from "./notes-list-route.js";
 import { calendarRange, hasExpectedHash, invalidCalendarRange, isCalendarDay } from "./request-checks.js";
 import { shutDown } from "./shutdown.js";
@@ -151,6 +152,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!options) return reply.status(400).send({ error: "otherPersonId is required" });
     return application.mergePeople(options);
   });
+  registerDuplicateCleanup(server, application, async () => (autoBackups ? await autoBackups.runNow() : await backups.create()));
   route(server, "POST /api/v1/index/rebuild", async () => application.rebuildIndex());
 
   route(server, "GET /api/v1/calendar/events", async (request, reply) => {
@@ -187,6 +189,17 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     const { emails, expectedHash } = request.body ?? {};
     if (!Array.isArray(emails)) return reply.status(400).send({ error: "emails must be a list" });
     return application.saveSelfEmails(emails, expectedHash);
+  });
+  route(server, "GET /api/v1/people/ignored-addresses", async () => application.ignoredAddresses());
+  route(server, "POST /api/v1/people/:id/not-a-person", async (request, reply) => {
+    const expectedHash = request.body?.expectedHash;
+    if (typeof expectedHash !== "string" || !expectedHash) return reply.status(400).send({ error: "expectedHash is required" });
+    return application.markNotAPerson(request.params.id, expectedHash);
+  });
+  route(server, "POST /api/v1/people/:id/not-a-person/undo", async (request, reply) => {
+    const expectedHash = request.body?.expectedHash;
+    if (typeof expectedHash !== "string" || !expectedHash) return reply.status(400).send({ error: "expectedHash is required" });
+    return application.undoNotAPerson(request.params.id, expectedHash);
   });
   // #48: meeting-hours threshold and brief time; invalid values answer 400 with every problem named.
   route(server, "GET /api/v1/settings/today", async () => application.getTodaySettings());

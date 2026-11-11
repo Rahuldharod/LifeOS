@@ -3,7 +3,8 @@ import { markdownFileName, type AppContext } from "./context.js";
 import { decisionPeopleIds } from "./decisions.js";
 import { checkEntityLinks } from "./entity-links.js";
 import { openPointPeopleIds } from "./open-points.js";
-import { dueDate, isLive, isRestricted } from "./support.js";
+import { byIdentifier, dueDate, isLive, isRestricted } from "./support.js";
+import { addressInName, derivePersonName, personEmails } from "./people.js";
 
 import { isUnreviewedPerson, type EntityType } from "@lifeos/shared";
 export type { EntityType };
@@ -49,8 +50,19 @@ export class EntitiesModule {
   }
 
   async createEntity(type: EntityType, fields: Record<string, unknown>) {
-    const title = typeof fields.title === "string" ? fields.title.trim() : "";
+    let title = typeof fields.title === "string" ? fields.title.trim() : "";
     if (!title) throw new Error("Title is required");
+    // A Person is never named by an address alone: the Person holding it is reused, or the address becomes the email.
+    const address = type === "person" ? addressInName(title) : undefined;
+    if (address) {
+      // An email is an identifier (decision 2026-10-10): it reaches an archived Person too, live first; deleted ones are gone.
+      // So "create" answers the Person who already holds the address rather than a duplicate.
+      const holder = byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && !object.frontmatter.merged_into_person_id && personEmails(object).includes(address.email)))[0];
+      if (holder) return holder;
+      const { title: derived, ...names } = derivePersonName(address.email, address.displayName);
+      title = derived;
+      fields = { ...names, ...fields };
+    }
     const now = new Date().toISOString();
     const id = uuidV7();
     const folders = { task: "tasks", project: "projects", client: "clients", product: "products", person: "people" } as const;
@@ -62,6 +74,7 @@ export class EntitiesModule {
       person: ["given_name", "family_name", "organization_name", "job_title", "timezone", "is_self"]
     };
     const selected = Object.fromEntries(Object.entries(fields).filter(([key, value]) => [...allowed[type], ...envelopeFields].includes(key) && value !== "" && value !== undefined && value !== null));
+    if (address) selected.identifiers = [{ kind: "email", value: address.email }];
     checkEntityLinks(this.ctx, type, selected);
     if (type === "task") {
       selected.status ??= "Inbox";

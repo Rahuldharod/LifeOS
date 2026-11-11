@@ -300,8 +300,7 @@ LifeOS becomes my single source of truth for work commitments. The app stays the
   - A local part with no separator falls back to the display name, or else to the local part as the given name.
 - **External flag:** `is_external` is derived from the email domain against the internal-domain setting, with a manual override. External people get minimal handling in Phase A: they are created, matched and badged. Organization and client linking is deferred.
 - **Display label** (application read model, used by badges, pickers and the Agent Index):
-  - first name by default
-  - first and last name when another active person shares the first name, recomputed live
+  - first and last name, or the title when no family name is known (changed 2026-11-11: the first-name-only label hid who was who and broke attendee matching)
   - external people get the suffix " - ext", styled red, with the text always present
 - **Self person:** carries all of the user's addresses, so it is never duplicated. The addresses are not in code: the user enters them in Settings → **My email addresses** (stored as `settings/self-emails.md`, e.g. `me@example.com`, `me@example.org`). While this card or **Internal domains** is empty, Today and System Health show a warning with a button to the card (#54, #76).
 - **Merge:** `person-merge` Review Items are suggested when names match, or when the email local part matches across internal domains. Accepting re-points references through a recoverable multi-file operation and tombstones the merged person. Merges never happen automatically.

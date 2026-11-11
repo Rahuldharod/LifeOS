@@ -76,11 +76,12 @@ function expectMergedInto(application: LifeOSApplication, s: Scenario, keptId: s
 }
 
 describe("manual merge (#213)", () => {
-  it("merges an email-only person into a named one: email moves, name becomes an alias, references follow, kept is reviewed", async () => {
+  it("merges an Email-only person into a named one: email moves, the made-up name is dropped, references follow, kept is reviewed", async () => {
     const s = await jdoeScenario();
     const kept = await s.application.mergePeople({ personId: s.jdoe.frontmatter.id, otherPersonId: s.john.frontmatter.id });
     expect(kept.frontmatter.id).toBe(s.john.frontmatter.id);
-    expect(kept.frontmatter).toMatchObject({ title: "John Doe", identifiers: [{ kind: "email", value: "jdoe@example.com" }], aliases: ["Jdoe"], review_state: "reviewed" });
+    expect(kept.frontmatter).toMatchObject({ title: "John Doe", identifiers: [{ kind: "email", value: "jdoe@example.com" }], review_state: "reviewed" });
+    expect(kept.frontmatter.aliases).toBeUndefined();
     expectMergedInto(s.application, s, s.john.frontmatter.id, s.jdoe.frontmatter.id);
     expect((await s.application.health()).diagnostics).toEqual([]);
     expect(s.application.entities("person").map((person) => person.frontmatter.id)).not.toContain(s.jdoe.frontmatter.id);
@@ -96,7 +97,8 @@ describe("manual merge (#213)", () => {
   it("lets the user keep the other person: the record survives and takes the name with a family name", async () => {
     const s = await jdoeScenario();
     const kept = await s.application.mergePeople({ personId: s.john.frontmatter.id, otherPersonId: s.jdoe.frontmatter.id, keepPersonId: s.jdoe.frontmatter.id });
-    expect(kept.frontmatter).toMatchObject({ id: s.jdoe.frontmatter.id, title: "John Doe", given_name: "John", family_name: "Doe", aliases: ["Jdoe"], review_state: "reviewed" });
+    expect(kept.frontmatter).toMatchObject({ id: s.jdoe.frontmatter.id, title: "John Doe", given_name: "John", family_name: "Doe", review_state: "reviewed" });
+    expect(kept.frontmatter.aliases).toBeUndefined();
     expectMergedInto(s.application, s, s.jdoe.frontmatter.id, s.john.frontmatter.id);
   });
 
@@ -104,7 +106,7 @@ describe("manual merge (#213)", () => {
     const s = await jdoeScenario();
     const before = s.application.object(s.john.frontmatter.id).contentHash;
     const preview = await s.application.previewPersonMerge({ personId: s.jdoe.frontmatter.id, otherPersonId: s.john.frontmatter.id });
-    expect(preview).toMatchObject({ keepPersonId: s.john.frontmatter.id, nameFromPersonId: s.john.frontmatter.id, keepLocked: false, keptName: "John Doe", aliases: ["Jdoe"], emails: ["jdoe@example.com"], referenceCount: 3 });
+    expect(preview).toMatchObject({ keepPersonId: s.john.frontmatter.id, nameFromPersonId: s.john.frontmatter.id, keepLocked: false, keptName: "John Doe", aliases: [], emails: ["jdoe@example.com"], referenceCount: 3 });
     const swapped = await s.application.previewPersonMerge({ personId: s.jdoe.frontmatter.id, otherPersonId: s.john.frontmatter.id, keepPersonId: s.jdoe.frontmatter.id, nameFromPersonId: s.jdoe.frontmatter.id });
     expect(swapped).toMatchObject({ keepPersonId: s.jdoe.frontmatter.id, keptName: "Jdoe", aliases: ["John Doe"] });
     expect(s.application.object(s.john.frontmatter.id).contentHash).toBe(before);
@@ -170,7 +172,8 @@ describe("manual merge (#213)", () => {
     const restarted = await setup(s.root);
     expect(await restarted.application.recoverOperations()).toHaveLength(1);
     expectMergedInto(restarted.application, s, s.john.frontmatter.id, s.jdoe.frontmatter.id);
-    expect(restarted.application.object(s.john.frontmatter.id).frontmatter).toMatchObject({ aliases: ["Jdoe"], review_state: "reviewed" });
+    expect(restarted.application.object(s.john.frontmatter.id).frontmatter).toMatchObject({ review_state: "reviewed" });
+    expect(restarted.application.object(s.john.frontmatter.id).frontmatter.aliases).toBeUndefined();
     expect(await restarted.application.recoverOperations()).toHaveLength(0);
     expect(mergeReviews(restarted.application).map((review) => review.frontmatter.status)).toEqual(["accepted"]);
   });

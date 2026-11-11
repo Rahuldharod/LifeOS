@@ -1,6 +1,6 @@
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { isUnreviewedPerson } from "@lifeos/shared";
-import { foldForSearch, markdownFileName, type AppContext } from "./context.js";
+import { markdownFileName, type AppContext } from "./context.js";
 import type { CalendarAttendee, CalendarEvent } from "./ports.js";
 import { byIdentifier, isLive, OneAtATime } from "./support.js";
 import { SyncedSetting, type SyncedSettingSpec } from "./synced-settings.js";
@@ -27,6 +27,18 @@ export function normalizeEmail(value: unknown) {
   if (typeof value !== "string") return undefined;
   const email = value.trim().toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
+}
+
+/**
+ * The email address a name holds instead of a real name: "jane@example.com" or "Jane Doe <jane@example.com>".
+ * A Person is never named by an address alone; callers store the address as its email instead.
+ */
+export function addressInName(text: unknown): { email: string; displayName?: string } | undefined {
+  if (typeof text !== "string") return undefined;
+  const angled = text.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  const email = normalizeEmail(angled ? angled[2] : text);
+  const displayName = angled?.[1]?.trim();
+  return email ? { email, ...(displayName ? { displayName } : {}) } : undefined;
 }
 
 /** The address in one stored identifier; hand-edited files may list plain strings. */
@@ -120,7 +132,6 @@ export function externalStatus(person: Pick<LifeOSObject, "frontmatter">, intern
  */
 export type PersonLabel = { id: string; name: string; label: string; suffix?: typeof EXTERNAL_SUFFIX; isExternal: boolean; externalSource: ExternalSource; unreviewed: boolean };
 
-const isActivePerson = (person: Pick<LifeOSObject, "frontmatter">) => person.frontmatter.type === "person" && isLive(person);
 const cleanText = (value: unknown) => typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 
 /**
@@ -139,6 +150,34 @@ export function isExternalDomain(internalDomains: readonly string[], domain: str
 }
 
 /** The user's own addresses from the indexed setting file; empty when unset (#54). */
+/** The addresses a "Not a person" Person holds (CONTEXT.md, Ignored address): its emails, or the address it is named by. */
+function notAPersonAddresses(person: Pick<LifeOSObject, "frontmatter">) {
+  const address = addressInName(person.frontmatter.title)?.email;
+  return [...new Set([...personEmails(person as LifeOSObject), ...(address ? [address] : [])])];
+}
+
+/** People marked "Not a person" (mailing lists, shared mailboxes), deleted ones excluded. */
+function notAPersonPeople(index: Pick<AppContext["index"], "all">) {
+  return index.all().filter((object) => object.frontmatter.type === "person" && object.frontmatter.not_a_person === true && !object.frontmatter.deleted_at);
+}
+
+/** Ignored addresses: invites never turn them into Attendees. They live on the "Not a person" People themselves. */
+export function ignoredAddressesOf(index: Pick<AppContext["index"], "all">) {
+  return [...new Set(notAPersonPeople(index).flatMap(notAPersonAddresses))];
+}
+
+/** The attendee list saved with a meeting: the invite's labels, without Ignored addresses (or rooms, which connectors drop). */
+export function attendeeSnapshot(event: CalendarEvent, index: Pick<AppContext["index"], "all">) {
+  const ignored = ignoredAddressesOf(index);
+  if (!ignored.length) return [...event.attendees];
+  // Google lists labels and details in the same order; otherwise a label is matched by the address it holds.
+  const details = event.attendeeDetails?.length === event.attendees.length ? event.attendeeDetails : undefined;
+  return event.attendees.filter((label, position) => {
+    const email = normalizeEmail(details?.[position]?.email) ?? addressInName(label)?.email;
+    return !(email && ignored.includes(email));
+  });
+}
+
 export function selfEmailsOf(index: Pick<AppContext["index"], "all">) {
   return selfEmailsFrom(settingIn(index, SyncedSetting.relativePathOf(selfEmailsKey))?.frontmatter);
 }
@@ -155,18 +194,11 @@ export function peopleSetupWarning(index: Pick<AppContext["index"], "all">): Peo
 
 export function personDisplayLabels(objects: ReadonlyArray<Pick<LifeOSObject, "frontmatter">>, internalDomains: readonly string[]): PersonLabel[] {
   const people = objects.filter((object) => object.frontmatter.type === "person");
-  const firstName = (person: Pick<LifeOSObject, "frontmatter">) => cleanText(person.frontmatter.given_name) || cleanText(person.frontmatter.title).split(" ")[0] || "Unnamed";
-  const holders = new Map<string, Set<string>>();
-  for (const person of people.filter(isActivePerson)) {
-    const key = foldForSearch(firstName(person));
-    holders.set(key, (holders.get(key) ?? new Set<string>()).add(person.frontmatter.id));
-  }
   return people.map((person) => {
-    const first = firstName(person);
-    const shared = [...holders.get(foldForSearch(first)) ?? []].some((id) => id !== person.frontmatter.id);
+    // Full name (first + family); without a family name the title is the best full name there is (it may be one word).
+    const first = cleanText(person.frontmatter.given_name);
     const family = cleanText(person.frontmatter.family_name);
-    // Without a family name, the title is the best longer name there is (it may equal the first name).
-    const name = !shared ? first : family ? `${first} ${family}` : cleanText(person.frontmatter.title) || first;
+    const name = first && family ? `${first} ${family}` : cleanText(person.frontmatter.title) || first || "Unnamed";
     const { isExternal, source } = externalStatus(person, internalDomains);
     return { id: person.frontmatter.id, name, label: isExternal ? name + EXTERNAL_SUFFIX : name, ...(isExternal ? { suffix: EXTERNAL_SUFFIX } : {}), isExternal, externalSource: source, unreviewed: isUnreviewed(person) };
   });
@@ -177,8 +209,14 @@ export const isUnreviewed = (person: Pick<LifeOSObject, "frontmatter">) => isUnr
 
 /** One attendee as the matcher sees it. Name-only connectors give strings; a bare address counts as an email. */
 function attendeesOf(event: CalendarEvent): CalendarAttendee[] {
-  if (event.attendeeDetails) return event.attendeeDetails;
-  return event.attendees.map((label) => normalizeEmail(label) ? { email: label } : { displayName: label });
+  // An attendee known only by an address in its name is that email (no bare-address People).
+  const named = (attendee: CalendarAttendee): CalendarAttendee => {
+    const address = attendee.email ? undefined : addressInName(attendee.displayName);
+    if (!address) return attendee;
+    const { displayName: _address, ...rest } = attendee;
+    return { ...rest, email: address.email, ...(address.displayName ? { displayName: address.displayName } : {}) };
+  };
+  return (event.attendeeDetails ?? event.attendees.map((label): CalendarAttendee => ({ displayName: label }))).map(named);
 }
 
 /** People for calendar attendees (#38): matched by email, created when unknown, the user always the self person. */
@@ -233,6 +271,40 @@ export class PeopleModule {
       field: "self_emails", normalize: normalizeEmail, invalid: "Not an email address"
     }, input, expectedHash);
     return { emails, contentHash };
+  }
+
+  /** The Ignored addresses, one entry per "Not a person" Person, so each can be undone. */
+  ignoredAddresses(): Array<{ personId: string; title: string; emails: string[]; contentHash: string }> {
+    return notAPersonPeople(this.ctx.index).map((person) => ({ personId: person.frontmatter.id, title: String(person.frontmatter.title), emails: notAPersonAddresses(person), contentHash: person.contentHash }));
+  }
+
+  /**
+   * "Not a person": the Person is flagged and archived in one write, so its addresses become Ignored addresses.
+   * One file, so no crash-recovery journal is needed (ADR 0013); repeating it changes nothing.
+   */
+  async markNotAPerson(id: string, expectedHash: string) {
+    const { ctx } = this;
+    const person = ctx.required(id, "person");
+    if (person.frontmatter.is_self === true) throw new Error("This is you; you cannot mark yourself as not a person");
+    if (!notAPersonAddresses(person).length) throw new Error("This person has no email address to ignore");
+    if (person.frontmatter.not_a_person === true && person.frontmatter.archived_at) return person;
+    const now = new Date().toISOString();
+    const updated = await ctx.update(person, { not_a_person: true, archived_at: person.frontmatter.archived_at ?? now }, { expectedHash, now });
+    await ctx.writeAudit("person.not-a-person", id, now, {});
+    await ctx.rebuildIndex();
+    return updated;
+  }
+
+  /** Undoes "Not a person": the Person is live again and invites use its addresses again. One write. */
+  async undoNotAPerson(id: string, expectedHash: string) {
+    const { ctx } = this;
+    const person = ctx.required(id, "person");
+    if (person.frontmatter.not_a_person !== true) return person;
+    const now = new Date().toISOString();
+    const updated = await ctx.update(person, { not_a_person: undefined, archived_at: undefined }, { expectedHash, now });
+    await ctx.writeAudit("person.not-a-person-undone", id, now, {});
+    await ctx.rebuildIndex();
+    return updated;
   }
 
   /** Saves the internal domains (lowercased, "@" stripped, de-duplicated). Blank entries are ignored; invalid ones are named in the error. */
@@ -357,9 +429,12 @@ export class PeopleModule {
     }
     const byEmail = this.peopleByEmail();
     const selfEmails = this.selfEmails();
+    const ignored = ignoredAddressesOf(ctx.index);
     const people: LifeOSObject[] = [];
     for (const attendee of attendees) {
       const email = normalizeEmail(attendee.email);
+      // An Ignored address is never an Attendee (it names a mailing list or shared mailbox, not a person).
+      if (email && !attendee.self && ignored.includes(email) && !selfEmails.includes(email)) continue;
       let person = attendee.self || (email && selfEmails.includes(email)) ? self : email ? byEmail.get(email) : undefined;
       if (!person && email) {
         person = await this.createPerson(email, attendee.displayName, timestamp);

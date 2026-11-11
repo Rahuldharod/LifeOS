@@ -62,6 +62,8 @@ export type ReferenceDataSettingsProps = {
   onDelete: (object: LifeObject) => Promise<boolean>;
   onSetExternal?: (object: LifeObject, choice: ExternalChoice) => Promise<boolean>;
   onConfirmReviewed?: (object: LifeObject) => Promise<boolean>;
+  /** "Not a person": archive this person and ignore its addresses in future invites. Answers whether it was done. */
+  onNotAPerson?: (person: LifeObject) => Promise<boolean>;
   /** #213: Manual merge. Without both, the People card shows no "Merge with…" button. */
   onPreviewMerge?: (person: LifeObject, choice: PersonMergeChoice) => Promise<PersonMergePreview>;
   onMergePeople?: (person: LifeObject, choice: PersonMergeChoice) => Promise<LifeObject | undefined>;
@@ -72,7 +74,8 @@ export type ReferenceDataSettingsProps = {
   onRestored: () => Promise<void>;
 };
 
-export function ReferenceDataSettings({ type, objects: listed, linkables, personLabels, selectedId, busy, readOnly, onOpen, onCreate, onSave, onDelete, onSetExternal, onConfirmReviewed, onPreviewMerge, onMergePeople, onAddEmail, onRemoveEmail, run, onRestored }: ReferenceDataSettingsProps) {
+export function ReferenceDataSettings({ type, objects: listed, linkables, personLabels, selectedId, busy, readOnly, onOpen, onCreate, onSave, onDelete, onSetExternal, onConfirmReviewed, onNotAPerson, onPreviewMerge, onMergePeople, onAddEmail, onRemoveEmail, run, onRestored }: ReferenceDataSettingsProps) {
+  const [confirmingNotAPerson, setConfirmingNotAPerson] = useState(false);
   const objects = useMemo(() => withOpenedArchived(listed, linkables as LinkedObject[], type, selectedId) as LifeObject[], [listed, linkables, type, selectedId]);
   const selected = selectedId && selectedId !== "new" ? objects.find((object) => object.frontmatter.id === selectedId) : undefined;
   const creating = selectedId === "new";
@@ -144,7 +147,13 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
           <label><small>Sensitivity</small><select aria-label="Sensitivity" value={draft.sensitivity} disabled={busy || readOnly} onChange={(event) => set("sensitivity", event.target.value)}><option value="normal">Normal</option><option value="restricted">Restricted</option></select></label>
         </div>
         {selected && type === "person" && <div className="reference-person-controls"><PersonExternalControl person={selected} labels={personLabels} disabled={busy || readOnly || dirty} onChange={onSetExternal} />{onConfirmReviewed && <PersonReviewControl person={selected} disabled={busy || readOnly || dirty} onConfirm={() => { void onConfirmReviewed(selected); }} />}
-          {onPreviewMerge && onMergePeople && <button type="button" className="person-merge-open" disabled={busy || readOnly || dirty} onClick={() => { setMergeOtherId(undefined); setMerging(true); }}>Merge with…</button>}</div>}
+          {onPreviewMerge && onMergePeople && <button type="button" className="person-merge-open" disabled={busy || readOnly || dirty} onClick={() => { setMergeOtherId(undefined); setMerging(true); }}>Merge with…</button>}
+          {onNotAPerson && selected.frontmatter.is_self !== true && <button type="button" disabled={busy || readOnly || dirty} onClick={() => setConfirmingNotAPerson(true)}>Not a person…</button>}</div>}
+        {confirmingNotAPerson && selected && onNotAPerson && <div className="person-emails-warning" role="alertdialog" aria-label={`Mark ${selected.frontmatter.title} as not a person?`}>
+          <p>Archive {selected.frontmatter.title} and ignore its email address in future calendar invites? Use this for mailing lists and shared mailboxes. You can undo it from Settings, Ignored addresses.</p>
+          <button type="button" disabled={busy} onClick={() => void onNotAPerson(selected).then((done) => { if (done) setConfirmingNotAPerson(false); })}>Not a person</button>
+          <button type="button" onClick={() => setConfirmingNotAPerson(false)}>Cancel</button>
+        </div>}
         {selected && type === "person" && onAddEmail && onRemoveEmail && onPreviewMerge && onMergePeople && <PersonEmails person={selected} disabled={busy || readOnly || dirty} onAdd={(email) => onAddEmail(selected, email)} onRemove={(email) => onRemoveEmail(selected, email)} onMergeInstead={(otherId) => { setMergeOtherId(otherId); setMerging(true); }} />}
         {merging && selected && onPreviewMerge && onMergePeople && <PersonMergeDialog key={mergeOtherId ?? "pick"} person={selected} initialOtherPersonId={mergeOtherId} people={listed} personLabels={personLabels} onPreview={(choice) => onPreviewMerge(selected, choice)} onMerge={(choice) => onMergePeople(selected, choice)} onClose={() => { setMerging(false); setMergeOtherId(undefined); }} onMerged={(kept) => onOpen(kept.frontmatter.id)} />}
         {selected && <div className="reference-record-meta"><EnvelopeBadges frontmatter={selected.frontmatter} />{Boolean(selected.frontmatter.archived_at) && <small className="archived-tag">Archived</small>}<small>Revision {selected.frontmatter.revision} · {formatDate(selected.frontmatter.updated_at)}</small></div>}

@@ -127,19 +127,31 @@ The synced setting listing the email domains of the user's own organisations. Wi
 A Person LifeOS created automatically (from a calendar invite or an adopted draft) that the user has not yet confirmed, including one created from an attendee name alone. Shown with the text "unreviewed" until the user confirms, saves or merges it. People the user creates are never unreviewed.
 _Avoid_: New contact, pending person
 
+**Email-only person**:
+A Person whose name was made up from its email address because the calendar or draft gave no real name: the local part (`jdoe@` becomes "Jdoe") or, in older records, the whole address. When merged with a named Person, the named Person is kept and the made-up name is dropped, not kept as an Alias.
+_Avoid_: Email profile, contact
+
 **Merge suggestion**:
-An Inbox proposal that two People are the same person, matched by a shared email, an email that fits the other's name (`john.doe@` for John Doe), or the same full name. It always involves at least one unreviewed person, never merges by itself, and is not proposed again once the user keeps the pair separate.
+An Inbox proposal that two People are the same person, matched by a shared email, a name that is an address the other holds, an email that fits the other's name (`john.doe@` for John Doe), or the same full name. It always involves at least one unreviewed person, never merges by itself, and is not proposed again once the user keeps the pair separate.
 _Avoid_: Duplicate alert
 
+**Duplicate clean-up**:
+The user reviewing every likely duplicate among all live People at once and merging the ones they tick, after a backup. Sure matches (a shared address, or an email that fits exactly one name) come pre-ticked; name-only matches never do. Email-only people with no twin are repaired in place instead.
+_Avoid_: Bulk merge, dedupe
+
+**Ignored address**:
+An email address of a Person the user marked "Not a person" (a mailing list or shared mailbox). That Person is archived and future invites never turn the address into an Attendee; undoing "Not a person" makes it live again.
+_Avoid_: Blocked address, group contact
+
 **Manual merge**:
-The user joining any two People from the People card. The user chooses which Person and which name to keep; the Self person always survives. The other Person's emails move across and its name becomes an alias.
+The user joining any two People from the People card. The user chooses which Person and which name to keep; the Self person always survives. The other Person's emails move across and its name becomes an Alias, unless it is an Email-only person's made-up name.
 _Avoid_: Link, combine
 
 **Alias**:
 Another name a Person is known by, usually the name of a Person merged into it. Found by search; never shown as the Display label.
 
 **Display label**:
-How a Person is shown everywhere: first name, or full name when another live person shares the first name, plus " - ext" for an External person.
+How a Person is shown everywhere: full name (first and last), or just the name LifeOS has when it knows only one, plus " - ext" for an External person.
 
 ### Interface language
 
@@ -184,6 +196,10 @@ _Avoid_: Waiting age, updated time
 **Calendar event**:
 An occurrence supplied by a connected calendar. Opening one is a read-only preview and creates no LifeOS object.
 _Avoid_: Meeting object, appointment
+
+**Attendee**:
+A person invited to a Calendar event, resolved to a Person. Rooms and group addresses (mailing lists) are not Attendees and never become People.
+_Avoid_: Guest, participant, contact
 
 **Meeting record**:
 The internal LifeOS object created on the first edit of a Calendar event, anchoring its Meeting Note, enrichment and event identity. The interface continues to present the Calendar event rather than exposing this implementation record as a separate destination.

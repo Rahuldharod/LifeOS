@@ -758,3 +758,7 @@ h2, h3 { overflow-wrap: anywhere; }
 .about-lifeos-versions span { color: var(--color-text); font-weight: 700; }
 .about-lifeos .about-lifeos-warning { margin-top: var(--space-2); color: var(--color-warning); }
 .about-lifeos-warning::before { margin-right: var(--space-2); content: "⚠" / ""; }
+/* Ignored addresses: one row per "Not a person" Person, with its Undo button. */
+.ignored-addresses { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.ignored-addresses li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ignored-addresses li > span { overflow-wrap: anywhere; }

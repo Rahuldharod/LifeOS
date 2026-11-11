@@ -47,6 +47,8 @@ export interface Endpoints {
 
   // Entities and people (PB-010, #39, #87)
   "GET /api/v1/entities/:type": { params: { type: W.EntityType }; response: W.LifeObject[] };
+  // A person titled with an email address ("a@example.com" or "Name <a@example.com>") stores it as the email; if a Person
+  // already holds that address, that Person is answered instead of a duplicate.
   "POST /api/v1/entities/:type": { params: { type: W.EntityType }; body: { fields: Record<string, unknown> }; response: W.LifeObject };
   "PATCH /api/v1/entities/by-id/:id": { body: { fields: Record<string, unknown>; expectedHash: string }; response: W.LifeObject };
   "DELETE /api/v1/entities/by-id/:id": Guarded & { response: unknown };
@@ -61,6 +63,13 @@ export interface Endpoints {
   // (the survivor rule, the name with a family name); the Self person always survives. The merge answers the kept person.
   "GET /api/v1/people/:id/merge-preview": { query: W.PersonMergeChoice; response: W.PersonMergePreview };
   "POST /api/v1/people/:id/merge": { body: W.PersonMergeChoice; response: W.LifeObject };
+  // "Not a person": the person is flagged and archived, so its addresses become Ignored addresses; undo reverses both.
+  "POST /api/v1/people/:id/not-a-person": Guarded & { response: W.LifeObject };
+  "POST /api/v1/people/:id/not-a-person/undo": Guarded & { response: W.LifeObject };
+  "GET /api/v1/people/ignored-addresses": { response: W.IgnoredAddress[] };
+  // Duplicate clean-up: the list (writes nothing), then a backup and the ticked rows. A failed backup changes nothing.
+  "GET /api/v1/people/duplicates": { response: W.DuplicateCleanupRow[] };
+  "POST /api/v1/people/duplicates/clean-up": { body: W.DuplicateCleanupChoice; response: W.DuplicateCleanupResult };
 
   // Calendar (#88)
   "GET /api/v1/calendar/events": { query: Range; response: W.CalendarEvent[] };
