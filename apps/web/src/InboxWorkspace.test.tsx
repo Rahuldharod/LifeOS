@@ -20,7 +20,7 @@ const object = (id: string, type: string, title: string): LifeObject => ({
 });
 
 let root: Root | undefined;
-afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; root = undefined; vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; root = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 async function render(props: Partial<React.ComponentProps<typeof InboxWorkspace>> = {}) {
   root = createRoot(document.body.appendChild(document.createElement("div")));
@@ -135,13 +135,12 @@ describe("InboxWorkspace", () => {
     expect((document.querySelector("[aria-label='Review queue']") as HTMLElement).hidden).toBe(false);
   });
 
-  it("keeps completion inline and emits a brief notification", async () => {
+  it("emits a brief notification after a decision", async () => {
     vi.useFakeTimers();
     const accept = vi.fn(async () => true);
     await render({ selectedId: "r1", onAccept: accept });
     await click("Accept task");
     expect(accept).toHaveBeenCalledOnce();
-    expect(document.querySelector("[aria-label='Review detail']")?.textContent).toContain("Accepted");
     expect(document.querySelector("[role='status']")?.textContent).toContain("Proposal accepted");
     await act(async () => vi.advanceTimersByTime(3500));
     expect(document.querySelector("[role='status']")).toBeNull();
@@ -179,16 +178,98 @@ describe("InboxWorkspace", () => {
     expect(document.querySelector("[aria-label='Review detail']")?.textContent).not.toContain("Rejected");
   });
 
-  it("keeps the restricted marker visible through a decision", async () => {
-    await render({ reviews: [review("restricted", "Private follow-up", { sensitivity: "restricted" })], selectedId: "restricted" });
+  it("keeps the restricted marker visible while a decision saves", async () => {
+    let release!: () => void;
+    await render({ reviews: [review("restricted", "Private follow-up", { sensitivity: "restricted" })], selectedId: "restricted", onAccept: () => new Promise<boolean>((resolve) => { release = () => resolve(true); }) });
     expect(document.querySelector("[aria-label='Review detail']")?.textContent).toContain("Restricted");
     await click("Accept task");
-    expect(document.querySelector("[aria-label='Review detail']")?.textContent).toMatch(/Restricted.*Accepted|Accepted.*Restricted/s);
+    expect(document.querySelector("[aria-label='Review detail']")?.textContent).toContain("Restricted");
+    await act(async () => release());
   });
   it("enables Accept summary when the stored title has surrounding spaces (#195)", async () => {
     await render({ reviews: [review("r3", "Summary: Weekly sync ", { review_type: "summary", target_object_type: "meeting", proposed_fields: { summary: "A concise summary." } })], selectedId: "r3" });
     const button = (name: string) => [...document.querySelectorAll("button")].find((item) => item.textContent === name) as HTMLButtonElement;
     expect(button("Accept summary").disabled).toBe(false);
     expect(button("Save edits").disabled).toBe(true);
+  });
+});
+
+/** PB-035: a stateful Inbox like the app's — a decided item leaves `reviews`, and the URL follows `onOpen`. */
+describe("InboxWorkspace auto-advance (PB-035)", () => {
+  const queue = () => [
+    review("a", "Alpha task", { created_at: "2026-10-10T10:00:00Z" }),
+    review("b", "Bravo task", { created_at: "2026-10-10T09:00:00Z" }),
+    review("c", "Charlie decision", { created_at: "2026-10-10T08:00:00Z", target_object_type: "decision" })
+  ];
+  let opened: Array<[string, { replace?: boolean } | undefined]> = [];
+
+  function Harness({ initial, selectedId }: { initial: ReturnType<typeof queue>; selectedId: string }) {
+    const [reviews, setReviews] = React.useState(initial);
+    const [route, setRoute] = React.useState<string | undefined>(selectedId);
+    const decide = async (item: { frontmatter: { id: string } }) => { setReviews((current) => current.filter((entry) => entry.frontmatter.id !== item.frontmatter.id)); setRoute(undefined); return true; };
+    return <InboxWorkspace reviews={reviews} selectedId={route} objects={[object("meeting-1", "meeting", "Pilot review")]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris"
+      onOpen={(id, options) => { opened.push([id, options]); setRoute(id); }} onAccept={decide} onReject={decide} onSave={async () => true} />;
+  }
+  async function mount(selectedId: string, initial = queue()) {
+    opened = [];
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<Harness initial={initial} selectedId={selectedId} />));
+  }
+  const heading = () => document.querySelector("[aria-label='Review detail'] h2")?.textContent;
+  const button = (label: string) => [...document.querySelectorAll("button")].find((item) => item.getAttribute("aria-label") === label || item.textContent?.trim() === label) as HTMLButtonElement;
+  const press = async (key: string, target: EventTarget = document.body) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
+
+  it("opens the item below after accept, replacing the URL", async () => {
+    await mount("b");
+    await click("Accept task");
+    expect(heading()).toBe("Charlie decision");
+    expect(opened.at(-1)).toEqual(["c", { replace: true }]);
+  });
+
+  it("opens the item above when the bottom item is rejected", async () => {
+    await mount("c");
+    await click("Reject");
+    expect(heading()).toBe("Bravo task");
+  });
+
+  it("shows Inbox clear after the last item", async () => {
+    await mount("a", [review("a", "Alpha task")]);
+    await click("Accept task");
+    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Inbox clear");
+    expect(document.querySelector("[aria-label='Review detail']")?.textContent).toContain("Select a proposal");
+  });
+
+  it("offers Clear filters when filters hide the remaining items", async () => {
+    await mount("c");
+    await choose("Filter by proposal type", "Decisions");
+    await click("Accept decision");
+    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("No matching proposals");
+    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("2 proposals are hidden by the filters.");
+    await click("Clear filters");
+    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Alpha task");
+    expect(heading()).toBe("Alpha task");
+  });
+
+  it("keeps the same item open after Save edits", async () => {
+    await mount("b");
+    await type("Proposed title", "Bravo task, revised");
+    await click("Save edits");
+    expect(heading()).toBe("Bravo task");
+  });
+
+  it("moves with Previous/Next and the arrow keys, but not while typing", async () => {
+    await mount("a");
+    expect(button("Previous proposal").disabled).toBe(true);
+    expect(document.querySelector(".inbox-step")?.textContent).toContain("1 of 3");
+    await click("Next proposal");
+    expect(heading()).toBe("Bravo task");
+    expect(opened.at(-1)).toEqual(["b", undefined]);
+    await press("ArrowDown");
+    expect(heading()).toBe("Charlie decision");
+    expect(button("Next proposal").disabled).toBe(true);
+    await press("ArrowUp");
+    expect(heading()).toBe("Bravo task");
+    await press("ArrowDown", document.querySelector("[aria-label='Proposed title']")!);
+    expect(heading()).toBe("Bravo task");
   });
 });

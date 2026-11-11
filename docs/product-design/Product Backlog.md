@@ -27,9 +27,8 @@ Items required to make the current version dependable for regular use. Reviewed 
 
 | ID | Improvement | User problem / desired outcome | Impact | Confidence | Effort | Owner | GitHub |
 | --- | --- | --- | ---: | --- | ---: | --- | --- |
-| PB-034 | Create a Standalone Note | A "New note" button on the Notes tab opens the editor at once; the full header (title, Project, Client, Product, People, Restricted) works before the file exists, and nothing is written until the first real edit. New type `standalone-note` in `notes/`, origin `app`, title auto-filled as "Note <date time>" and renamable. Grilled 2026-10-14, ADR 0023. | 4 | High | 2 | agent | #222, #223, #224 |
 | PB-031 | Split Legacy shared Notes | One-time reviewed split of each Legacy shared Note (ADR 0019 format) into one Note per occurrence, backup first, originals kept until confirmed, so the Visual editor and the collapsible series view work on old data. Known case: the Weekly Prio note; [TBD] count any others. See *Analysis* below. | 3 | Medium | 3 | — | — |
-| PB-035 | Inbox auto-advance | After a decision on a recommendation (accept, edit, reject, snooze), move to the next item so a batch is processed faster. Open: what happens at the last item (empty state), and a way to go back one step. From the 2026-10-13 Inbox. | 3 | Medium | 1 | — | — |
+| PB-035 | Inbox auto-advance | After accepting or rejecting a Review Item, open the next one so a batch is processed faster. Next = the item below in the current filtered list (the one above if it was the bottom one); "Save edits" does not advance. After the last item: "Inbox clear", or "No matching proposals" with Clear filters when filters hide the rest. Previous/Next buttons and arrow keys move between waiting items; no undo of a decision. Snooze split out to PB-040. Grilled 2026-11-11. | 3 | High | 1 | agent | #227 |
 | PB-036 | Dyslexia-friendly font and dark theme | Optional reading font and dark theme (PRD stories 88–91), moved from Phase A to Phase B (#90). | 3 | High | 2 | — | — |
 | PB-037 | `@` tagging in note and task editors | Typing `@` plus a character (for example `@P`) opens a list under the text, grouped by type across all objects, for example *Person:* Paul; *Product:* P.Promo, P.Picks. Up/Down arrows move through the options; Enter or Space picks one and sets that metadata on the object. The `@` text is not kept: once picked it disappears and only the metadata is set (decided 2026-10-13). Build after PB-034, which shares the pickers. From the 2026-10-13 Inbox. | 4 | Medium | 4 | — | — |
 
@@ -55,6 +54,7 @@ Valuable ideas that are not prerequisites for dependable daily use.
 | PB-015 | Backlog inside LifeOS | Represent product ideas as first-class LifeOS objects, with prioritization and links to projects or GitHub Issues. | 3 | Medium | 4 | — | — |
 | PB-016 | Mobile/read-only companion | Provide a safe way to review notes and tasks from a smaller device without creating concurrent-write risk. | 3 | Low | 5 | — | — |
 | PB-039 | Keep calendar organizer and attendee RSVP status | Today a synced meeting keeps its attendees but not who organised it or who accepted, declined or has not answered. Store the organizer (as a Person) and each attendee's RSVP status on the meeting, so the user can see who is really coming and the Agent Index can use it. Deliberately out of scope of #211. [TBD: check what the Google Calendar connector returns and whether RSVP changes should refresh on sync.] | 3 | Medium | 3 | — | — |
+| PB-040 | Snooze a Review Item | Hide a proposal from the Inbox until a chosen date, then bring it back. Needs a new Review Item state and a wake-up date. Split out of PB-035 on 2026-11-11. | 2 | Medium | 3 | — | — |
 
 ## Inbox
 
@@ -128,6 +128,7 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-018 | App Feedback: nav-bar button opens a resizable popup with a Bug/Feature toggle; each item is a file in `_inbox/feedback/`, promoted into this backlog by an Agent (ADR 0022; #199, #200, #201) | 2026-10-14 |
 | PB-032 | App version `YY.MM.DD.N` worked out from git history (#208) | 2026-10-14 |
 | PB-033 | App version shown in the nav footer and an "About LifeOS" card on System (#208) | 2026-10-14 |
+| PB-034 | Standalone Note: "New note" on the Notes tab, full header before the file exists, nothing written until the first real edit; shows in filters, search, links and the Agent Index (ADR 0023; #222, #223, #224) | 2026-10-14 |
 
 ## Decision log
 
