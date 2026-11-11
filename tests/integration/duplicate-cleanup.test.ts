@@ -91,4 +91,22 @@ describe("Duplicate clean-up", () => {
     const result = await application.applyDuplicateCleanup({ merges: [{ keepPersonId: samA.frontmatter.id, mergePersonId: samB.frontmatter.id }, { keepPersonId: samB.frontmatter.id, mergePersonId: samA.frontmatter.id }], repairs: [] }, async () => ({ backupId: "b" }));
     expect(result).toMatchObject({ merged: 1, skipped: 1 });
   });
+
+  it("never pre-ticks a row whose Person is in another row too, so one ambiguous email cannot chain two merges", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-cleanup-"));
+    roots.push(root);
+    const calendar = new FakeCalendar();
+    const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), calendar, undefined, "test", new FilesystemInboxStore(root));
+    await application.rebuildIndex();
+    await application.createEntity("person", { title: "John Doe", given_name: "John", family_name: "Doe" });
+    await application.createEntity("person", { title: "John Doe", given_name: "John", family_name: "Doe" });
+    const startsAt = new Date(Date.now() + 3_600_000).toISOString();
+    calendar.events = [{ externalId: "e1", title: "Sync", startsAt, endsAt: new Date(Date.parse(startsAt) + 1_800_000).toISOString(), timezone: "Europe/Paris", attendees: [], attendeeDetails: [{ email: "john.doe@example.com", displayName: "JD" }] }];
+    await application.createMeetingFromEvent("e1");
+    const rows = await application.duplicateCleanup();
+    const emailRows = rows.filter((row) => row.kind === "merge" && row.match === "name-email");
+    expect(emailRows).toHaveLength(2);
+    expect(rows.filter((row) => row.kind === "merge" && row.preTicked)).toEqual([]);
+  });
 });
+

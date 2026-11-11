@@ -58,4 +58,27 @@ describe("Merge suggestion: a name that is another Person's address", () => {
     expect(kept.frontmatter.title).toBe("Jane Doe");
     expect(kept.frontmatter.aliases ?? []).toEqual([]);
   });
+
+  it("keeps the Person holding the address even when its own name is made up too", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-merge-address-"));
+    roots.push(root);
+    await seedBareAddressPerson(root, "jdoe@example.com");
+    const calendar = new FakeCalendar();
+    const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), calendar, undefined, "test", new FilesystemInboxStore(root));
+    await application.rebuildIndex();
+    const startsAt = new Date(Date.now() + 3_600_000).toISOString();
+    calendar.events = [{ externalId: "e1", title: "Sync", startsAt, endsAt: new Date(Date.parse(startsAt) + 1_800_000).toISOString(), timezone: "Europe/Paris", attendees: [], attendeeDetails: [{ email: "jdoe@example.com" }] }];
+    await application.createMeetingFromEvent("e1");
+    const twin = application.entities("person").find((person) => person.frontmatter.title === "jdoe")!;
+    await application.suggestPersonMerges();
+    expect(merges(application)[0]!.frontmatter.proposed_fields).toMatchObject({ keep_person_id: twin.frontmatter.id, merge_person_id: BARE_ID, match: "name-address" });
+  });
+
+  it("keeps a real one-word name the user gave as an Alias, even when it equals the email's local part", async () => {
+    const { application, jane } = await setup();
+    const jean = await application.createEntity("person", { title: "Jean" });
+    await application.addPersonEmail(jean.frontmatter.id, "jean@example.org", application.object(jean.frontmatter.id).contentHash);
+    const kept = await application.mergePeople({ personId: jean.frontmatter.id, otherPersonId: jane.frontmatter.id, keepPersonId: jane.frontmatter.id });
+    expect(kept.frontmatter.aliases).toContain("Jean");
+  });
 });

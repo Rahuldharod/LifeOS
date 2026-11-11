@@ -57,12 +57,21 @@ const nameKey = (value: unknown) => typeof value === "string" ? foldForSearch(va
 const namesOf = (person: LifeOSObject) => [person.frontmatter.title, `${String(person.frontmatter.given_name ?? "")} ${String(person.frontmatter.family_name ?? "")}`, ...(Array.isArray(person.frontmatter.aliases) ? person.frontmatter.aliases : [])].filter((name): name is string => typeof name === "string" && name.trim() !== "");
 const candidateOf = (person: LifeOSObject): NameCandidate => ({ id: person.frontmatter.id, names: namesOf(person) });
 const localPart = (email: string) => email.split("@")[0]!.replace(/\+.*$/, "");
-/** An Email-only person's made-up name: an address, or exactly the local part of one of its own emails ("Jdoe"). */
+/**
+ * An Email-only person's made-up name: an address, or (for a Person LifeOS created and the user never confirmed) exactly
+ * the local part of one of its own emails ("Jdoe"). A name the user gave or confirmed is never made up.
+ */
 const hasMadeUpName = (person: LifeOSObject) => {
   if (person.frontmatter.is_self === true) return false;
   if (addressInName(person.frontmatter.title)) return true;
+  if (!isUnreviewedPerson(person.frontmatter)) return false;
   const title = nameKey(person.frontmatter.title);
   return personEmails(person).some((email) => nameKey(localPart(email)) === title);
+};
+/** The Person whose name is an address the other holds is merged into the holder, whatever else they rank. */
+const holderFirst = (left: LifeOSObject, right: LifeOSObject): [LifeOSObject, LifeOSObject] => {
+  const named = addressInName(left.frontmatter.title)?.email;
+  return named && personEmails(right).includes(named) ? [right, left] : [left, right];
 };
 
 const matchReasons: Record<PersonMergeMatch, string> = { email: "Both have the same email address.", "name-address": "The name of one is an email address of the other.", "email-local-part": "Their email addresses match on two internal domains.", "name-email": "An email address of one fits the name of the other.", name: "Their names match.", manual: "You asked for this merge." };
@@ -132,7 +141,12 @@ export class PersonMergeModule {
    */
   async cleanupRows(): Promise<DuplicateCleanupRow[]> {
     await this.ctx.rebuildIndex();
-    const merges = this.scan(undefined, { everyone: true }).flatMap(({ match, keep, merge }): DuplicateCleanupRow[] => match ? [{ kind: "merge", keepPersonId: keep.frontmatter.id, mergePersonId: merge.frontmatter.id, keepTitle: String(keep.frontmatter.title), mergeTitle: String(merge.frontmatter.title), match, preTicked: sureMatches.has(match) }] : []);
+    const pairs = this.scan(undefined, { everyone: true }).flatMap(({ match, keep, merge }) => match ? [{ match, keep, merge }] : []);
+    // A Person in more than one pair is ambiguous (one email fitting two names, or a chain): none of its rows is pre-ticked.
+    const seen = new Map<string, number>();
+    for (const { keep, merge } of pairs) for (const id of [keep.frontmatter.id, merge.frontmatter.id]) seen.set(id, (seen.get(id) ?? 0) + 1);
+    const alone = (person: LifeOSObject) => seen.get(person.frontmatter.id) === 1;
+    const merges = pairs.map(({ match, keep, merge }): DuplicateCleanupRow => ({ kind: "merge", keepPersonId: keep.frontmatter.id, mergePersonId: merge.frontmatter.id, keepTitle: String(keep.frontmatter.title), mergeTitle: String(merge.frontmatter.title), match, preTicked: sureMatches.has(match) && alone(keep) && alone(merge) }));
     const people = this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
     const held = new Set(people.flatMap(personEmails));
     const repairs = people.filter(isLive).flatMap((person): DuplicateCleanupRow[] => {
@@ -168,7 +182,7 @@ export class PersonMergeModule {
         // The clean-up looks again at pairs already proposed, except those the user kept separate.
         const settled = existing && (!options.everyone || existing.frontmatter.status === "rejected");
         const match = settled ? undefined : this.match(left, right, candidates);
-        const [keep, merge] = this.order(left, right);
+        const [keep, merge] = match === "name-address" ? holderFirst(left, right) : this.order(left, right);
         pairs.push({ key, existing, match, keep, merge });
       }
     }
