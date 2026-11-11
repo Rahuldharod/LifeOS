@@ -140,7 +140,7 @@ The user reviewing every likely duplicate among all live People at once and merg
 _Avoid_: Bulk merge, dedupe
 
 **Ignored address**:
-An email address the user marked "Not a person" (a mailing list or shared mailbox). Its Person is archived and future invites never turn it into an Attendee.
+An email address of a Person the user marked "Not a person" (a mailing list or shared mailbox). That Person is archived and future invites never turn the address into an Attendee; undoing "Not a person" makes it live again.
 _Avoid_: Blocked address, group contact
 
 **Manual merge**:

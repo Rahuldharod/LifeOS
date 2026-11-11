@@ -124,6 +124,8 @@ export type DuplicateCleanupRow =
   | { kind: "repair"; personId: string; title: string; email: string };
 /** The rows the user ticked. */
 export type DuplicateCleanupChoice = { merges: Array<{ keepPersonId: string; mergePersonId: string }>; repairs: string[] };
+/** One "Not a person" Person and the addresses invites now skip (an Ignored address each). */
+export type IgnoredAddress = { personId: string; title: string; emails: string[]; contentHash: string };
 export type DuplicateCleanupResult = { backupId: string; merged: number; repaired: number; skipped: number };
 
 export type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };

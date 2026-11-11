@@ -236,10 +236,11 @@ export class LifeOSApplication {
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }
   getSelfEmails() { return this.people.getSelfEmails(); }
-  getIgnoredAddresses() { return this.people.getIgnoredAddresses(); }
-  saveIgnoredAddresses(emails: unknown[], expectedHash?: string) { return this.people.saveIgnoredAddresses(emails, expectedHash); }
-  /** "Not a person": ignore the Person's addresses in future invites and archive it. */
+  /** Ignored addresses, one entry per "Not a person" Person. */
+  ignoredAddresses() { return this.people.ignoredAddresses(); }
+  /** "Not a person": archive the Person and ignore its addresses in future invites. */
   markNotAPerson(id: string, expectedHash: string) { return this.people.markNotAPerson(id, expectedHash); }
+  undoNotAPerson(id: string, expectedHash: string) { return this.people.undoNotAPerson(id, expectedHash); }
   saveSelfEmails(emails: unknown[], expectedHash?: string) { return this.people.saveSelfEmails(emails, expectedHash); }
 
   // Open Points (#42)

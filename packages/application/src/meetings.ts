@@ -2,7 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { acceptedSummaryText } from "@lifeos/shared";
 import { uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
 import { DEFAULT_NOTE_BODY, markdownFileName, type AppContext } from "./context.js";
-import { PeopleModule } from "./people.js";
+import { attendeeSnapshot, PeopleModule } from "./people.js";
 import { operationKinds, type CalendarEvent, type CalendarEventReference, type Operation } from "./ports.js";
 import { isLive, isMeetingRestricted, isRestricted, liveMeetingNote, OneAtATime, resolveObjectRedirect } from "./support.js";
 
@@ -150,7 +150,7 @@ export class MeetingsModule {
         timezone: event.timezone,
         attendee_ids: context.people.map((person) => person.frontmatter.id),
         // Immutable display snapshot: Person records may be renamed or deleted later.
-        attendee_snapshot: [...event.attendees],
+        attendee_snapshot: attendeeSnapshot(event, this.ctx.index),
         primary_client_id: context.client?.frontmatter.id,
         primary_product_id: context.product?.frontmatter.id,
         primary_project_id: context.project?.frontmatter.id,
@@ -245,7 +245,7 @@ export class MeetingsModule {
         ends_at: event.endsAt,
         timezone: event.timezone,
         is_all_day: event.isAllDay ?? false,
-        attendee_snapshot: [...event.attendees],
+        attendee_snapshot: attendeeSnapshot(event, this.ctx.index),
         ...(event.location ? { location: event.location } : {}),
         ...(event.joinUrl ? { join_url: event.joinUrl } : {}),
         ...(seriesId ? { recurrence_series_id: seriesId } : {}),

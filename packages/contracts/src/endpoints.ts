@@ -61,8 +61,10 @@ export interface Endpoints {
   // (the survivor rule, the name with a family name); the Self person always survives. The merge answers the kept person.
   "GET /api/v1/people/:id/merge-preview": { query: W.PersonMergeChoice; response: W.PersonMergePreview };
   "POST /api/v1/people/:id/merge": { body: W.PersonMergeChoice; response: W.LifeObject };
-  // "Not a person": the person's addresses join the Ignored addresses and the person is archived.
+  // "Not a person": the person is flagged and archived, so its addresses become Ignored addresses; undo reverses both.
   "POST /api/v1/people/:id/not-a-person": Guarded & { response: W.LifeObject };
+  "POST /api/v1/people/:id/not-a-person/undo": Guarded & { response: W.LifeObject };
+  "GET /api/v1/people/ignored-addresses": { response: W.IgnoredAddress[] };
   // Duplicate clean-up: the list (writes nothing), then a backup and the ticked rows. A failed backup changes nothing.
   "GET /api/v1/people/duplicates": { response: W.DuplicateCleanupRow[] };
   "POST /api/v1/people/duplicates/clean-up": { body: W.DuplicateCleanupChoice; response: W.DuplicateCleanupResult };
@@ -82,9 +84,6 @@ export interface Endpoints {
   "GET /api/v1/settings/self-emails": { response: W.SelfEmails };
   "GET /api/v1/settings/claude-skills": { response: W.ClaudeSkillsStatus };
   "PUT /api/v1/settings/self-emails": { body: { emails: string[]; expectedHash?: string }; response: W.SelfEmails };
-  // Ignored addresses (mailing lists, shared mailboxes): calendar invites never turn them into Attendees.
-  "GET /api/v1/settings/ignored-addresses": { response: W.SelfEmails };
-  "PUT /api/v1/settings/ignored-addresses": { body: { emails: string[]; expectedHash?: string }; response: W.SelfEmails };
   "GET /api/v1/settings/today": { response: W.TodaySettings };
   "PUT /api/v1/settings/today": { body: { meetingHoursThreshold?: number; briefTime?: string; briefTimeZone?: string; briefDays?: W.Weekday[]; expectedHash?: string }; response: W.TodaySettings };
   "GET /api/v1/settings/daily-focus": { response: W.FocusSettings };

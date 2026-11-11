@@ -6,7 +6,8 @@ import { LifeOSApplication, personEmails, type CalendarConnector, type CalendarE
 import { MemoryIndex } from "@lifeos/index-memory";
 import { MarkdownObjectStore } from "@lifeos/object-store-markdown";
 
-// "Not a person" and Ignored addresses (CONTEXT.md): a mailing list's Person is archived and future invites skip its address.
+// "Not a person" and Ignored addresses (CONTEXT.md): a mailing list's Person is flagged and archived in one write, and
+// future invites skip its address everywhere (attendees, the note's People and the attendee list saved with the meeting).
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
@@ -37,13 +38,15 @@ describe("Not a person", () => {
     const { root, calendar, application, team } = await setup();
     await application.markNotAPerson(team.frontmatter.id, team.contentHash);
     expect(application.object(team.frontmatter.id).frontmatter.archived_at).toEqual(expect.any(String));
-    expect((await application.getIgnoredAddresses()).emails).toEqual(["team@example.com"]);
-    expect(await readFile(path.join(root, "settings", "ignored-addresses.md"), "utf8")).toContain("team@example.com");
+    expect(application.ignoredAddresses()).toEqual([{ personId: team.frontmatter.id, title: team.frontmatter.title, emails: ["team@example.com"], contentHash: expect.any(String) }]);
+    expect(await readFile(path.join(root, application.object(team.frontmatter.id).relativePath), "utf8")).toContain("not_a_person: true");
 
     calendar.events = [invite("e2", ["Team@Example.com", "kim.lee@example.com"])];
     const workspace = await application.createMeetingFromEvent("e2");
     const kim = application.entities("person").find((person) => person.frontmatter.title === "Kim Lee")!;
     expect(workspace.meeting.frontmatter.attendee_ids).toEqual([kim.frontmatter.id]);
+    expect(workspace.note!.frontmatter.people_ids).toEqual([kim.frontmatter.id]);
+    expect(workspace.meeting.frontmatter.attendee_snapshot).toEqual(["kim.lee@example.com"]);
   });
 
   it("refuses the Self person and a Person with no email address", async () => {
@@ -54,11 +57,13 @@ describe("Not a person", () => {
     await expect(application.markNotAPerson(nameOnly.frontmatter.id, nameOnly.contentHash)).rejects.toThrow(/no email address/);
   });
 
-  it("lets the user take an address off the ignore list", async () => {
+  it("lets the user undo it: the Person is live again and invites use its address again", async () => {
     const { calendar, application, team } = await setup();
-    await application.markNotAPerson(team.frontmatter.id, team.contentHash);
-    const { contentHash } = await application.getIgnoredAddresses();
-    await application.saveIgnoredAddresses([], contentHash);
+    const marked = await application.markNotAPerson(team.frontmatter.id, team.contentHash);
+    const restored = await application.undoNotAPerson(team.frontmatter.id, marked.contentHash);
+    expect(restored.frontmatter.archived_at).toBeUndefined();
+    expect(restored.frontmatter.not_a_person).toBeUndefined();
+    expect(application.ignoredAddresses()).toEqual([]);
     calendar.events = [invite("e3", ["team@example.com"])];
     const workspace = await application.createMeetingFromEvent("e3");
     expect(workspace.meeting.frontmatter.attendee_ids).toEqual([team.frontmatter.id]);
