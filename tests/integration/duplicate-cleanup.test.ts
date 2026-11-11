@@ -108,5 +108,25 @@ describe("Duplicate clean-up", () => {
     expect(emailRows).toHaveLength(2);
     expect(rows.filter((row) => row.kind === "merge" && row.preTicked)).toEqual([]);
   });
+
+  it("shows a first-name-only Person next to the one full name it fits, unticked, and none when several fit", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lifeos-cleanup-"));
+    roots.push(root);
+    const application = new LifeOSApplication(new MarkdownObjectStore(root), new MemoryIndex(), new FakeCalendar(), undefined, "test", new FilesystemInboxStore(root));
+    await application.rebuildIndex();
+    const morgan = await application.createEntity("person", { title: "Morgan Ellis", given_name: "Morgan", family_name: "Ellis" });
+    const short = await application.createEntity("person", { title: "Morgan" });
+    await application.createEntity("person", { title: "Alex" });
+    await application.createEntity("person", { title: "Alex Stone", given_name: "Alex", family_name: "Stone" });
+    await application.createEntity("person", { title: "Alex Ward", given_name: "Alex", family_name: "Ward" });
+    const rows = await application.duplicateCleanup();
+    expect(rows).toEqual([{ kind: "merge", keepPersonId: morgan.frontmatter.id, mergePersonId: short.frontmatter.id, keepTitle: "Morgan Ellis", mergeTitle: "Morgan", match: "first-name", preTicked: false }]);
+  });
+
+  it("leaves a repaired Email-only person unreviewed, so the user confirms it", async () => {
+    const { application } = await setup();
+    await application.applyDuplicateCleanup({ merges: [], repairs: [BARE_SOLO] }, async () => ({ backupId: "b" }));
+    expect(application.object(BARE_SOLO).frontmatter.review_state).toBe("unreviewed");
+  });
 });
 

@@ -87,7 +87,7 @@ export function personMatchesQuery(frontmatter: Readonly<Record<string, unknown>
   return words.every((word) => haystack.includes(word));
 }
 
-export { emailFitsName, emailNameMatch, foldForSearch, isUnreviewedPerson, type EmailNameMatchKind, type NameCandidate } from "./person-match.js";
+export { emailFitsName, emailNameMatch, foldForSearch, isUnreviewedPerson, type EmailNameMatchKind, type NameCandidate, type PersonMergeMatch } from "./person-match.js";
 export { appVersion, unknownAppInfo, type AppInfo, type BuildHistory, type MainCommit } from "./app-version.js";
 
 /** `Note 14 Oct 2026 14:05`: the auto title of a Standalone Note, in the user's time zone (throws on an invalid zone). */

@@ -47,6 +47,8 @@ export interface Endpoints {
 
   // Entities and people (PB-010, #39, #87)
   "GET /api/v1/entities/:type": { params: { type: W.EntityType }; response: W.LifeObject[] };
+  // A person titled with an email address ("a@example.com" or "Name <a@example.com>") stores it as the email; if a Person
+  // already holds that address, that Person is answered instead of a duplicate.
   "POST /api/v1/entities/:type": { params: { type: W.EntityType }; body: { fields: Record<string, unknown> }; response: W.LifeObject };
   "PATCH /api/v1/entities/by-id/:id": { body: { fields: Record<string, unknown>; expectedHash: string }; response: W.LifeObject };
   "DELETE /api/v1/entities/by-id/:id": Guarded & { response: unknown };

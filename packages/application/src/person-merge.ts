@@ -1,5 +1,5 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
-import { emailNameMatch, isUnreviewedPerson, type NameCandidate } from "@lifeos/shared";
+import { emailNameMatch, isUnreviewedPerson, type NameCandidate, type PersonMergeMatch } from "@lifeos/shared";
 import { foldForSearch, type AppContext } from "./context.js";
 import { addressInName, internalDomainsOf, personEmails } from "./people.js";
 import { operationKinds, type Operation } from "./ports.js";
@@ -17,13 +17,15 @@ import { isLive, OneAtATime, replayRoles, sameValue, type ReplayRole } from "./s
  */
 
 export const personMergeReviewType = "person-merge";
-export type PersonMergeMatch = "email" | "name-address" | "email-local-part" | "name" | "name-email" | "manual";
+export type { PersonMergeMatch };
 /** `name_from_person_id` (manual merges, #213) says whose name the kept person ends up with; absent means the kept person's own. */
 export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string; name_from_person_id?: string }
 /** One line of the Duplicate clean-up: a pair to merge (sure matches pre-ticked), or an Email-only person to repair in place. */
 export type DuplicateCleanupRow =
   | { kind: "merge"; keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: PersonMergeMatch; preTicked: boolean }
   | { kind: "repair"; personId: string; title: string; email: string };
+/** The rows the user ticked. */
+export interface DuplicateCleanupChoice { merges: ReadonlyArray<{ keepPersonId: string; mergePersonId: string }>; repairs: readonly string[] }
 /** Matches on an address are sure; a match on names alone is for the user to judge. */
 const sureMatches = new Set<PersonMergeMatch>(["email", "name-address", "name-email"]);
 /** A likely duplicate pair and why it was found (#215). `keep` is the person who would survive. */
@@ -68,13 +70,27 @@ const hasMadeUpName = (person: LifeOSObject) => {
   const title = nameKey(person.frontmatter.title);
   return personEmails(person).some((email) => nameKey(localPart(email)) === title);
 };
+/** One-word name of one Person that is the first name of the other, and of no other live Person (the clean-up only). */
+const firstNameMatch = (left: LifeOSObject, right: LifeOSObject, people: readonly LifeOSObject[]): PersonMergeMatch | undefined => {
+  const oneWord = (person: LifeOSObject) => { const title = nameKey(person.frontmatter.title); return title && !title.includes(" ") && !hasMadeUpName(person) ? title : undefined; };
+  const firstOfFull = (person: LifeOSObject) => {
+    const family = nameKey(person.frontmatter.family_name);
+    const given = nameKey(person.frontmatter.given_name) || nameKey(person.frontmatter.title).split(" ")[0];
+    return family || nameKey(person.frontmatter.title).includes(" ") ? given : undefined;
+  };
+  const fits = (short: LifeOSObject, full: LifeOSObject) => {
+    const name = oneWord(short);
+    return Boolean(name) && firstOfFull(full) === name && people.filter((person) => person !== short && firstOfFull(person) === name).length === 1;
+  };
+  return fits(left, right) || fits(right, left) ? "first-name" : undefined;
+};
 /** The Person whose name is an address the other holds is merged into the holder, whatever else they rank. */
 const holderFirst = (left: LifeOSObject, right: LifeOSObject): [LifeOSObject, LifeOSObject] => {
   const named = addressInName(left.frontmatter.title)?.email;
   return named && personEmails(right).includes(named) ? [right, left] : [left, right];
 };
 
-const matchReasons: Record<PersonMergeMatch, string> = { email: "Both have the same email address.", "name-address": "The name of one is an email address of the other.", "email-local-part": "Their email addresses match on two internal domains.", "name-email": "An email address of one fits the name of the other.", name: "Their names match.", manual: "You asked for this merge." };
+const matchReasons: Record<PersonMergeMatch, string> = { "first-name": "The one-word name of one is the first name of the other.", email: "Both have the same email address.", "name-address": "The name of one is an email address of the other.", "email-local-part": "Their email addresses match on two internal domains.", "name-email": "An email address of one fits the name of the other.", name: "Their names match.", manual: "You asked for this merge." };
 
 export class PersonMergeConflictError extends Error { override name = "PersonMergeConflictError"; }
 
@@ -157,6 +173,41 @@ export class PersonMergeModule {
   }
 
   /**
+   * Applies the ticked Duplicate clean-up rows, only after `backUp` succeeds (a failed backup changes nothing). Each merge
+   * is a crash-safe Manual merge through `merge`, following earlier merges in the same run; a pair already one Person is
+   * skipped. A repair stores the address as the Person's email and marks it unreviewed, in one write; it is skipped when
+   * another Person holds the address by then. The batch has no journal of its own: the backup is its safety net.
+   */
+  async applyCleanup(input: DuplicateCleanupChoice, backUp: () => Promise<{ backupId: string }>, merge: (options: ManualMergeOptions) => Promise<LifeOSObject>) {
+    const { ctx } = this;
+    const { backupId } = await backUp();
+    let merged = 0, repaired = 0, skipped = 0;
+    const survivor = (id: string) => {
+      const person = ctx.index.get(survivingPersonId(ctx.index, id));
+      return person && person.frontmatter.type === "person" && !person.frontmatter.deleted_at ? person.frontmatter.id : undefined;
+    };
+    for (const pair of input.merges) {
+      const keep = survivor(pair.keepPersonId), other = survivor(pair.mergePersonId);
+      if (!keep || !other || keep === other) { skipped += 1; continue; }
+      await merge({ personId: other, otherPersonId: keep, keepPersonId: keep });
+      merged += 1;
+    }
+    for (const id of input.repairs) {
+      await ctx.rebuildIndex();
+      const person = ctx.index.get(id);
+      const address = person && mergeable(person) && !personEmails(person).length ? addressInName(person.frontmatter.title)?.email : undefined;
+      const taken = address && ctx.index.all().some((other) => other.frontmatter.type === "person" && !other.frontmatter.deleted_at && personEmails(other).includes(address));
+      if (!person || !address || taken) { skipped += 1; continue; }
+      const now = new Date().toISOString();
+      await ctx.update(person, { identifiers: [{ kind: "email", value: address }], review_state: "unreviewed" }, { expectedHash: person.contentHash, now });
+      await ctx.writeAudit("person.email-added", id, now, { reason: "duplicate-cleanup" });
+      repaired += 1;
+    }
+    await ctx.rebuildIndex();
+    return { backupId, merged, repaired, skipped };
+  }
+
+  /**
    * The one place that decides which pairs are considered: live people only, at least one unreviewed, never two Self
    * people, `personIds` narrowing (`everyone` drops the unreviewed rule and re-matches pairs proposed but not rejected, for the
    * Duplicate clean-up). `match` is undefined for a pair that matches nothing or was already proposed (any status);
@@ -181,8 +232,9 @@ export class PersonMergeModule {
         const existing = suggestions.get(key);
         // The clean-up looks again at pairs already proposed, except those the user kept separate.
         const settled = existing && (!options.everyone || existing.frontmatter.status === "rejected");
-        const match = settled ? undefined : this.match(left, right, candidates);
-        const [keep, merge] = match === "name-address" ? holderFirst(left, right) : this.order(left, right);
+        const match = settled ? undefined : this.match(left, right, candidates) ?? (options.everyone ? firstNameMatch(left, right, people) : undefined);
+        const [keep, merge] = match === "name-address" ? holderFirst(left, right)
+          : match === "first-name" ? (nameKey(left.frontmatter.title).includes(" ") ? [left, right] : [right, left]) : this.order(left, right);
         pairs.push({ key, existing, match, keep, merge });
       }
     }

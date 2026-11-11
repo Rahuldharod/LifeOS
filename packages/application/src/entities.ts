@@ -55,7 +55,9 @@ export class EntitiesModule {
     // A Person is never named by an address alone: the Person holding it is reused, or the address becomes the email.
     const address = type === "person" ? addressInName(title) : undefined;
     if (address) {
-      const holder = byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && personEmails(object).includes(address.email)))[0];
+      // An email is an identifier (decision 2026-10-10): it reaches an archived Person too, live first; deleted ones are gone.
+      // So "create" answers the Person who already holds the address rather than a duplicate.
+      const holder = byIdentifier(this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && !object.frontmatter.merged_into_person_id && personEmails(object).includes(address.email)))[0];
       if (holder) return holder;
       const { title: derived, ...names } = derivePersonName(address.email, address.displayName);
       title = derived;

@@ -7,6 +7,12 @@ export const foldForSearch = (value: string) => value.normalize("NFKD").replace(
 /** The ways an email local part can spell a name: `john.doe`, `johndoe`, `john_doe`, or `jdoe` (first initial + family name). */
 export type EmailNameMatchKind = "first.last" | "firstlast" | "first_last" | "flast";
 
+/**
+ * Why two People look like the same person. `first-name` (a one-word name fitting exactly one full name) is offered only
+ * by the Duplicate clean-up, never by the background suggestions; `manual` is the user's own merge.
+ */
+export type PersonMergeMatch = "email" | "name-address" | "email-local-part" | "name" | "name-email" | "first-name" | "manual";
+
 /** A live person as the matcher sees them: every name they are known by (title, given + family name, aliases). */
 export interface NameCandidate { id: string; names: readonly string[] }
 

@@ -1,3 +1,4 @@
+import type { PersonMergeMatch } from "@lifeos/shared";
 // #121: the JSON shapes the localhost API sends and receives, as the browser sees them after `JSON.parse`.
 // Types only; no Node dependencies, so the web app can import them. The server's routes are checked against
 // these (apps/server/src/route.ts), so a use case whose result stops matching breaks the server's typecheck.
@@ -120,7 +121,7 @@ export type PersonMergePreview = {
 
 /** The Duplicate clean-up: a pair to merge (`preTicked` for sure matches), or an Email-only person to repair in place. */
 export type DuplicateCleanupRow =
-  | { kind: "merge"; keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: "email" | "name-address" | "email-local-part" | "name" | "name-email" | "manual"; preTicked: boolean }
+  | { kind: "merge"; keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: PersonMergeMatch; preTicked: boolean }
   | { kind: "repair"; personId: string; title: string; email: string };
 /** The rows the user ticked. */
 export type DuplicateCleanupChoice = { merges: Array<{ keepPersonId: string; mergePersonId: string }>; repairs: string[] };

@@ -10,6 +10,7 @@ const reasons: Record<Extract<DuplicateCleanupRow, { kind: "merge" }>["match"], 
   "name-email": "The email fits the other's name",
   "email-local-part": "Same email on two internal domains",
   name: "Same name only: check before merging",
+  "first-name": "Only a first name: check before merging",
   manual: "Asked for earlier"
 };
 
