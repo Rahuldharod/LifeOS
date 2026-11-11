@@ -25,6 +25,7 @@ import { connectionSettings, googleConnectionStatus } from "./connections.js";
 import { httpError } from "./http-errors.js";
 import { IdleRelease, registerLease } from "./lease.js";
 import { registerNotePurge } from "./note-purge-routes.js";
+import { registerDuplicateCleanup } from "./duplicate-cleanup-route.js";
 import { registerNotesList } from "./notes-list-route.js";
 import { calendarRange, hasExpectedHash, invalidCalendarRange, isCalendarDay } from "./request-checks.js";
 import { shutDown } from "./shutdown.js";
@@ -151,6 +152,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     if (!options) return reply.status(400).send({ error: "otherPersonId is required" });
     return application.mergePeople(options);
   });
+  registerDuplicateCleanup(server, application, async () => (autoBackups ? await autoBackups.runNow() : await backups.create()));
   route(server, "POST /api/v1/index/rebuild", async () => application.rebuildIndex());
 
   route(server, "GET /api/v1/calendar/events", async (request, reply) => {

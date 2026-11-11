@@ -61,6 +61,9 @@ export interface Endpoints {
   // (the survivor rule, the name with a family name); the Self person always survives. The merge answers the kept person.
   "GET /api/v1/people/:id/merge-preview": { query: W.PersonMergeChoice; response: W.PersonMergePreview };
   "POST /api/v1/people/:id/merge": { body: W.PersonMergeChoice; response: W.LifeObject };
+  // Duplicate clean-up: the list (writes nothing), then a backup and the ticked rows. A failed backup changes nothing.
+  "GET /api/v1/people/duplicates": { response: W.DuplicateCleanupRow[] };
+  "POST /api/v1/people/duplicates/clean-up": { body: W.DuplicateCleanupChoice; response: W.DuplicateCleanupResult };
 
   // Calendar (#88)
   "GET /api/v1/calendar/events": { query: Range; response: W.CalendarEvent[] };

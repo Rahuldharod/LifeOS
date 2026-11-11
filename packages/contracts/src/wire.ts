@@ -118,6 +118,14 @@ export type PersonMergePreview = {
   keptName: string; aliases: string[]; emails: string[]; referenceCount: number;
 };
 
+/** The Duplicate clean-up: a pair to merge (`preTicked` for sure matches), or an Email-only person to repair in place. */
+export type DuplicateCleanupRow =
+  | { kind: "merge"; keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: "email" | "name-address" | "email-local-part" | "name" | "name-email" | "manual"; preTicked: boolean }
+  | { kind: "repair"; personId: string; title: string; email: string };
+/** The rows the user ticked. */
+export type DuplicateCleanupChoice = { merges: Array<{ keepPersonId: string; mergePersonId: string }>; repairs: string[] };
+export type DuplicateCleanupResult = { backupId: string; merged: number; repaired: number; skipped: number };
+
 export type FocusItem = { id: string; state: "open" | "done" | "cancelled" | "past" | "missing"; object?: LifeObject; overdue?: boolean; whyToday?: string; ifThen?: string; ageDays?: number; context?: string; ask?: string; reason?: string; pinned?: boolean; replaces?: { id: string; title: string } };
 /** #47: one change to the date's Top 3. */
 export type FocusChange = { action: "pin" | "unpin" | "replace" | "dismiss" | "restore" | "reset"; taskId?: string; replacementId?: string };

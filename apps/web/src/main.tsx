@@ -77,6 +77,7 @@ import { InboxWorkspace } from "./InboxWorkspace.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
 import { firstEditPeopleIds, headerPeopleIds } from "./firstEditPeople.js";
+import { DuplicateCleanupCard } from "./DuplicateCleanupCard.js";
 import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, PersonMergeChoice, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
@@ -1248,7 +1249,8 @@ function App() {
           const plural = type === "person" ? "people" : `${type}s`;
           const label = plural[0]!.toUpperCase() + plural.slice(1);
           const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
-          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> }] };
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> },
+            ...(type === "person" ? [{ id: "settings-people-duplicates", label: "Clean up duplicates", content: <DuplicateCleanupCard disabled={readOnly || busy} onLoad={() => api("GET /api/v1/people/duplicates")} onApply={(choice) => api("POST /api/v1/people/duplicates/clean-up", { body: choice })} onApplied={() => void refresh()} /> }] : [])] };
         })}
       />}
   </ApplicationShell>;

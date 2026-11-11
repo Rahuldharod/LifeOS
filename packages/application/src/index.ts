@@ -15,7 +15,7 @@ import { MeetingsModule } from "./meetings.js";
 import { NotesModule, type NewStandaloneNote, type NoteFilters } from "./notes.js";
 import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
 import { PatchModule } from "./patches.js";
-import { PeopleModule } from "./people.js";
+import { addressInName, PeopleModule, PersonEmailTakenError, personEmails } from "./people.js";
 import type { ManualMergeOptions } from "./person-merge.js";
 import type { Sensitivity } from "@lifeos/domain";
 import type { AgentIndexWriter, AiProvider, CalendarConnector, IndexStore, InboxStore, ObjectStore } from "./ports.js";
@@ -31,7 +31,7 @@ export type { NewStandaloneNote, NoteFilters, ObjectReference, PurgeCheck } from
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, PersonEmailTakenError, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
-export type { ManualMergeOptions, PersonMergePreview } from "./person-merge.js";
+export type { DuplicateCleanupRow, ManualMergeOptions, PersonMergePreview } from "./person-merge.js";
 export type { AgentIndexFile, AgentIndexWriter, AiProvider, CalendarAttendee, CalendarConnector, CalendarEvent, CalendarEventReference, CalendarPreferences, CalendarSummary, IndexStore, InboxDocument, InboxFile, InboxFolder, InboxStore, ObjectStore, Operation, OperationKind, SecretStore, StoredOperation } from "./ports.js";
 export { inboxFolders, operationKinds } from "./ports.js";
 export type { FeedbackInput, FeedbackLabel } from "./feedback.js";
@@ -83,6 +83,7 @@ export class LifeOSApplication {
   private readonly agentIndex: AgentIndexModule;
   private readonly todayModule: TodayModule;
   private readonly backups: BackupModule;
+  private readonly ctx: AppContext;
 
   /**
    * `inbox` gives access to `_inbox/` for draft adoption (ADR 0007); without it adoption is a no-op.
@@ -90,6 +91,7 @@ export class LifeOSApplication {
    */
   constructor(objects: ObjectStore, index: IndexStore, calendar?: CalendarConnector, ai?: AiProvider, deviceId = "local-development", inbox?: InboxStore, agentIndex?: AgentIndexWriter, options: { agentIndexDebounceMs?: number; timeZone?: string; agentIndexCanWrite?: () => boolean; contract?: ContractFile[]; appInfo?: AppInfo } = {}) {
     const ctx = new AppContext(objects, index, calendar, ai, deviceId);
+    this.ctx = ctx;
     this.patches = new PatchModule(ctx);
     this.people = new PeopleModule(ctx);
     this.meetings = new MeetingsModule(ctx, this.people);
@@ -201,6 +203,35 @@ export class LifeOSApplication {
   async mergePeople(options: ManualMergeOptions) {
     const review = await this.review.merges.proposeManual(options);
     return this.acceptReviewItem(review.frontmatter.id);
+  }
+  /** The Duplicate clean-up list (sure matches pre-ticked, repairs for Email-only people); writes nothing. */
+  duplicateCleanup() { return this.review.merges.cleanupRows(); }
+  /**
+   * Applies the rows the user ticked, after `backUp` succeeds (a failed backup changes nothing). Each merge is a Manual merge
+   * (crash-safe, ADR 0013), following earlier merges in the same run; a pair already one Person, or a repair whose address is
+   * now taken, is skipped.
+   */
+  async applyDuplicateCleanup(input: { merges: ReadonlyArray<{ keepPersonId: string; mergePersonId: string }>; repairs: readonly string[] }, backUp: () => Promise<{ backupId: string }>) {
+    const { backupId } = await backUp();
+    let merged = 0, repaired = 0, skipped = 0;
+    const survivor = (id: string) => {
+      let person = this.ctx.index.get(id);
+      for (let hops = 0; person && typeof person.frontmatter.merged_into_person_id === "string" && hops < 20; hops += 1) person = this.ctx.index.get(person.frontmatter.merged_into_person_id);
+      return person && person.frontmatter.type === "person" && !person.frontmatter.deleted_at ? person.frontmatter.id : undefined;
+    };
+    for (const pair of input.merges) {
+      const keep = survivor(pair.keepPersonId), merge = survivor(pair.mergePersonId);
+      if (!keep || !merge || keep === merge) { skipped += 1; continue; }
+      await this.mergePeople({ personId: merge, otherPersonId: keep, keepPersonId: keep });
+      merged += 1;
+    }
+    for (const id of input.repairs) {
+      const person = this.ctx.index.get(id);
+      const address = person && person.frontmatter.type === "person" && !person.frontmatter.deleted_at && !personEmails(person).length ? addressInName(person.frontmatter.title) : undefined;
+      if (!person || !address) { skipped += 1; continue; }
+      try { await this.people.addEmail(id, address.email, person.contentHash); repaired += 1; } catch (error) { if (error instanceof PersonEmailTakenError) skipped += 1; else throw error; }
+    }
+    return { backupId, merged, repaired, skipped };
   }
   getInternalDomains() { return this.people.getInternalDomains(); }
   saveInternalDomains(domains: unknown[], expectedHash?: string) { return this.people.saveInternalDomains(domains, expectedHash); }

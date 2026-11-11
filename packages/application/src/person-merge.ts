@@ -20,6 +20,12 @@ export const personMergeReviewType = "person-merge";
 export type PersonMergeMatch = "email" | "name-address" | "email-local-part" | "name" | "name-email" | "manual";
 /** `name_from_person_id` (manual merges, #213) says whose name the kept person ends up with; absent means the kept person's own. */
 export interface PersonMergeProposal { keep_person_id: string; merge_person_id: string; match: PersonMergeMatch; keep_title: string; merge_title: string; name_from_person_id?: string }
+/** One line of the Duplicate clean-up: a pair to merge (sure matches pre-ticked), or an Email-only person to repair in place. */
+export type DuplicateCleanupRow =
+  | { kind: "merge"; keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: PersonMergeMatch; preTicked: boolean }
+  | { kind: "repair"; personId: string; title: string; email: string };
+/** Matches on an address are sure; a match on names alone is for the user to judge. */
+const sureMatches = new Set<PersonMergeMatch>(["email", "name-address", "name-email"]);
 /** A likely duplicate pair and why it was found (#215). `keep` is the person who would survive. */
 export interface PersonMergeCandidate { keepPersonId: string; mergePersonId: string; keepTitle: string; mergeTitle: string; match: PersonMergeMatch }
 /** A Manual merge (#213): the two people and, optionally, who survives and whose name is kept. */
@@ -121,11 +127,28 @@ export class PersonMergeModule {
   }
 
   /**
+   * The Duplicate clean-up: likely duplicates among ALL live People (not only unreviewed ones), except pairs the user kept
+   * separate, plus Email-only people named by an address nobody holds, to repair in place. Nothing is written.
+   */
+  async cleanupRows(): Promise<DuplicateCleanupRow[]> {
+    await this.ctx.rebuildIndex();
+    const merges = this.scan(undefined, { everyone: true }).flatMap(({ match, keep, merge }): DuplicateCleanupRow[] => match ? [{ kind: "merge", keepPersonId: keep.frontmatter.id, mergePersonId: merge.frontmatter.id, keepTitle: String(keep.frontmatter.title), mergeTitle: String(merge.frontmatter.title), match, preTicked: sureMatches.has(match) }] : []);
+    const people = this.ctx.index.all().filter((object) => object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
+    const held = new Set(people.flatMap(personEmails));
+    const repairs = people.filter(isLive).flatMap((person): DuplicateCleanupRow[] => {
+      const address = addressInName(person.frontmatter.title);
+      return address && !personEmails(person).length && !held.has(address.email) ? [{ kind: "repair", personId: person.frontmatter.id, title: String(person.frontmatter.title), email: address.email }] : [];
+    });
+    return [...merges, ...repairs];
+  }
+
+  /**
    * The one place that decides which pairs are considered: live people only, at least one unreviewed, never two Self
-   * people, `personIds` narrowing. `match` is undefined for a pair that matches nothing or was already proposed (any status);
+   * people, `personIds` narrowing (`everyone` drops the unreviewed rule and re-matches pairs proposed but not rejected, for the
+   * Duplicate clean-up). `match` is undefined for a pair that matches nothing or was already proposed (any status);
    * `existing` is that earlier suggestion. Used by the live sweep and by `candidates`, so both always agree.
    */
-  private scan(only: string[] | undefined) {
+  private scan(only: string[] | undefined, options: { everyone?: boolean } = {}) {
     const { ctx } = this;
     // Suggestions match by name, so they consider live people only.
     const people = ctx.index.all().filter((object) => mergeable(object) && isLive(object));
@@ -137,12 +160,14 @@ export class PersonMergeModule {
     const pairs: Array<{ key: string; existing?: LifeOSObject; match?: PersonMergeMatch; keep: LifeOSObject; merge: LifeOSObject }> = [];
     for (const [index, left] of people.entries()) {
       for (const right of people.slice(index + 1)) {
-        if (!isUnreviewedPerson(left.frontmatter) && !isUnreviewedPerson(right.frontmatter)) continue;
+        if (!options.everyone && !isUnreviewedPerson(left.frontmatter) && !isUnreviewedPerson(right.frontmatter)) continue;
         if (only && !only.includes(left.frontmatter.id) && !only.includes(right.frontmatter.id)) continue;
         if (left.frontmatter.is_self === true && right.frontmatter.is_self === true) continue;
         const key = pairKey(left.frontmatter.id, right.frontmatter.id);
         const existing = suggestions.get(key);
-        const match = existing ? undefined : this.match(left, right, candidates);
+        // The clean-up looks again at pairs already proposed, except those the user kept separate.
+        const settled = existing && (!options.everyone || existing.frontmatter.status === "rejected");
+        const match = settled ? undefined : this.match(left, right, candidates);
         const [keep, merge] = this.order(left, right);
         pairs.push({ key, existing, match, keep, merge });
       }
