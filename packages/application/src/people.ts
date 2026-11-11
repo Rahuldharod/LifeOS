@@ -29,6 +29,18 @@ export function normalizeEmail(value: unknown) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
 }
 
+/**
+ * The email address a name holds instead of a real name: "jane@example.com" or "Jane Doe <jane@example.com>".
+ * A Person is never named by an address alone; callers store the address as its email instead.
+ */
+export function addressInName(text: unknown): { email: string; displayName?: string } | undefined {
+  if (typeof text !== "string") return undefined;
+  const angled = text.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  const email = normalizeEmail(angled ? angled[2] : text);
+  const displayName = angled?.[1]?.trim();
+  return email ? { email, ...(displayName ? { displayName } : {}) } : undefined;
+}
+
 /** The address in one stored identifier; hand-edited files may list plain strings. */
 function identifierEmail(identifier: unknown) {
   if (typeof identifier === "string") return normalizeEmail(identifier);
@@ -169,8 +181,14 @@ export const isUnreviewed = (person: Pick<LifeOSObject, "frontmatter">) => isUnr
 
 /** One attendee as the matcher sees it. Name-only connectors give strings; a bare address counts as an email. */
 function attendeesOf(event: CalendarEvent): CalendarAttendee[] {
-  if (event.attendeeDetails) return event.attendeeDetails;
-  return event.attendees.map((label) => normalizeEmail(label) ? { email: label } : { displayName: label });
+  // An attendee known only by an address in its name is that email (no bare-address People).
+  const named = (attendee: CalendarAttendee): CalendarAttendee => {
+    const address = attendee.email ? undefined : addressInName(attendee.displayName);
+    if (!address) return attendee;
+    const { displayName: _address, ...rest } = attendee;
+    return { ...rest, email: address.email, ...(address.displayName ? { displayName: address.displayName } : {}) };
+  };
+  return (event.attendeeDetails ?? event.attendees.map((label): CalendarAttendee => ({ displayName: label }))).map(named);
 }
 
 /** People for calendar attendees (#38): matched by email, created when unknown, the user always the self person. */

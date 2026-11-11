@@ -170,7 +170,8 @@ export class GoogleCalendarConnector implements CalendarConnector {
       ...(typeof previousSeriesId === "string" ? { previousSeriesId } : {}),
       status: event.status === "cancelled" ? "cancelled" : "confirmed",
       declined: Array.isArray(event.attendees) && event.attendees.some((attendee: Record<string, unknown>) => attendee.self === true && attendee.responseStatus === "declined"),
-      attendees: Array.isArray(event.attendees) ? event.attendees.map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : [],
+      // Rooms are not Attendees: they are in neither list.
+      attendees: Array.isArray(event.attendees) ? event.attendees.filter((attendee: Record<string, unknown>) => attendee.resource !== true).map((attendee: Record<string, unknown>) => String(attendee.displayName ?? attendee.email ?? "Unknown attendee")) : [],
       ...(typeof event.location === "string" ? { location: event.location } : {}),
       ...(typeof event.hangoutLink === "string" ? { joinUrl: event.hangoutLink } : typeof event.conferenceData?.entryPoints?.find((entry: Record<string, unknown>) => entry.entryPointType === "video")?.uri === "string" ? { joinUrl: event.conferenceData.entryPoints.find((entry: Record<string, unknown>) => entry.entryPointType === "video").uri } : {}),
       attendeeDetails: Array.isArray(event.attendees) ? event.attendees.filter((attendee: Record<string, unknown>) => attendee.resource !== true).map((attendee: Record<string, unknown>) => ({

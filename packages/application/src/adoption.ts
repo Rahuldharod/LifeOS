@@ -6,7 +6,7 @@ import type { MeetingsModule } from "./meetings.js";
 import { MeetingMaterialModule } from "./meeting-material.js";
 import type { PatchModule } from "./patches.js";
 import { operationKinds, type InboxDocument, type InboxFile, type InboxFolder, type InboxStore, type Operation } from "./ports.js";
-import { internalDomainsOf, isExternalDomain, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
+import { addressInName, derivePersonName, internalDomainsOf, isExternalDomain, normalizeEmail, organizationFromDomain, personEmails } from "./people.js";
 import { PersonMergeModule } from "./person-merge.js";
 import { ReferenceResolver, type ReferenceField } from "./resolution.js";
 import { proposeReviewItem } from "./review-items.js";
@@ -874,7 +874,11 @@ export class AdoptionModule {
       if (!email) issues.push(`${fields.email === raw ? "email" : "emails"}: not an email address ("${String(raw)}")`);
       else if (!emails.includes(email)) emails.push(email);
     }
-    const [given, ...family] = draft.title.split(/\s+/);
+    // A Person is never named by an address alone: the address is the draft's email, and the name comes from it.
+    const address = addressInName(draft.title);
+    if (address && !emails.includes(address.email)) emails.push(address.email);
+    const title = address ? derivePersonName(address.email, address.displayName).title : draft.title;
+    const [given, ...family] = title.split(/\s+/);
     for (const key of ["given_name", "family_name", "organization_name", "job_title"]) {
       if (fields[key] === undefined) continue;
       if (typeof fields[key] === "string" && fields[key].trim()) extra[key] = fields[key].trim(); else issues.push(`${key}: must be text`);
@@ -897,9 +901,9 @@ export class AdoptionModule {
     if (known && known.frontmatter.id !== id) return [known.frontmatter.id];
     const narrative = draft.body.trim();
     if (!known) await this.ctx.objects.write({
-      relativePath: `people/${markdownFileName(draft.title, id, run.now)}`,
-      frontmatter: { ...this.ctx.envelope(id, "person", draft.title, run.now, draft.origin), ...extra, ...(emails.length ? { identifiers: emails.map((value) => ({ kind: "email", value })) } : {}), review_state: "unreviewed", captured_at: draft.capturedAt },
-      body: `# ${draft.title}\n${narrative ? `\n${narrative}\n` : ""}`
+      relativePath: `people/${markdownFileName(title, id, run.now)}`,
+      frontmatter: { ...this.ctx.envelope(id, "person", title, run.now, draft.origin), ...extra, ...(emails.length ? { identifiers: emails.map((value) => ({ kind: "email", value })) } : {}), review_state: "unreviewed", captured_at: draft.capturedAt },
+      body: `# ${title}\n${narrative ? `\n${narrative}\n` : ""}`
     });
     this.personMerges ??= new PersonMergeModule(this.ctx);
     return [id, ...await this.personMerges.suggest({ now: run.now, personIds: [id], newId: (role) => run.newId(replayRoles.within(replayRoles.main, role)) })];
