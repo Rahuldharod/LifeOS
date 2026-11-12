@@ -82,14 +82,17 @@ export class MeetingMaterialModule {
 
     const lookup = { from: new Date(Date.parse(run.now) - eventLookbackMs), to: new Date(Date.parse(run.now) + 86_400_000), calendarId: text(fields.calendar_id) || undefined };
     let occurrence = meeting ? this.meetings?.enrichmentOccurrenceForMeeting(meeting) : undefined;
+    let eventMissing = false;
     if (!meeting && this.meetings) {
       try { occurrence = await this.meetings.enrichmentOccurrenceForEvent(reference, lookup.from, lookup.to, lookup.calendarId); }
-      catch (error) { if (!(error instanceof Error) || !error.message.startsWith("Calendar event not found:")) throw error; }
+      catch (error) { if (!(error instanceof Error) || !error.message.startsWith("Calendar event not found:")) throw error; eventMissing = true; }
     }
 
     // 2. Every check up front, so a bad draft writes nothing (not even the meeting).
     const issues: string[] = [];
-    this.validateOccurrence(fields, occurrence, issues);
+    // A vanished event cannot be checked for recurrence; say so rather than "not a recurring occurrence".
+    if (eventMissing) issues.push(`meeting: no LifeOS meeting or calendar event "${reference}" in the last 30 days; the event may have been deleted or moved`);
+    else this.validateOccurrence(fields, occurrence, issues);
     const sources = this.parseSources(fields.sources, issues);
     const unavailable = parseUnavailable(fields.unavailable, sources, issues);
     const summary = draft.body.trim();
