@@ -20,24 +20,28 @@ test("filters people, marks the selected ones external, and archives them after 
 
   await page.getByRole("button", { name: "Select all", exact: true }).click();
   await expect(page.getByText("2 selected")).toBeVisible();
-  // Narrow and compact layouts show the list or the panel, so "Actions…" and "Back to people" move between them.
+  // Narrow and compact layouts show the list or the panel, so "Actions…" opens the panel.
   const stacked = await page.getByRole("button", { name: "Actions…" }).isVisible();
   const openPanel = async () => { if (stacked) await page.getByRole("button", { name: "Actions…" }).click(); };
-  const backToList = async () => { if (stacked) await page.getByRole("button", { name: "Back to people" }).click(); };
   await openPanel();
   const panel = page.getByRole("region", { name: "Selected people actions" });
   await panel.getByRole("button", { name: "Mark external (2 of 2)" }).click();
-  await expect(panel.getByRole("status")).toContainText("2 people marked external");
-  await backToList();
+  // Done: a toast, and the selection clears so the list is ready for the next batch.
+  await expect(page.locator(".people-bulk-toast")).toContainText("2 people marked external");
+  await expect(page.getByText("2 shown")).toBeVisible();
+  await expect(panel).toHaveCount(0);
   await page.getByLabel("Internal or external filter").selectOption("external");
   await expect(rows).toHaveCount(2);
-  await expect(page.getByText("2 selected")).toBeVisible();
+  // The list stays inside its column (#230 follow-up): no row is wider than the list.
+  const widths = await page.evaluate(() => ({ list: document.querySelector(".reference-list")!.getBoundingClientRect().right, rows: Math.max(...[...document.querySelectorAll(".reference-rows small")].map((small) => small.getBoundingClientRect().right)) }));
+  expect(widths.rows).toBeLessThanOrEqual(widths.list);
 
+  await page.getByRole("button", { name: "Select all", exact: true }).click();
   await openPanel();
   await panel.getByRole("button", { name: "Archive (2 of 2)" }).click();
   const dialog = page.getByRole("dialog", { name: "Archive 2 people?" });
   await expect(dialog).toContainText("Bulkfilter Ana");
   await dialog.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(rows).toHaveCount(0);
-  await expect(page.getByRole("complementary", { name: "People list" }).getByRole("status")).toContainText("2 people archived");
+  await expect(page.locator(".people-bulk-toast")).toContainText("2 people archived");
 });

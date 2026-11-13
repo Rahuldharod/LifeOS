@@ -12,7 +12,7 @@ import { PersonName } from "./PersonName.js";
 import { PersonEmails, type AddEmailOutcome } from "./PersonEmails.js";
 import { PersonMergeDialog } from "./PersonMerge.js";
 import { PersonReviewControl } from "./PersonReview.js";
-import { PeopleBulkPanel, PeopleBulkResult, PeopleFilterBar, PeopleSelectionBar } from "./PeopleBulk.js";
+import { PeopleBulkPanel, PeopleBulkToast, PeopleFilterBar, PeopleSelectionBar } from "./PeopleBulk.js";
 import { defaultPeopleFilters, matchesPeopleFilters, type BulkResult, type PeopleBulkAction, type PeopleFilters } from "./peopleBulkRules.js";
 import { externalChoiceOf, personLabel, type ExternalChoice } from "./personLabels.js";
 import { foldText } from "./searchOptions.js";
@@ -75,7 +75,7 @@ export type ReferenceDataSettingsProps = {
   /** #230: "Not a person" People (archived, so not in `objects`); listed when the Type filter asks for them. */
   notAPersonPeople?: LifeObject[];
   /** #230: one action on the selected people. Without it the People card shows no filters or checkboxes. */
-  onBulkPeople?: (action: PeopleBulkAction, people: LifeObject[]) => Promise<BulkResult | undefined>;
+  onBulkPeople?: (action: PeopleBulkAction, people: LifeObject[], onProgress?: (done: number, total: number) => void) => Promise<BulkResult | undefined>;
   run: (action: () => Promise<void>, success: string) => Promise<boolean>;
   onRestored: () => Promise<void>;
 };
@@ -86,7 +86,9 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
   const bulk = type === "person" && Boolean(onBulkPeople);
   const [filters, setFilters] = useState<PeopleFilters>(defaultPeopleFilters);
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  /** The last bulk action's outcome, shown as a toast. */
   const [bulkResult, setBulkResult] = useState<BulkResult>();
+  const [progress, setProgress] = useState<{ done: number; total: number }>();
   const [showBulk, setShowBulk] = useState(false);
   const band = useWorkspaceBand();
   const stacked = band === "narrow" || band === "compact";
@@ -146,13 +148,21 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
   // People hidden by a filter or the search stop counting as selected.
   const selectedPeople = bulk ? visible.filter((object) => checked.has(object.frontmatter.id)) : [];
   const bulkOpen = selectedPeople.length > 0 && (!stacked || showBulk);
-  const toggle = (id: string) => leave(() => { setChecked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); setBulkResult(undefined); });
-  const selectAll = () => leave(() => { setChecked(new Set(visible.map((object) => object.frontmatter.id))); setBulkResult(undefined); });
+  const toggle = (id: string) => leave(() => setChecked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }));
+  const selectAll = () => leave(() => setChecked(new Set(visible.map((object) => object.frontmatter.id))));
   const deselectAll = () => { setChecked(new Set()); setShowBulk(false); };
+  // A new filter or search starts a new selection, so the panel never acts on people chosen under another view.
+  const changeFilters = (next: PeopleFilters) => { setFilters(next); deselectAll(); };
+  const changeQuery = (next: string) => { setQuery(next); if (bulk) deselectAll(); };
   const runBulk = async (action: PeopleBulkAction, people: LifeObject[]) => {
     if (!onBulkPeople) return;
-    const result = await onBulkPeople(action, people);
+    setBulkResult(undefined);
+    setProgress({ done: 0, total: people.length });
+    const result = await onBulkPeople(action, people, (done, total) => setProgress({ done, total }));
+    setProgress(undefined);
     setBulkResult(result);
+    // The treated people are done: the selection clears and the panel closes, so the list is ready for the next batch.
+    if (result) deselectAll();
     // An archived or deleted person leaves the list, so its record closes too.
     if (result && (action === "archive" || action === "delete") && selected && people.some((person) => person.frontmatter.id === selected.frontmatter.id)) onOpen(undefined);
   };
@@ -167,15 +177,14 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
   return <ReferenceSplit detailKey={bulkOpen ? "selected-people" : creating ? "new" : selected?.frontmatter.id}>
     <aside className="reference-list" data-pane="list" aria-label={`${labels[type]} list`}>
       <header><div><span>REFERENCE DATA</span><h3>{labels[type]}</h3></div><button className="primary" disabled={busy || readOnly} onClick={() => choose("new")}>New {singular[type]}</button></header>
-      <input type="search" aria-label={`Search ${labels[type]}`} placeholder={`Search ${labels[type].toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.target.value)} />
-      {bulk && <PeopleFilterBar filters={filters} onChange={setFilters} />}
+      <input type="search" aria-label={`Search ${labels[type]}`} placeholder={`Search ${labels[type].toLowerCase()}…`} value={query} onChange={(event) => changeQuery(event.target.value)} />
+      {bulk && <PeopleFilterBar filters={filters} onChange={changeFilters} />}
       {bulk && <PeopleSelectionBar shown={visible.length} selected={selectedPeople.length} disabled={busy} stacked={stacked} onSelectAll={selectAll} onDeselectAll={deselectAll} onShowActions={() => setShowBulk(true)} />}
-      {bulk && bulkResult && !bulkOpen && <PeopleBulkResult result={bulkResult} />}
       {!visible.length && <p className="reference-empty">{query || (bulk && objects.length) ? `No ${labels[type].toLowerCase()} match.` : `No ${labels[type].toLowerCase()} yet.`}</p>}
       <div className="reference-rows">{visible.map(row)}</div>
     </aside>
     <section className="reference-detail" data-pane="detail" aria-label={bulkOpen ? "Selected people actions" : `${singular[type]} details`}>
-      {bulkOpen ? <PeopleBulkPanel selected={selectedPeople} busy={busy} readOnly={readOnly} result={bulkResult} onRun={(action, people) => void runBulk(action, people)} onBack={stacked ? () => setShowBulk(false) : undefined} /> : !selected && !creating ? <div className="reference-empty-detail">Choose a {singular[type]} or create a new one.</div> : <>
+      {bulkOpen ? <PeopleBulkPanel selected={selectedPeople} busy={busy} readOnly={readOnly} progress={progress} onDeselectAll={deselectAll} onRun={(action, people) => void runBulk(action, people)} onBack={stacked ? () => setShowBulk(false) : undefined} /> : !selected && !creating ? <div className="reference-empty-detail">Choose a {singular[type]} or create a new one.</div> : <>
         <header className="reference-record-header"><button className="reference-back" onClick={() => choose(undefined)}>Back to {labels[type].toLowerCase()}</button><div><span>{creating ? `NEW ${singular[type].toUpperCase()}` : singular[type].toUpperCase()}</span><h3 data-detail-heading tabIndex={-1}>{creating ? `New ${singular[type]}` : String(selected!.frontmatter.title)}</h3></div></header>
         {selected?.frontmatter.archived_at && <p className="archived-tag">Archived record opened from a direct link</p>}
         <div className="reference-fields">
@@ -202,6 +211,7 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
       </>}
     </section>
     {pending && <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="leave-reference-title" className="leave-dialog"><h3 id="leave-reference-title">Save changes before leaving?</h3><p>This {singular[type]} has unsaved changes.</p><div><button className="primary" disabled={readOnly} onClick={() => void finishDecision("save")}>Save</button><button onClick={() => void finishDecision("discard")}>Discard</button><button onClick={() => void finishDecision("stay")}>Stay</button></div></section></div>}
+    {bulk && bulkResult && <PeopleBulkToast result={bulkResult} onClose={() => setBulkResult(undefined)} />}
   </ReferenceSplit>;
 }
 
