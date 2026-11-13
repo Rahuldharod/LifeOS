@@ -118,19 +118,17 @@ If all this takes longer than 60 seconds, the script force-stops LifeOS. A half-
 
 Only one Mac can change your data at a time. That Mac holds the **write lease**. The other Mac is **read-only**: you can read everything, but saves are refused.
 
-You do not need to stop LifeOS when you leave a Mac. After **15 minutes** without you using it, LifeOS on that Mac gives up the lease by itself (ADR 0015).
+The Mac holding the lease **keeps it for as long as LifeOS runs there**, however long you leave it alone (ADR 0024). You do not need to stop LifeOS when you leave a Mac.
 
 | Situation | What happens |
 | --- | --- |
-| You use the laptop while the desktop sits idle | After 15 minutes the desktop lets go. Once Google Drive has synced that (usually under a minute), your next action on the laptop takes the lease |
-| You come back to the desktop | A **Read-only on this Mac** banner shows. Click **Take back** |
-| You click Take back while the laptop holds the lease | The banner warns you first: close LifeOS on the laptop and let Google Drive finish syncing |
-| LifeOS is left open but nobody touches it | It still lets go after 15 minutes. It never takes the lease back by itself |
-| A Mac crashes or sleeps with LifeOS open | The other Mac stays read-only for up to 15 minutes, until the lease expires, or click **Take over** once Drive has synced (ADR 0016) |
+| You open LifeOS on the laptop while the desktop holds the lease | A **LifeOS is in use on {desktop}** banner shows on every page. Click **Use LifeOS here** to edit on the laptop |
+| You come back to the desktop | The same banner shows there. Click **Use LifeOS here** |
+| You step away from the Mac you are using | Nothing changes. It keeps write access |
+| The other Mac is asleep, shut down or crashed | Its lease expires after 15 minutes. Your next action on this Mac takes the lease, no click needed |
+| Both Macs are running | Only the one where you last clicked **Use LifeOS here** can save. The other is read-only until you click there |
 
-What counts as "using it": typing, clicking, scrolling or moving the mouse in the LifeOS tab while it is visible and in front, and saving changes. Backups, calendar syncs and drafts adopted in the background do not count.
-
-To change the 15 minutes, add `export LIFEOS_IDLE_RELEASE_MINUTES=30` (for example) to `~/.zshrc`, then run `corepack pnpm update-app`. Backups keep running on a Mac that let go.
+What counts as "an action": typing, clicking, scrolling or moving the mouse in the LifeOS tab while it is visible and in front, and saving changes. Backups, calendar syncs and drafts adopted in the background do not count. If you just edited on the other Mac, let Google Drive finish syncing before you switch.
 
 ### Develop LifeOS
 
@@ -205,7 +203,7 @@ The Markdown root is authoritative. Browser state and indexes are disposable. Re
 Documentation is intentionally lean during the MVP:
 
 - [`docs/architecture/README.md`](docs/architecture/README.md) explains system boundaries and responsibilities.
-- [`docs/decisions/`](docs/decisions/) records durable architectural decisions (ADRs 0001–0015).
+- [`docs/decisions/`](docs/decisions/) records durable architectural decisions (ADRs 0001–0024).
 - [`CONTEXT.md`](CONTEXT.md) is the domain glossary.
 - [`docs/architecture/mvp-gap-analysis.md`](docs/architecture/mvp-gap-analysis.md) preserves the solution-design audit and deferred scope.
 - [`docs/product-design/LifeOS_Solution_Design_v0.8.md`](docs/product-design/LifeOS_Solution_Design_v0.8.md) is the current versioned solution baseline. v0.4, v0.6 and v0.7 are kept for history.

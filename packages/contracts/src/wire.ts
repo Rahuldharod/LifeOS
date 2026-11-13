@@ -69,13 +69,13 @@ export type ProjectRollup = { project: LifeObject; tasks: LifeObject[]; meetings
 export type EntityRollup = { entity: LifeObject; related: LifeObject[] };
 
 /** The advisory device lease (ADR 0003, ADR 0015). */
-export type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string; releasedAfterIdle?: boolean };
+export type SessionStatus = { currentDeviceId: string; activeDeviceId: string; startedAt: string; lastActivityAt: string; leaseExpiresAt: string; writeAllowed: boolean; warning?: string };
 /** #76: present while the user's own email addresses or the internal domains are unset. */
 export type SetupWarning = { selfEmailsMissing: boolean; internalDomainsMissing: boolean };
 export type BackupWarningKind = "backup-failed" | "off-drive-failed" | "overdue";
 /** #84: a backup or the off-Drive copy failed, or none succeeded in 26 hours. */
 export type BackupWarning = { kind: BackupWarningKind; message: string; reason: string; at?: string };
-export type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; idleReleaseMinutes: number; setupWarning?: SetupWarning; backupWarning?: BackupWarning; appInfo: AppInfo };
+export type SystemHealth = { status: "healthy" | "attention"; objectCount: number; diagnostics: string[]; session: SessionStatus; setupWarning?: SetupWarning; backupWarning?: BackupWarning; appInfo: AppInfo };
 
 /** ADR 0007: Inbox Drafts plus Patch Drafts waiting to be adopted, and the ones that failed. */
 export type InboxStatus = { awaiting: number; drafts: number; patches: number; failed: Array<{ path: string; reason: string }> };

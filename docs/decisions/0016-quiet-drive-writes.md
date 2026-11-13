@@ -1,6 +1,6 @@
 # ADR 0016: Write synced files only when something changed
 
-- Status: Accepted
+- Status: Accepted; amended by [ADR 0024](0024-lease-stays-until-taken-over.md) (2026-11-13): no idle release, so a running holder rewrites the lease file every 5 minutes indefinitely
 - Date: 2026-10-09
 - Amends: ADR 0003 (advisory device lease), ADR 0009 (Agent Index)
 

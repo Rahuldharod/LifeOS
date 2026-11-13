@@ -48,7 +48,7 @@ import type { AddEmailOutcome } from "./PersonEmails.js";
 import { parseReferenceSettingsId, referenceCardIdFromRoute, referenceRouteInSettings, referenceSettingsCardId, referenceSettingsId, type ReferenceEntityType } from "./referenceSettingsRoutes.js";
 import { SelfEmailWarning } from "./SelfEmailWarning.js";
 import { MeetingNoteActions } from "./MeetingNoteActions.js";
-import { takeoverCaution } from "./LeaseBanner.js";
+import { takeoverCaution, takeoverLabel } from "./LeaseBanner.js";
 import { AppStatusBanners } from "./ConnectionDeviceSettings.js";
 import { useActivityHeartbeat } from "./activityHeartbeat.js";
 import { AboutLifeOS } from "./AboutLifeOS.js";
@@ -241,8 +241,7 @@ function App() {
   // base hash no longer matches the file on disk, whether or not it's the one currently open.
   const conflictedNoteIds = new Set(notes.filter((note) => isConflictedDraft(readCachedDraft(note), note)).map((note) => note.frontmatter.id));
   const readOnly = health?.session.writeAllowed === false;
-  const releasedAfterIdle = readOnly && health?.session.releasedAfterIdle === true;
-  // ADR 0015: real input in this tab keeps (or, when free, claims) the write lease; the answer refreshes read-only state.
+  // ADR 0024: real input in this tab claims a free (expired) write lease; the answer refreshes read-only state.
   useActivityHeartbeat(async () => {
     const session = await api("POST /api/v1/session/activity");
     updateHealth((current) => current ? { ...current, session } : current);
@@ -1061,7 +1060,7 @@ function App() {
   return <ApplicationShell
     activeView={view}
     pendingReviewCount={pendingReviews.length}
-    status={readOnly ? (releasedAfterIdle ? "Read-only · paused after inactivity" : "Read-only · another device active") : message}
+    status={readOnly ? "Read-only · in use on another Mac" : message}
     readOnly={readOnly}
     onNavigate={(item) => void go(tabRoute(item))}
     onSearch={openSearch}
@@ -1077,7 +1076,7 @@ function App() {
       </OverlayDialog>
       <Breadcrumbs trail={trail} onGo={(next) => void go(next)} />
       {!server.online && <article className="lease-warning" role="status"><span>LIFEOS SERVER</span><h3>Reconnecting…</h3><p>LifeOS is restarting or not running. Keep typing: your draft is kept in the browser and saves when the server is back.</p></article>}
-      <AppStatusBanners session={health?.session} idleMinutes={health?.idleReleaseMinutes} offline={calendar.offline} busy={busy} timeZone={displayTimeZone} onTakeOver={takeOverSessionForSettings} onRetryCalendar={async () => { await retryCalendar(); }} />
+      <AppStatusBanners session={health?.session} offline={calendar.offline} busy={busy} timeZone={displayTimeZone} onTakeOver={takeOverSessionForSettings} onRetryCalendar={async () => { await retryCalendar(); }} />
       {missingItem && <article className="lease-warning" role="status"><span>NOT FOUND</span><p>{missingItem} Showing the {view === "Calendar" ? "day" : "list"} instead.</p></article>}
       {view === "Today" && <TodayPage today={today} panels={todayPanels} enrichment={enrichment} eventCount={calendar.events.length} capture={capture} busy={busy} readOnly={readOnly} loading={!collectionsLoaded} onCaptureChange={setCapture} onCapture={submitCapture} onReplan={requestReplan} onChangeFocus={changeFocus} onEnrich={requestEnrichment} onGiveUp={giveUpEnrichment} onOpenInbox={() => void go({ view: "Inbox" })} onOpenSettingsCard={openSettingsCard} onCompleteTask={(task) => updateEntity(task, { status: "Done" })} onOpenTasks={() => void go({ view: "Tasks" })} onOpenCalendar={() => void go(tabRoute("Calendar"))} timeZone={displayTimeZone} onRetryCalendar={() => void retryCalendar()} onBackUpNow={createBackup} />}
 
@@ -1234,12 +1233,12 @@ function App() {
         <AboutLifeOS server={health?.appInfo} timeZone={displayTimeZone} />
         <div className="summary">
           <Summary label="Object graph" value={health?.diagnostics.length ? "Attention" : "Healthy"} detail={`${health?.objectCount ?? 0} indexed objects`} />
-          <Summary label="Write access" value={readOnly ? "Read-only" : "Enabled"} detail={readOnly ? (releasedAfterIdle ? "released after inactivity" : "another device lease is active") : "revision checks remain active"} />
+          <Summary label="Write access" value={readOnly ? "Read-only" : "Enabled"} detail={readOnly ? "another device lease is active" : "revision checks remain active"} />
           <Summary label="Device" value={health?.session.currentDeviceId ?? "—"} detail="this installation" />
         </div>
         <SelfEmailWarning warning={health?.setupWarning} onOpenSettings={openSettingsCard} />
         <BackupWarning warning={health?.backupWarning} disabled={busy || readOnly} onBackUpNow={createBackup} />
-        {readOnly && !releasedAfterIdle && <article className="lease-warning"><span>DEVICE HANDOFF REQUIRED</span><h3>{health?.session.activeDeviceId} is still active</h3><p>{health?.session.warning}</p><p>{takeoverCaution}</p><button className="takeover" disabled={busy} onClick={takeOverSession}>Take over write access</button></article>}
+        {readOnly && <article className="lease-warning"><span>DEVICE HANDOFF</span><h3>LifeOS is in use on {health?.session.activeDeviceId}</h3><p>{health?.session.warning}</p><p>{takeoverCaution}</p><button className="takeover" disabled={busy} onClick={takeOverSession}>{takeoverLabel}</button></article>}
         <div className="system-grid">
           <article><span>SESSION LEASE</span><div className="system-details"><Meta label="Active device" value={health?.session.activeDeviceId ?? "—"} /><Meta label="Started" value={formatDate(health?.session.startedAt)} /><Meta label="Last activity" value={formatDate(health?.session.lastActivityAt)} /><Meta label="Lease expires" value={formatDate(health?.session.leaseExpiresAt)} /></div></article>
           <article><span>INTEGRITY DIAGNOSTICS</span>{!health?.diagnostics.length ? <div className="health-ok"><i />No duplicate IDs, broken links, type mismatches, or duplicate canonical notes.</div> : <ul className="diagnostics">{health.diagnostics.map((diagnostic) => <li key={diagnostic}>{diagnostic}</li>)}</ul>}</article>

@@ -9,7 +9,6 @@ import { buildApi } from "./api.js";
 import { readAppInfo } from "@lifeos/build-info";
 import { calendarSource } from "./calendar-source.js";
 import { secretRefs } from "./connections.js";
-import { idleReleaseMs } from "./lease.js";
 
 const host = process.env.LIFEOS_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEOS_PORT ?? 4310);
@@ -40,7 +39,6 @@ const api = await buildApi({
   appInfo: readAppInfo({ dev: process.env.NODE_ENV !== "production" }),
   secrets,
   calendars,
-  idleReleaseMs: idleReleaseMs(),
   // The launcher points LIFEOS_WEB_ROOT at its own snapshot of the build, so a later `pnpm build` cannot change the running app.
   webRoot: process.env.LIFEOS_WEB_ROOT ?? fileURLToPath(new URL("../../web/dist/", import.meta.url)),
   logger: true

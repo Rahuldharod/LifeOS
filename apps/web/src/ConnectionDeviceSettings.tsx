@@ -4,7 +4,7 @@ import { BackupFolderCard } from "./BackupFolderCard.js";
 import { BackupWarning } from "./BackupWarning.js";
 import { CalendarOfflineBanner } from "./CalendarOffline.js";
 import { ConnectionsNotice, type ConnectionsState } from "./connections.js";
-import { LeaseBanner, takeoverCaution, type LeaseBannerSession } from "./LeaseBanner.js";
+import { LeaseBanner, takeoverCaution, takeoverLabel, type LeaseBannerSession } from "./LeaseBanner.js";
 import { SaveStatus, type SaveState } from "./SaveStatus.js";
 import { useSettingsCardGuard, type SettingsSection } from "./SettingsWorkspace.js";
 import { dateInTimeZone } from "./zonedTime.js";
@@ -134,7 +134,7 @@ function SystemHealthCard({ health, loading, error }: { health?: SystemHealth; l
 
 function SafeHandoffCard({ health, busy, onTakeOver }: { health?: SystemHealth; busy: boolean; onTakeOver: () => Promise<void> }) {
   const readOnly = health?.session.writeAllowed === false;
-  return <article><span>SAFE HANDOFF</span><h3>Move safely between devices</h3><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol>{readOnly && <><p>{health?.session.warning ?? "This Mac does not currently hold the write lease."}</p>{!health?.session.releasedAfterIdle && <p>{takeoverCaution}</p>}<button type="button" disabled={busy} onClick={() => void onTakeOver()}>{health?.session.releasedAfterIdle ? "Take back" : "Take over write access"}</button></>}
+  return <article><span>SAFE HANDOFF</span><h3>Move safely between devices</h3><ol><li>Finish and close LifeOS on this computer.</li><li>Wait until Google Drive reports synchronization complete.</li><li>On the other computer, wait for incoming sync to finish.</li><li>Start LifeOS and confirm System Health before editing.</li></ol>{readOnly && <><p>{health?.session.warning ?? "This Mac does not currently hold the write lease."}</p><p>{takeoverCaution}</p><button type="button" disabled={busy} onClick={() => void onTakeOver()}>{takeoverLabel}</button></>}
   </article>;
 }
 
@@ -160,11 +160,9 @@ export function connectionDeviceSettingsSections(props: SettingsProps): Settings
 }
 
 /** Mount once above the active workspace so global read-only and Calendar-offline state is never buried in Settings. */
-export function AppStatusBanners({ session, idleMinutes, offline, busy, timeZone, onTakeOver, onRetryCalendar }: { session?: LeaseBannerSession; idleMinutes?: number; offline?: CalendarOffline; busy: boolean; timeZone: string; onTakeOver: () => Promise<void>; onRetryCalendar: () => Promise<void> }) {
-  const foreignLease = session && !session.writeAllowed && !session.releasedAfterIdle;
+export function AppStatusBanners({ session, offline, busy, timeZone, onTakeOver, onRetryCalendar }: { session?: LeaseBannerSession; offline?: CalendarOffline; busy: boolean; timeZone: string; onTakeOver: () => Promise<void>; onRetryCalendar: () => Promise<void> }) {
   return <div className="app-status-banners">
-    <LeaseBanner session={session} idleMinutes={idleMinutes} busy={busy} onTakeBack={() => void onTakeOver()} />
-    {foreignLease && <article className="connection-app-banner" role="status"><span>READ-ONLY</span><h3>Read-only on this Mac</h3><p>{session.activeDeviceId} currently holds write access. {takeoverCaution}</p><button type="button" disabled={busy} onClick={() => void onTakeOver()}>Take over write access</button></article>}
+    <LeaseBanner session={session} busy={busy} onTakeOver={() => void onTakeOver()} />
     <CalendarOfflineBanner offline={offline} timeZone={timeZone} busy={busy} onRetry={() => void onRetryCalendar()} />
   </div>;
 }

@@ -21,7 +21,7 @@ const connected: ConnectionSettings = {
   keychain: "ok"
 };
 const health: SystemHealth = {
-  status: "healthy", objectCount: 12, diagnostics: [], idleReleaseMinutes: 15, appInfo: { version: "26.10.14.1", commit: "abc1234" },
+  status: "healthy", objectCount: 12, diagnostics: [], appInfo: { version: "26.10.14.1", commit: "abc1234" },
   session: { currentDeviceId: "desk-mac", activeDeviceId: "desk-mac", startedAt: "2026-10-11T07:00:00.000Z", lastActivityAt: "2026-10-11T08:00:00.000Z", leaseExpiresAt: "2026-10-11T08:15:00.000Z", writeAllowed: true }
 };
 const verification: BackupVerification = { backupId: "backup-1", createdAt: "2026-10-11T08:10:00.000Z", fileCount: 21, totalBytes: 4096, valid: true, restoredToTemporaryDirectory: true, diagnostics: [] };
@@ -110,9 +110,9 @@ describe("Connections and Data & devices Settings (#139)", () => {
   it("renders app-wide read-only and offline banners with guarded actions", async () => {
     const takeOver = vi.fn(async () => undefined); const retry = vi.fn(async () => undefined);
     root = createRoot(document.body.appendChild(document.createElement("div")));
-    await act(async () => root!.render(<AppStatusBanners session={{ ...health.session, activeDeviceId: "laptop", writeAllowed: false }} idleMinutes={15} offline={{ reason: "network", error: "No route" }} busy={false} timeZone="Europe/Paris" onTakeOver={takeOver} onRetryCalendar={retry} />));
-    expect(document.body.textContent).toMatch(/Read-only on this Mac.*laptop.*Offline: showing meetings already in LifeOS/s);
-    await click("Take over write access"); await click("Retry");
+    await act(async () => root!.render(<AppStatusBanners session={{ ...health.session, activeDeviceId: "laptop", writeAllowed: false }} offline={{ reason: "network", error: "No route" }} busy={false} timeZone="Europe/Paris" onTakeOver={takeOver} onRetryCalendar={retry} />));
+    expect(document.body.textContent).toMatch(/LifeOS is in use on laptop.*Offline: showing meetings already in LifeOS/s);
+    await click("Use LifeOS here"); await click("Retry");
     expect(takeOver).toHaveBeenCalledOnce(); expect(retry).toHaveBeenCalledOnce();
   });
 });

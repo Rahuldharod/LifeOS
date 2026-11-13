@@ -109,10 +109,11 @@ describe("background work and the device lease (ADR 0015)", () => {
     await vi.waitFor(async () => expect((await tasks(get)).filter((object) => object.frontmatter.type === "audit-event" && object.frontmatter.actor_type === "external")).toHaveLength(1), { timeout: 5_000 });
   });
 
-  it("the heartbeat runs the idle check: without user activity the lease is released", async () => {
-    const { start, get } = await api({ idleReleaseMs: 50, timing: { ...quick.timing, heartbeatMs: 20 } });
+  it("the heartbeat keeps the lease: without user activity this Mac still holds it (ADR 0024)", async () => {
+    const { start, get } = await api({ timing: { ...quick.timing, heartbeatMs: 20 } });
     await start();
-    await vi.waitFor(async () => expect((await get("/api/v1/health")).json().session).toMatchObject({ writeAllowed: false, releasedAfterIdle: true }), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await get("/api/v1/health")).json().session).toMatchObject({ writeAllowed: true, activeDeviceId: "desk-mac" });
   });
 
   const snapshots = async (backupRoot: string) => (await readdir(backupRoot).catch(() => [] as string[])).filter((name) => !name.startsWith("."));

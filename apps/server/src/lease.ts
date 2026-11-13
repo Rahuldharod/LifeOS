@@ -1,13 +1,15 @@
 /**
- * The advisory device lease over HTTP (ADR 0003) and its idle auto-handover (ADR 0015).
+ * The advisory device lease over HTTP (ADR 0003, ADR 0024). The Mac holding the lease keeps it for as long as LifeOS
+ * runs there; only the other Mac's explicit takeover ("Use LifeOS here") moves it. A lease still expires 15 minutes after
+ * its holder stops renewing (asleep, crashed), and then the other Mac claims it on its user's first activity.
  *
- * What counts as user activity (resets the idle timer):
+ * What counts as user activity (claims a free lease, or extends our own and records `last_activity_at`):
  *  - `POST /api/v1/session/activity`, which the browser sends only from a visible, focused tab after a real key
  *    press, click, scroll or pointer move (at most once a minute);
  *  - any successful write request, except the system ones in `notActivity` (backups, calendar sync, index rebuild,
  *    connection retry, adopt now): those can run without the user being at this Mac;
- *  - the explicit takeover ("Take over" / "Take back").
- * What never counts: the lease heartbeat timer, automatic adoption, automatic backups, the file watcher, and reads.
+ *  - the explicit takeover.
+ * The heartbeat only extends a lease this Mac already holds; it never claims one.
  */
 import type { FastifyInstance } from "fastify";
 import { route } from "./route.js";
@@ -17,36 +19,9 @@ export interface LeaseSession {
   refresh(): Promise<SessionStatus>;
   touch(): Promise<SessionStatus>;
   renew(): Promise<SessionStatus>;
-  release(): Promise<SessionStatus>;
   takeOver(): Promise<SessionStatus>;
   status(): SessionStatus;
   holdsLease(): boolean;
-}
-
-export const defaultIdleReleaseMinutes = 15;
-
-/** Minutes from LIFEOS_IDLE_RELEASE_MINUTES (a positive number), else 15. */
-export function idleReleaseMs(env: NodeJS.ProcessEnv = process.env) {
-  const minutes = Number(env.LIFEOS_IDLE_RELEASE_MINUTES);
-  return (Number.isFinite(minutes) && minutes > 0 ? minutes : defaultIdleReleaseMinutes) * 60_000;
-}
-
-/** Tracks the last user activity and releases the lease once it is `idleMs` old. */
-export class IdleRelease {
-  private lastActivity: number;
-
-  constructor(private readonly session: LeaseSession, readonly idleMs: number, private readonly now: () => number = Date.now) {
-    this.lastActivity = now();
-  }
-
-  activity() { this.lastActivity = this.now(); }
-
-  /** The heartbeat (every minute): releases the lease when idle, otherwise extends it. Never claims a lease. */
-  async tick() {
-    await this.session.refresh();
-    if (this.session.holdsLease() && this.now() - this.lastActivity >= this.idleMs) return this.session.release();
-    return this.session.renew();
-  }
 }
 
 const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -62,9 +37,9 @@ export function countsAsActivity(method: string, url: string) {
   return writeMethods.has(method) && !notActivity.some((pattern) => pattern.test(route));
 }
 
-/** Read-only enforcement (423), the takeover and activity routes, and activity tracking for writes. */
-export function registerLease(server: FastifyInstance, options: { session: LeaseSession; idle: IdleRelease; stopping: () => boolean }) {
-  const { session, idle, stopping } = options;
+/** Read-only enforcement (423), the takeover and activity routes, and lease renewal after writes. */
+export function registerLease(server: FastifyInstance, options: { session: LeaseSession; stopping: () => boolean }) {
+  const { session, stopping } = options;
 
   server.addHook("preHandler", async (request, reply) => {
     if (!writeMethods.has(request.method)) return;
@@ -79,18 +54,11 @@ export function registerLease(server: FastifyInstance, options: { session: Lease
     const route = request.url.split("?")[0] ?? request.url;
     if (!writeMethods.has(request.method) || reply.statusCode >= 400 || sessionRoutes.has(route)) return;
     if (!countsAsActivity(request.method, request.url)) { await session.renew(); return; }
-    idle.activity();
     if (session.status().writeAllowed) await session.touch();
   });
 
-  route(server, "POST /api/v1/session/take-over", async () => {
-    idle.activity();
-    return session.takeOver();
-  });
+  route(server, "POST /api/v1/session/take-over", async () => session.takeOver());
 
-  // The browser's "someone is here" signal. It never takes back a released lease: only Take back does.
-  route(server, "POST /api/v1/session/activity", async () => {
-    idle.activity();
-    return session.touch();
-  });
+  // The browser's "someone is here" signal: claims a free (expired) lease, never a live one held by the other Mac.
+  route(server, "POST /api/v1/session/activity", async () => session.touch());
 }
