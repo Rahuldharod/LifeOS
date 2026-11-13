@@ -49,11 +49,6 @@ export interface SessionStatus {
   leaseExpiresAt: string;
   writeAllowed: boolean;
   warning?: string;
-  /**
-   * ADR 0015: this device gave the lease up after a period without user activity. It stays read-only until the user
-   * takes it back (never automatically), exactly like a device that sees another device's lease.
-   */
-  releasedAfterIdle: boolean;
 }
 
 function hash(content: string) {
@@ -538,8 +533,14 @@ export class FilesystemSessionStore {
   private record?: SessionRecord;
   private writeAllowed = true;
   private warning?: string;
-  /** ADR 0015: set by `release()`, cleared only by `start()` and `takeOver()`. */
-  private released = false;
+  /**
+   * ADR 0024: when this device last claimed the lease (its `started_at`). The newest claim wins: a live foreign record
+   * that started before it is the old holder's late renewal crossing our takeover in Drive, so our claim stands.
+   */
+  private claimedAt?: number;
+  private reassertedAt?: number;
+  /** True once this device has held the lease during this run; backups keep running after another Mac takes over. */
+  private heldThisRun = false;
 
   /**
    * The lease file syncs through Google Drive, so it is rewritten at most once per `renewEveryMs` (a third of the lease)
@@ -554,7 +555,6 @@ export class FilesystemSessionStore {
 
   async start() {
     await this.cleanupTemporaryFiles();
-    this.released = false;
     const existing = await this.readRecord();
     if (existing && this.isForeignActive(existing)) {
       this.record = existing;
@@ -566,22 +566,22 @@ export class FilesystemSessionStore {
     return this.status();
   }
 
-  /** The user's explicit takeover (also "Take back" after an idle release). */
+  /** The user's explicit takeover ("Use LifeOS here"). Never done by a timer. */
   async takeOver() {
-    this.released = false;
     await this.claim();
     return this.status();
   }
 
   async refresh() {
     const existing = await this.readRecord();
+    if (existing && this.isForeignActive(existing) && this.isStaleRenewal(existing)) {
+      await this.reassert();
+      return this.status();
+    }
     if (existing) this.record = existing;
     if (existing && this.isForeignActive(existing)) {
       this.writeAllowed = false;
       this.warning = this.foreignWarning(existing);
-    } else if (this.released) {
-      this.writeAllowed = false;
-      this.warning = "This Mac released the lease after a period without activity, so it is read-only until you take it back";
     } else {
       this.writeAllowed = true;
       this.warning = undefined;
@@ -609,22 +609,16 @@ export class FilesystemSessionStore {
 
   /** True while this device holds the lease: only then may background work (adoption, external-edit audits) write objects. */
   holdsLease() {
-    return this.writeAllowed && !this.released && this.record?.device_id === this.deviceId;
+    return this.writeAllowed && this.record?.device_id === this.deviceId;
   }
 
-  /** ADR 0015: gives the lease up after inactivity (expires it now). Read-only until `takeOver()`. */
-  async release() {
-    await this.refresh();
-    if (!this.holdsLease() || !this.record) return this.status();
-    const now = this.now().toISOString();
-    this.record = { ...this.record, lease_expires_at: now };
-    await this.writeRecord(this.record);
-    this.released = true;
-    return this.refresh();
+  /** True once this device has held the lease during this run, even if another Mac has taken it over since. */
+  hasHeldLease() {
+    return this.heldThisRun;
   }
 
   async close() {
-    if (!this.writeAllowed || this.released || this.record?.device_id !== this.deviceId) return;
+    if (!this.writeAllowed || this.record?.device_id !== this.deviceId) return;
     const now = this.now().toISOString();
     this.record = { ...this.record, last_activity_at: now, lease_expires_at: now };
     await this.writeRecord(this.record);
@@ -640,13 +634,28 @@ export class FilesystemSessionStore {
       lastActivityAt: record.last_activity_at,
       leaseExpiresAt: record.lease_expires_at,
       writeAllowed: this.writeAllowed,
-      warning: this.warning,
-      releasedAfterIdle: this.released
+      warning: this.warning
     };
   }
 
   private isForeignActive(record: SessionRecord) {
     return record.device_id !== this.deviceId && Date.parse(record.lease_expires_at) > this.now().getTime();
+  }
+
+  /** ADR 0024: a live foreign lease that started before our own latest claim, while our claim is still in memory. */
+  private isStaleRenewal(record: SessionRecord) {
+    return this.claimedAt !== undefined && this.record?.device_id === this.deviceId && Date.parse(record.started_at) < this.claimedAt;
+  }
+
+  /** Writes our newer claim again (at most once a minute, so a slow Drive sync does not cause a write per request). */
+  private async reassert() {
+    const now = this.now();
+    this.writeAllowed = true;
+    this.warning = undefined;
+    if (this.reassertedAt !== undefined && now.getTime() - this.reassertedAt < 60_000) return;
+    this.reassertedAt = now.getTime();
+    this.record = { ...this.record!, lease_expires_at: new Date(now.getTime() + this.leaseDurationMs).toISOString() };
+    await this.writeRecord(this.record);
   }
 
   private foreignWarning(record: SessionRecord) {
@@ -663,6 +672,8 @@ export class FilesystemSessionStore {
       last_activity_at: now.toISOString(),
       lease_expires_at: new Date(now.getTime() + this.leaseDurationMs).toISOString()
     };
+    this.claimedAt = Date.parse(this.record.started_at);
+    this.heldThisRun = true;
     await this.writeRecord(this.record);
   }
 
@@ -684,6 +695,8 @@ export class FilesystemSessionStore {
       last_activity_at: activity || !own ? now.toISOString() : own.last_activity_at,
       lease_expires_at: new Date(now.getTime() + this.leaseDurationMs).toISOString()
     };
+    this.claimedAt = Date.parse(this.record.started_at);
+    this.heldThisRun = true;
     await this.writeRecord(this.record);
   }
 

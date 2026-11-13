@@ -8,7 +8,7 @@ import { MockCalendarConnector } from "@lifeos/connectors";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemSessionStore, MarkdownObjectStore } from "@lifeos/object-store-markdown";
 import { httpError } from "../../apps/server/src/http-errors.js";
-import { IdleRelease, registerLease } from "../../apps/server/src/lease.js";
+import { registerLease } from "../../apps/server/src/lease.js";
 import { registerNotePurge } from "../../apps/server/src/note-purge-routes.js";
 
 // PB-030 (#103): a tombstoned note can be deleted permanently from the Deleted tab.
@@ -186,7 +186,7 @@ describe("permanent delete over HTTP (PB-030)", () => {
     await session.start();
     const server = Fastify();
     servers.push(server);
-    registerLease(server, { session, idle: new IdleRelease(session, 15 * 60_000), stopping: () => false });
+    registerLease(server, { session, stopping: () => false });
     registerNotePurge(server, context.application);
     server.setErrorHandler((error, _request, reply) => { const { statusCode, body } = httpError(error); reply.status(statusCode).send(body); });
     const url = `/api/v1/notes/${context.note.frontmatter.id}`;

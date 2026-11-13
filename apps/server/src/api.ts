@@ -5,7 +5,7 @@
  * reads the environment, refuses a data root without `.lifeos/schema.md` (ADR 0014), opens the port and handles signals.
  *
  * Background object writers (adoption, external-edit audits, person-merge suggestions, the Agent Index) run only
- * while this device holds the lease; the heartbeat runs the idle check (ADR 0015).
+ * while this device holds the lease; the heartbeat only extends a lease this device holds (ADR 0024).
  */
 import path from "node:path";
 import { watch } from "node:fs";
@@ -23,7 +23,7 @@ import { listBundledSkills, pluginMarketplace, zipBundledSkill } from "./skills-
 import type { calendarSource } from "./calendar-source.js";
 import { connectionSettings, googleConnectionStatus } from "./connections.js";
 import { httpError } from "./http-errors.js";
-import { IdleRelease, registerLease } from "./lease.js";
+import { registerLease } from "./lease.js";
 import { registerNotePurge } from "./note-purge-routes.js";
 import { registerDuplicateCleanup } from "./duplicate-cleanup-route.js";
 import { registerNotesList } from "./notes-list-route.js";
@@ -54,7 +54,6 @@ export interface ApiOptions {
   secrets: KnownSecrets;
   calendars: CalendarSource;
   /** Released after this long without user activity (ADR 0015). */
-  idleReleaseMs: number;
   /** The production web build served for every non-API URL. */
   webRoot: string;
   logger?: boolean;
@@ -104,11 +103,10 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   // The stable app serves the UI itself (same origin); only the Vite dev UI needs CORS.
   await server.register(cors, { origin: ["http://127.0.0.1:5174", "http://localhost:5174"] });
 
-  // ADR 0003 and 0015: read-only enforcement, takeover, and the idle auto-handover of the device lease.
-  const idle = new IdleRelease(session, options.idleReleaseMs);
-  registerLease(server, { session, idle, stopping: () => stopping });
+  // ADR 0003 and 0024: read-only enforcement and the takeover of the device lease.
+  registerLease(server, { session, stopping: () => stopping });
 
-  route(server, "GET /api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), idleReleaseMinutes: idle.idleMs / 60_000, ...await backupWarning(), appInfo }));
+  route(server, "GET /api/v1/health", async () => ({ ...await application.health(), session: await session.refresh(), ...await backupWarning(), appInfo }));
   route(server, "GET /api/v1/objects", async () => application.listObjects());
   registerNotesList(server, application);
   route(server, "GET /api/v1/entities/:type", async (request) => application.entities(request.params.type));
@@ -459,8 +457,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     await application.rebuildIndex();
     if (session.holdsLease()) await application.suggestPersonMerges().catch((error) => server.log.error(error));
     // Inbox Drafts and Patch Drafts (ADR 0007, #32) are adopted at startup (which also finishes a batch a crash interrupted), shortly after
-    // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease
-    // (not after an idle release, ADR 0015).
+    // one lands, and by a periodic sweep in case watcher events are lost on Drive-synced folders; only while this device holds the lease.
     const autoAdoption = application.startAutoAdoption({ canWrite: () => session.holdsLease(), onError: (error) => server.log.error(error), sweepMs: timing.adoptionSweepMs, debounceMs: timing.adoptionDebounceMs });
     await autoAdoption.runNow();
     return autoAdoption;
@@ -469,8 +466,8 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   /** As before #120: background work starts only once the server is listening. */
   function afterListen(autoAdoption: ReturnType<typeof application.startAutoAdoption>) {
     // Backups (#84): at start, daily while running and at a clean stop; only while this device may write (ADR 0003). Backups only
-    // read the data folder into this Mac's own backup folder, so they keep running after an idle release (ADR 0015).
-    autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed || session.status().releasedAfterIdle, onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
+    // read the data folder into this Mac's own backup folder, so they keep running after the other Mac takes over (ADR 0024).
+    autoBackups = application.startAutoBackups(backups, { canWrite: () => session.status().writeAllowed || session.hasHeldLease(), onError: (error, trigger) => server.log.error({ err: error, trigger }, "Backup failed") });
     let reconcileTimer: NodeJS.Timeout | undefined;
     let reconciling: Promise<unknown> = Promise.resolve();
     const driveCopyOfAppFolder = /^(\.lifeos|_agent|_inbox) \d+\//; // ADR 0016
@@ -483,8 +480,8 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
       const reconcile = () => session.holdsLease() ? application.recordExternalChanges() : application.rebuildIndex();
       reconcileTimer = setTimeout(() => { reconciling = reconcile().catch((error) => server.log.error(error)); }, timing.reconcileDelayMs);
     });
-    // Every minute: extend the lease, or release it after LIFEOS_IDLE_RELEASE_MINUTES without user activity (ADR 0015).
-    const heartbeat = setInterval(() => void idle.tick().catch((error) => server.log.error(error)), timing.heartbeatMs);
+    // Every minute: extend the lease this Mac holds (ADR 0024). Never claims one.
+    const heartbeat = setInterval(() => void session.renew().catch((error) => server.log.error(error)), timing.heartbeatMs);
     heartbeat.unref();
     // #95: writes stop, HTTP and adoption go idle, then the clean-stop backup, then the lease is released.
     const stop = () => shutDown({

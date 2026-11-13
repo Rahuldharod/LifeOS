@@ -50,7 +50,7 @@ There is intentionally no standalone user guide during the MVP. The interface an
 - Preserve unknown Markdown frontmatter and body content during round trips.
 - External workflows must be idempotent. Meeting creation, review acceptance, and recovery must tolerate retries. Any step that writes more than one file follows the crash-recovery pattern in ADR 0013 and its helpers; do not hand-write another.
 - While developing, do not read or write the real data root, and never edit its files to make a test pass. Tests use temporary roots and synthetic records; manual checks use `.dev-data/`.
-- Treat the advisory device lease as a guardrail, not the sole concurrency control. Background work that writes objects runs only while this device holds the lease (`holdsLease()`); after an idle release nothing reclaims it except the user's Take back (ADR 0015).
+- Treat the advisory device lease as a guardrail, not the sole concurrency control. Background work that writes objects runs only while this device holds the lease (`holdsLease()`); a live lease moves only by the other Mac's explicit takeover, "Use LifeOS here" (ADR 0024).
 - The server and maintenance scripts refuse to start unless the data root holds `.lifeos/schema.md` (ADR 0014). Do not add a default data path.
 
 ## Commands

@@ -1,6 +1,6 @@
-// ADR 0015: tells the server someone is using LifeOS on this Mac, so it keeps the write lease.
+// ADR 0024: tells the server someone is using LifeOS on this Mac, so it claims the write lease when it is free (the
+// other Mac is asleep or closed and its lease expired). It never takes a live lease: only "Use LifeOS here" does.
 // Sent only after a real key press, click, scroll or pointer move, in a visible and focused tab, at most once a minute.
-// Timers, background refreshes and an open-but-unattended tab never send it, so an idle Mac lets the lease go.
 import { useEffect, useRef } from "react";
 
 export const activityIntervalMs = 60_000;

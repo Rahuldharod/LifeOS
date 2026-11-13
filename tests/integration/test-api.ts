@@ -44,7 +44,7 @@ export async function testApi(options: Partial<ApiOptions> & { files?: Record<st
   }
   const secrets = new KnownSecrets(new MemorySecretStore());
   const calendars = calendarSource({ secrets, mockOnly: true, mock: new MockCalendarConnector(), createGoogle: () => { throw new Error("No Google Calendar in tests"); } });
-  const api = await buildApi({ dataRoot: root, backupRoot, deviceId: "desk-mac", secrets, calendars, idleReleaseMs: 15 * 60_000, webRoot: path.join(root, "no-web-build"), ...overrides });
+  const api = await buildApi({ dataRoot: root, backupRoot, deviceId: "desk-mac", secrets, calendars, webRoot: path.join(root, "no-web-build"), ...overrides });
   apis.push(api);
   /** Runs startup; `listen` stands in for opening the port (no port is opened in tests). */
   const start = async (listen: () => PromiseLike<unknown> = () => api.server.ready()) => { const background = await api.start(listen); running.push(background); return background; };

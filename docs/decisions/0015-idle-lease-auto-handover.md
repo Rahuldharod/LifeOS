@@ -1,6 +1,6 @@
 # ADR 0015: Release the device lease after inactivity
 
-- Status: Accepted
+- Status: Superseded by [ADR 0024](0024-lease-stays-until-taken-over.md) (2026-11-13): no idle release; the lease moves only by takeover
 - Date: 2026-10-07
 - Amends: ADR 0003 (advisory two-device lease)
 
