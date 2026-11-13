@@ -214,6 +214,8 @@ export class LifeOSApplication {
   getSelfEmails() { return this.people.getSelfEmails(); }
   /** Ignored addresses, one entry per "Not a person" Person. */
   ignoredAddresses() { return this.people.ignoredAddresses(); }
+  /** The "Not a person" People, deleted ones excluded; the People settings list them under the Type filter. */
+  notAPersonPeople() { return this.people.notAPersonPeople(); }
   /** "Not a person": archive the Person and ignore its addresses in future invites. */
   markNotAPerson(id: string, expectedHash: string) { return this.people.markNotAPerson(id, expectedHash); }
   undoNotAPerson(id: string, expectedHash: string) { return this.people.undoNotAPerson(id, expectedHash); }

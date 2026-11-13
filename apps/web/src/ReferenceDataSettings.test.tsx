@@ -127,6 +127,57 @@ describe("ReferenceDataSettings (#140)", () => {
     expect(([...document.querySelectorAll("button")].find((button) => button.textContent === "Delete project") as HTMLButtonElement).disabled).toBe(false);
   });
 
+  // #230: People filters, checkboxes and bulk actions.
+  it("filters people with AND, selects them, and asks before a bulk archive", async () => {
+    const ana = object("ana", "person", "Ana External", { review_state: "unreviewed", origin: "calendar" });
+    const ben = object("ben", "person", "Ben Internal", { review_state: "reviewed" });
+    const list = object("list", "person", "Team List", { not_a_person: true, archived_at: "2026-11-02T08:00:00Z" });
+    const personLabels = new Map<string, PersonLabel>([
+      ["ana", { id: "ana", name: "Ana External", label: "Ana External - ext", suffix: " - ext", isExternal: true, externalSource: "email", unreviewed: true } as PersonLabel],
+      ["ben", { id: "ben", name: "Ben Internal", label: "Ben Internal", isExternal: false, externalSource: "email" } as PersonLabel]
+    ]);
+    const bulk = vi.fn(async (action: string, people: LifeObject[]) => ({ action: action as "archive", done: people.length, skipped: 0, failed: [] }));
+    await render(defaults({ type: "person", objects: [ana, ben], linkables: [ana, ben], notAPersonPeople: [list], personLabels, selectedId: undefined, onBulkPeople: bulk }));
+    const rows = () => [...document.querySelectorAll("[aria-label^='Open person:']")].map((row) => row.getAttribute("aria-label"));
+    const choose = async (label: string, value: string) => {
+      const select = document.querySelector(`[aria-label='${label}']`) as HTMLSelectElement;
+      await act(async () => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    };
+    expect(rows()).toEqual(["Open person: Ana External - ext", "Open person: Ben Internal"]);
+    await choose("Type filter", "not-a-person");
+    expect(rows()).toEqual(["Open person: Team List"]);
+    await choose("Type filter", "all"); await choose("Review status filter", "reviewed");
+    expect(rows()).toEqual(["Open person: Ben Internal", "Open person: Team List"]);
+    await choose("Internal or external filter", "external");
+    expect(rows()).toEqual([]);
+    expect(document.body.textContent).toContain("No people match.");
+    await choose("Review status filter", "unreviewed");
+    expect(rows()).toEqual(["Open person: Ana External - ext"]);
+    await choose("Review status filter", "all"); await choose("Internal or external filter", "all"); await choose("Type filter", "person");
+
+    await click("Select all");
+    expect(document.body.textContent).toContain("2 selected");
+    await act(async () => (document.querySelector("[aria-label='Select Ben Internal']") as HTMLInputElement).click());
+    expect(document.body.textContent).toContain("1 selected");
+    await click("Select all"); await click("Actions…");
+    expect(document.querySelector("[aria-label='Selected people actions']")).toBeTruthy();
+    expect(([...document.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "Confirm (1 of 2)") as HTMLButtonElement).disabled).toBe(false);
+    expect(([...document.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "Mark as a person (0 of 2)") as HTMLButtonElement).disabled).toBe(true);
+
+    await click("Archive (2 of 2)");
+    expect(bulk).not.toHaveBeenCalled();
+    const dialog = document.querySelector("[role='dialog']")!;
+    expect(dialog.textContent).toContain("Archive 2 people?");
+    await click("Cancel");
+    expect(document.querySelector("[role='dialog']")).toBeNull(); expect(bulk).not.toHaveBeenCalled();
+    await click("Archive (2 of 2)"); await click("Archive");
+    expect(bulk).toHaveBeenCalledWith("archive", [ana, ben]);
+    expect(document.body.textContent).toContain("2 people archived");
+
+    await click("Deselect all");
+    expect(document.body.textContent).toContain("2 shown");
+  });
+
   it("disables creation, editing, saving and deletion when read-only", async () => {
     await render(defaults({ readOnly: true }));
     expect((document.querySelector("[aria-label='project title']") as HTMLInputElement).disabled).toBe(true);

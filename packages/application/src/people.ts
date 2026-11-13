@@ -278,6 +278,11 @@ export class PeopleModule {
     return notAPersonPeople(this.ctx.index).map((person) => ({ personId: person.frontmatter.id, title: String(person.frontmatter.title), emails: notAPersonAddresses(person), contentHash: person.contentHash }));
   }
 
+  /** The "Not a person" People themselves (archived, so the People rollup leaves them out), for the People filter. */
+  notAPersonPeople(): LifeOSObject[] {
+    return notAPersonPeople(this.ctx.index);
+  }
+
   /**
    * "Not a person": the Person is flagged and archived in one write, so its addresses become Ignored addresses.
    * One file, so no crash-recovery journal is needed (ADR 0013); repeating it changes nothing.
