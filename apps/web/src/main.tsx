@@ -825,10 +825,10 @@ function App() {
       case "delete": return api("DELETE /api/v1/entities/by-id/:id", { params, body });
     }
   };
-  const bulkPeople = async (action: PeopleBulkAction, selected: LifeObject[]) => {
+  const bulkPeople = async (action: PeopleBulkAction, selected: LifeObject[], onProgress?: (done: number, total: number) => void) => {
     let result: BulkResult | undefined;
     await run(async () => {
-      result = await applyToEach(action, selected, (person) => writePerson(action, person));
+      result = await applyToEach(action, selected, (person) => writePerson(action, person), onProgress);
       await refresh();
     }, "");
     if (result) setMessage(describeBulkResult(result));

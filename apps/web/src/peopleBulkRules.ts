@@ -60,12 +60,13 @@ export type BulkResult = { action: PeopleBulkAction; done: number; skipped: numb
  * One write per person, one after the other (each guarded by that person's content hash). A failure is
  * recorded and the rest carry on; every endpoint used is idempotent, so running the action again is safe.
  */
-export async function applyToEach(action: PeopleBulkAction, people: LifeObject[], write: (person: LifeObject) => Promise<unknown>): Promise<BulkResult> {
+export async function applyToEach(action: PeopleBulkAction, people: LifeObject[], write: (person: LifeObject) => Promise<unknown>, onProgress?: (done: number, total: number) => void): Promise<BulkResult> {
   const targets = people.filter((person) => bulkApplies(action, person));
   const result: BulkResult = { action, done: 0, skipped: people.length - targets.length, failed: [] };
   for (const person of targets) {
     try { await write(person); result.done += 1; }
     catch (error) { result.failed.push({ title: String(person.frontmatter.title), error: error instanceof Error ? error.message : "Something went wrong" }); }
+    onProgress?.(result.done + result.failed.length, targets.length);
   }
   return result;
 }

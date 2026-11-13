@@ -171,11 +171,29 @@ describe("ReferenceDataSettings (#140)", () => {
     await click("Cancel");
     expect(document.querySelector("[role='dialog']")).toBeNull(); expect(bulk).not.toHaveBeenCalled();
     await click("Archive (2 of 2)"); await click("Archive");
-    expect(bulk).toHaveBeenCalledWith("archive", [ana, ben]);
-    expect(document.body.textContent).toContain("2 people archived");
-
-    await click("Deselect all");
+    expect(bulk).toHaveBeenCalledWith("archive", [ana, ben], expect.any(Function));
+    // Done: a toast says what happened, the selection clears and the panel closes.
+    expect(document.querySelector(".people-bulk-toast[role='status']")?.textContent).toContain("2 people archived");
     expect(document.body.textContent).toContain("2 shown");
+    expect(document.querySelector("[aria-label='Selected people actions']")).toBeNull();
+    await click("Dismiss");
+    expect(document.querySelector(".people-bulk-toast")).toBeNull();
+
+    // A filter change starts a new selection.
+    await click("Select all");
+    expect(document.body.textContent).toContain("2 selected");
+    await choose("Review status filter", "unreviewed");
+    expect(document.body.textContent).toContain("1 shown");
+  });
+
+  it("keeps a failed bulk action on screen as an alert, naming who failed", async () => {
+    const ana = object("ana", "person", "Ana External", { review_state: "unreviewed", origin: "calendar" });
+    const bulk = vi.fn(async () => ({ action: "confirm" as const, done: 0, skipped: 0, failed: [{ title: "Ana External", error: "Changed on another device" }] }));
+    await render(defaults({ type: "person", objects: [ana], linkables: [ana], personLabels: new Map(), selectedId: undefined, onBulkPeople: bulk }));
+    await click("Select all"); await click("Actions…"); await click("Confirm (1 of 1)");
+    const alert = document.querySelector(".people-bulk-toast[role='alert']");
+    expect(alert?.textContent).toContain("Some changes failed");
+    expect(alert?.textContent).toContain("Ana External: Changed on another device");
   });
 
   it("disables creation, editing, saving and deletion when read-only", async () => {

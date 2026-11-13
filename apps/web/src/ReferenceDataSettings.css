@@ -6,7 +6,10 @@
 .reference-list header h3, .reference-record-header h3 { margin: var(--space-1) 0; }
 .reference-list header span, .reference-record-header span { color: var(--color-accent); font-size: var(--font-size-xs); font-weight: 800; letter-spacing: .1em; }
 .reference-list > input { width: 100%; margin: var(--space-3) 0; }
-.reference-rows { display: grid; gap: var(--space-1); }
+/* minmax(0, 1fr): a long name wraps inside the list instead of widening every row past the column. */
+.reference-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+.reference-rows strong { min-width: 0; overflow-wrap: anywhere; }
+.reference-rows small { flex: none; }
 .reference-rows > button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; padding: var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text); text-align: left; }
 .reference-rows > button.selected { background: var(--color-surface); color: var(--color-primary); box-shadow: var(--shadow-surface); }
 .reference-rows small { color: var(--color-text-muted); }
@@ -61,7 +64,7 @@
 .people-filters select { width: 100%; }
 .people-selection { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); color: var(--color-text-muted); }
 .people-selection > span { margin-right: auto; }
-.reference-row-check { display: flex; align-items: center; gap: var(--space-2); padding-left: var(--space-2); }
+.reference-row-check { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding-left: var(--space-2); }
 .reference-row-check > input { flex: none; width: 1.1rem; height: 1.1rem; }
 .reference-row-check > button { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text); text-align: left; }
 .reference-row-check > button.selected { background: var(--color-surface); color: var(--color-primary); box-shadow: var(--shadow-surface); }
@@ -69,6 +72,11 @@
 .people-bulk-names, .people-bulk-hint { margin: 0; color: var(--color-text-muted); overflow-wrap: anywhere; }
 .people-bulk-group { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: var(--border-thin) solid var(--color-border); }
 .people-bulk-group small { margin-left: var(--space-1); font-weight: 700; }
-.people-bulk-result { margin-bottom: var(--space-2); padding: var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-quiet); }
-.people-bulk-result p, .people-bulk-result ul { margin: 0; }
-.people-bulk-result ul { padding-left: var(--space-4); }
+.people-bulk-progress { margin: 0; font-weight: 700; }
+.people-bulk-toast { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 50; display: grid; gap: var(--space-2); max-width: min(440px, calc(100vw - 2 * var(--space-5))); padding: var(--space-3) var(--space-4); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-success-surface); color: var(--color-text); box-shadow: var(--shadow-overlay); }
+.people-bulk-toast.failed { border-color: var(--color-error-border); background: var(--color-error-surface); color: var(--color-error); }
+.people-bulk-toast p, .people-bulk-toast ul { margin: 0; overflow-wrap: anywhere; }
+.people-bulk-toast ul { max-height: 200px; overflow: auto; padding-left: var(--space-4); }
+.people-bulk-toast > button { justify-self: end; }
+/* Reference data (list + detail) uses the full width of the Settings section, not the 900px form measure. */
+.settings-card-slot:has(> .reference-settings) { max-width: none; }

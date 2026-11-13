@@ -1,5 +1,5 @@
 // #230: People settings filters, selection bar and the bulk-action panel. The rules live in peopleBulkRules.ts.
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { LifeObject } from "@lifeos/contracts";
 import { bulkActionLabels, bulkApplies, describeBulkResult, type BulkResult, type PeopleBulkAction, type PeopleFilters } from "./peopleBulkRules.js";
 
@@ -33,7 +33,7 @@ const names = (people: LifeObject[]) => {
 };
 
 /** The right-hand panel while people are selected. Archive and Delete ask first; the other actions run at once. */
-export function PeopleBulkPanel({ selected, busy, readOnly, result, onRun, onBack }: { selected: LifeObject[]; busy: boolean; readOnly: boolean; result?: BulkResult; onRun: (action: PeopleBulkAction, people: LifeObject[]) => void; onBack?: () => void }) {
+export function PeopleBulkPanel({ selected, busy, readOnly, progress, onRun, onDeselectAll, onBack }: { selected: LifeObject[]; busy: boolean; readOnly: boolean; progress?: { done: number; total: number }; onRun: (action: PeopleBulkAction, people: LifeObject[]) => void; onDeselectAll: () => void; onBack?: () => void }) {
   const [confirming, setConfirming] = useState<"archive" | "delete">();
   const applies = (action: PeopleBulkAction) => selected.filter((person) => bulkApplies(action, person));
   const choose = (action: PeopleBulkAction) => needsConfirmation(action) ? setConfirming(action) : onRun(action, selected);
@@ -41,12 +41,13 @@ export function PeopleBulkPanel({ selected, busy, readOnly, result, onRun, onBac
   return <div className="people-bulk">
     <header className="reference-record-header">{onBack && <button className="reference-back" onClick={onBack}>Back to people</button>}<div><span>SELECTED PEOPLE</span><h3 data-detail-heading tabIndex={-1}>{selected.length} {selected.length === 1 ? "person" : "people"} selected</h3></div></header>
     <p className="people-bulk-names">{names(selected)}</p>
+    <div><button type="button" className="link-button" disabled={busy} onClick={onDeselectAll}>Clear selection</button></div>
+    {progress && <p className="people-bulk-progress" role="status">Working… {progress.done} of {progress.total} done</p>}
     {groups.map((group) => <div className="people-bulk-group" key={group.join()}>{group.map((action) => {
       const count = applies(action).length;
       return <button type="button" key={action} className={action === "delete" ? "danger" : undefined} disabled={busy || readOnly || !count} aria-label={`${bulkActionLabels[action].replace("…", "")} (${count} of ${selected.length})`} onClick={() => choose(action)}>{bulkActionLabels[action]} <small>{count}</small></button>;
     })}</div>)}
     <p className="people-bulk-hint">The number on each button is how many selected people it changes. You are never changed in bulk, and people already in that state are skipped.</p>
-    {result && <PeopleBulkResult result={result} />}
     {confirming && <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="people-bulk-confirm-title" className="leave-dialog" onKeyDown={(event) => { if (event.key === "Escape") setConfirming(undefined); }}>
       <h3 id="people-bulk-confirm-title">{confirming === "archive" ? "Archive" : "Delete"} {targets.length} {targets.length === 1 ? "person" : "people"}?</h3>
       <p>{names(targets)}</p>
@@ -58,9 +59,20 @@ export function PeopleBulkPanel({ selected, busy, readOnly, result, onRun, onBac
   </div>;
 }
 
-export function PeopleBulkResult({ result }: { result: BulkResult }) {
-  return <div className="people-bulk-result" role="status">
-    <p>{describeBulkResult(result)}</p>
-    {result.failed.length > 0 && <ul>{result.failed.map((failure) => <li key={failure.title}><b>{failure.title}</b>: {failure.error}</li>)}</ul>}
+/** The outcome of a bulk action. Success hides itself after a few seconds; a failure stays until dismissed. */
+export function PeopleBulkToast({ result, onClose }: { result: BulkResult; onClose: () => void }) {
+  const failed = result.failed.length > 0;
+  // The timer starts once per result; a re-render with a new onClose does not restart it.
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (failed) return;
+    const timer = window.setTimeout(() => close.current(), 6000);
+    return () => window.clearTimeout(timer);
+  }, [result, failed]);
+  return <div className={`people-bulk-toast${failed ? " failed" : ""}`} role={failed ? "alert" : "status"}>
+    <p><b>{failed ? "Some changes failed" : "Done"}</b> · {describeBulkResult(result)}</p>
+    {failed && <ul>{result.failed.map((failure) => <li key={failure.title}><b>{failure.title}</b>: {failure.error}</li>)}</ul>}
+    <button type="button" className="link-button" onClick={onClose}>Dismiss</button>
   </div>;
 }
