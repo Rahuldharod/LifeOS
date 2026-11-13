@@ -191,6 +191,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return application.saveSelfEmails(emails, expectedHash);
   });
   route(server, "GET /api/v1/people/ignored-addresses", async () => application.ignoredAddresses());
+  route(server, "GET /api/v1/people/not-a-person", async () => application.notAPersonPeople());
   route(server, "POST /api/v1/people/:id/not-a-person", async (request, reply) => {
     const expectedHash = request.body?.expectedHash;
     if (typeof expectedHash !== "string" || !expectedHash) return reply.status(400).send({ error: "expectedHash is required" });

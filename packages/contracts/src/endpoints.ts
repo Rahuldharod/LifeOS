@@ -67,6 +67,8 @@ export interface Endpoints {
   "POST /api/v1/people/:id/not-a-person": Guarded & { response: W.LifeObject };
   "POST /api/v1/people/:id/not-a-person/undo": Guarded & { response: W.LifeObject };
   "GET /api/v1/people/ignored-addresses": { response: W.IgnoredAddress[] };
+  // The "Not a person" People in full (they are archived, so the person rollup leaves them out), for the People filters.
+  "GET /api/v1/people/not-a-person": { response: W.LifeObject[] };
   // Duplicate clean-up: the list (writes nothing), then a backup and the ticked rows. A failed backup changes nothing.
   "GET /api/v1/people/duplicates": { response: W.DuplicateCleanupRow[] };
   "POST /api/v1/people/duplicates/clean-up": { body: W.DuplicateCleanupChoice; response: W.DuplicateCleanupResult };

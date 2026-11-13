@@ -68,4 +68,24 @@ describe("Not a person", () => {
     const workspace = await application.createMeetingFromEvent("e3");
     expect(workspace.meeting.frontmatter.attendee_ids).toEqual([team.frontmatter.id]);
   });
+
+  // #230: the People filters list "Not a person" People in full (the person rollup leaves archived ones out).
+  it("lists the Not a person People in full until they are marked as a person again or deleted", async () => {
+    const { application, team } = await setup();
+    const kim = application.entities("person").find((person) => personEmails(person).includes("kim.lee@example.com"))!;
+    expect(application.notAPersonPeople()).toEqual([]);
+    const marked = await application.markNotAPerson(team.frontmatter.id, team.contentHash);
+    const listed = application.notAPersonPeople();
+    expect(listed.map((person) => person.frontmatter.id)).toEqual([team.frontmatter.id]);
+    expect(listed[0]).toMatchObject({ contentHash: marked.contentHash, frontmatter: { not_a_person: true, archived_at: expect.any(String) } });
+    expect(application.rollups("person").map(({ entity }) => entity.frontmatter.id)).not.toContain(team.frontmatter.id);
+
+    await application.undoNotAPerson(team.frontmatter.id, listed[0]!.contentHash);
+    expect(application.notAPersonPeople()).toEqual([]);
+    expect(application.rollups("person").map(({ entity }) => entity.frontmatter.id)).toContain(team.frontmatter.id);
+
+    const kimMarked = await application.markNotAPerson(kim.frontmatter.id, kim.contentHash);
+    await application.deleteEntity(kim.frontmatter.id, kimMarked.contentHash);
+    expect(application.notAPersonPeople()).toEqual([]);
+  });
 });

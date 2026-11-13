@@ -27,6 +27,7 @@ import { addCalendarDays, dateInTimeZone, dayRange } from "./zonedTime.js";
 import { DecisionsPage } from "./DecisionsPage.js";
 import { activeNoteFilterCount, emptyNotesMessage, noNoteFilters, noteListQuery } from "./noteFilters.js";
 import { externalChoiceValue, labelMap, personLabel, personOption, type ExternalChoice } from "./personLabels.js";
+import { applyToEach, describeBulkResult, type BulkResult, type PeopleBulkAction } from "./peopleBulkRules.js";
 import { PersonName } from "./PersonName.js";
 import { MeetingEnrichment } from "./MeetingEnrichment.js";
 import { OpenPointsPage } from "./OpenPointsPage.js";
@@ -220,7 +221,7 @@ function App() {
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
-  const { today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, objectLinks, notes, deletedNotes, inboxDrafts, appliedPatches, personLabels, enrichment, connections, refresh, refreshTodayPanels, refreshConnections, refreshNotes, refreshNoteLists, refreshObjectLinks, updateNotes, updateToday, updateHealth } = useWorkspaceData({ displayTimeZone });
+  const { today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, notAPersonPeople, objectLinks, notes, deletedNotes, inboxDrafts, appliedPatches, personLabels, enrichment, connections, refresh, refreshTodayPanels, refreshConnections, refreshNotes, refreshNoteLists, refreshObjectLinks, updateNotes, updateToday, updateHealth } = useWorkspaceData({ displayTimeZone });
   const [selectedDate, setSelectedDate] = useState(() => (route?.view === "Calendar" && route.date) || dateInTimeZone(new Date(), storedDisplayTimeZone()));
   // PB-027: open items in the URL are resolved only once the lists they live in have loaded.
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
@@ -810,6 +811,30 @@ function App() {
     await refresh();
   }, `${person.frontmatter.title} archived; its address is now ignored`);
 
+  // #230: one bulk action on the selected people: one guarded write each, through the same endpoints as the
+  // single-person controls, then one refresh. A failed person is named and the others still run.
+  const writePerson = (action: PeopleBulkAction, person: LifeObject) => {
+    const params = { id: person.frontmatter.id };
+    const body = { expectedHash: person.contentHash };
+    switch (action) {
+      case "internal": case "external": return api("PUT /api/v1/people/:id/external", { params, body: { ...body, isExternal: action === "external" } });
+      case "person": return api("POST /api/v1/people/:id/not-a-person/undo", { params, body });
+      case "not-a-person": return api("POST /api/v1/people/:id/not-a-person", { params, body });
+      case "confirm": return api("POST /api/v1/people/:id/reviewed", { params, body });
+      case "archive": return api("POST /api/v1/objects/:id/archive", { params, body });
+      case "delete": return api("DELETE /api/v1/entities/by-id/:id", { params, body });
+    }
+  };
+  const bulkPeople = async (action: PeopleBulkAction, selected: LifeObject[]) => {
+    let result: BulkResult | undefined;
+    await run(async () => {
+      result = await applyToEach(action, selected, (person) => writePerson(action, person));
+      await refresh();
+    }, "");
+    if (result) setMessage(describeBulkResult(result));
+    return result;
+  };
+
   // #214: edit a person's emails. An address on another person comes back named, so the card can offer the merge.
   const addPersonEmail = async (person: LifeObject, email: string): Promise<AddEmailOutcome> => {
     const result: { outcome: AddEmailOutcome } = { outcome: { kind: "failed" } };
@@ -1254,7 +1279,7 @@ function App() {
           const plural = type === "person" ? "people" : `${type}s`;
           const label = plural[0]!.toUpperCase() + plural.slice(1);
           const selection = parseReferenceSettingsId(route?.view === "Settings" ? route.id : undefined);
-          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onNotAPerson={type === "person" ? markNotAPerson : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} run={run} onRestored={refresh} /> },
+          return { id: `reference-${plural}`, group: "Reference data", label, cards: [{ id: referenceSettingsCardId(type), label, safeNames: objects.map((object) => object.frontmatter.title), content: <ReferenceDataSettings type={type} objects={objects} linkables={objectLinks} personLabels={labels} selectedId={selection?.type === type ? selection.recordId : undefined} busy={busy} readOnly={readOnly} onOpen={(id) => followRoute({ view: "Settings", id: referenceSettingsId(type, id) })} onCreate={createReferenceEntity} onSave={updateEntity} onDelete={deleteEntity} onSetExternal={type === "person" ? setPersonExternal : undefined} onConfirmReviewed={type === "person" ? confirmPersonReviewed : undefined} onNotAPerson={type === "person" ? markNotAPerson : undefined} onPreviewMerge={type === "person" ? previewPersonMerge : undefined} onMergePeople={type === "person" ? mergePeople : undefined} onAddEmail={type === "person" ? addPersonEmail : undefined} onRemoveEmail={type === "person" ? removePersonEmail : undefined} notAPersonPeople={type === "person" ? notAPersonPeople : undefined} onBulkPeople={type === "person" ? bulkPeople : undefined} run={run} onRestored={refresh} /> },
             ...(type === "person" ? [{ id: "settings-people-duplicates", label: "Clean up duplicates", content: <DuplicateCleanupCard disabled={readOnly || busy} onLoad={() => api("GET /api/v1/people/duplicates")} onApply={(choice) => api("POST /api/v1/people/duplicates/clean-up", { body: choice })} onApplied={() => void refresh()} /> }] : [])] };
         })}
       />}

@@ -12,6 +12,8 @@ import { PersonName } from "./PersonName.js";
 import { PersonEmails, type AddEmailOutcome } from "./PersonEmails.js";
 import { PersonMergeDialog } from "./PersonMerge.js";
 import { PersonReviewControl } from "./PersonReview.js";
+import { PeopleBulkPanel, PeopleBulkResult, PeopleFilterBar, PeopleSelectionBar } from "./PeopleBulk.js";
+import { defaultPeopleFilters, matchesPeopleFilters, type BulkResult, type PeopleBulkAction, type PeopleFilters } from "./peopleBulkRules.js";
 import { externalChoiceOf, personLabel, type ExternalChoice } from "./personLabels.js";
 import { foldText } from "./searchOptions.js";
 import { useSettingsCardGuard } from "./SettingsWorkspace.js";
@@ -70,13 +72,30 @@ export type ReferenceDataSettingsProps = {
   /** #214: edit a person's emails. The card shows the list only when all four merge and email props are given. */
   onAddEmail?: (person: LifeObject, email: string) => Promise<AddEmailOutcome>;
   onRemoveEmail?: (person: LifeObject, email: string) => Promise<boolean>;
+  /** #230: "Not a person" People (archived, so not in `objects`); listed when the Type filter asks for them. */
+  notAPersonPeople?: LifeObject[];
+  /** #230: one action on the selected people. Without it the People card shows no filters or checkboxes. */
+  onBulkPeople?: (action: PeopleBulkAction, people: LifeObject[]) => Promise<BulkResult | undefined>;
   run: (action: () => Promise<void>, success: string) => Promise<boolean>;
   onRestored: () => Promise<void>;
 };
 
-export function ReferenceDataSettings({ type, objects: listed, linkables, personLabels, selectedId, busy, readOnly, onOpen, onCreate, onSave, onDelete, onSetExternal, onConfirmReviewed, onNotAPerson, onPreviewMerge, onMergePeople, onAddEmail, onRemoveEmail, run, onRestored }: ReferenceDataSettingsProps) {
+export function ReferenceDataSettings({ type, objects: listed, linkables, personLabels, selectedId, busy, readOnly, onOpen, onCreate, onSave, onDelete, onSetExternal, onConfirmReviewed, onNotAPerson, onPreviewMerge, onMergePeople, onAddEmail, onRemoveEmail, notAPersonPeople, onBulkPeople, run, onRestored }: ReferenceDataSettingsProps) {
   const [confirmingNotAPerson, setConfirmingNotAPerson] = useState(false);
-  const objects = useMemo(() => withOpenedArchived(listed, linkables as LinkedObject[], type, selectedId) as LifeObject[], [listed, linkables, type, selectedId]);
+  // #230: filters, checkboxes and bulk actions, People only.
+  const bulk = type === "person" && Boolean(onBulkPeople);
+  const [filters, setFilters] = useState<PeopleFilters>(defaultPeopleFilters);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [bulkResult, setBulkResult] = useState<BulkResult>();
+  const [showBulk, setShowBulk] = useState(false);
+  const band = useWorkspaceBand();
+  const stacked = band === "narrow" || band === "compact";
+  const objects = useMemo(() => {
+    const live = withOpenedArchived(listed, linkables as LinkedObject[], type, selectedId) as LifeObject[];
+    if (!bulk || !notAPersonPeople?.length) return live;
+    const ids = new Set(live.map((object) => object.frontmatter.id));
+    return [...live, ...notAPersonPeople.filter((person) => !ids.has(person.frontmatter.id))];
+  }, [listed, linkables, type, selectedId, bulk, notAPersonPeople]);
   const selected = selectedId && selectedId !== "new" ? objects.find((object) => object.frontmatter.id === selectedId) : undefined;
   const creating = selectedId === "new";
   const sourceDraft = useMemo(() => selected ? draftFrom(selected, type) : blankDraft(type), [selected, type]);
@@ -120,23 +139,43 @@ export function ReferenceDataSettings({ type, objects: listed, linkables, person
   const words = foldText(query).split(/\s+/).filter(Boolean);
   const visible = objects.filter((object) => {
     // #211: People are also found by email address and alias.
-    if (type === "person") return personMatchesQuery(object.frontmatter, personLabel(personLabels, object).label, query);
+    if (type === "person") return personMatchesQuery(object.frontmatter, personLabel(personLabels, object).label, query) && (!bulk || matchesPeopleFilters(object, personLabels, filters));
     return words.every((word) => foldText(String(object.frontmatter.title)).includes(word));
   }).sort((left, right) => String(left.frontmatter.title).localeCompare(String(right.frontmatter.title)));
   const choose = (id?: string) => leave(() => onOpen(id));
+  // People hidden by a filter or the search stop counting as selected.
+  const selectedPeople = bulk ? visible.filter((object) => checked.has(object.frontmatter.id)) : [];
+  const bulkOpen = selectedPeople.length > 0 && (!stacked || showBulk);
+  const toggle = (id: string) => leave(() => { setChecked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); setBulkResult(undefined); });
+  const selectAll = () => leave(() => { setChecked(new Set(visible.map((object) => object.frontmatter.id))); setBulkResult(undefined); });
+  const deselectAll = () => { setChecked(new Set()); setShowBulk(false); };
+  const runBulk = async (action: PeopleBulkAction, people: LifeObject[]) => {
+    if (!onBulkPeople) return;
+    const result = await onBulkPeople(action, people);
+    setBulkResult(result);
+    // An archived or deleted person leaves the list, so its record closes too.
+    if (result && (action === "archive" || action === "delete") && selected && people.some((person) => person.frontmatter.id === selected.frontmatter.id)) onOpen(undefined);
+  };
+  const row = (object: LifeObject) => {
+    const display = type === "person" ? personLabel(personLabels, object) : { name: String(object.frontmatter.title), label: String(object.frontmatter.title) };
+    const state = object.frontmatter.not_a_person === true ? "Not a person" : object.frontmatter.archived_at ? "Archived" : text(object.frontmatter.status) || "Ready";
+    const open = <button key={object.frontmatter.id} className={selected?.frontmatter.id === object.frontmatter.id ? "selected" : ""} aria-label={`Open ${singular[type]}: ${display.label}`} onClick={() => choose(object.frontmatter.id)}><strong>{type === "person" ? <PersonName {...display} /> : display.label}</strong><small>{state}</small></button>;
+    if (!bulk) return open;
+    return <div key={object.frontmatter.id} className="reference-row-check"><input type="checkbox" aria-label={`Select ${display.label}`} checked={checked.has(object.frontmatter.id)} disabled={busy} onChange={() => toggle(object.frontmatter.id)} />{open}</div>;
+  };
 
-  return <ReferenceSplit detailKey={creating ? "new" : selected?.frontmatter.id}>
+  return <ReferenceSplit detailKey={bulkOpen ? "selected-people" : creating ? "new" : selected?.frontmatter.id}>
     <aside className="reference-list" data-pane="list" aria-label={`${labels[type]} list`}>
       <header><div><span>REFERENCE DATA</span><h3>{labels[type]}</h3></div><button className="primary" disabled={busy || readOnly} onClick={() => choose("new")}>New {singular[type]}</button></header>
       <input type="search" aria-label={`Search ${labels[type]}`} placeholder={`Search ${labels[type].toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.target.value)} />
-      {!visible.length && <p className="reference-empty">{query ? `No ${labels[type].toLowerCase()} match.` : `No ${labels[type].toLowerCase()} yet.`}</p>}
-      <div className="reference-rows">{visible.map((object) => {
-        const display = type === "person" ? personLabel(personLabels, object) : { name: String(object.frontmatter.title), label: String(object.frontmatter.title) };
-        return <button key={object.frontmatter.id} className={selected?.frontmatter.id === object.frontmatter.id ? "selected" : ""} aria-label={`Open ${singular[type]}: ${display.label}`} onClick={() => choose(object.frontmatter.id)}><strong>{type === "person" ? <PersonName {...display} /> : display.label}</strong><small>{object.frontmatter.archived_at ? "Archived" : text(object.frontmatter.status) || "Ready"}</small></button>;
-      })}</div>
+      {bulk && <PeopleFilterBar filters={filters} onChange={setFilters} />}
+      {bulk && <PeopleSelectionBar shown={visible.length} selected={selectedPeople.length} disabled={busy} stacked={stacked} onSelectAll={selectAll} onDeselectAll={deselectAll} onShowActions={() => setShowBulk(true)} />}
+      {bulk && bulkResult && !bulkOpen && <PeopleBulkResult result={bulkResult} />}
+      {!visible.length && <p className="reference-empty">{query || (bulk && objects.length) ? `No ${labels[type].toLowerCase()} match.` : `No ${labels[type].toLowerCase()} yet.`}</p>}
+      <div className="reference-rows">{visible.map(row)}</div>
     </aside>
-    <section className="reference-detail" data-pane="detail" aria-label={`${singular[type]} details`}>
-      {!selected && !creating ? <div className="reference-empty-detail">Choose a {singular[type]} or create a new one.</div> : <>
+    <section className="reference-detail" data-pane="detail" aria-label={bulkOpen ? "Selected people actions" : `${singular[type]} details`}>
+      {bulkOpen ? <PeopleBulkPanel selected={selectedPeople} busy={busy} readOnly={readOnly} result={bulkResult} onRun={(action, people) => void runBulk(action, people)} onBack={stacked ? () => setShowBulk(false) : undefined} /> : !selected && !creating ? <div className="reference-empty-detail">Choose a {singular[type]} or create a new one.</div> : <>
         <header className="reference-record-header"><button className="reference-back" onClick={() => choose(undefined)}>Back to {labels[type].toLowerCase()}</button><div><span>{creating ? `NEW ${singular[type].toUpperCase()}` : singular[type].toUpperCase()}</span><h3 data-detail-heading tabIndex={-1}>{creating ? `New ${singular[type]}` : String(selected!.frontmatter.title)}</h3></div></header>
         {selected?.frontmatter.archived_at && <p className="archived-tag">Archived record opened from a direct link</p>}
         <div className="reference-fields">

@@ -23,6 +23,8 @@ export type WorkspaceData = {
   clients: EntityRollup[];
   products: EntityRollup[];
   people: EntityRollup[];
+  /** "Not a person" People: archived, so the rollup leaves them out; the People settings list them under the Type filter. */
+  notAPersonPeople: LifeObject[];
   objectLinks: ObjectLink[];
   notes: LifeObject[];
   deletedNotes: LifeObject[];
@@ -60,6 +62,7 @@ export function useWorkspaceData({ displayTimeZone, call = api }: { displayTimeZ
   const [clients, setClients] = useState<EntityRollup[]>([]);
   const [products, setProducts] = useState<EntityRollup[]>([]);
   const [people, setPeople] = useState<EntityRollup[]>([]);
+  const [notAPersonPeople, setNotAPersonPeople] = useState<LifeObject[]>([]);
   const [personLabels, setPersonLabels] = useState<PersonLabel[]>([]);
   const [reviews, setReviews] = useState<ReviewObject[]>([]);
   const [knowledge, setKnowledge] = useState<LifeObject[]>([]);
@@ -88,6 +91,8 @@ export function useWorkspaceData({ displayTimeZone, call = api }: { displayTimeZ
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
     setAppliedPatches(await call("GET /api/v1/inbox/patches"));
+    // Loaded on its own: without it the People settings only miss their "Not a person" filter results.
+    void call("GET /api/v1/people/not-a-person").then(setNotAPersonPeople).catch(() => undefined);
     // #77: loaded on its own; a Keychain problem only shows on the Connections card, never fails a load or a save.
     void refreshConnections();
     // #44: loaded on its own so a failure here never blanks the other panels.
@@ -106,7 +111,7 @@ export function useWorkspaceData({ displayTimeZone, call = api }: { displayTimeZ
   const refreshObjectLinks = async () => { const objects = await call("GET /api/v1/objects"); setObjectLinks(objects); return objects; };
 
   return {
-    today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, objectLinks, notes, deletedNotes, inboxDrafts, appliedPatches, personLabels, enrichment, connections,
+    today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, notAPersonPeople, objectLinks, notes, deletedNotes, inboxDrafts, appliedPatches, personLabels, enrichment, connections,
     refresh, refreshTodayPanels, refreshConnections, refreshNotes, refreshNoteLists, refreshObjectLinks,
     updateNotes: setNotes, updateToday: setToday, updateHealth: setHealth
   };
