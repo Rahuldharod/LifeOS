@@ -733,7 +733,7 @@ textarea { padding-right: 24px !important; }
 h2, h3 { overflow-wrap: anywhere; }
 /* Row-style buttons are list items, not actions: block layout, start-aligned text. */
 .event, .note-list-item, .decision-row { display: block; text-align: left; }
-.settings-rail nav button, .settings-search-results button, .reference-rows > button, .inbox-row, .global-search-result, .focus-controls button, .knowledge-row, .task-row > button { justify-content: flex-start; text-align: left; }
+.settings-rail nav button, .settings-search-results button, .reference-rows > button, .inbox-row-open, .global-search-result, .focus-controls button, .knowledge-row, .task-row > button { justify-content: flex-start; text-align: left; }
 .settings-search-results button, .knowledge-row, .task-row > button { display: grid; }
 .calendar-day-buttons { grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)) !important; }
 

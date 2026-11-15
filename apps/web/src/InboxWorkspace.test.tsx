@@ -39,6 +39,15 @@ async function click(name: string) {
   await act(async () => control.click());
 }
 
+async function tab(name: string) {
+  const control = [...document.querySelectorAll("[role='tab']")].find((item) => item.textContent?.replace(/\s*\d+$/, "") === name) as HTMLButtonElement;
+  expect(control, `tab ${name}`).toBeTruthy();
+  await act(async () => control.click());
+}
+
+const queueText = () => document.querySelector("[aria-label='Review queue']")?.textContent ?? "";
+const press = async (key: string, target: EventTarget = document.body, init: KeyboardEventInit = {}) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })); });
+
 async function type(label: string, value: string) {
   const control = document.querySelector(`[aria-label='${label}']`) as HTMLInputElement;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -57,7 +66,7 @@ describe("InboxWorkspace", () => {
     expect(document.body.textContent).toContain("Evidence");
     expect(document.body.textContent).toContain("Accept task");
     expect(document.body.textContent).toContain("Reject");
-    expect(document.querySelector("select[aria-label='Filter by proposal type']")).toBeTruthy();
+    expect([...document.querySelectorAll("[role='tab']")].map((item) => item.textContent)).toEqual(["All 2", "Summary 1", "Decision 0", "Task 1", "Open point 0", "Other 0"]);
   });
 
   it("saves proposal edits before enabling acceptance", async () => {
@@ -75,9 +84,9 @@ describe("InboxWorkspace", () => {
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).not.toContain("Ship the pilot");
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Summarise workshop");
     await type("Search proposals", "");
-    await choose("Filter by proposal type", "Updates");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).not.toContain("Ship the pilot");
-    await choose("Filter by proposal type", "");
+    await tab("Summary");
+    expect(queueText()).not.toContain("Ship the pilot");
+    await tab("All");
     await click("Advanced");
     expect(document.querySelector("select[aria-label='Filter by source meeting']")).toBeTruthy();
     expect(document.querySelector("select[aria-label='Filter by created period']")).toBeTruthy();
@@ -89,7 +98,7 @@ describe("InboxWorkspace", () => {
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).not.toContain("Summarise workshop");
   });
 
-  it("offers user-facing proposal categories across create targets and updates", async () => {
+  it("groups proposals into Summary, Decision, Task, Open point and Other tabs", async () => {
     const reviews = [
       review("task", "Task proposal"),
       review("decision", "Decision proposal", { target_object_type: "decision" }),
@@ -98,19 +107,19 @@ describe("InboxWorkspace", () => {
       review("summary", "Summary proposal", { review_type: "summary", target_object_type: "meeting" })
     ];
     await render({ reviews, selectedId: "task" });
-    const typeFilter = document.querySelector("select[aria-label='Filter by proposal type']") as HTMLSelectElement;
-    expect([...typeFilter.options].map((option) => option.textContent)).toEqual(["All proposal types", "Tasks", "Decisions", "Open points", "Updates"]);
-    await choose("Filter by proposal type", "Tasks");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Task proposal");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).not.toContain("Decision proposal");
-    await choose("Filter by proposal type", "Decisions");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Decision proposal");
-    await choose("Filter by proposal type", "Open points");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Open point proposal");
-    await choose("Filter by proposal type", "Updates");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Update proposal");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Summary proposal");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).not.toContain("Task proposal");
+    expect([...document.querySelectorAll("[role='tab']")].map((item) => item.textContent)).toEqual(["All 5", "Summary 1", "Decision 1", "Task 1", "Open point 1", "Other 1"]);
+    const rows = () => [...document.querySelectorAll("[aria-label^='Open proposal: ']")].map((item) => item.getAttribute("aria-label")!.replace("Open proposal: ", ""));
+    await tab("Task");
+    expect(rows()).toEqual(["Task proposal"]);
+    await tab("Decision");
+    expect(rows()).toEqual(["Decision proposal"]);
+    await tab("Open point");
+    expect(rows()).toEqual(["Open point proposal"]);
+    await tab("Summary");
+    expect(rows()).toEqual(["Summary proposal"]);
+    await tab("Other");
+    expect(rows()).toEqual(["Update proposal"]);
+    expect(document.querySelector("[role='tab'][aria-selected='true']")?.textContent).toBe("Other 1");
   });
 
   it("uses the selected display timezone for Today and created-date labels", async () => {
@@ -217,7 +226,6 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
   }
   const heading = () => document.querySelector("[aria-label='Review detail'] h2")?.textContent;
   const button = (label: string) => [...document.querySelectorAll("button")].find((item) => item.getAttribute("aria-label") === label || item.textContent?.trim() === label) as HTMLButtonElement;
-  const press = async (key: string, target: EventTarget = document.body) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
 
   it("opens the item below after accept, replacing the URL", async () => {
     await mount("b");
@@ -241,7 +249,7 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
 
   it("offers Clear filters when filters hide the remaining items", async () => {
     await mount("c");
-    await choose("Filter by proposal type", "Decisions");
+    await tab("Decision");
     await click("Accept decision");
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("No matching proposals");
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("2 proposals are hidden by the filters.");
@@ -271,5 +279,128 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
     expect(heading()).toBe("Bravo task");
     await press("ArrowDown", document.querySelector("[aria-label='Proposed title']")!);
     expect(heading()).toBe("Bravo task");
+  });
+});
+
+describe("InboxWorkspace keyboard shortcuts", () => {
+  const reviews = () => [
+    review("t", "Task one", { created_at: "2026-10-10T10:00:00Z" }),
+    review("s", "Summary one", { created_at: "2026-10-10T09:00:00Z", review_type: "summary", target_object_type: "meeting", proposed_fields: { summary: "Short." } }),
+    review("d", "Decision one", { created_at: "2026-10-10T08:00:00Z", target_object_type: "decision" })
+  ];
+
+  it("A accepts and R rejects the open item, whatever its type", async () => {
+    const accept = vi.fn(async () => true); const reject = vi.fn(async () => true);
+    await render({ reviews: reviews(), selectedId: "s", onAccept: accept, onReject: reject });
+    await press("a");
+    expect(accept).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "s" }) }));
+    act(() => root?.unmount());
+    await render({ reviews: reviews(), selectedId: "t", onAccept: accept, onReject: reject });
+    await press("R");
+    expect(reject).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "t" }) }));
+  });
+
+  it("S saves edits; A waits until they are saved", async () => {
+    const accept = vi.fn(async () => true); const save = vi.fn(async () => true);
+    await render({ reviews: reviews(), selectedId: "t", onAccept: accept, onSave: save });
+    await type("Proposed title", "Task one, revised");
+    await press("a");
+    expect(accept).not.toHaveBeenCalled();
+    await press("s");
+    expect(save).toHaveBeenCalledWith(expect.anything(), { title: "Task one, revised" });
+  });
+
+  it("ignores keys while typing, with modifiers, or held down", async () => {
+    const accept = vi.fn(async () => true);
+    await render({ reviews: reviews(), selectedId: "t", onAccept: accept });
+    await press("a", document.querySelector("[aria-label='Search proposals']")!);
+    await press("a", document.body, { metaKey: true });
+    await press("a", document.body, { repeat: true });
+    expect(accept).not.toHaveBeenCalled();
+  });
+
+  it("X ticks the open item and 1–6 switch tabs, opening the tab's first item", async () => {
+    const opened = vi.fn();
+    await render({ reviews: reviews(), selectedId: "t", onOpen: opened });
+    await press("x");
+    expect((document.querySelector("[aria-label='Select proposal: Task one']") as HTMLInputElement).checked).toBe(true);
+    await press("2");
+    expect(document.querySelector("[role='tab'][aria-selected='true']")?.textContent).toBe("Summary 1");
+    expect(document.querySelector("[aria-label='Review detail'] h2")?.textContent).toBe("Summary one");
+    expect(opened).toHaveBeenLastCalledWith("s", { replace: true });
+    await press("3");
+    expect(document.querySelector("[role='tab'][aria-selected='true']")?.textContent).toBe("Decision 1");
+    await press("1");
+    expect(document.querySelector("[role='tab'][aria-selected='true']")?.textContent).toBe("All 3");
+  });
+
+  it("shows each shortcut on its button", async () => {
+    await render({ reviews: reviews(), selectedId: "t" });
+    const shortcut = (name: string) => [...document.querySelectorAll("button")].find((item) => item.textContent === name)?.getAttribute("aria-keyshortcuts");
+    expect([shortcut("Accept task"), shortcut("Reject"), shortcut("Save edits")]).toEqual(["A", "R", "S"]);
+  });
+});
+
+describe("InboxWorkspace bulk actions", () => {
+  const reviews = () => [
+    review("a", "Alpha task", { created_at: "2026-10-10T10:00:00Z" }),
+    review("b", "Bravo task", { created_at: "2026-10-10T09:00:00Z" }),
+    review("l", "Link owner", { created_at: "2026-10-10T08:00:00Z", review_type: "link-resolution" }),
+    review("c", "Charlie decision", { created_at: "2026-10-10T07:00:00Z", target_object_type: "decision" })
+  ];
+  const tick = async (title: string) => act(async () => (document.querySelector(`[aria-label='Select proposal: ${title}']`) as HTMLInputElement).click());
+  const isTicked = (title: string) => (document.querySelector(`[aria-label='Select proposal: ${title}']`) as HTMLInputElement).checked;
+
+  it("Select all ticks the items in view; Deselect all clears them; switching tab clears them", async () => {
+    await render({ reviews: reviews(), selectedId: "a" });
+    expect(document.body.textContent).not.toContain("Accept selected");
+    await click("Select all");
+    expect(["Alpha task", "Bravo task", "Link owner", "Charlie decision"].every(isTicked)).toBe(true);
+    expect(document.querySelector("[aria-label='Bulk actions']")?.textContent).toContain("4 selected");
+    await click("Deselect all");
+    expect(isTicked("Alpha task")).toBe(false);
+    await tab("Task");
+    await click("Select all");
+    await tab("All");
+    expect(isTicked("Alpha task")).toBe(false);
+  });
+
+  it("bulk Accept skips link proposals and moves off a decided open item", async () => {
+    const decideMany = vi.fn(async (items: Array<{ frontmatter: { id: string } }>) => ({ decided: items.map((item) => item.frontmatter.id), failures: [] }));
+    const opened = vi.fn();
+    await render({ reviews: reviews(), selectedId: "a", onDecideMany: decideMany, onOpen: opened });
+    await tick("Alpha task"); await tick("Link owner"); await tick("Bravo task");
+    await click("Accept selected (2)");
+    expect(decideMany).toHaveBeenCalledWith([expect.objectContaining({ frontmatter: expect.objectContaining({ id: "a" }) }), expect.objectContaining({ frontmatter: expect.objectContaining({ id: "b" }) })], "accepted");
+    expect(document.querySelector("[role='status']")?.textContent).toBe("2 proposals accepted · 1 skipped (link or merge needs a choice)");
+    expect(opened).toHaveBeenLastCalledWith("l", { replace: true });
+  });
+
+  it("bulk Reject asks first, includes link proposals, and reports failures", async () => {
+    const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
+    const decideMany = vi.fn(async () => ({ decided: ["b"], failures: ["Link owner: Conflict"] }));
+    await render({ reviews: reviews(), selectedId: "a", onDecideMany: decideMany });
+    await tick("Bravo task"); await tick("Link owner");
+    await click("Reject selected (2)");
+    expect(confirm).toHaveBeenCalledWith("Reject 2 proposals? This cannot be undone.");
+    expect(decideMany).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    await click("Reject selected (2)");
+    expect(decideMany).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ frontmatter: expect.objectContaining({ id: "l" }) })]), "rejected");
+    expect(document.querySelector("[role='alert']")?.textContent).toContain("1 not rejected: Link owner: Conflict");
+  });
+
+  it("falls back to one onAccept per item without onDecideMany", async () => {
+    const accept = vi.fn(async () => true);
+    await render({ reviews: reviews(), selectedId: "c", onAccept: accept });
+    await tick("Alpha task"); await tick("Bravo task");
+    await click("Accept selected (2)");
+    expect(accept).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables bulk actions when read-only", async () => {
+    await render({ reviews: reviews(), selectedId: "a", readOnly: true });
+    await tick("Alpha task");
+    expect(([...document.querySelectorAll("button")].find((item) => item.textContent === "Accept selected (1)") as HTMLButtonElement).disabled).toBe(true);
   });
 });
