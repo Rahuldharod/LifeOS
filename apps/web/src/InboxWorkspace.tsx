@@ -14,8 +14,10 @@ export type InboxReview = LifeObject & { evidence?: Record<string, ReviewEvidenc
 type Outcome = "accepted" | "rejected";
 type ActionResult = boolean | void;
 type CreatedPeriod = "" | "today" | "7d" | "30d";
-type ProposalCategory = "Tasks" | "Decisions" | "Open points" | "Updates";
-const proposalCategories: ProposalCategory[] = ["Tasks", "Decisions", "Open points", "Updates"];
+export type InboxTab = "All" | "Summary" | "Decision" | "Task" | "Open point" | "Other";
+/** Tab order is also the 1–6 shortcut order. */
+const inboxTabs: InboxTab[] = ["All", "Summary", "Decision", "Task", "Open point", "Other"];
+export type BulkResult = { decided: string[]; failures: string[] };
 
 const editableByTarget: Record<string, string[]> = {
   task: ["owner_person_id", "due_on", "priority", "primary_project_id", "primary_client_id", "primary_product_id"],
@@ -25,13 +27,20 @@ const editableByTarget: Record<string, string[]> = {
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const reviewType = (review: InboxReview) => text(review.frontmatter.review_type) || "create";
 const proposalLabel = (review: InboxReview) => reviewType(review) === "create" ? `Create ${text(review.frontmatter.target_object_type) || "item"}` : reviewType(review).replaceAll("-", " ");
-const proposalCategory = (review: InboxReview): ProposalCategory => {
-  if (reviewType(review) !== "create") return "Updates";
-  if (review.frontmatter.target_object_type === "task") return "Tasks";
-  if (review.frontmatter.target_object_type === "decision") return "Decisions";
-  if (review.frontmatter.target_object_type === "open-point") return "Open points";
-  return "Updates";
+const proposalTab = (review: InboxReview): Exclude<InboxTab, "All"> => {
+  const kind = reviewType(review);
+  if (kind === "summary") return "Summary";
+  if (kind !== "create") return "Other";
+  if (review.frontmatter.target_object_type === "task") return "Task";
+  if (review.frontmatter.target_object_type === "decision") return "Decision";
+  if (review.frontmatter.target_object_type === "open-point") return "Open point";
+  return "Other";
 };
+/** Link and merge proposals need a judgement call, so bulk Accept skips them (bulk Reject does not). */
+const needsChoice = (review: InboxReview) => ["link-resolution", "person-merge"].includes(reviewType(review));
+/** Single-key shortcuts must not fire while the user types; checkboxes and radios are not typing. */
+const typingTarget = "input:not([type='checkbox']):not([type='radio']), textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']";
+const errorText = (caught: unknown) => caught instanceof Error ? caught.message : "Something went wrong";
 
 const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string) => {
   if (!period) return undefined;
@@ -40,20 +49,24 @@ const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string) => {
   return { from: zonedMidnight(startDay, timeZone).getTime(), to: zonedMidnight(addCalendarDays(today, 1), timeZone).getTime() };
 };
 
-export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, linkActionsFor }: {
+export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onDecideMany, linkActionsFor }: {
   reviews: InboxReview[]; objects: Array<LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices;
   selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; displayTimeZone: string; now?: Date;
   onOpen?: (id: string, options?: { replace?: boolean }) => void; onBack?: () => void;
   onAccept: (review: InboxReview) => Promise<ActionResult>; onReject: (review: InboxReview) => Promise<ActionResult>; onSave: (review: InboxReview, edits: ReviewEdits) => Promise<ActionResult>;
+  /** Bulk decisions with one refresh at the end. Without it, the Inbox calls onAccept/onReject per item. */
+  onDecideMany?: (reviews: InboxReview[], outcome: Outcome) => Promise<BulkResult>;
   linkActionsFor?: (reviewId: string) => LinkCardActions;
 }) {
   const narrow = useNarrowWorkspace();
   const [openedId, setOpenedId] = useState<string | undefined>(() => selectedId ?? (narrow ? undefined : reviews[0]?.frontmatter.id));
   const split = useSplitPane("inbox");
-  const [query, setQuery] = useState(""); const [type, setType] = useState(""); const [advanced, setAdvanced] = useState(false);
+  const [query, setQuery] = useState(""); const [tab, setTabState] = useState<InboxTab>("All"); const [advanced, setAdvanced] = useState(false);
   const [meetingId, setMeetingId] = useState(""); const [period, setPeriod] = useState<CreatedPeriod>("");
   const [deciding, setDeciding] = useState<InboxReview>(); const [notification, setNotification] = useState(""); const [actionError, setActionError] = useState("");
   const [activeId, setActiveId] = useState<string>(); const active = useRef(new Set<string>()); const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [checked, setChecked] = useState<Set<string>>(() => new Set()); const [bulkRunning, setBulkRunning] = useState(false);
+  const detailRef = useRef<HTMLElement>(null);
 
   const openedRef = useRef(openedId); openedRef.current = openedId;
   useEffect(() => { if (selectedId !== undefined) setOpenedId(selectedId); }, [selectedId]);
@@ -62,15 +75,20 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const objectById = useMemo(() => new Map(objects.map((object) => [String(object.frontmatter.id), object])), [objects]);
   const meetings = useMemo(() => objects.filter((object) => object.frontmatter.type === "meeting"), [objects]);
   const window = createdWindow(period, now, displayTimeZone);
-  const visible = reviews.filter((review) => {
+  const filtered = reviews.filter((review) => {
     const search = `${review.frontmatter.title} ${review.body} ${reviewType(review)} ${review.frontmatter.target_object_type ?? ""}`.toLowerCase();
     if (query.trim() && !search.includes(query.trim().toLowerCase())) return false;
-    if (type && proposalCategory(review) !== type) return false;
     if (meetingId && review.frontmatter.source_meeting_id !== meetingId) return false;
     const createdAt = Date.parse(String(review.frontmatter.created_at));
     if (window && (createdAt < window.from || createdAt >= window.to)) return false;
     return true;
-  }).sort((a, b) => String(b.frontmatter.created_at).localeCompare(String(a.frontmatter.created_at)));
+  });
+  const tabCounts = new Map<InboxTab, number>(inboxTabs.map((name) => [name, name === "All" ? filtered.length : filtered.filter((review) => proposalTab(review) === name).length]));
+  const visible = filtered.filter((review) => tab === "All" || proposalTab(review) === tab)
+    .sort((a, b) => String(b.frontmatter.created_at).localeCompare(String(a.frontmatter.created_at)));
+  /** Bulk actions only touch ticked items that are on screen now. */
+  const ticked = visible.filter((review) => checked.has(review.frontmatter.id));
+  const acceptable = ticked.filter((review) => !needsChoice(review));
 
   useEffect(() => {
     if (narrow || openedId || !visible.length) return;
@@ -81,7 +99,9 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const selected = reviews.find((review) => review.frontmatter.id === openedId) ?? (deciding?.frontmatter.id === openedId ? deciding : undefined);
   const open = (id: string, options?: { replace?: boolean }) => { setOpenedId(id); setActionError(""); onOpen?.(id, options); };
   const back = () => { setOpenedId(undefined); setActionError(""); onBack?.(); };
-  const clearFilters = () => { setQuery(""); setType(""); setMeetingId(""); setPeriod(""); };
+  const setTab = (next: InboxTab) => { setTabState(next); setChecked(new Set()); };
+  const clearFilters = () => { setQuery(""); setTab("All"); setMeetingId(""); setPeriod(""); };
+  const toggleChecked = (id: string) => setChecked((current) => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
   const notify = (message: string) => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     setNotification(message); noticeTimer.current = setTimeout(() => setNotification(""), 3000);
@@ -119,37 +139,110 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const followingId = position >= 0 ? visibleIds[position + 1] : undefined;
   const step = useRef<(direction: -1 | 1) => boolean>(() => false);
   step.current = (direction) => { const target = direction < 0 ? previousId : followingId; if (target) open(target); return Boolean(target); };
+
+  /** Bulk Accept/Reject on the ticked items in view. Each item is its own idempotent request; a failure does not stop the rest. */
+  const decideTicked = async (outcome: Outcome) => {
+    if (busy || readOnly || bulkRunning) return;
+    const targets = outcome === "accepted" ? acceptable : ticked;
+    const skipped = ticked.length - targets.length;
+    if (!targets.length) return;
+    if (outcome === "rejected" && !globalThis.confirm(`Reject ${targets.length === 1 ? "1 proposal" : `${targets.length} proposals`}? This cannot be undone.`)) return;
+    const targetIds = new Set(targets.map((review) => review.frontmatter.id));
+    const openId = openedRef.current;
+    const openIndex = openId ? visibleIds.indexOf(openId) : -1;
+    const nextId = visibleIds.slice(openIndex + 1).find((id) => !targetIds.has(id)) ?? visibleIds.slice(0, Math.max(openIndex, 0)).reverse().find((id) => !targetIds.has(id));
+    setBulkRunning(true); setActionError("");
+    try {
+      const result = onDecideMany ? await onDecideMany(targets, outcome) : await decideEach(targets, outcome);
+      const decided = new Set(result.decided);
+      setChecked((current) => new Set([...current].filter((id) => !decided.has(id))));
+      notify([`${decided.size === 1 ? "1 proposal" : `${decided.size} proposals`} ${outcome}`, ...(skipped ? [`${skipped} skipped (link or merge needs a choice)`] : [])].join(" · "));
+      if (result.failures.length) setActionError(`${result.failures.length} not ${outcome}: ${result.failures.join("; ")}`);
+      if (openId && decided.has(openId)) advanceFrom(openId, nextId);
+    } catch (caught) { setActionError(errorText(caught)); }
+    finally { setBulkRunning(false); }
+  };
+  const decideEach = async (targets: InboxReview[], outcome: Outcome): Promise<BulkResult> => {
+    const result: BulkResult = { decided: [], failures: [] };
+    for (const review of targets) {
+      try { if ((await (outcome === "accepted" ? onAccept(review) : onReject(review))) !== false) result.decided.push(review.frontmatter.id); else result.failures.push(review.frontmatter.title); }
+      catch (caught) { result.failures.push(`${review.frontmatter.title}: ${errorText(caught)}`); }
+    }
+    return result;
+  };
+
+  /** Inbox keys: ↑/↓ move, 1–6 switch tab, X ticks the open item, A/R/S press the open item's buttons that carry `data-shortcut`. */
+  const keys = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  keys.current = (event) => {
+    const target = event.target as HTMLElement | null;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
+      if (step.current(event.key === "ArrowUp" ? -1 : 1)) event.preventDefault();
+      return;
+    }
+    if (event.repeat || target?.closest(typingTarget)) return; // holding A must not accept item after item
+    const key = event.key.toLowerCase();
+    const tabIndex = Number(key) - 1;
+    if (/^[1-6]$/.test(key)) { event.preventDefault(); setTab(inboxTabs[tabIndex]!); return; }
+    if (key === "x" && selected && visibleIds.includes(selected.frontmatter.id)) { event.preventDefault(); toggleChecked(selected.frontmatter.id); return; }
+    if (key !== "a" && key !== "r" && key !== "s") return;
+    const control = detailRef.current?.querySelector<HTMLButtonElement>(`button[data-shortcut='${key}']`);
+    if (!control || control.disabled) return;
+    event.preventDefault(); control.click();
+  };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
-      if (step.current(event.key === "ArrowUp" ? -1 : 1)) event.preventDefault();
+      keys.current(event);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
-  const itemBusy = Boolean(busy || (selected && activeId === selected.frontmatter.id));
+  /** After a tab switch, an open item that is not in the new tab gives way to the tab's first item (wide screens; narrow shows the list). */
+  const shownTab = useRef(tab);
+  useEffect(() => {
+    if (shownTab.current === tab) return;
+    shownTab.current = tab;
+    if (narrow || (openedId && visibleIds.includes(openedId))) return;
+    if (visibleIds[0]) open(visibleIds[0], { replace: true });
+  });
+  const itemBusy = Boolean(busy || bulkRunning || (selected && activeId === selected.frontmatter.id));
+  const allTicked = visible.length > 0 && ticked.length === visible.length;
 
   const ref = useListDetailReturn(selected?.frontmatter.id);
   return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" style={split.style}>
     {notification && <div className="inbox-toast" role="status">{notification}</div>}
     <section className="inbox-queue" data-pane="list" aria-label="Review queue" hidden={narrow && Boolean(selected)}>
       <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div></header>
+      <div className="workspace-tabs inbox-tabs" role="tablist" aria-label="Proposal type">
+        {inboxTabs.map((name, index) => <button role="tab" key={name} aria-selected={tab === name} className={tab === name ? "selected" : ""} title={`${name} (press ${index + 1})`} aria-keyshortcuts={String(index + 1)} onClick={() => setTab(name)}>{name} <small>{tabCounts.get(name)}</small></button>)}
+      </div>
       <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={() => setAdvanced(!advanced)}>
         <input type="search" aria-label="Search proposals" placeholder="Search proposals…" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <select aria-label="Filter by proposal type" value={type} onChange={(event) => setType(event.target.value)}><option value="">All proposal types</option>{proposalCategories.map((value) => <option value={value} key={value}>{value}</option>)}</select>
       </WorkspaceFilterBar>
       {advanced && <div className="inbox-advanced-filters">
         <label>Source meeting<select aria-label="Filter by source meeting" value={meetingId} onChange={(event) => setMeetingId(event.target.value)}><option value="">Any meeting</option>{meetings.map((meeting) => <option value={meeting.frontmatter.id} key={meeting.frontmatter.id}>{meeting.frontmatter.title}</option>)}</select></label>
         <label>Created<select aria-label="Filter by created period" value={period} onChange={(event) => setPeriod(event.target.value as CreatedPeriod)}><option value="">Any time</option><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
         <button onClick={() => { setMeetingId(""); setPeriod(""); }}>Clear advanced filters</button>
       </div>}
-      {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviews.length ? "No matching proposals" : "Inbox clear"}</h3>{reviews.length ? <><p>{reviews.length === 1 ? "1 proposal is hidden by the filters." : `${reviews.length} proposals are hidden by the filters.`}</p><button onClick={clearFilters}>Clear filters</button></> : <p>No proposals require your attention.</p>}</div> : <div className="inbox-rows">{visible.map((review) => <button className={openedId === review.frontmatter.id ? "inbox-row selected" : "inbox-row"} aria-label={`Open proposal: ${review.frontmatter.title}`} aria-pressed={openedId === review.frontmatter.id} key={review.frontmatter.id} onClick={() => open(review.frontmatter.id)}><span><strong>{review.frontmatter.title}</strong><small>{proposalLabel(review)} · {dateInTimeZone(new Date(review.frontmatter.created_at), displayTimeZone)}</small></span><LockBadge frontmatter={review.frontmatter} /></button>)}</div>}
+      {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviews.length ? "No matching proposals" : "Inbox clear"}</h3>{reviews.length ? <><p>{reviews.length === 1 ? "1 proposal is hidden by the filters." : `${reviews.length} proposals are hidden by the filters.`}</p><button onClick={clearFilters}>Clear filters</button></> : <p>No proposals require your attention.</p>}</div> : <>
+        <div className="inbox-bulk" role="toolbar" aria-label="Bulk actions">
+          <button disabled={allTicked} onClick={() => setChecked(new Set(visibleIds))}>Select all</button>
+          <button disabled={!ticked.length} onClick={() => setChecked(new Set())}>Deselect all</button>
+          {ticked.length > 0 && <>
+            <small>{ticked.length} selected</small>
+            <button className="primary" disabled={busy || readOnly || bulkRunning || !acceptable.length} title={acceptable.length < ticked.length ? "Link and merge proposals need a choice, so they are skipped" : undefined} onClick={() => void decideTicked("accepted")}>Accept selected ({acceptable.length})</button>
+            <button className="danger" disabled={busy || readOnly || bulkRunning} onClick={() => void decideTicked("rejected")}>Reject selected ({ticked.length})</button>
+          </>}
+        </div>
+        <div className="inbox-rows">{visible.map((review) => <div className={`inbox-row${openedId === review.frontmatter.id ? " selected" : ""}${checked.has(review.frontmatter.id) ? " checked" : ""}`} key={review.frontmatter.id}>
+          <input type="checkbox" aria-label={`Select proposal: ${review.frontmatter.title}`} title="Select for bulk actions (X)" checked={checked.has(review.frontmatter.id)} onChange={() => toggleChecked(review.frontmatter.id)} />
+          <button className="inbox-row-open" aria-label={`Open proposal: ${review.frontmatter.title}`} aria-pressed={openedId === review.frontmatter.id} onClick={() => open(review.frontmatter.id)}><span><strong>{review.frontmatter.title}</strong><small>{proposalLabel(review)} · {dateInTimeZone(new Date(review.frontmatter.created_at), displayTimeZone)}</small></span><LockBadge frontmatter={review.frontmatter} /></button>
+        </div>)}</div>
+      </>}
     </section>
     {!narrow && <div {...split.dividerProps} />}
-    <section className="inbox-detail" data-pane="detail" aria-label="Review detail" hidden={narrow && !selected}>
+    <section ref={detailRef} className="inbox-detail" data-pane="detail" aria-label="Review detail" hidden={narrow && !selected}>
       {!selected ? <div className="inbox-state"><h3>Select a proposal</h3><p>Choose a row to review its source, evidence and proposed change.</p></div> : <>
         <header className="inbox-record-header"><button className="narrow-back" aria-label="Back to review queue" onClick={back}>Back</button><div><span>{proposalLabel(selected)}</span><h2 data-detail-heading tabIndex={-1}>{selected.frontmatter.title}</h2><div className="inbox-record-meta"><LockBadge frontmatter={selected.frontmatter} /><small>{String(selected.frontmatter.confidence_label ?? "Unrated")} confidence</small></div></div>
           <nav className="inbox-step" aria-label="Move between proposals">{position >= 0 && <small>{position + 1} of {visibleIds.length}</small>}<button aria-label="Previous proposal" title="Previous proposal (↑)" disabled={!previousId} onClick={() => step.current(-1)}>↑ Previous</button><button aria-label="Next proposal" title="Next proposal (↓)" disabled={!followingId} onClick={() => step.current(1)}>↓ Next</button></nav></header>
@@ -196,7 +289,7 @@ function ReviewDetail({ review, objectById, labels, choices, busy, nextId, onAcc
 
   if (type === "link-resolution" && linkActions) {
     const wrapped: LinkCardActions = { onCreate: linkActions.onCreate, onLink: async (id) => { await linkActions.onLink(id); onLinkCompletion("accepted", nextId); }, onReject: async () => { await linkActions.onReject(); onLinkCompletion("rejected", nextId); } };
-    return <div className="inbox-review-flow"><SourceAndEvidence review={review} objectById={objectById} /><section className="inbox-detail-section"><h3>Decision</h3><LinkResolutionCard review={review} labels={labels} busy={busy} actions={wrapped} /></section></div>;
+    return <div className="inbox-review-flow"><SourceAndEvidence review={review} objectById={objectById} /><section className="inbox-detail-section"><h3>Decision</h3><LinkResolutionCard review={review} labels={labels} busy={busy} actions={wrapped} rejectShortcut="r" /></section></div>;
   }
   const changes = proposed.changes as Array<{ field: string; current: unknown; proposed: unknown }> | undefined;
   return <div className="inbox-review-flow">
@@ -208,6 +301,6 @@ function ReviewDetail({ review, objectById, labels, choices, busy, nextId, onAcc
       </>}
       {review.body.replace(/^# .*\n+/, "").trim() && !["summary", "person-merge"].includes(type) && <p className="inbox-proposal-copy">{review.body.replace(/^# .*\n+/, "").trim()}</p>}
     </section>
-    <footer className="inbox-decision-actions"><button disabled={busy || !Object.keys(edits).length} onClick={() => onSave(edits)}>Save edits</button><button className="primary" disabled={busy || Object.keys(edits).length > 0} title={Object.keys(edits).length ? "Save your edits first" : undefined} onClick={onAccept}>{type === "summary" ? "Accept summary" : type === "update" ? "Apply change" : type === "person-merge" ? "Merge" : `Accept ${target}`}</button><button className="danger" disabled={busy} onClick={onReject}>{type === "person-merge" ? "Keep separate" : "Reject"}</button></footer>
+    <footer className="inbox-decision-actions"><button data-shortcut="s" aria-keyshortcuts="S" disabled={busy || !Object.keys(edits).length} onClick={() => onSave(edits)}>Save edits</button><button className="primary" data-shortcut="a" aria-keyshortcuts="A" disabled={busy || Object.keys(edits).length > 0} title={Object.keys(edits).length ? "Save your edits first" : undefined} onClick={onAccept}>{type === "summary" ? "Accept summary" : type === "update" ? "Apply change" : type === "person-merge" ? "Merge" : `Accept ${target}`}</button><button className="danger" data-shortcut="r" aria-keyshortcuts="R" disabled={busy} onClick={onReject}>{type === "person-merge" ? "Keep separate" : "Reject"}</button></footer>
   </div>;
 }

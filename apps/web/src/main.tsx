@@ -611,6 +611,26 @@ function App() {
     await refresh();
   }, "Proposal rejected"));
 
+  /** Inbox bulk Accept/Reject: one request per item (each idempotent), one refresh at the end; a failure does not stop the rest. */
+  const decideMany = async (items: LifeObject[], outcome: "accepted" | "rejected") => {
+    const result = { decided: [] as string[], failures: [] as string[] };
+    setBusy(true);
+    try {
+      for (const item of items) {
+        const id = item.frontmatter.id;
+        try {
+          const sent = await reviewRequests.run(id, () => outcome === "accepted"
+            ? api("POST /api/v1/review-items/:id/accept", { params: { id } })
+            : api("POST /api/v1/review-items/:id/reject", { params: { id } }));
+          if (sent) { result.decided.push(id); leaveFinishedItem(id); }
+        } catch (error) { result.failures.push(`${item.frontmatter.title}: ${error instanceof Error ? error.message : "Something went wrong"}`); }
+      }
+      if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
+      await refresh();
+      return result; // the Inbox shows the outcome in its own toast
+    } finally { setBusy(false); }
+  };
+
   const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
     await api("PATCH /api/v1/review-items/:id", { params: { id: reviewId }, body: changes });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
@@ -1210,6 +1230,7 @@ function App() {
           onBack={() => void go({ view: "Inbox" })}
           onAccept={accept}
           onReject={(review) => reject(review.frontmatter.id)}
+          onDecideMany={decideMany}
           onSave={(review, changes) => editReview(review.frontmatter.id, changes)}
           linkActionsFor={linkActionsFor}
         />

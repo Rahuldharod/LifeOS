@@ -142,7 +142,7 @@ const seedLedger = async ({ name, noteId, meetings, own, ownNoteId, sharedBody }
 await seedLedger({ name: "ledger", noteId: "91000000-0000-4000-8000-000000000001", meetings: ["92000000-0000-4000-8000-000000000001", "92000000-0000-4000-8000-000000000002"], own: "92000000-0000-4000-8000-000000000003", ownNoteId: "91000000-0000-4000-8000-000000000003", sharedBody: "Ledger shared words.\n" });
 await seedLedger({ name: "modeledger", noteId: "93000000-0000-4000-8000-000000000001", meetings: ["94000000-0000-4000-8000-000000000001", "94000000-0000-4000-8000-000000000002"], own: "94000000-0000-4000-8000-000000000003", sharedBody: "# Shared heading\n\n- shared item\n" });
 // #183 single (non-recurring) meetings whose Note ends in an HTML comment, to reach the plain Visual editor's end-of-note typing.
-for (const [month, body] of [["04", "# Solo heading\n\nLast line <!-- keep me -->\n"], ["05", "# Solo summary\n\nBody text.\n\n<!-- lifeos:summary:end -->\n"], ["06", "# Solo image\n\nBefore the image.\n"], ["07", "# Solo normal\n\n* star one\n* star two\n\nSnake_case and 2 * 3.\n"]]) {
+for (const [month, body] of [["04", "# Solo heading\n\nLast line <!-- keep me -->\n"], ["05", "# Solo summary\n\nBody text.\n\n<!-- lifeos:summary:end -->\n"], ["06", "# Solo image\n\nBefore the image.\n"], ["07", "# Solo normal\n\n* star one\n* star two\n\nSnake_case and 2 * 3.\n"], ["08", "# Solo escape\n\nEsc leaves this editor.\n"]]) {
   const meetingId = `61000000-0000-4000-8000-0000000000${month}`;
   const noteId = `62000000-0000-4000-8000-0000000000${month}`;
   await objectFile("meetings", meetingId, { ...stamped(meetingId, "meeting", `Solo ${month}`), status: "scheduled", starts_at: "2026-05-12T08:00:00.000Z", ends_at: "2026-05-12T09:00:00.000Z", timezone: "Europe/Paris", attendee_ids: [] });
@@ -183,6 +183,8 @@ draft("review-task-2", { kind: "task", draft_key: "browser-review-task-2", origi
 draft("review-decision-1", { kind: "decision", draft_key: "browser-review-decision-1", origin: "agent-extracted", confidence: "Medium", title: "Browser review: adopt weekly reviews" }, "Extracted from a synthetic meeting.");
 // PB-035: proposals that only inbox-auto-advance.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
 for (const n of [1, 2, 3]) draft(`auto-advance-${n}`, { kind: "task", draft_key: `browser-auto-advance-${n}`, origin: "agent-extracted", confidence: "High", title: `Auto-advance proposal ${n}` }, "Extracted for the auto-advance test.");
+// Inbox bulk actions: proposals that only inbox-bulk.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const [n, kind] of [[1, "task"], [2, "task"], [3, "decision"]]) draft(`bulk-${n}`, { kind, draft_key: `browser-bulk-${n}`, origin: "agent-extracted", confidence: "High", title: `Bulk proposal ${n}` }, "Extracted for the bulk actions test.");
 for (const [name, content] of Object.entries(files)) {
   const file = path.join(drafts, name);
   await writeFile(file, content);

@@ -5,6 +5,7 @@ import { lifeosLinkId, type LinkedObject } from "./lifeosLinks.js";
 import { pasteLifeosLink } from "./visualLinkPaste.js";
 import { ImageLossNotice } from "./ImageLossNotice.js";
 import { UnprovenFormattingLabel } from "./UnprovenFormattingLabel.js";
+import { leaveEditorOnEscape } from "./escapeLeavesField.js";
 
 type CrepeInstance = {
   create(): Promise<unknown>;
@@ -114,5 +115,5 @@ export function VisualMarkdownEditor({ editorKey, owner, ensureOwner, markdown, 
   }, [editorKey]);
 
   useEffect(() => { crepe.current?.setReadonly(readOnly || busy || blocked.current); }, [readOnly, busy]);
-  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onFocusCapture={() => { engaged.current = true; }} onBlurCapture={() => flush(session.current)} onPointerDownCapture={() => { engaged.current = true; }} /></>;
+  return <><ImageLossNotice lost={lost} />{!lost?.length && <UnprovenFormattingLabel report={roundTrip} />}<div className="visual-markdown-editor" ref={root} onPasteCapture={(event) => { if (!latest.current.readOnly) pasteLifeosLink(event.nativeEvent, crepe.current as never, latest.current.linkObjects); }} onKeyDownCapture={(event) => leaveEditorOnEscape(event.nativeEvent)} onFocusCapture={() => { engaged.current = true; }} onBlurCapture={() => flush(session.current)} onPointerDownCapture={() => { engaged.current = true; }} /></>;
 }

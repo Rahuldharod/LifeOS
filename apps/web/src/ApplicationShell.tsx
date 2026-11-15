@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, type ReactNode } from "react";
+import { leaveFieldOnEscape } from "./escapeLeavesField.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import type { View } from "./routes.js";
 import { useShellLayout, WorkspaceLayoutContext } from "./useNarrowWorkspace.js";
@@ -74,6 +75,10 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
     document.addEventListener("keydown", keydown);
     return () => document.removeEventListener("keydown", keydown);
   }, [onSearch, onCapture]);
+  useEffect(() => {
+    document.addEventListener("keydown", leaveFieldOnEscape);
+    return () => document.removeEventListener("keydown", leaveFieldOnEscape);
+  }, []);
   const setNavigationCollapsed = (next: boolean) => {
     setCollapsed(next);
     try { localStorage.setItem(navigationCollapsedKey, String(next)); } catch { /* browser storage unavailable */ }

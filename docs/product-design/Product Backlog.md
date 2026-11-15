@@ -129,6 +129,8 @@ Keep this section brief. Detailed delivery history should live in GitHub Issues 
 | PB-032 | App version `YY.MM.DD.N` worked out from git history (#208) | 2026-10-14 |
 | PB-033 | App version shown in the nav footer and an "About LifeOS" card on System (#208) | 2026-10-14 |
 | PB-034 | Standalone Note: "New note" on the Notes tab, full header before the file exists, nothing written until the first real edit; shows in filters, search, links and the Agent Index (ADR 0023; #222, #223, #224) | 2026-10-14 |
+| PB-041 | Inbox batch review: tabs by type (All, Summary, Decision, Task, Open point, Other) replace the type dropdown; a checkbox per proposal with Select all / Deselect all and bulk Accept / Reject (bulk Accept skips link and merge proposals, bulk Reject asks first); keys A accept, R reject, S save edits, X tick, 1–6 tabs, shown on the buttons | 2026-11-14 |
+| PB-042 | Esc leaves the field being edited anywhere in the app (search boxes, form fields, the Markdown and Visual note editors), keeping its text and saving pending typing; an Esc a dialog, list or editor menu uses is left to it, so the next Esc leaves the field | 2026-11-15 |
 
 ## Decision log
 

@@ -14,11 +14,13 @@ export type LinkCardActions = {
   onReject: () => Promise<void>;
 };
 
-export function LinkResolutionCard({ review, labels, busy, actions }: {
+export function LinkResolutionCard({ review, labels, busy, actions, rejectShortcut }: {
   review: { frontmatter: { id: string; title: string } & Record<string, unknown> };
   labels: Map<string, PersonLabel>;
   busy: boolean;
   actions: LinkCardActions;
+  /** The Inbox presses this card's Reject with a key; the meeting view has no shortcut. */
+  rejectShortcut?: string;
 }) {
   const view = linkResolutionView(review, labels);
   // An object created here stays pickable, so a failed accept can be retried without creating it twice.
@@ -55,7 +57,7 @@ export function LinkResolutionCard({ review, labels, busy, actions }: {
     {pending && <div className="review-actions">
       {options.length > 0 && <button className="primary" disabled={busy || !choice} title={choice ? undefined : `Choose the ${view.candidateType} first`} onClick={() => void link()}>Link</button>}
       {view.canCreate && !created && <button className={options.length ? undefined : "primary"} disabled={busy} onClick={() => void createAndLink()}>Create {view.candidateType} "{view.reference}" and link</button>}
-      <button className="danger" disabled={busy} onClick={() => void attempt(actions.onReject)}>Reject</button>
+      <button className="danger" data-shortcut={rejectShortcut} aria-keyshortcuts={rejectShortcut?.toUpperCase()} disabled={busy} onClick={() => void attempt(actions.onReject)}>Reject</button>
     </div>}
   </div>;
 }
