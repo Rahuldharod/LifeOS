@@ -55,6 +55,7 @@ The undo journal entry (`undo-review`) now carries a `revert` record next to the
 - **An `update` accept records the exact text it appended** (`applied_append`) on the item, because the note's leading blank line cannot be recovered from the body.
 - **Ledger for History (#243):** `review.undone` also carries `reverted_object_ids` (every object put back; for a merge, the merged-away and kept People first), and for a merge `restored_person_id` and `kept_person_id`. `person.merged` is unchanged apart from `undo_record`.
 - **Not done:** a link resolution made by creating a new Person does not delete that Person: the create is a separate action recorded nowhere, so undo takes back the link only.
+- **Confirmed by the user (2026-11-23):** keeping that new Person is acceptable; the strict revision rule for merge undo stays (any later edit to a re-pointed file refuses it); merges and notes accepted before #242 can never be undone.
 
 ## How it works (#243): Inbox History
 
