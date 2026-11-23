@@ -7,14 +7,17 @@ import { rowLayoutModes, type RowLayoutMode } from "./useInboxRowLayout.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
 export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
-  onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
+  onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
   paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean;
   onRowMode: (mode: RowLayoutMode) => void; onShowHelp: () => void; onFocusRow: (id: string) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
   openedId?: string; focusedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
   onTab: (tab: InboxTab) => void; onQuery: (query: string) => void; onToggleAdvanced: () => void; onMeeting: (id: string) => void; onPeriod: (period: CreatedPeriod) => void; onClearFilters: () => void;
   onOpen: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
+  onDecideRow: (id: string, outcome: Outcome) => void; onDecideGroup: (items: InboxReview[], outcome: Outcome) => void;
 }) {
+  /** Row and group buttons are off while the app is read-only or a decision is saving. */
+  const groupLocked = busy || readOnly || bulkRunning;
   return <section ref={paneRef} className={`inbox-queue ${twoLine ? "two-line" : "one-line"}`} data-pane="list" aria-label="Review queue" hidden={hidden}>
     <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div></header>
     <div className="workspace-tabs inbox-tabs">
@@ -45,14 +48,20 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
         </>}
       </div>
       <div className="inbox-legend"><LowConfidenceDot legend /> Low confidence: check the evidence before accepting</div>
-      {!twoLine && <div className="inbox-row inbox-colhead" aria-hidden><span className="c-check" /><span className="c-kind">Type</span><span className="c-dot" /><span className="c-title">Item</span><span className="c-owner">Owner</span><span className="c-due">Due</span><span className="c-project">Project</span><span className="c-time">Time</span></div>}
+      {!twoLine && <div className="inbox-row inbox-colhead" aria-hidden><span className="c-check" /><span className="c-kind">Type</span><span className="c-dot" /><span className="c-title">Item</span><span className="c-owner">Owner</span><span className="c-due">Due</span><span className="c-project">Project</span><span className="c-time">Time</span><span className="c-actions" /></div>}
       <div className="inbox-rows">{groups.map(({ bucket, sources }) => <div key={bucket} className="inbox-date-group">
         <h3 className="inbox-date">{bucket}</h3>
         {sources.map((source) => {
           const key = groupKey(bucket, source); const isCollapsed = collapsed.has(key);
           return <div key={key} className="inbox-source-group">
-            <button className="inbox-source" aria-expanded={!isCollapsed} aria-label={`${source.label}, ${source.items.length}`} onClick={() => onToggleGroup(key)}><span aria-hidden>{isCollapsed ? "▸" : "▾"}</span> {source.label} <small>{source.items.length}</small></button>
-            {!isCollapsed && source.items.map((review) => <InboxRow key={review.frontmatter.id} review={review} cells={cellsFor(review)} twoLine={twoLine} opened={openedId === review.frontmatter.id} focused={focusedId === review.frontmatter.id} onFocusRow={onFocusRow} checked={checked.has(review.frontmatter.id)} onOpen={onOpen} onToggleChecked={onToggleChecked} />)}
+            <div className="inbox-source-head">
+              <button className="inbox-source" aria-expanded={!isCollapsed} aria-label={`${source.label}, ${source.items.length}`} onClick={() => onToggleGroup(key)}><span aria-hidden>{isCollapsed ? "▸" : "▾"}</span> {source.label} <small>{source.items.length}</small></button>
+              <span className="inbox-group-actions" role="group" aria-label={`Actions for ${source.label}`}>
+                <button disabled={groupLocked} title="Accept all in this group (skips Link and Merge)" aria-label={`Accept all in ${source.label}`} onClick={() => onDecideGroup(source.items, "accepted")}>Accept all</button>
+                <button className="danger" disabled={groupLocked} aria-label={`Reject all in ${source.label}`} onClick={() => onDecideGroup(source.items, "rejected")}>Reject all</button>
+              </span>
+            </div>
+            {!isCollapsed && source.items.map((review) => <InboxRow key={review.frontmatter.id} review={review} cells={cellsFor(review)} twoLine={twoLine} opened={openedId === review.frontmatter.id} focused={focusedId === review.frontmatter.id} onFocusRow={onFocusRow} checked={checked.has(review.frontmatter.id)} onOpen={onOpen} onToggleChecked={onToggleChecked} actionsDisabled={groupLocked} onDecide={onDecideRow} />)}
           </div>;
         })}
       </div>)}</div>

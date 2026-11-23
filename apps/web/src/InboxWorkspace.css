@@ -10,10 +10,11 @@
 .inbox-legend { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .inbox-rows { margin-top: var(--space-2); }
 .inbox-date { margin: var(--space-4) 0 var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); letter-spacing: .08em; text-transform: uppercase; }
-.inbox-source { display: flex; align-items: center; gap: var(--space-1); width: 100%; margin-top: var(--space-2); padding: var(--space-1) var(--space-2); border: 0; border-bottom: var(--border-thin) solid var(--color-border); border-radius: 0; background: none; color: var(--color-text); font-size: var(--font-size-sm); font-weight: 750; text-align: left; }
+.inbox-source-head { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); border-bottom: var(--border-thin) solid var(--color-border); }
+.inbox-source { display: flex; flex: 1; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: 0; background: none; color: var(--color-text); font-size: var(--font-size-sm); font-weight: 750; text-align: left; }
 .inbox-source small { color: var(--color-text-muted); font-weight: 600; }
 /* Rows and the column header share one grid, so badges, titles and the right-hand columns line up. Cells are placed by column, so a dropped column leaves no gap or height. */
-.inbox-row { --cols: 20px 108px 12px minmax(160px, 1fr) 104px 56px 140px 56px; display: grid; grid-template-columns: var(--cols); column-gap: var(--space-2); align-items: baseline; padding: 9px var(--space-2); border-bottom: var(--border-thin) solid color-mix(in srgb, var(--color-border) 55%, transparent); cursor: pointer; }
+.inbox-row { --cols: 20px 108px 12px minmax(160px, 1fr) 104px 56px 140px 56px 88px; display: grid; grid-template-columns: var(--cols); column-gap: var(--space-2); align-items: baseline; padding: 9px var(--space-2); border-bottom: var(--border-thin) solid color-mix(in srgb, var(--color-border) 55%, transparent); cursor: pointer; }
 .inbox-row .c-check { grid-column: 1; align-self: center; margin: 0; }
 .inbox-row .c-kind { grid-column: 2; display: flex; }
 .inbox-row .c-dot { grid-column: 3; display: flex; justify-content: center; }
@@ -22,17 +23,25 @@
 .inbox-row .c-due { grid-column: 6; }
 .inbox-row .c-project { grid-column: 7; }
 .inbox-row .c-time { grid-column: 8; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inbox-row .c-actions { grid-column: -2 / -1; align-self: center; display: flex; justify-content: flex-end; gap: 2px; visibility: hidden; }
+.inbox-row:hover .c-actions, .inbox-row.focused .c-actions, .inbox-row.selected .c-actions, .inbox-row:focus-within .c-actions { visibility: visible; }
+.inbox-row .c-actions button { width: 28px; min-height: 0; height: 28px; padding: 0; border-radius: var(--radius-sm); line-height: 1; }
+.inbox-colhead .c-actions { visibility: hidden !important; }
+/* Group buttons appear on hover or keyboard focus, like the row buttons. */
+.inbox-group-actions { display: flex; gap: var(--space-1); padding-right: var(--space-2); opacity: 0; transition: opacity .1s; }
+.inbox-source-head:hover .inbox-group-actions, .inbox-source-head:focus-within .inbox-group-actions { opacity: 1; }
+.inbox-group-actions button { padding: 2px var(--space-2); font-size: var(--font-size-xs); }
 .inbox-row .c-owner, .inbox-row .c-due, .inbox-row .c-project, .inbox-row .c-time { min-width: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
-.inbox-queue.two-line .inbox-row { --cols: 20px 108px 12px minmax(0, 1fr) 60px; padding-block: 7px; }
+.inbox-queue.two-line .inbox-row { --cols: 20px 108px 12px minmax(0, 1fr) 60px 88px; padding-block: 7px; }
 .inbox-queue.two-line .inbox-row .c-time { grid-column: 5; }
 /* A narrow list (forced 1 line) drops Project, then Owner, so the title keeps its room. */
 @container (max-width: 830px) {
-  .inbox-queue.one-line .inbox-row { --cols: 20px 108px 12px minmax(160px, 1fr) 104px 56px 56px; }
+  .inbox-queue.one-line .inbox-row { --cols: 20px 108px 12px minmax(160px, 1fr) 104px 56px 56px 88px; }
   .inbox-queue.one-line .inbox-row .c-project { display: none; }
   .inbox-queue.one-line .inbox-row .c-time { grid-column: 7; }
 }
 @container (max-width: 650px) {
-  .inbox-queue.one-line .inbox-row { --cols: 20px 108px 12px minmax(140px, 1fr) 56px 56px; }
+  .inbox-queue.one-line .inbox-row { --cols: 20px 108px 12px minmax(140px, 1fr) 56px 56px 88px; }
   .inbox-queue.one-line .inbox-row .c-owner { display: none; }
   .inbox-queue.one-line .inbox-row .c-due { grid-column: 5; }
   .inbox-queue.one-line .inbox-row .c-time { grid-column: 6; }

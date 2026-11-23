@@ -37,6 +37,7 @@ export function recordUrl(view: View, id?: string): string {
 export const AUTO_ADVANCE_PREFIX = "Auto-advance proposal";
 export const BULK_PREFIX = "Bulk proposal";
 export const TRIAGE_PREFIX = "Triage proposal";
+export const ROW_ACTION_PREFIX = "Row action proposal";
 
 export const LONG_TASK_TITLE = "Prepare the quarterly alignment review for the example.com platform migration including budget, staffing, risks, dependencies, vendor contracts and the communication plan for every affected team";
 
@@ -119,5 +120,5 @@ async function readBack(get: <T>(url: string) => Promise<T>): Promise<SeedData> 
   const long = knowledgeNotes.find((note) => note.title === "Browser knowledge note 1");
   const longTitleTask = tasks.find((task) => task.title === LONG_TASK_TITLE);
   if (!long || !longTitleTask) throw new Error("Seed data is incomplete");
-  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems: reviewItems.filter((item) => !item.title.startsWith(AUTO_ADVANCE_PREFIX) && !item.title.startsWith(BULK_PREFIX) && !item.title.startsWith(TRIAGE_PREFIX)), recurringNote: RECURRING_NOTE };
+  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems: reviewItems.filter((item) => !item.title.startsWith(AUTO_ADVANCE_PREFIX) && !item.title.startsWith(BULK_PREFIX) && !item.title.startsWith(TRIAGE_PREFIX) && !item.title.startsWith(ROW_ACTION_PREFIX)), recurringNote: RECURRING_NOTE };
 }

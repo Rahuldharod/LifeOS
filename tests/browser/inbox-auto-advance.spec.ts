@@ -33,11 +33,11 @@ test("accept and reject move to the next proposal; arrows and Previous/Next move
   await expect(rows).toHaveCount(2);
 
   // Bottom item rejected: the item above opens.
-  await page.getByRole("button", { name: "Reject" }).click();
+  await page.getByRole("button", { name: "Reject", exact: true }).click();
   await expect(heading).toHaveText(titles[0]!);
 
   // Last visible item: other proposals are hidden by the search, so the Inbox offers to clear it.
-  await page.getByRole("button", { name: "Reject" }).click();
+  await page.getByRole("button", { name: "Reject", exact: true }).click();
   const queue = page.getByRole("region", { name: "Review queue" });
   await expect(queue).toContainText("No matching proposals");
   await expect(page).toHaveURL(/\/inbox$/);

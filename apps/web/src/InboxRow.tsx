@@ -1,6 +1,6 @@
 import React from "react";
 import { LockBadge } from "./EnvelopeBadges.js";
-import { kindClass, type InboxReview, type RowCells } from "./inboxModel.js";
+import { kindClass, needsChoice, type InboxReview, type Outcome, type RowCells } from "./inboxModel.js";
 
 const LOW_TIP = "Low confidence: the agent was unsure. Check the source and evidence before accepting.";
 
@@ -10,9 +10,9 @@ export function LowConfidenceDot({ legend = false }: { legend?: boolean }) {
 }
 
 /** One queue row. The tick box and the title button are the controls; clicking anywhere else on the row also opens it. */
-export function InboxRow({ review, cells, twoLine, opened, focused, checked, onOpen, onFocusRow, onToggleChecked }: {
-  review: InboxReview; cells: RowCells; twoLine: boolean; opened: boolean; focused: boolean; checked: boolean;
-  onOpen: (id: string) => void; onFocusRow: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void;
+export function InboxRow({ review, cells, twoLine, opened, focused, checked, actionsDisabled, onOpen, onFocusRow, onToggleChecked, onDecide }: {
+  review: InboxReview; cells: RowCells; twoLine: boolean; opened: boolean; focused: boolean; checked: boolean; actionsDisabled: boolean;
+  onOpen: (id: string) => void; onFocusRow: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; onDecide: (id: string, outcome: Outcome) => void;
 }) {
   const id = review.frontmatter.id;
   const sub = [cells.owner, cells.due && `Due ${cells.due}`, cells.project].filter(Boolean) as string[];
@@ -32,5 +32,11 @@ export function InboxRow({ review, cells, twoLine, opened, focused, checked, onO
       <span className="c-project" title={cells.project}>{cells.project ?? "—"}</span>
     </>}
     <span className="c-time">{cells.time}</span>
+    {/* Own reserved column, so the buttons never cover the title or other cells. Clicks here must not open or tick the row. */}
+    <span className="c-actions" role="group" aria-label={`Actions: ${review.frontmatter.title}`} onClick={(event) => event.stopPropagation()}>
+      <button className="inbox-row-action accept" aria-label={`Accept proposal: ${review.frontmatter.title}`} title={needsChoice(review) ? "Link and merge proposals need a choice: open it to decide" : "Accept (A)"} disabled={actionsDisabled || needsChoice(review)} onClick={() => onDecide(id, "accepted")}>✓</button>
+      <button className="inbox-row-action reject" aria-label={`Reject proposal: ${review.frontmatter.title}`} title="Reject (R)" disabled={actionsDisabled} onClick={() => onDecide(id, "rejected")}>✕</button>
+      <button className="inbox-row-action open" aria-label={`Open in reading pane: ${review.frontmatter.title}`} title="Open (Enter)" onClick={() => onOpen(id)}>↗</button>
+    </span>
   </div>;
 }

@@ -132,11 +132,11 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const step = useRef<(direction: -1 | 1) => boolean>(() => false);
   step.current = (direction) => { const target = direction < 0 ? previousId : followingId; if (target) open(target); return Boolean(target); };
 
-  /** Bulk Accept/Reject on the ticked items in view. Each item is its own idempotent request; a failure does not stop the rest. */
-  const decideTicked = async (outcome: Outcome) => {
-    if (busy || readOnly || bulkRunning) return;
-    const targets = outcome === "accepted" ? acceptable : ticked;
-    const skipped = ticked.length - targets.length;
+  /** Bulk Accept/Reject on a set of items (the ticked ones, or one group). Link and merge items are skipped on Accept and counted. Each item is its own idempotent request; a failure does not stop the rest. */
+  const decideSet = async (pool: InboxReview[], outcome: Outcome) => {
+    if (busy || readOnly || bulkRunning || !pool.length) return;
+    const targets = outcome === "accepted" ? pool.filter((review) => !needsChoice(review)) : pool;
+    const skipped = pool.length - targets.length;
     if (!targets.length) { if (skipped) notify(`${skipped} skipped (link or merge needs a choice)`); return; }
     if (outcome === "rejected" && !globalThis.confirm(`Reject ${targets.length === 1 ? "1 proposal" : `${targets.length} proposals`}? This cannot be undone.`)) return;
     const targetIds = new Set(targets.map((review) => review.frontmatter.id));
@@ -158,6 +158,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     } catch (caught) { setActionError(errorText(caught)); }
     finally { setBulkRunning(false); }
   };
+  const decideTicked = (outcome: Outcome) => decideSet(ticked, outcome);
   const decideEach = async (targets: InboxReview[], outcome: Outcome): Promise<BulkResult> => {
     const result: BulkResult = { decided: [], failures: [] };
     for (const review of targets) {
@@ -175,21 +176,33 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     finally { active.current.delete(id); setActiveId(undefined); }
   };
 
-  /** A / R: every ticked item, else the Focused item. When the Focused item is the Open one, its own buttons run (so unsaved edits still block Accept). */
-  const decideFocused = (outcome: Outcome) => {
-    if (ticked.length) { void decideTicked(outcome); return true; }
-    const target = visible.find((review) => review.frontmatter.id === focusedId);
-    if (!target) return false;
+  /** Accept or Reject one item from the list (key or row button). When it is the Open item, its own detail buttons run, so unsaved edits still block Accept instead of being lost. */
+  const decideItem = (target: InboxReview, outcome: Outcome) => {
     const id = target.frontmatter.id; const link = reviewType(target) === "link-resolution";
-    if (link && outcome === "accepted") { notify("Link proposals need a choice: open it to link, create or reject."); return true; }
+    if (needsChoice(target) && outcome === "accepted") { notify(`${link ? "Link" : "Merge"} proposals need a choice: open it to decide.`); return true; }
     if (id === selected?.frontmatter.id) {
       const control = detailRef.current?.querySelector<HTMLButtonElement>(`button[data-shortcut='${outcome === "accepted" ? "a" : "r"}']`);
       if (control && !control.disabled) control.click();
+      else if (control && outcome === "accepted") notify("Save your edits first, then accept.");
       return Boolean(control);
     }
     const linkActions = link ? linkActionsFor?.(id) : undefined;
     void decide(target, outcome, outcome === "accepted" ? () => onAccept(target) : linkActions ? async () => { await linkActions.onReject(); } : () => onReject(target));
     return true;
+  };
+  /** A / R: every ticked item, else the Focused item. */
+  const decideFocused = (outcome: Outcome) => {
+    if (ticked.length) { void decideTicked(outcome); return true; }
+    const target = visible.find((review) => review.frontmatter.id === focusedId);
+    return target ? decideItem(target, outcome) : false;
+  };
+  /** A row's own button: it makes that row the Focused item first, so focus moves on from it like after a key. */
+  const decideRow = (id: string, outcome: Outcome) => {
+    const target = visible.find((review) => review.frontmatter.id === id);
+    if (!target) return;
+    setFocusState((current) => current.id === id ? current : { id });
+    focusSourceRef.current = id;
+    decideItem(target, outcome);
   };
   useInboxKeys({
     setTab,
@@ -231,7 +244,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
       hidden={narrow && Boolean(selected)}
       onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters}
-      onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} />
+      onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} onDecideRow={decideRow} onDecideGroup={(items, outcome) => void decideSet(items, outcome)} />
     {!narrow && <div {...split.dividerProps} />}
     <InboxReadingPane paneRef={detailRef} selected={selected} hidden={narrow && !selected} position={position} total={visibleIds.length} previousId={previousId} followingId={followingId} readOnly={readOnly} actionError={actionError}
       objectById={objectById} labels={labels} choices={choices} itemBusy={itemBusy} nextId={selected ? nextAfter(selected.frontmatter.id) : undefined} linkActions={selected ? linkActionsFor?.(selected.frontmatter.id) : undefined}
