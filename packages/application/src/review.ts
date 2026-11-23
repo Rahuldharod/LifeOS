@@ -13,6 +13,13 @@ import { proposeReviewItem, recordAgentRun, seededRun } from "./review-items.js"
 import { contextLinkFields, inheritContextLinks, isLive, isRestricted, OneAtATime, replayRoles, sameValue, validTimeZone } from "./support.js";
 
 
+/**
+ * #243: an item that is accepted, undone and accepted again must leave one `review.accepted` audit per accept, or the Inbox
+ * History would miss the second one (a link or update accept audits the same target both times). Undo gives the item a fresh
+ * `operation_id`, so the audit is matched on it; an item never undone has none, and a crash replay shares it.
+ */
+const acceptRound = (review: LifeOSObject) => typeof review.frontmatter.operation_id === "string" ? { operation_id: review.frontmatter.operation_id } : {};
+
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
 export class ReviewModule {
   /** `person-merge` Review Items (#40): suggesting, accepting and recovering merges. */
@@ -172,7 +179,7 @@ export class ReviewModule {
     const recorded = sameValue(held, record) ? review : await ctx.update(review, { link_undo: record }, { expectedHash: review.contentHash, now });
     const updated = unchanged ? target : await ctx.update(target, { [proposed.link_field]: value }, { expectedHash: target.contentHash, now });
     await ctx.update(recorded, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, chosen_object_id: chosenId }, { expectedHash: recorded.contentHash, now });
-    await ctx.writeAuditOnce("review.accepted", targetId, now, { review_id: review.frontmatter.id, link_field: proposed.link_field, linked_object_id: chosenId }, { matchOn: ["review_id"] });
+    await ctx.writeAuditOnce("review.accepted", targetId, now, { review_id: review.frontmatter.id, ...acceptRound(review), link_field: proposed.link_field, linked_object_id: chosenId }, { matchOn: ["review_id", "operation_id"] });
     await ctx.rebuildIndex();
     return updated;
   }
@@ -217,10 +224,10 @@ export class ReviewModule {
     }
     await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, ...(appended !== undefined ? { applied_append: appended } : {}) }, { expectedHash: review.contentHash, now });
     await ctx.writeAuditOnce("review.accepted", targetId, now, {
-      review_id: review.frontmatter.id, draft_key: proposal.draft_key,
+      review_id: review.frontmatter.id, ...acceptRound(review), draft_key: proposal.draft_key,
       before: Object.fromEntries(proposal.changes.map((change) => [change.field, change.current])), after: Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed])),
       ...(note ? { append_note: note } : {})
-    }, { matchOn: ["review_id"] });
+    }, { matchOn: ["review_id", "operation_id"] });
     await ctx.rebuildIndex();
     return updated;
   }

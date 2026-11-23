@@ -11,6 +11,7 @@ import { EntitiesModule, type EntityType } from "./entities.js";
 import { DailyFocusModule } from "./focus.js";
 import { FeedbackModule, type FeedbackInput } from "./feedback.js";
 import { HistoryModule } from "./history.js";
+import { InboxHistoryModule } from "./inbox-history.js";
 import { MeetingsModule } from "./meetings.js";
 import { NotesModule, type NewStandaloneNote, type NoteFilters } from "./notes.js";
 import { OpenPointsModule, type OpenPointFilters } from "./open-points.js";
@@ -30,6 +31,8 @@ export type { OpenPointFilters } from "./open-points.js";
 export { NoteReferencedError } from "./notes.js";
 export type { NewStandaloneNote, NoteFilters, ObjectReference, PurgeCheck } from "./notes.js";
 export type { ExternalChange, HistoryEntry, HistoryPanel } from "./history.js";
+export type { HistoryAction, InboxHistoryEntry } from "./inbox-history.js";
+export { inboxHistoryLimit } from "./inbox-history.js";
 export { derivePersonName, EXTERNAL_SUFFIX, externalStatus, normalizeDomain, personDisplayLabels, PersonEmailTakenError, personEmails } from "./people.js";
 export type { ExternalSource, PeopleSetupWarning, PersonLabel } from "./people.js";
 export type { DuplicateCleanupChoice, DuplicateCleanupRow, ManualMergeOptions, PersonMergePreview } from "./person-merge.js";
@@ -73,6 +76,7 @@ export class LifeOSApplication {
   private readonly review: ReviewModule;
   private readonly capture: CaptureModule;
   private readonly history: HistoryModule;
+  private readonly inboxHistoryModule: InboxHistoryModule;
   private readonly adoption: AdoptionModule;
   private readonly enrichment: EnrichmentModule;
   private readonly decisionsModule: DecisionsModule;
@@ -108,6 +112,7 @@ export class LifeOSApplication {
     this.feedback = new FeedbackModule(inbox, deviceId, options.appInfo ?? unknownAppInfo, options.timeZone);
     this.todayModule = new TodayModule(ctx, this.entitiesModule, this.adoption, this.enrichment, this.meetings, this.calendarModule, this.people);
     this.history = new HistoryModule(ctx);
+    this.inboxHistoryModule = new InboxHistoryModule(ctx, this.patches);
     const agentIndexOptions: AgentIndexOptions = { debounceMs: options.agentIndexDebounceMs, timeZone: options.timeZone, canWrite: options.agentIndexCanWrite, contract: options.contract };
     this.agentIndex = new AgentIndexModule(ctx, this.decisionsModule, this.adoption, inbox, agentIndex, agentIndexOptions);
     ctx.onRebuild = () => this.agentIndex.schedule();
@@ -288,6 +293,8 @@ export class LifeOSApplication {
 
   // Patch Drafts: applied by adoption; listed and undone here
   appliedPatches() { return this.patches.appliedPatches(); }
+  /** #243: the last 100 Review actions (and applied Patch Drafts), newest first, with who took them and whether each can be undone. */
+  inboxHistory(limit?: number) { return this.inboxHistoryModule.inboxHistory(limit); }
   undoPatch(auditEventId: string) { return this.patches.undoPatch(auditEventId); }
 
   // Backups (#84, ADR 0004): automatic at start, clean stop and daily; a weekly off-Drive copy; a warning on failure

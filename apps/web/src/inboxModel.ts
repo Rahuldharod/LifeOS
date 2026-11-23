@@ -55,22 +55,22 @@ export const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string
 /** What a Review Item is, in the words the list badge uses (CONTEXT.md: Review kind). Create items follow their target type. */
 export type ReviewKind = "Task" | "Decision" | "Open point" | "Knowledge note" | "Change" | "Summary" | "Link" | "Merge" | (string & {});
 const createKinds: Record<string, ReviewKind> = { task: "Task", decision: "Decision", "open-point": "Open point", "knowledge-note": "Knowledge note" };
-export const reviewKind = (review: InboxReview): ReviewKind => {
-  const type = reviewType(review);
+/** The badge for a Review type and (for a create item) its target object type; History rows carry these two fields. */
+export const kindOf = (type: string, target = ""): ReviewKind => {
   if (type === "update") return "Change";
   if (type === "summary") return "Summary";
   if (type === "link-resolution") return "Link";
   if (type === "person-merge") return "Merge";
-  const target = text(review.frontmatter.target_object_type);
   return createKinds[target] ?? (target ? `${target[0]!.toUpperCase()}${target.slice(1).replaceAll("-", " ")}` : "Task");
 };
+export const reviewKind = (review: InboxReview): ReviewKind => kindOf(reviewType(review), text(review.frontmatter.target_object_type));
 export const kindClass = (kind: ReviewKind) => `kind-${kind.toLowerCase().replaceAll(" ", "-")}`;
 
 export type DateBucket = "Today" | "Yesterday" | "Earlier this week" | "Older";
 const dayMs = 86_400_000;
 const midday = (key: string) => Date.parse(`${key}T12:00:00.000Z`);
 /** The calendar day an instant falls on in `timeZone` ("YYYY-MM-DD"). */
-const dayOf = (value: string | Date, timeZone: string) => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).format(new Date(value));
+export const dayOf = (value: string | Date, timeZone: string) => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).format(new Date(value));
 export const dateBucket = (iso: string, now: Date, timeZone: string): DateBucket => {
   if (Number.isNaN(Date.parse(iso))) return "Older";
   const days = Math.round((midday(dayOf(now, timeZone)) - midday(dayOf(iso, timeZone))) / dayMs);

@@ -7,9 +7,9 @@ import { rowLayoutModes, type RowLayoutMode } from "./useInboxRowLayout.js";
 import { inboxViews, type InboxView } from "./useInboxView.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
-export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, view, onView, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
+export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, view, onView, switcher, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
   onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
-  paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean; view: InboxView; /** Undefined where the view cannot be chosen (narrow screens). */ onView?: (view: InboxView) => void;
+  paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean; view: InboxView; /** Undefined where the view cannot be chosen (narrow screens). */ onView?: (view: InboxView) => void; /** The Inbox / History switch, shown in the page header (#243). */ switcher?: React.ReactNode;
   onRowMode: (mode: RowLayoutMode) => void; onShowHelp: () => void; onFocusRow: (id: string) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
   openedId?: string; focusedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
@@ -20,7 +20,7 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
   /** Row and group buttons are off while the app is read-only or a decision is saving. */
   const groupLocked = busy || readOnly || bulkRunning;
   return <section ref={paneRef} className={`inbox-queue ${twoLine ? "two-line" : "one-line"}`} data-pane="list" aria-label="Review queue" hidden={hidden}>
-    <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div></header>
+    <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div>{switcher}</header>
     <div className="workspace-tabs inbox-tabs">
       <div className="inbox-tablist" role="tablist" aria-label="Proposal type">
         {inboxTabs.map((name, index) => <button role="tab" key={name} aria-selected={tab === name} className={tab === name ? "selected" : ""} title={`${name} (press ${index + 1})`} aria-keyshortcuts={String(index + 1)} onClick={() => onTab(name)}>{name} <small>{tabCounts.get(name)}</small></button>)}

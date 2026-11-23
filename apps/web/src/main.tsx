@@ -74,13 +74,15 @@ import { meetingSummary } from "./meetingSummary.js";
 import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
 import { useNewStandaloneNote } from "./useNewStandaloneNote.js";
+import { InboxHistory } from "./InboxHistory.js";
+import { InboxSwitch } from "./InboxSwitch.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
 import { createdObjectId, type UndoResult } from "./inboxModel.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
 import { firstEditPeopleIds, headerPeopleIds } from "./firstEditPeople.js";
 import { DuplicateCleanupCard } from "./DuplicateCleanupCard.js";
-import type { AppliedPatch, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, PersonMergeChoice, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
+import type { InboxHistoryEntry, BackupVerification, CalendarDay, CalendarEvent, FocusChange, GoogleConnection, LifeObject, PersonLabel, PersonMergeChoice, ReviewEdits, ReviewEvidence, Workspace } from "@lifeos/contracts";
 
 /** PB-027: `/` (and an unknown path) resumes the last page; the only place the page is kept outside the URL. */
 const lastPathKey = "lifeos.lastPath";
@@ -222,7 +224,7 @@ function App() {
   const [lastVerification, setLastVerification] = useState<BackupVerification>();
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>();
   const [displayTimeZone, setDisplayTimeZone] = useState(storedDisplayTimeZone);
-  const { today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, notAPersonPeople, objectLinks, notes, deletedNotes, inboxDrafts, appliedPatches, personLabels, enrichment, connections, refresh, refreshTodayPanels, refreshConnections, refreshNotes, refreshNoteLists, refreshObjectLinks, updateNotes, updateToday, updateHealth } = useWorkspaceData({ displayTimeZone });
+  const { today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, notAPersonPeople, objectLinks, notes, deletedNotes, inboxDrafts, inboxHistory, personLabels, enrichment, connections, refresh, refreshTodayPanels, refreshConnections, refreshNotes, refreshNoteLists, refreshObjectLinks, updateNotes, updateToday, updateHealth } = useWorkspaceData({ displayTimeZone });
   const [selectedDate, setSelectedDate] = useState(() => (route?.view === "Calendar" && route.date) || dateInTimeZone(new Date(), storedDisplayTimeZone()));
   // PB-027: open items in the URL are resolved only once the lists they live in have loaded.
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
@@ -662,6 +664,8 @@ function App() {
     } finally { setBusy(false); }
   };
 
+  const inboxSwitch = (page: "inbox" | "history") => <InboxSwitch page={page} onPage={(next) => void go(next === "history" ? { view: "Inbox", inboxTab: "history" } : { view: "Inbox" })} />;
+
   const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
     await api("PATCH /api/v1/review-items/:id", { params: { id: reviewId }, body: changes });
     if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
@@ -788,10 +792,11 @@ function App() {
     await refresh();
   }, "Stopped waiting for material for this meeting");
 
-  const undoPatch = (patch: AppliedPatch) => run(async () => {
-    await api("POST /api/v1/inbox/patches/:id/undo", { params: { id: patch.auditEventId } });
+  /** Undo from the Inbox History: rethrows, so the History row shows the server's reason. */
+  const undoPatchEntry = async (entry: InboxHistoryEntry) => {
+    await api("POST /api/v1/inbox/patches/:id/undo", { params: { id: entry.id } });
     await refresh();
-  }, `Undid the change to ${patch.title}`);
+  };
 
   const preserveSource = async (title: string, text: string) => {
     await api("POST /api/v1/sources/text", { body: { title, text } });
@@ -1243,10 +1248,9 @@ function App() {
       {view === "Decisions" && <DecisionsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} guard={decisionEditorGuard} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
       {view === "Open Points" && <OpenPointsPage projects={projects.map(({ project }) => project)} clients={clients.map(({ entity }) => entity)} products={products.map(({ entity }) => entity)} people={people.map(({ entity }) => entity)} busy={busy} readOnly={readOnly} timeZone={displayTimeZone} highlightId={highlightId} guard={openPointEditorGuard} run={run} onOpen={(id) => void openLifeosLink(`lifeos://object/${id}`)} onChanged={refresh} formatDate={formatDate} />}
 
-      {view === "Inbox" && <>
+      {view === "Inbox" && (route?.view === "Inbox" && route.inboxTab === "history" ? <InboxHistory entries={inboxHistory.entries} loading={!inboxHistory.loaded} error={inboxHistory.error} switcher={inboxSwitch("history")} busy={busy} readOnly={readOnly} displayTimeZone={displayTimeZone} onUndo={undoMany} onUndoPatch={undoPatchEntry} onOpenObject={(id) => void openLifeosLink(`lifeos://object/${id}`)} onReopen={(id) => void go({ view: "Inbox", id })} /> : <>
         <article className="inbox-drafts"><span>AGENT DRAFTS</span><div className="capture-row"><p>{awaitingAdoptionLabel(inboxDrafts)}</p><button className="primary" disabled={busy || readOnly} onClick={() => void adoptDrafts()}>Adopt now</button></div>
           {inboxDrafts.failed.length > 0 && <><p>Failed drafts are kept in <code>_inbox/failed/</code>. Fix and re-send them, or remove the file.</p><ul className="diagnostics">{inboxDrafts.failed.map((entry) => <li key={entry.path}>{entry.reason}</li>)}</ul></>}</article>
-        {appliedPatches.length > 0 && <article className="inbox-drafts"><span>APPLIED CHANGES</span><ul className="diagnostics">{appliedPatches.slice(0, 20).map((patch) => <li key={patch.auditEventId}><div className="capture-row"><p><b>{patch.title}</b>: {[...Object.keys(patch.after).map((field) => `${field} ${String(patch.before[field] ?? "none")} → ${String(patch.after[field] ?? "none")}`), ...(patch.appendedNote ? [`note added: "${patch.appendedNote}"`] : [])].join("; ") || "no change"}</p>{patch.undone ? <em>Undone</em> : <button disabled={busy || readOnly} onClick={() => void undoPatch(patch)}>Undo</button>}</div></li>)}</ul></article>}
         <InboxWorkspace
           reviews={pendingReviews}
           objects={objectLinks}
@@ -1266,8 +1270,9 @@ function App() {
           onView={(id) => void openLifeosLink(`lifeos://object/${id}`)}
           onSave={(review, changes) => editReview(review.frontmatter.id, changes)}
           linkActionsFor={linkActionsFor}
+          switcher={inboxSwitch("inbox")}
         />
-      </>}
+      </>)}
 
       {view === "Knowledge" && <KnowledgeWorkspace
         notes={knowledge}

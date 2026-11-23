@@ -408,6 +408,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
     return application.markEnrichmentGaveUp(request.params.id, request.body.expectedHash);
   });
   route(server, "GET /api/v1/inbox/patches", async () => application.appliedPatches());
+  route(server, "GET /api/v1/inbox/history", async () => application.inboxHistory());
   route(server, "POST /api/v1/inbox/patches/:id/undo", async (request) => application.undoPatch(request.params.id));
   route(server, "POST /api/v1/history/:id/restore", async (request) => application.restoreVersion(request.params.id));
   // #85: one object's kept versions and the audit events about them, and restoring any kept version.

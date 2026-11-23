@@ -20,6 +20,10 @@ describe("routes (PB-027)", () => {
     expect(parseRoute("/notes")).toEqual({ view: "Notes", noteTab: "open" });
     expect(parseRoute(`/tasks/${NOTE}`)).toEqual({ view: "Tasks", id: NOTE });
     expect(parseRoute(`/inbox/${NOTE}`)).toEqual({ view: "Inbox", id: NOTE });
+    // #243: the History tab has its own path, which is not a Review Item id.
+    expect(parseRoute("/inbox/history")).toEqual({ view: "Inbox", inboxTab: "history" });
+    expect(routePath({ view: "Inbox", inboxTab: "history" })).toBe("/inbox/history");
+    expect(routePath({ view: "Inbox", id: NOTE })).toBe(`/inbox/${NOTE}`);
     expect(parseRoute("/settings/settings-self-emails")).toEqual({ view: "Settings", id: "settings-self-emails" });
     // #154: a published Knowledge Note has a direct link, so narrow list → detail survives reload and bookmarks.
     expect(parseRoute("/knowledge/knowledge-1")).toEqual({ view: "Knowledge", id: "knowledge-1" });

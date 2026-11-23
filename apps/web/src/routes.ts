@@ -12,7 +12,7 @@ export const views: View[] = ["Today", "Calendar", "Notes", "Tasks", "Decisions"
  * `id` is the open item: a note on Notes, a meeting on Calendar, the highlighted card on an entity
  * tab, the Review Item on Inbox. `date` is the Calendar day; `noteTab` the Notes list being shown.
  */
-export type Route = { view: View; id?: string; date?: string; noteTab?: "open" | "deleted" };
+export type Route = { view: View; id?: string; date?: string; noteTab?: "open" | "deleted"; inboxTab?: "history" };
 
 const slugs = Object.fromEntries(views.map((view) => [view, view.toLowerCase().replace(/ /g, "-")])) as Record<View, string>;
 const viewsBySlug = new Map(views.map((view) => [slugs[view], view]));
@@ -38,6 +38,8 @@ export function parseRoute(pathname: string): Route | undefined {
     if (!date || !DAY.test(date)) return { view };
     return { view, date, ...(id ? { id } : {}) };
   }
+  // #243: `/inbox/history` is the Inbox History tab; every other second segment is a Review Item.
+  if (view === "Inbox" && rest[0] === "history") return { view, inboxTab: "history" };
   return itemViews.has(view) && rest[0] ? { view, id: rest[0] } : { view };
 }
 
@@ -45,8 +47,9 @@ export function parseRoute(pathname: string): Route | undefined {
 export function routePath(route: Route): string {
   const parts = [slugs[route.view]];
   if (route.view === "Notes" && route.noteTab === "deleted") parts.push("deleted");
+  if (route.view === "Inbox" && route.inboxTab === "history") parts.push("history");
   if (route.view === "Calendar" && route.date) parts.push(route.date);
-  if (route.id && (route.view === "Notes" || itemViews.has(route.view) || (route.view === "Calendar" && route.date))) parts.push(route.id);
+  if (route.id && !(route.view === "Inbox" && route.inboxTab === "history") && (route.view === "Notes" || itemViews.has(route.view) || (route.view === "Calendar" && route.date))) parts.push(route.id);
   return `/${parts.map(encodeURIComponent).join("/")}`;
 }
 

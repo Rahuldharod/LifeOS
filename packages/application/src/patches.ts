@@ -258,7 +258,7 @@ export class PatchModule {
   private async audit(patch: ParsedPatch, target: LifeOSObject, values: PatchJournal, run: AdoptionRun) {
     await this.ctx.writeAuditOnce(appliedAction, target.frontmatter.id, run.now, {
       ...this.auditFields(patch, run), before: values.before, after: values.after, ...(values.appended_text ? { append_note: patch.appendNote, appended_text: values.appended_text } : {})
-    }, { matchOn: ["draft_key", "content_hash"] });
+    }, { matchOn: ["draft_key", "content_hash"], actor: { type: "agent", ref: run.id } });
     await this.closeJournals(patch);
     return { objectId: target.frontmatter.id, outcome: "applied" as const };
   }
@@ -293,7 +293,7 @@ export class PatchModule {
       if (!target || ctx.index.duplicatePaths?.(target.frontmatter.id)) throw new Error(`the patch's target ${String(journal.target_id)} is ${target ? "a duplicate object ID" : "missing"}, so whether patch ${journal.draft_key} was applied cannot be checked; restore the target or close the entry by hand`);
       if (holdsChange(target, journal)) {
         const { target_id: _target, base_hash: _base, base_note_count: _count, before, after, appended_text, now, append_note, ...fields } = journal;
-        await ctx.writeAuditOnce(appliedAction, target.frontmatter.id, now ?? new Date().toISOString(), { ...fields, before, after, ...(appended_text ? { append_note, appended_text } : {}) }, { matchOn: ["draft_key", "content_hash"] });
+        await ctx.writeAuditOnce(appliedAction, target.frontmatter.id, now ?? new Date().toISOString(), { ...fields, before, after, ...(appended_text ? { append_note, appended_text } : {}) }, { matchOn: ["draft_key", "content_hash"], actor: { type: "system" } });
         await ctx.rebuildIndex();
       }
     }

@@ -84,6 +84,12 @@ export type DraftResult = { draft: string; outcome: DraftOutcome; objectIds: str
 /** One adoption run: `retrySoon` when a draft was skipped only because it may still be being written. */
 export type AdoptionBatch = { agentRunId?: string; drafts: DraftResult[]; retrySoon: boolean };
 export type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
+/** `GET /inbox/history` (#243): one Review action, or one applied Patch Draft, newest first, at most 100. `actor` is "system" for what nobody at the keyboard did (see InboxHistoryModule). */
+export type InboxHistoryEntry = {
+  id: string; at: string; actor: "you" | "system"; action: "accepted" | "rejected" | "merged" | "kept-separate" | "applied" | "linked"; source: "review" | "patch";
+  reviewId?: string; reviewType: string; targetObjectType?: string; title: string; sourceMeetingId?: string; sourceMeetingTitle?: string; objectId?: string; summary?: string;
+  restricted: boolean; undone: boolean; undoable: boolean;
+};
 
 export type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 export type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };

@@ -154,6 +154,7 @@ export interface Endpoints {
   "POST /api/v1/enrichment/work-orders": { response: W.Message };
   "POST /api/v1/meetings/:id/enrichment/gave-up": Guarded & { response: unknown };
   "GET /api/v1/inbox/patches": { response: W.AppliedPatch[] };
+  "GET /api/v1/inbox/history": { response: W.InboxHistoryEntry[] };
   "POST /api/v1/inbox/patches/:id/undo": { response: unknown };
 
   // Backups (#84, #95)

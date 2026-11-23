@@ -4,12 +4,15 @@
 // main list fails; Connections, Enrichment and Today panels load on their own and never fail it or
 // each other, and person labels fall back to `[]`. `call` is the API seam (tests pass a fake).
 import { useState } from "react";
-import type { AppliedPatch, BackupSummary, EnrichmentStatus, EntityRollup, InboxStatus, LifeObject, ObjectLink, PersonLabel, ProjectRollup, ReviewEvidence, SystemHealth, Today, TodayPanels } from "@lifeos/contracts";
+import type { BackupSummary, EnrichmentStatus, EntityRollup, InboxHistoryEntry, InboxStatus, LifeObject, ObjectLink, PersonLabel, ProjectRollup, ReviewEvidence, SystemHealth, Today, TodayPanels } from "@lifeos/contracts";
 import { api, type Api } from "./api.js";
 import { loadConnections, type ConnectionsState } from "./connections.js";
 import { dateInTimeZone } from "./zonedTime.js";
 
 export type ReviewObject = LifeObject & { evidence?: Record<string, ReviewEvidence[]> };
+
+/** #243: the Inbox History, loaded on its own like Enrichment: `loaded` is false until the first answer, `error` when it failed. */
+export type InboxHistoryState = { entries: InboxHistoryEntry[]; loaded: boolean; error?: string };
 
 export type WorkspaceData = {
   today: Today;
@@ -29,7 +32,7 @@ export type WorkspaceData = {
   notes: LifeObject[];
   deletedNotes: LifeObject[];
   inboxDrafts: InboxStatus;
-  appliedPatches: AppliedPatch[];
+  inboxHistory: InboxHistoryState;
   /** #39: short, unambiguous names; `[]` when they could not be loaded (badges show full titles). */
   personLabels: PersonLabel[];
   enrichment: EnrichmentStatus;
@@ -71,7 +74,7 @@ export function useWorkspaceData({ displayTimeZone, call = api }: { displayTimeZ
   const [health, setHealth] = useState<SystemHealth>();
   const [inboxDrafts, setInboxDrafts] = useState<InboxStatus>({ awaiting: 0, drafts: 0, patches: 0, failed: [] });
   const [enrichment, setEnrichment] = useState<EnrichmentStatus>({ proposedGaveUp: [], staleWorkOrders: [] });
-  const [appliedPatches, setAppliedPatches] = useState<AppliedPatch[]>([]);
+  const [inboxHistory, setInboxHistory] = useState<InboxHistoryState>({ entries: [], loaded: false });
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [connections, setConnections] = useState<ConnectionsState>();
   const [objectLinks, setObjectLinks] = useState<ObjectLink[]>([]);
@@ -90,7 +93,8 @@ export function useWorkspaceData({ displayTimeZone, call = api }: { displayTimeZ
       call("GET /api/v1/projects"), call("GET /api/v1/review-items"), call("GET /api/v1/health"), call("GET /api/v1/backups"), call("GET /api/v1/knowledge"), call("GET /api/v1/rollups/:type", { params: { type: "client" } }), call("GET /api/v1/rollups/:type", { params: { type: "product" } }), call("GET /api/v1/rollups/:type", { params: { type: "person" } }), call("GET /api/v1/objects"), call("GET /api/v1/notes"), call("GET /api/v1/notes", { query: { state: "deleted" } }), call("GET /api/v1/inbox/drafts")
     ]);
     setToday(nextToday); setTasks(nextTasks); setProjects(nextProjects); setReviews(nextReviews); setHealth(nextHealth); setBackups(nextBackups); setKnowledge(nextKnowledge); setClients(nextClients); setProducts(nextProducts); setPeople(nextPeople); setObjectLinks(nextObjectLinks); setNotes(nextNotes); setDeletedNotes(nextDeletedNotes); setInboxDrafts(nextInboxDrafts);
-    setAppliedPatches(await call("GET /api/v1/inbox/patches"));
+    // #243: likewise; applied Patch Drafts are part of it, so the Inbox page no longer lists them on its own.
+    void call("GET /api/v1/inbox/history").then((entries) => setInboxHistory({ entries, loaded: true }), (error: unknown) => setInboxHistory((current) => ({ ...current, loaded: true, error: error instanceof Error ? error.message : "History could not be loaded" })));
     // Loaded on its own: without it the People settings only miss their "Not a person" filter results.
     void call("GET /api/v1/people/not-a-person").then(setNotAPersonPeople).catch(() => undefined);
     // #77: loaded on its own; a Keychain problem only shows on the Connections card, never fails a load or a save.
@@ -111,7 +115,7 @@ export function useWorkspaceData({ displayTimeZone, call = api }: { displayTimeZ
   const refreshObjectLinks = async () => { const objects = await call("GET /api/v1/objects"); setObjectLinks(objects); return objects; };
 
   return {
-    today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, notAPersonPeople, objectLinks, notes, deletedNotes, inboxDrafts, appliedPatches, personLabels, enrichment, connections,
+    today, todayPanels, tasks, projects, reviews, health, backups, knowledge, clients, products, people, notAPersonPeople, objectLinks, notes, deletedNotes, inboxDrafts, inboxHistory, personLabels, enrichment, connections,
     refresh, refreshTodayPanels, refreshConnections, refreshNotes, refreshNoteLists, refreshObjectLinks,
     updateNotes: setNotes, updateToday: setToday, updateHealth: setHealth
   };

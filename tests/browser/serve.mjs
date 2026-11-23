@@ -191,6 +191,8 @@ for (const n of [1, 2, 3, 4]) draft(`triage-${n}`, { kind: "task", draft_key: `b
 for (const n of [1, 2, 3, 4]) draft(`rowact-${n}`, { kind: "task", draft_key: `browser-rowact-${n}`, origin: "agent-extracted", confidence: "High", title: `Row action proposal ${n}` }, "Extracted for the row actions test.");
 // #241 undo: proposals that only inbox-undo.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
 for (const n of [1, 2, 3, 4]) draft(`undo-${n}`, { kind: "task", draft_key: `browser-undo-${n}`, origin: "agent-extracted", confidence: "High", title: `Undo proposal ${n}` }, "Extracted for the undo test.");
+// #243 Inbox History: proposals that only inbox-history.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const n of [1, 2, 3]) draft(`history-${n}`, { kind: "task", draft_key: `browser-history-${n}`, origin: "agent-extracted", confidence: "High", title: `History proposal ${n}` }, "Extracted for the Inbox History test.");
 for (const [name, content] of Object.entries(files)) {
   const file = path.join(drafts, name);
   await writeFile(file, content);

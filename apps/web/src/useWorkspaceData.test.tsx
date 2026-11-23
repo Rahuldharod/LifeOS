@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeApi } from "./fakeApi.js";
 import { useWorkspaceData, type WorkspaceData } from "./useWorkspaceData.js";
 
@@ -29,7 +29,7 @@ const answers = (over: Record<string, unknown>): Record<string, unknown> => ({
   "GET /api/v1/notes": [note("note-1")],
   "GET /api/v1/notes:deleted": [note("gone-1")],
   "GET /api/v1/inbox/drafts": { awaiting: 2, drafts: 1, patches: 0, failed: [] },
-  "GET /api/v1/inbox/patches": [{ id: "p1" }],
+  "GET /api/v1/inbox/history": [{ id: "h1" }],
   "GET /api/v1/people/labels": [{ id: "person-1", label: "Ana" }],
   "GET /api/v1/settings/connections": { calendar: { configured: true } },
   "POST /api/v1/settings/connections/retry": { calendar: { configured: true } },
@@ -81,7 +81,7 @@ describe("useWorkspaceData", () => {
     expect(page.data().notes.map((o) => o.frontmatter.id)).toEqual(["note-1"]);
     expect(page.data().deletedNotes.map((o) => o.frontmatter.id)).toEqual(["gone-1"]);
     expect(page.data().inboxDrafts.awaiting).toBe(2);
-    expect(page.data().appliedPatches).toHaveLength(1);
+    await vi.waitFor(() => expect(page.data().inboxHistory).toMatchObject({ loaded: true, entries: [{ id: "h1" }] }));
     expect(page.data().personLabels).toEqual([{ id: "person-1", label: "Ana" }]);
   });
 
