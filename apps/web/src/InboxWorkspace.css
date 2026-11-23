@@ -12,7 +12,7 @@
 .inbox-rows { margin-top: var(--space-2); }
 .inbox-date { margin: var(--space-4) 0 var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); letter-spacing: .08em; text-transform: uppercase; }
 .inbox-source-head { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); border-bottom: var(--border-thin) solid var(--color-border); }
-.inbox-source { display: flex; flex: 1; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: 0; background: none; color: var(--color-text); font-size: var(--font-size-sm); font-weight: 750; text-align: left; }
+.inbox-source { display: flex; flex: 1; align-items: center; justify-content: flex-start; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: 0; background: none; color: var(--color-text); font-size: var(--font-size-sm); font-weight: 750; text-align: left; }
 .inbox-source small { color: var(--color-text-muted); font-weight: 600; }
 /* Rows and the column header share one grid, so badges, titles and the right-hand columns line up. Cells are placed by column, so a dropped column leaves no gap or height. */
 .inbox-row { --cols: 20px 108px 12px minmax(160px, 1fr) 104px 56px 140px 56px 88px; display: grid; grid-template-columns: var(--cols); column-gap: var(--space-2); align-items: baseline; padding: 9px var(--space-2); border-bottom: var(--border-thin) solid color-mix(in srgb, var(--color-border) 55%, transparent); cursor: pointer; }
@@ -55,7 +55,7 @@
 .inbox-row.focused:not(.inbox-colhead) { outline: 2px solid var(--color-focus); outline-offset: -2px; border-radius: var(--radius-sm); }
 .inbox-row-open:focus-visible { outline: none; }
 .inbox-shortcuts-link { margin-left: var(--space-2); padding: 2px var(--space-2); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 600; white-space: nowrap; }
-.inbox-tab-tools { display: flex; align-items: center; margin-left: auto; }
+.inbox-tab-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; row-gap: var(--space-1); margin-left: auto; min-width: 0; }
 kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-quiet); font: inherit; font-size: .85em; font-weight: 700; }
 .inbox-shortcuts { min-width: min(440px, 92vw); padding: var(--space-5); }
 .inbox-shortcuts h3 { margin-top: 0; }
@@ -113,3 +113,18 @@ kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-stron
 /* List view (#240): one column; the reading pane is hidden until an item is opened, then it replaces the list. */
 .inbox-workspace[data-view="list"] { grid-template-columns: minmax(0, 1fr) !important; }
 .inbox-workspace[data-view="list"] .narrow-back { display: inline-flex; align-self: flex-start; }
+/* The Inbox list starts at half the workspace (the user asked for a larger list), not the shared 36%. */
+.inbox-workspace.pane-workspace { --list-width: clamp(var(--list-min), var(--split-width, 50%), calc(100% - var(--detail-reserve, 400px))); }
+/* A narrow 2-line list reads like a mail app: the title has line 1 to itself, the type badge leads line 2, and the row buttons float over the time. */
+.inbox-row { position: relative; }
+@container (max-width: 520px) {
+  .inbox-queue.two-line .inbox-row { grid-template-columns: 20px auto minmax(0, 1fr) 48px; grid-template-areas: "check title title time" "dot kind sub sub"; row-gap: 2px; }
+  .inbox-queue.two-line .inbox-row .c-title { display: contents; }
+  .inbox-queue.two-line .inbox-row .inbox-row-open { grid-area: title; min-width: 0; }
+  .inbox-queue.two-line .inbox-row .inbox-row-sub { grid-area: sub; align-self: center; min-width: 0; }
+  .inbox-queue.two-line .inbox-row .c-check { grid-area: check; }
+  .inbox-queue.two-line .inbox-row .c-kind { grid-area: kind; }
+  .inbox-queue.two-line .inbox-row .c-dot { grid-area: dot; align-self: center; }
+  .inbox-queue.two-line .inbox-row .c-time { grid-area: time; }
+  .inbox-queue.two-line .inbox-row .c-actions { position: absolute; top: var(--space-1); right: var(--space-2); padding-left: var(--space-1); border-radius: var(--radius-sm); background: var(--color-surface); }
+}

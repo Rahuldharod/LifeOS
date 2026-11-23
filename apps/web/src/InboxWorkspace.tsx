@@ -208,9 +208,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
 
   /** Accept or Reject one item from the list (key or row button). When it is the Open item, its own detail buttons run, so unsaved edits still block Accept instead of being lost. */
   const decideItem = (target: InboxReview, outcome: Outcome) => {
-    const id = target.frontmatter.id; const link = reviewType(target) === "link-resolution";
-    if (needsChoice(target) && outcome === "accepted") { notify(`${link ? "Link" : "Merge"} proposals need a choice: open it to decide.`); return true; }
-    if (id === selected?.frontmatter.id) {
+    const id = target.frontmatter.id; const link = reviewType(target) === "link-resolution"; const open = id === selected?.frontmatter.id;
+    if (open) {
       const control = detailRef.current?.querySelector<HTMLButtonElement>(`button[data-shortcut='${outcome === "accepted" ? "a" : "r"}']`);
       if (control && !control.disabled) control.click();
       else if (control && outcome === "accepted") {
@@ -218,8 +217,10 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
         if (control.dataset.unsaved) notify("Save your edits first, then accept.");
         else if (readOnly) notify("Read-only on this Mac: click “Use LifeOS here” before accepting.");
       }
-      return Boolean(control);
+      if (control || !needsChoice(target)) return Boolean(control);
     }
+    // An Open merge runs its own Merge button above (A). A link has no single Accept: the user picks the record in its card.
+    if (needsChoice(target) && outcome === "accepted") { notify(open ? "Pick the record to link in the proposal." : `${link ? "Link" : "Merge"} proposals need a choice: open it to decide.`); return true; }
     const linkActions = link ? linkActionsFor?.(id) : undefined;
     void decide(target, outcome, outcome === "accepted" ? () => onAccept(target) : linkActions ? async () => { await linkActions.onReject(); } : () => onReject(target));
     return true;

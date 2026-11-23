@@ -51,7 +51,7 @@ describe("groupReviews", () => {
       review("d", "2026-11-22T09:00:00Z", { source_meeting_id: "m2" })
     ]);
     expect(groups.map((entry) => entry.bucket)).toEqual(["Today", "Yesterday"]);
-    expect(groups[0]!.sources.map((source) => source.label)).toEqual(["Meeting · Acme sync", "Agent run · run-7", "Other"]);
+    expect(groups[0]!.sources.map((source) => source.label)).toEqual(["Meeting · Acme sync", "Agent run · 09:00", "Other"]);
     expect(groups[1]!.sources[0]!.label).toBe("Meeting · POS review");
   });
 

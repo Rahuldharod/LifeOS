@@ -89,7 +89,8 @@ export function groupReviews(reviews: InboxReview[], { now, timeZone, meetingTit
   const sourceOf = (review: InboxReview) => {
     const meetingId = text(review.frontmatter.source_meeting_id); const runId = text(review.frontmatter.agent_run_id);
     if (meetingId) return { key: `meeting:${meetingId}`, label: `Meeting · ${meetingTitle(meetingId) ?? "unavailable"}` };
-    if (runId) return { key: `run:${runId}`, label: `Agent run · ${runId}` };
+    // The run ID means nothing to the user; the time it wrote the item names the run (#237 review).
+    if (runId) return { key: `run:${runId}`, label: `Agent run · ${runTime(String(review.frontmatter.created_at), now, timeZone)}` };
     return { key: "other", label: "Other" };
   };
   const byBucket = new Map<DateBucket, Map<string, SourceGroup>>();
@@ -124,6 +125,11 @@ export function rangeIds(ordered: string[], hidden: Set<string>, anchor: string 
 
 export type RowCells = { kind: ReviewKind; owner?: string; due?: string; project?: string; time: string; low: boolean };
 export type RowLookups = { now: Date; timeZone: string; personName: (id: string) => string | undefined; projectName: (id: string) => string | undefined };
+/** When an item arrived: the time today, else the short day. Empty when the date is unreadable. */
+const clock = (iso: string, timeZone: string) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone }).format(new Date(iso));
+const arrivedAt = (iso: string, now: Date, timeZone: string) => Number.isNaN(Date.parse(iso)) ? "" : dayOf(iso, timeZone) === dayOf(now, timeZone) ? clock(iso, timeZone) : shortDay(dayOf(iso, timeZone));
+/** An Agent run is named by when it wrote: the time today, else the day and time (two runs on one older day stay apart). */
+const runTime = (iso: string, now: Date, timeZone: string) => Number.isNaN(Date.parse(iso)) ? "time unknown" : dayOf(iso, timeZone) === dayOf(now, timeZone) ? clock(iso, timeZone) : `${shortDay(dayOf(iso, timeZone))} ${clock(iso, timeZone)}`;
 const shortDay = (key: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(midday(key));
 /** Owner, Due, Project and Time for one list row, read the way the detail pane reads them. */
 export function reviewRowCells(review: InboxReview, { now, timeZone, personName, projectName }: RowLookups): RowCells {
@@ -131,9 +137,7 @@ export function reviewRowCells(review: InboxReview, { now, timeZone, personName,
   const target = text(review.frontmatter.target_object_type); const create = reviewType(review) === "create";
   const ownerId = text(proposed.owner_person_id); const projectId = text(review.frontmatter.primary_project_id); const due = text(proposed.due_on);
   const iso = String(review.frontmatter.created_at);
-  const time = Number.isNaN(Date.parse(iso)) ? "" : dayOf(iso, timeZone) === dayOf(now, timeZone)
-    ? new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone }).format(new Date(iso))
-    : shortDay(dayOf(iso, timeZone));
+  const time = arrivedAt(iso, now, timeZone);
   return {
     kind: reviewKind(review),
     owner: create && editableByTarget[target]?.includes("owner_person_id") ? (ownerId ? personName(ownerId) ?? "Unknown person" : "Me") : undefined,

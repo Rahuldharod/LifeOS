@@ -329,6 +329,20 @@ describe("InboxWorkspace keyboard shortcuts", () => {
     expect(reject).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "t" }) }));
   });
 
+  it("A merges an Open merge proposal, but asks to open a closed one first", async () => {
+    const accept = vi.fn(async () => true);
+    const merge = review("m", "Merge Ana Silva into A. Silva", { created_at: "2026-10-10T11:00:00Z", review_type: "person-merge", target_object_type: "person", proposed_fields: {} });
+    await render({ reviews: [merge, ...reviews()], selectedId: "m", onAccept: accept });
+    await press("a");
+    expect(accept).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "m" }) }));
+    act(() => root?.unmount()); accept.mockClear();
+    await render({ reviews: [merge, ...reviews()], selectedId: "t", onAccept: accept });
+    await press("k");
+    await press("a");
+    expect(accept).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Merge proposals need a choice: open it to decide.");
+  });
+
   it("S saves edits; A waits until they are saved", async () => {
     const accept = vi.fn(async () => true); const save = vi.fn(async () => true);
     await render({ reviews: reviews(), selectedId: "t", onAccept: accept, onSave: save });
@@ -450,7 +464,7 @@ describe("InboxWorkspace grouped list (#237)", () => {
   it("groups by date, then Source meeting, Agent run and Other, with counts, and lists rows in that order", async () => {
     await render(props);
     expect([...document.querySelectorAll(".inbox-date")].map((item) => item.textContent)).toEqual(["Today", "Older"]);
-    expect(sources()).toEqual(["▾ Meeting · Alpha sync 2", "▾ Meeting · Beta review 1", "▾ Agent run · run-7 1", "▾ Other 1"]);
+    expect(sources()).toEqual(["▾ Meeting · Alpha sync 2", "▾ Meeting · Beta review 1", "▾ Agent run · 1 Oct 07:00 1", "▾ Other 1"]);
     expect(rowTitles()).toEqual(["Alpha newest", "Alpha older", "Beta item", "Run item", "Loose item"]);
   });
 
@@ -484,7 +498,7 @@ describe("InboxWorkspace grouped list (#237)", () => {
     await tab("Decision");
     expect(sources()).toEqual(["▾ Meeting · Beta review 1"]);
     await tab("Summary");
-    expect(sources()).toEqual(["▾ Agent run · run-7 1"]);
+    expect(sources()).toEqual(["▾ Agent run · 1 Oct 07:00 1"]);
   });
 
   it("auto-advance follows the grouped order, not the time order", async () => {
