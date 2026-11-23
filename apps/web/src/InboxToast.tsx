@@ -24,12 +24,20 @@ export function useInboxToast() {
   };
   /** The action with this id, only while the toast is on screen. */
   const action = (id: string) => toast.message ? toast.actions.find((candidate) => candidate.id === id) : undefined;
-  return { notification: toast.message, toast, notify, action, hold: () => { held.current = true; stop(); }, release: () => { held.current = false; if (toast.message) start(); } };
+  return { notification: toast.message, toast, notify, action, held: () => held.current, hold: () => { held.current = true; stop(); }, release: () => { held.current = false; if (toast.message) start(); } };
 }
 
-export function InboxToast({ toast, onHold, onRelease }: { toast: Toast; onHold?: () => void; onRelease?: () => void }) {
+export function InboxToast({ toast, held, onHold, onRelease }: { toast: Toast; held?: () => boolean; onHold?: () => void; onRelease?: () => void }) {
+  const element = useRef<HTMLDivElement>(null);
+  // A focused button that a new message replaces leaves without a blur event (Enter on Undo, then "back in the Inbox"):
+  // after each change, a hold with neither the pointer nor focus still on the toast is let go, so it can time out again.
+  useEffect(() => {
+    const node = element.current;
+    if (!held?.() || (node && (node.matches(":hover") || node.contains(globalThis.document.activeElement)))) return;
+    onRelease?.();
+  });
   if (!toast.message) return null;
-  return <div className="inbox-toast" role="status" onMouseEnter={onHold} onMouseLeave={onRelease} onFocus={onHold} onBlur={onRelease}>
+  return <div ref={element} className="inbox-toast" role="status" onMouseEnter={onHold} onMouseLeave={onRelease} onFocus={onHold} onBlur={onRelease}>
     <span>{toast.message}</span>
     {toast.actions.map((action) => <button key={action.id} type="button" className="inbox-toast-action" data-toast-action={action.id} onClick={action.run}>{action.label}{action.key && <kbd>{action.key}</kbd>}</button>)}
   </div>;

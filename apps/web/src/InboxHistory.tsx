@@ -58,7 +58,7 @@ export function InboxHistory({ entries, switcher, loading = false, error, busy, 
   };
 
   return <section className="inbox-history" aria-label="Inbox History" data-workspace="inbox-history">
-    <InboxToast toast={toasts.toast} onHold={toasts.hold} onRelease={toasts.release} />
+    <InboxToast toast={toasts.toast} held={toasts.held} onHold={toasts.hold} onRelease={toasts.release} />
     <header className="workspace-heading"><div><span>INBOX · HISTORY</span><h2>Review actions</h2><p className="muted">Last 100, newest first. Undo puts an item back or takes its change back.</p></div>{switcher}</header>
     <div className="inbox-history-chips" role="group" aria-label="Who took the action">
       {filters.map((name) => <button key={name} type="button" aria-pressed={filter === name} className={filter === name ? "selected" : ""} onClick={() => setFilter(name)}>{name}</button>)}
