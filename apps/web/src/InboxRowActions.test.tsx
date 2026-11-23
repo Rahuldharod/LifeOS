@@ -121,14 +121,11 @@ describe("group buttons", () => {
     expect(focusedTitle()).toBe("Link owner");
   });
 
-  it("Reject all asks first, then rejects every item of the group", async () => {
+  it("Reject all rejects every item of the group without asking first (Undo replaces the confirmation)", async () => {
     const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
     await mount("a");
     await click(groupButton(/Reject all/));
-    expect(confirm).toHaveBeenCalledWith("Reject 5 proposals? This cannot be undone.");
-    expect(decided).toEqual([]);
-    confirm.mockReturnValue(true);
-    await click(groupButton(/Reject all/));
+    expect(confirm).not.toHaveBeenCalled();
     expect(decided.sort()).toEqual(["rejected:a", "rejected:b", "rejected:c", "rejected:d", "rejected:l"]);
   });
 

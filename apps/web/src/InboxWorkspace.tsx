@@ -6,7 +6,8 @@ import { InboxReadingPane } from "./InboxReadingPane.js";
 import { InboxToast, useInboxToast } from "./InboxToast.js";
 import { InboxShortcutSheet } from "./InboxShortcutSheet.js";
 import { useInboxKeys } from "./useInboxKeys.js";
-import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
+import { useInboxUndo } from "./useInboxUndo.js";
+import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type UndoResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
 import type { InboxView } from "./useInboxView.js";
 import { useSplitPane } from "./splitPane.js";
 import { useListDetailReturn } from "./useListDetailReturn.js";
@@ -15,16 +16,20 @@ import { useInboxView } from "./useInboxView.js";
 import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 import "./InboxWorkspace.css";
 
-export type { BulkResult, InboxReview, InboxTab, ReviewChoices } from "./inboxModel.js";
+export type { BulkResult, InboxReview, InboxTab, ReviewChoices, UndoResult } from "./inboxModel.js";
 
 /** The Inbox page: owns the state (filters, opened item, ticks, decisions) and composes the queue, reading pane, keys and toast. */
-export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onDecideMany, linkActionsFor }: {
+export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onDecideMany, onUndo, onView, linkActionsFor }: {
   reviews: InboxReview[]; objects: Array<LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices;
   selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; displayTimeZone: string; now?: Date;
   onOpen?: (id: string, options?: { replace?: boolean }) => void; onBack?: () => void;
   onAccept: (review: InboxReview) => Promise<ActionResult>; onReject: (review: InboxReview) => Promise<ActionResult>; onSave: (review: InboxReview, edits: ReviewEdits) => Promise<ActionResult>;
   /** Bulk decisions with one refresh at the end. Without it, the Inbox calls onAccept/onReject per item. */
   onDecideMany?: (reviews: InboxReview[], outcome: Outcome) => Promise<BulkResult>;
+  /** ADR 0025: undoes these Review Items (one request each, one refresh at the end). Without it, the toast has no Undo. */
+  onUndo?: (ids: string[]) => Promise<UndoResult>;
+  /** Opens the object an accept created (the toast's View). Without it, the toast has no View. */
+  onView?: (objectId: string) => void;
   linkActionsFor?: (reviewId: string) => LinkCardActions;
 }) {
   const narrow = useNarrowWorkspace();
@@ -36,7 +41,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const split = useSplitPane("inbox", { onDoubleClick: () => chooseView("list") });
   const [query, setQuery] = useState(""); const [tab, setTabState] = useState<InboxTab>("All"); const [advanced, setAdvanced] = useState(false);
   const [meetingId, setMeetingId] = useState(""); const [period, setPeriod] = useState<CreatedPeriod>("");
-  const [deciding, setDeciding] = useState<InboxReview>(); const { notification, notify } = useInboxToast(); const [actionError, setActionError] = useState("");
+  const [deciding, setDeciding] = useState<InboxReview>(); const toasts = useInboxToast(); const { notify } = toasts; const [actionError, setActionError] = useState("");
   const [activeId, setActiveId] = useState<string>(); const active = useRef(new Set<string>());
   const [checked, setChecked] = useState<Set<string>>(() => new Set()); const [bulkRunning, setBulkRunning] = useState(false);
   const detailRef = useRef<HTMLElement>(null); const queueRef = useRef<HTMLElement>(null);
@@ -119,6 +124,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   };
   /** After a Review action on the Focused item, focus lands on the next item (the Open item advances separately, above). */
   const moveFocusOn = (decidedId: string, nextId: string | undefined, dom: boolean) => { if (nextId && focusSourceRef.current === decidedId) setFocusState({ id: nextId, dom }); };
+  /** ADR 0025: an undone item is back in the list and becomes the Focused item. */
+  const undoing = useInboxUndo({ toasts, onUndo, onView, onRestored: (ids) => setFocusState({ id: ids[0], dom: listHasKeyboard() }) });
   const decide = async (review: InboxReview, outcome: Outcome, action: () => Promise<ActionResult>) => {
     const id = review.frontmatter.id;
     if (active.current.has(id) || busy || readOnly) return;
@@ -127,14 +134,15 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     try {
       const result = await action();
       if (result === false) return;
-      notify(`Proposal ${outcome}`);
+      const objectId = typeof result === "object" ? result.objectId : undefined;
+      undoing.announce(`Proposal ${outcome}`, [review], outcome, objectId ? { [id]: objectId } : {});
       advanceFrom(id, nextId);
       moveFocusOn(id, nextId, followWithKeyboard);
     } catch (caught) { setActionError(errorText(caught)); }
     finally { active.current.delete(id); setActiveId((current) => current === id ? undefined : current); setDeciding((current) => current?.frontmatter.id === id ? undefined : current); }
   };
   /** Link-resolution cards run their own requests; once one finishes, the Inbox moves on the same way. */
-  const linkFinished = (review: InboxReview, nextId: string | undefined, outcome: Outcome) => { const followWithKeyboard = listHasKeyboard(); notify(`Proposal ${outcome}`); advanceFrom(review.frontmatter.id, nextId); moveFocusOn(review.frontmatter.id, nextId, followWithKeyboard); };
+  const linkFinished = (review: InboxReview, nextId: string | undefined, outcome: Outcome) => { const followWithKeyboard = listHasKeyboard(); undoing.announce(`Proposal ${outcome}`, [review], outcome); advanceFrom(review.frontmatter.id, nextId); moveFocusOn(review.frontmatter.id, nextId, followWithKeyboard); };
   const position = selected ? visibleIds.indexOf(selected.frontmatter.id) : -1;
   const previousId = selected ? adjacentId(visibleIds, hiddenIds, selected.frontmatter.id, -1) : undefined;
   const followingId = selected && position >= 0 ? adjacentId(visibleIds, hiddenIds, selected.frontmatter.id, 1) : undefined;
@@ -147,7 +155,6 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     const targets = outcome === "accepted" ? pool.filter((review) => !needsChoice(review)) : pool;
     const skipped = pool.length - targets.length;
     if (!targets.length) { if (skipped) notify(`${skipped} skipped (link or merge needs a choice)`); return; }
-    if (outcome === "rejected" && !globalThis.confirm(`Reject ${targets.length === 1 ? "1 proposal" : `${targets.length} proposals`}? This cannot be undone.`)) return;
     const targetIds = new Set(targets.map((review) => review.frontmatter.id));
     const openId = openedRef.current;
     const skip = new Set([...hiddenIds, ...targetIds]);
@@ -160,7 +167,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       const decided = new Set(result.decided);
       setChecked((current) => new Set([...current].filter((id) => !decided.has(id))));
       if (anchor.current && decided.has(anchor.current)) anchor.current = undefined;
-      notify([`${decided.size === 1 ? "1 proposal" : `${decided.size} proposals`} ${outcome}`, ...(skipped ? [`${skipped} skipped (link or merge needs a choice)`] : [])].join(" · "));
+      // One Undo covers the whole batch (ADR 0025).
+      undoing.announce([`${decided.size === 1 ? "1 proposal" : `${decided.size} proposals`} ${outcome}`, ...(skipped ? [`${skipped} skipped (link or merge needs a choice)`] : [])].join(" · "), targets.filter((review) => decided.has(review.frontmatter.id)), outcome, result.objects);
       if (result.failures.length) setActionError(`${result.failures.length} not ${outcome}: ${result.failures.join("; ")}`);
       if (openId && decided.has(openId)) advanceFrom(openId, nextId);
       if (focusId && nextFocus && decided.has(focusId)) setFocusState({ id: nextFocus, dom: followWithKeyboard });
@@ -169,9 +177,14 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   };
   const decideTicked = (outcome: Outcome) => decideSet(ticked, outcome);
   const decideEach = async (targets: InboxReview[], outcome: Outcome): Promise<BulkResult> => {
-    const result: BulkResult = { decided: [], failures: [] };
+    const result: BulkResult = { decided: [], failures: [], objects: {} };
     for (const review of targets) {
-      try { if ((await (outcome === "accepted" ? onAccept(review) : onReject(review))) !== false) result.decided.push(review.frontmatter.id); else result.failures.push(review.frontmatter.title); }
+      try {
+        const done = await (outcome === "accepted" ? onAccept(review) : onReject(review));
+        if (done === false) { result.failures.push(review.frontmatter.title); continue; }
+        result.decided.push(review.frontmatter.id);
+        if (typeof done === "object" && done.objectId) result.objects![review.frontmatter.id] = done.objectId;
+      }
       catch (caught) { result.failures.push(`${review.frontmatter.title}: ${errorText(caught)}`); }
     }
     return result;
@@ -226,6 +239,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     openFocused: () => { if (!focusedId || focusedId === openedId) return false; open(focusedId); return true; },
     toggleFocused: (range) => { if (!focusedId) return false; toggleChecked(focusedId, range); return true; },
     decide: decideFocused,
+    undo: undoing.undoLast,
     save: () => {
       const control = detailRef.current?.querySelector<HTMLButtonElement>("button[data-shortcut='s']");
       if (!control || control.disabled) return false;
@@ -251,7 +265,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
 
   const ref = useListDetailReturn(selected?.frontmatter.id);
   return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" data-view={narrow ? undefined : view} style={split.style}>
-    <InboxToast message={notification} />
+    <InboxToast toast={toasts.toast} onHold={toasts.hold} onRelease={toasts.release} />
     <InboxShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
     <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} view={view} onView={narrow ? undefined : chooseView} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}

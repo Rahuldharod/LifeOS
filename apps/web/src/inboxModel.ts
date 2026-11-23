@@ -4,12 +4,21 @@ import { addCalendarDays, dateInTimeZone, zonedMidnight } from "./zonedTime.js";
 export type ReviewChoices = Record<"people" | "projects" | "clients" | "products", Array<{ id: string; title: string }>>;
 export type InboxReview = LifeObject & { evidence?: Record<string, ReviewEvidence[]> };
 export type Outcome = "accepted" | "rejected";
-export type ActionResult = boolean | void;
+/** `false` means nothing happened; an accept may name the object it created (for the toast's View). */
+export type ActionResult = boolean | void | { objectId?: string };
+/** ADR 0025: what undoing a batch did. `refused` carries the server's reason for each item it would not undo. */
+export type UndoResult = { undone: string[]; refused: Array<{ id: string; reason: string }> };
+/** The ID of the object an accept created, read from the accept response (the new object). */
+export const createdObjectId = (response: unknown): string | undefined => {
+  const id = (response as { frontmatter?: { id?: unknown } } | undefined)?.frontmatter?.id;
+  return typeof id === "string" ? id : undefined;
+};
 export type CreatedPeriod = "" | "today" | "7d" | "30d";
 export type InboxTab = "All" | "Summary" | "Decision" | "Task" | "Open point" | "Other";
 /** Tab order is also the 1–6 shortcut order. */
 export const inboxTabs: InboxTab[] = ["All", "Summary", "Decision", "Task", "Open point", "Other"];
-export type BulkResult = { decided: string[]; failures: string[] };
+/** `objects` maps an accepted item's ID to the object it created. */
+export type BulkResult = { decided: string[]; failures: string[]; objects?: Record<string, string> };
 
 export const editableByTarget: Record<string, string[]> = {
   task: ["owner_person_id", "due_on", "priority", "primary_project_id", "primary_client_id", "primary_product_id"],

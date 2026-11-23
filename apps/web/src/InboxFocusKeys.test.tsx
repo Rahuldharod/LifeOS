@@ -170,12 +170,12 @@ describe("A and R", () => {
     expect(focusedTitle()).toBe("Link owner");
   });
 
-  it("bulk R asks first and does nothing when declined", async () => {
+  it("bulk R rejects without asking first (Undo replaces the confirmation, ADR 0025)", async () => {
     const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
     await mount("a");
     await press("x"); await press("r");
-    expect(confirm).toHaveBeenCalledWith("Reject 1 proposal? This cannot be undone.");
-    expect(decided).toEqual([]);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(decided).toEqual(["rejected:a"]);
   });
 });
 

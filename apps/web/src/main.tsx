@@ -75,6 +75,7 @@ import { noteDeletePrompt } from "./noteDeletePrompt.js";
 import { NotesWorkspace } from "./NotesWorkspace.js";
 import { useNewStandaloneNote } from "./useNewStandaloneNote.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
+import { createdObjectId, type UndoResult } from "./inboxModel.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
 import { firstEditPeopleIds, headerPeopleIds } from "./firstEditPeople.js";
@@ -580,12 +581,19 @@ function App() {
     const here = parseRoute(locationRef.current.pathname);
     if (here?.id === id && here.view !== "Notes" && here.view !== "Calendar") followRoute({ view: here.view }, { replace: true });
   };
-  const accept = (review: LifeObject) => reviewRequests.run(review.frontmatter.id, () => run(async () => {
-    await api("POST /api/v1/review-items/:id/accept", { params: { id: review.frontmatter.id } });
-    leaveFinishedItem(review.frontmatter.id);
-    if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
-    await refresh();
-  }, acceptToast(review.frontmatter)));
+  /** Resolves `false` when nothing was accepted (a second click, or an error already shown); else the created object, for the toast's View. */
+  const accept = async (review: LifeObject): Promise<{ objectId?: string } | false> => {
+    let objectId: string | undefined; let done = false;
+    const sent = await reviewRequests.run(review.frontmatter.id, async () => {
+      done = await run(async () => {
+        objectId = createdObjectId(await api("POST /api/v1/review-items/:id/accept", { params: { id: review.frontmatter.id } }));
+        leaveFinishedItem(review.frontmatter.id);
+        if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
+        await refresh();
+      }, acceptToast(review.frontmatter));
+    });
+    return sent && done ? { objectId } : false;
+  };
 
   /** #57: like `run`, but rethrows so the link card shows the server's error itself (role=alert). */
   const reviewStep = (reviewId: string, action: () => Promise<unknown>, success: string) => reviewRequests.run(reviewId, async () => {
@@ -604,30 +612,53 @@ function App() {
     onReject: () => reviewStep(reviewId, () => api("POST /api/v1/review-items/:id/reject", { params: { id: reviewId } }), "Proposal rejected")
   });
 
-  const reject = (reviewId: string) => reviewRequests.run(reviewId, () => run(async () => {
-    await api("POST /api/v1/review-items/:id/reject", { params: { id: reviewId } });
-    leaveFinishedItem(reviewId);
-    if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
-    await refresh();
-  }, "Proposal rejected"));
+  const reject = async (reviewId: string) => {
+    let done = false;
+    const sent = await reviewRequests.run(reviewId, async () => {
+      done = await run(async () => {
+        await api("POST /api/v1/review-items/:id/reject", { params: { id: reviewId } });
+        leaveFinishedItem(reviewId);
+        if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
+        await refresh();
+      }, "Proposal rejected");
+    });
+    return sent && done;
+  };
 
   /** Inbox bulk Accept/Reject: one request per item (each idempotent), one refresh at the end; a failure does not stop the rest. */
   const decideMany = async (items: LifeObject[], outcome: "accepted" | "rejected") => {
-    const result = { decided: [] as string[], failures: [] as string[] };
+    const result = { decided: [] as string[], failures: [] as string[], objects: {} as Record<string, string> };
     setBusy(true);
     try {
       for (const item of items) {
         const id = item.frontmatter.id;
         try {
-          const sent = await reviewRequests.run(id, () => outcome === "accepted"
-            ? api("POST /api/v1/review-items/:id/accept", { params: { id } })
-            : api("POST /api/v1/review-items/:id/reject", { params: { id } }));
+          const sent = await reviewRequests.run(id, async () => {
+            if (outcome === "rejected") { await api("POST /api/v1/review-items/:id/reject", { params: { id } }); return; }
+            const created = createdObjectId(await api("POST /api/v1/review-items/:id/accept", { params: { id } }));
+            if (created) result.objects[id] = created;
+          });
           if (sent) { result.decided.push(id); leaveFinishedItem(id); }
         } catch (error) { result.failures.push(`${item.frontmatter.title}: ${error instanceof Error ? error.message : "Something went wrong"}`); }
       }
       if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
       await refresh();
       return result; // the Inbox shows the outcome in its own toast
+    } finally { setBusy(false); }
+  };
+
+  /** ADR 0025: undoes Review actions, one request per item, one refresh at the end; the server's refusal is each item's reason. */
+  const undoMany = async (ids: string[]): Promise<UndoResult> => {
+    const result: UndoResult = { undone: [], refused: [] };
+    setBusy(true);
+    try {
+      for (const id of ids) {
+        try { await api("POST /api/v1/review-items/:id/undo", { params: { id } }); result.undone.push(id); }
+        catch (error) { result.refused.push({ id, reason: error instanceof Error ? error.message : "Something went wrong" }); }
+      }
+      if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
+      await refresh();
+      return result;
     } finally { setBusy(false); }
   };
 
@@ -1231,6 +1262,8 @@ function App() {
           onAccept={accept}
           onReject={(review) => reject(review.frontmatter.id)}
           onDecideMany={decideMany}
+          onUndo={undoMany}
+          onView={(id) => void openLifeosLink(`lifeos://object/${id}`)}
           onSave={(review, changes) => editReview(review.frontmatter.id, changes)}
           linkActionsFor={linkActionsFor}
         />

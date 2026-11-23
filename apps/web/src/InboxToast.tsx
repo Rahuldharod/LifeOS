@@ -1,17 +1,34 @@
 import React, { useEffect, useRef, useState } from "react";
 
-/** The toast message and its 3-second timer; a new message replaces the old one. */
+/** A button on the toast. `id` lets a key (Z for "undo") find it. */
+export type ToastAction = { id: string; label: string; key?: string; run: () => void };
+export type Toast = { message: string; actions: ToastAction[] };
+
+/** A plain message stays 3 seconds; one with actions stays 8 (ADR 0025) so there is time to reach Undo. */
+const plainMs = 3000;
+const actionMs = 8000;
+
+/** The toast and its timer; a new message replaces the old one. Hovering or focusing the toast holds it open. */
 export function useInboxToast() {
-  const [notification, setNotification] = useState("");
+  const [toast, setToast] = useState<Toast>({ message: "", actions: [] });
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  const notify = (message: string) => {
-    if (timer.current) clearTimeout(timer.current);
-    setNotification(message); timer.current = setTimeout(() => setNotification(""), 3000);
+  const ms = useRef(plainMs);
+  const stop = () => { if (timer.current) clearTimeout(timer.current); timer.current = undefined; };
+  const start = () => { stop(); timer.current = setTimeout(() => setToast({ message: "", actions: [] }), ms.current); };
+  useEffect(() => stop, []);
+  const notify = (message: string, actions: ToastAction[] = []) => {
+    ms.current = actions.length ? actionMs : plainMs;
+    setToast({ message, actions }); start();
   };
-  return { notification, notify };
+  /** The action with this id, only while the toast is on screen. */
+  const action = (id: string) => toast.message ? toast.actions.find((candidate) => candidate.id === id) : undefined;
+  return { notification: toast.message, toast, notify, action, hold: stop, release: () => { if (toast.message) start(); } };
 }
 
-export function InboxToast({ message }: { message: string }) {
-  return message ? <div className="inbox-toast" role="status">{message}</div> : null;
+export function InboxToast({ toast, onHold, onRelease }: { toast: Toast; onHold?: () => void; onRelease?: () => void }) {
+  if (!toast.message) return null;
+  return <div className="inbox-toast" role="status" onMouseEnter={onHold} onMouseLeave={onRelease} onFocus={onHold} onBlur={onRelease}>
+    <span>{toast.message}</span>
+    {toast.actions.map((action) => <button key={action.id} type="button" className="inbox-toast-action" data-toast-action={action.id} onClick={action.run}>{action.label}{action.key && <kbd>{action.key}</kbd>}</button>)}
+  </div>;
 }

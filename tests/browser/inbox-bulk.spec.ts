@@ -36,12 +36,9 @@ test("tabs group proposals; X ticks, bulk Accept and confirmed bulk Reject decid
   await expect(rows).toHaveCount(1);
   await expect(heading).not.toHaveText(first);
 
-  // Bulk Reject asks first: dismissing keeps the item, accepting rejects it.
+  // Bulk Reject does not ask first (ADR 0025: the toast's Undo replaces the confirmation).
   await page.getByRole("button", { name: "Select all", exact: true }).click();
-  page.once("dialog", (dialog) => void dialog.dismiss());
-  await page.getByRole("button", { name: "Reject selected (1)" }).click();
-  await expect(rows).toHaveCount(1);
-  page.once("dialog", (dialog) => { expect(dialog.message()).toBe("Reject 1 proposal? This cannot be undone."); void dialog.accept(); });
+  page.on("dialog", () => { throw new Error("bulk Reject must not open a confirmation"); });
   await page.getByRole("button", { name: "Reject selected (1)" }).click();
   await expect(queue).toContainText("No matching proposals");
 });

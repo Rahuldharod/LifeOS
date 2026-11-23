@@ -379,16 +379,13 @@ describe("InboxWorkspace bulk actions", () => {
     expect(opened).toHaveBeenLastCalledWith("l", { replace: true });
   });
 
-  it("bulk Reject asks first, includes link proposals, and reports failures", async () => {
+  it("bulk Reject does not ask first, includes link proposals, and reports failures", async () => {
     const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
     const decideMany = vi.fn(async () => ({ decided: ["b"], failures: ["Link owner: Conflict"] }));
     await render({ reviews: reviews(), selectedId: "a", onDecideMany: decideMany });
     await tick("Bravo task"); await tick("Link owner");
     await click("Reject selected (2)");
-    expect(confirm).toHaveBeenCalledWith("Reject 2 proposals? This cannot be undone.");
-    expect(decideMany).not.toHaveBeenCalled();
-    confirm.mockReturnValue(true);
-    await click("Reject selected (2)");
+    expect(confirm).not.toHaveBeenCalled();
     expect(decideMany).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ frontmatter: expect.objectContaining({ id: "l" }) })]), "rejected");
     expect(document.querySelector("[role='alert']")?.textContent).toContain("1 not rejected: Link owner: Conflict");
   });

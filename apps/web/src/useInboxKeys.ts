@@ -12,6 +12,8 @@ export type InboxKeyActions = {
   toggleFocused: (range: boolean) => boolean;
   /** A and R: the Focused item, or every ticked item. */
   decide: (outcome: Outcome) => boolean;
+  /** Z: undo the last Review action (while its toast shows). */
+  undo: () => boolean;
   /** S: the Open item's Save edits. */
   save: () => boolean;
   /** Esc: go back to the list from an item shown full width (List view), else clear the ticks. */
@@ -42,6 +44,7 @@ export function useInboxKeys(actions: InboxKeyActions) {
     if (event.shiftKey) return;
     if (lower === "a") done(actions.decide("accepted"));
     else if (lower === "r") done(actions.decide("rejected"));
+    else if (lower === "z") done(actions.undo());
     else if (lower === "s") done(actions.save());
     else if (lower === "v") done(actions.toggleView());
   };
