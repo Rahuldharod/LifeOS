@@ -43,7 +43,23 @@ The common front-matter fields every LifeOS object carries (identity, type, sche
 
 **Review Item**:
 A proposed commitment or meaning-changing edit awaiting the user's accept, edit or reject. Not authoritative until accepted.
-_Avoid_: Suggestion, draft task
+_Avoid_: Suggestion, draft task, inbox item
+
+**Review kind**:
+What a Review Item proposes, shown as its badge: Task, Decision, Open point, Knowledge note, Change (from a Patch Draft), Summary, Link or Merge.
+_Avoid_: Type (an object's type is a different thing), category
+
+**Source meeting**:
+The meeting a Review Item was drawn from. Review Items with no Source meeting are grouped by the Agent run that wrote them.
+_Avoid_: Event (a Calendar event is the provider's occurrence), source (a Source is an object)
+
+**Review action**:
+One outcome applied to a Review Item: accept, edit, reject, merge, keep separate, apply, or the undo of one of these. Taken by the user, or by the system (for example during Adoption).
+_Avoid_: Decision (a Decision is an object), action (alone)
+
+**Undo** (of a Review action):
+Putting a Review Item back to pending. Undoing an accept also removes the object it created, and is refused when that object has been edited since.
+_Avoid_: Revert, rollback
 
 **Inbox Draft**:
 An Agent-written file in `_inbox/` awaiting Adoption. Not an object.
@@ -158,6 +174,18 @@ How a Person is shown everywhere: full name (first and last), or just the name L
 **Reference data**:
 Projects, Clients, Products and People: records maintained in Settings and reached contextually from the work they describe.
 _Avoid_: Entities, master data
+
+**Focused item**:
+The Inbox row the keyboard acts on. Moving focus does not open the row; Review action keys apply to the Focused item, even when another item is open.
+_Avoid_: Selected item (selection is the ticked set)
+
+**Open item**:
+The Review Item shown in full in the Inbox reading pane, opened by Enter or a click.
+_Avoid_: Selected item, current item
+
+**Inbox History**:
+The Inbox tab listing the last 100 Review actions, newest first, by the user and the system, where each can be undone or its result changed.
+_Avoid_: Audit log (the audit trail records every write, not only Review actions), activity feed
 
 **Global Search**:
 The search available from every workspace for live Tasks, Calendar events and Notes. It includes restricted records and excludes archived and deleted records; when a Calendar event has a Meeting Note, only the Meeting Note appears.
