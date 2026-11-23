@@ -374,7 +374,7 @@ export class ReviewModule {
       const review = ctx.required(reviewId, "review-item");
       const status = review.frontmatter.status;
       if (status === "pending") return { review, outcome: "already-pending" };
-      if (status !== "accepted" && status !== "rejected") throw new Error("Only accepted or rejected review items can be undone");
+      if (status !== "accepted" && status !== "rejected") throw new ObjectConflictError(`Cannot undo: this item is ${String(status)}; only accepted or rejected items can be undone.`);
       const type = typeof review.frontmatter.review_type === "string" ? review.frontmatter.review_type : undefined;
       if (!isReviewActionUndoable(type, status)) throw new ObjectConflictError(notYetUndoable);
       const plan = this.undoPlan(review, type ?? "create", status);

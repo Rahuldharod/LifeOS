@@ -41,6 +41,9 @@ export interface PersonMergePreview {
   keptName: string; aliases: string[]; emails: string[]; referenceCount: number;
 }
 
+/** The undo could not make a merge whole again after a conflict. Not an `ObjectConflictError` on purpose: the undo's journal stays open to be retried. */
+class MergeUndoRollbackError extends Error {}
+
 /** One file's change. `null` means "field absent"; `$body` stands for the Markdown body. */
 interface PlanEntry { id: string; before: Record<string, unknown>; after: Record<string, unknown> }
 const bodyKey = "$body";
@@ -61,13 +64,15 @@ const mergeable = (object: LifeOSObject | undefined): object is LifeOSObject => 
  */
 interface RecordedLink { at: number; was_at: number; was: string }
 interface RecordedChange { id: string; revision: number; before: Record<string, unknown>; after: Record<string, unknown>; body_links?: RecordedLink[] }
-interface MergeRecord { version: 1; changes: RecordedChange[] }
+/** `keep_revision`: the kept Person's revision right after the merge, recorded even when the merge changed nothing on it, so a later edit or merge of it is seen. Absent in records written before it existed. */
+interface MergeRecord { version: 1; changes: RecordedChange[]; keep_revision?: number }
 const linkPrefix = "lifeos://object/";
 
 function recordOf(ctx: AppContext, plan: PlanEntry[], fromId: string, toId: string): MergeRecord {
   const link = new RegExp(`${linkPrefix}${fromId}`, "gi");
   return {
     version: 1,
+    keep_revision: ctx.index.get(toId)?.frontmatter.revision ?? 0,
     changes: plan.map((entry) => {
       const { [bodyKey]: originalBody, ...before } = entry.before;
       const { [bodyKey]: _mergedBody, ...after } = entry.after;
@@ -500,7 +505,13 @@ export class PersonMergeModule {
     const operationId = String(review.frontmatter.operation_id);
     const found = readRecord(this.ctx.findAudits("person.merged", { operation_id: operationId })[0]);
     if (!found) throw new ObjectConflictError("Cannot undo: this merge was made before LifeOS kept a record of what it changed. Edit the two people by hand instead.");
-    // The kept person first: if it was merged again, that is the reason to give.
+    // The kept person first: if it was merged again, that is the reason to give. It is checked from `keep_revision` too, since a
+    // merge that changed nothing on it has no entry in `changes` (records from before that field have only the entry).
+    if (found.record.keep_revision !== undefined && !found.record.changes.some((change) => change.id === found.keepId)) {
+      const kept = this.ctx.index.get(found.keepId);
+      if (!kept) throw new ObjectConflictError(`Cannot undo: ${found.keepId} no longer exists, so the merge cannot be put back as it was.`);
+      if (kept.frontmatter.revision !== found.record.keep_revision) throw new ObjectConflictError(`Cannot undo: "${kept.frontmatter.title}" was changed or merged again after the merge (revision ${found.record.keep_revision}, now ${kept.frontmatter.revision}). Open it to change it yourself.`);
+    }
     for (const change of [...found.record.changes].sort((a, b) => Number(b.id === found.keepId) - Number(a.id === found.keepId))) {
       const object = this.ctx.index.get(change.id);
       if (!object) throw new ObjectConflictError(`Cannot undo: ${change.id} no longer exists, so the merge cannot be put back as it was.`);
@@ -550,10 +561,17 @@ export class PersonMergeModule {
       await ctx.rebuildIndex();
     }
     if (conflict) {
+      // Every file is tried even if one fails. A failed re-apply is not a refusal: the merge is left part undone, so the error must
+      // not be an ObjectConflictError (which closes the journal); the open undo is retried, and finds the same conflict again.
+      const failed: string[] = [];
       for (const change of done) {
-        if (stateOf(change) === "restored") await put(change, "after").catch(() => undefined);
+        if (stateOf(change) === "restored") {
+          try { await put(change, "after"); }
+          catch (error) { failed.push(`${ctx.index.get(change.id)?.frontmatter.title ?? change.id}: ${error instanceof Error ? error.message : String(error)}`); }
+        }
         await ctx.rebuildIndex();
       }
+      if (failed.length) throw new MergeUndoRollbackError(`The undo met a change made meanwhile and could not put the merge back whole (${failed.join("; ")}). It stays open and is retried.`);
       throw new ObjectConflictError(`Cannot undo: "${ctx.index.get(conflict.id)?.frontmatter.title ?? conflict.id}" was changed while the merge was being undone, so the merge was left as it was.`);
     }
     await ctx.rebuildIndex();

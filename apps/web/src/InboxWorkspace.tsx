@@ -107,8 +107,12 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const open = (id: string, options?: { replace?: boolean }) => { setOpenedId(id); setFocusState({ id }); setActionError(""); onOpen?.(id, options); };
   /** Back to the list. Focus returns to the row that was open (List view and narrow screens hide the list while an item is open). */
   const back = () => { if (openedId) setFocusState({ id: openedId, dom: true }); setOpenedId(undefined); setActionError(""); onBack?.(); };
-  /** Switching to List closes the open item (the list is the first thing the user sees); switching to Split opens the first item again. */
-  const chooseView = (next: InboxView) => { if (next === view || narrow) return; setView(next); if (next === "list") back(); };
+  /** Switching to List closes the open item (the list is the first thing the user sees); switching to Split opens the Focused item (the first one only when nothing is Focused). */
+  const chooseView = (next: InboxView) => {
+    if (next === view || narrow) return;
+    setView(next);
+    if (next === "list") back(); else if (focusedId) open(focusedId);
+  };
   const setTab = (next: InboxTab) => { setTabState(next); setChecked(new Set()); };
   const clearFilters = () => { setQuery(""); setTab("All"); setMeetingId(""); setPeriod(""); };
   /** Tick or untick one item, or (`range`) tick everything from the last anchor to it. A plain tick sets the anchor. */
@@ -209,7 +213,11 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     if (id === selected?.frontmatter.id) {
       const control = detailRef.current?.querySelector<HTMLButtonElement>(`button[data-shortcut='${outcome === "accepted" ? "a" : "r"}']`);
       if (control && !control.disabled) control.click();
-      else if (control && outcome === "accepted") notify("Save your edits first, then accept.");
+      else if (control && outcome === "accepted") {
+        // Disabled for a reason the user can act on: unsaved edits, or a read-only Mac. While a decision is saving, say nothing.
+        if (control.dataset.unsaved) notify("Save your edits first, then accept.");
+        else if (readOnly) notify("Read-only on this Mac: click “Use LifeOS here” before accepting.");
+      }
       return Boolean(control);
     }
     const linkActions = link ? linkActionsFor?.(id) : undefined;

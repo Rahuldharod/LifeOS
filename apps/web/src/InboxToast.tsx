@@ -13,16 +13,18 @@ export function useInboxToast() {
   const [toast, setToast] = useState<Toast>({ message: "", actions: [] });
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const ms = useRef(plainMs);
+  const held = useRef(false);
   const stop = () => { if (timer.current) clearTimeout(timer.current); timer.current = undefined; };
   const start = () => { stop(); timer.current = setTimeout(() => setToast({ message: "", actions: [] }), ms.current); };
   useEffect(() => stop, []);
   const notify = (message: string, actions: ToastAction[] = []) => {
     ms.current = actions.length ? actionMs : plainMs;
-    setToast({ message, actions }); start();
+    setToast({ message, actions });
+    if (held.current) stop(); else start(); // a message that arrives under the cursor waits there until it is let go
   };
   /** The action with this id, only while the toast is on screen. */
   const action = (id: string) => toast.message ? toast.actions.find((candidate) => candidate.id === id) : undefined;
-  return { notification: toast.message, toast, notify, action, hold: stop, release: () => { if (toast.message) start(); } };
+  return { notification: toast.message, toast, notify, action, hold: () => { held.current = true; stop(); }, release: () => { held.current = false; if (toast.message) start(); } };
 }
 
 export function InboxToast({ toast, onHold, onRelease }: { toast: Toast; onHold?: () => void; onRelease?: () => void }) {

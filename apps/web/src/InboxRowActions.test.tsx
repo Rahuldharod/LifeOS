@@ -101,6 +101,21 @@ describe("row buttons", () => {
     expect((document.querySelector("[aria-label='Proposed title']") as HTMLInputElement).value).toBe("Alpha task, revised");
   });
 
+  it("A on the Open item says to save first only when there are unsaved edits, not when read-only", async () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<InboxWorkspace reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly busy={false} displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true })); });
+    expect(status()).not.toContain("Save your edits");
+    expect(status()).toMatch(/Read-only/);
+  });
+
+  it("A on the Open item stays quiet while a decision is saving", async () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await act(async () => root!.render(<InboxWorkspace reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly={false} busy displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true })); });
+    expect(status() ?? "").toBe("");
+  });
+
   it("are disabled when read-only, but Open stays available", async () => {
     root = createRoot(document.body.appendChild(document.createElement("div")));
     await act(async () => root!.render(<InboxWorkspace reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly busy={false} displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));

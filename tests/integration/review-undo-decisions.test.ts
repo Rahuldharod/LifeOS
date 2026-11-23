@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { LifeOSApplication, type CalendarConnector, type CalendarEvent } from "@lifeos/application";
 import { uuidV7 } from "@lifeos/domain";
@@ -221,6 +221,58 @@ describe("undoing a merge", () => {
     const { priority: _unset, ...wasMerged } = merged[s.taskId] as Record<string, unknown>;
     expect(afterEdit).toEqual(wasMerged);
     expect(await restarted.store.incompleteOperations()).toEqual([]);
+  });
+
+  it("keeps the undo open when putting the merge back whole fails, and a retry converges", async () => {
+    const s = await mergeScenario();
+    await s.application.acceptReviewItem(s.reviewId);
+    s.context.store.arm(3);
+    await expect(s.application.undoReviewAction(s.reviewId)).rejects.toThrow(/simulated crash/);
+    const restarted = await open(s.context.root, s.context.calendar);
+    const task = restarted.application.object(s.taskId);
+    await restarted.application.updateTask(s.taskId, { priority: "High" }, task.contentHash);
+    // The undo meets the edit and tries to make the merge whole again; that write (the merged person's tombstone) fails.
+    const original = restarted.store.write.bind(restarted.store);
+    const failing = vi.spyOn(restarted.store, "write").mockImplementation((input) => input.frontmatter.type === "person" && input.frontmatter.deleted_at ? Promise.reject(new Error("disk full")) : original(input));
+    await expect(restarted.application.undoReviewAction(s.reviewId)).rejects.toThrow(/disk full/);
+    // Not a clean refusal: the journal stays open so the next retry or startup recovery repairs it.
+    expect(await restarted.store.incompleteOperations()).toHaveLength(1);
+    failing.mockRestore();
+    await restarted.application.recoverOperations();
+    await restarted.application.rebuildIndex();
+    expect(await restarted.store.incompleteOperations()).toEqual([]);
+    expect(restarted.application.object(s.reviewId).frontmatter.status).toBe("accepted");
+    expect(restarted.application.object(s.mergedId).frontmatter.deleted_at).toEqual(expect.any(String));
+    expect(restarted.application.object(s.taskId).frontmatter.owner_person_id).toBe(s.keepId);
+    expect(restarted.application.object(s.taskId).frontmatter.priority).toBe("High");
+  });
+
+  describe("the kept person's revision", () => {
+    const recordIn = (frontmatter: Record<string, unknown>) => (frontmatter.metadata as { undo_record: { changes: Array<{ id: string }>; keep_revision?: number } }).undo_record;
+
+    it("is recorded even when the merge left the kept person out of its changes, and a later edit refuses the undo", async () => {
+      const s = await mergeScenario();
+      await s.application.acceptReviewItem(s.reviewId);
+      const [audit] = await audits(s.application, "person.merged");
+      expect(recordIn(audit!.frontmatter).keep_revision).toEqual(expect.any(Number));
+      await rewrite(s.context.root, audit!.relativePath, (frontmatter) => { const record = recordIn(frontmatter); record.changes = record.changes.filter((change) => change.id !== s.keepId); });
+      await s.application.rebuildIndex();
+      const kept = s.application.object(s.keepId);
+      await s.application.updateEntity(s.keepId, { job_title: "Chemist" }, kept.contentHash);
+      await expect(s.application.undoReviewAction(s.reviewId)).rejects.toThrow(/was changed or merged again after the merge/);
+      expect(s.application.object(s.reviewId).frontmatter.status).toBe("accepted");
+      expect(await s.context.store.incompleteOperations()).toEqual([]);
+    });
+
+    it("keeps records written without it readable", async () => {
+      const s = await mergeScenario();
+      await s.application.acceptReviewItem(s.reviewId);
+      const [audit] = await audits(s.application, "person.merged");
+      await rewrite(s.context.root, audit!.relativePath, (frontmatter) => { delete recordIn(frontmatter).keep_revision; });
+      await s.application.rebuildIndex();
+      expect((await s.application.undoReviewAction(s.reviewId)).outcome).toBe("undone");
+      expect(snapshot(s.application, s.ids)).toEqual(s.before);
+    });
   });
 });
 
@@ -462,6 +514,18 @@ describe("undoing Apply change", () => {
       expect(await audits(restarted.application, "review.undone"), at).toHaveLength(1);
     });
   }, 120_000);
+});
+
+describe("a decision that cannot be undone is a refusal, not a server error", () => {
+  it("refuses an accepted change whose proposal lost its list of changes", async () => {
+    const s = await updateScenario();
+    await s.application.acceptReviewItem(s.reviewId);
+    const review = s.application.object(s.reviewId);
+    await rewrite(s.context.root, review.relativePath, (frontmatter) => { (frontmatter.proposed_fields as Record<string, unknown>).changes = "oops"; });
+    await s.application.rebuildIndex();
+    await expect(s.application.undoReviewAction(s.reviewId)).rejects.toMatchObject({ name: "ObjectConflictError" });
+    expect(await s.context.store.incompleteOperations()).toEqual([]);
+  });
 });
 
 describe("what stays refused", () => {

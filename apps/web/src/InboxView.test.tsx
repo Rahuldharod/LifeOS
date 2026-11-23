@@ -118,6 +118,16 @@ describe("List view", () => {
     await click(toggle("List"));
     expect(detail().hidden).toBe(true); expect(queue().hidden).toBe(false);
   });
+
+  it("switching to Split opens the Focused item, not the first one", async () => {
+    localStorage.setItem(inboxViewStorageKey, "list");
+    await mount();
+    await press("ArrowDown"); // Bravo is Focused; nothing is open in List view
+    expect(detail().hidden).toBe(true);
+    await click(toggle("Split"));
+    expect(detail().hidden).toBe(false);
+    expect(detail().querySelector("h2")?.textContent).toBe("Bravo task");
+  });
 });
 
 describe("Narrow screens", () => {

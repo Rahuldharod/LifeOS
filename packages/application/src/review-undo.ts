@@ -43,6 +43,7 @@ export function planLinkRevert(ctx: AppContext, review: LifeOSObject) {
 export function planUpdateRevert(ctx: AppContext, review: LifeOSObject) {
   const proposal = record(review.frontmatter.proposed_fields) as unknown as UpdateProposal;
   const targetId = String(review.frontmatter.target_object_id);
+  if (!Array.isArray(proposal.changes)) throw new ObjectConflictError("Cannot undo: this change has no record of the fields it changed.");
   if (proposal.changes.some((change) => change.field === "superseded_by_decision_id")) {
     throw new ObjectConflictError("Cannot undo: this change replaced a decision with another one, which changed both decisions. A replaced decision is final, so it cannot be put back.");
   }
