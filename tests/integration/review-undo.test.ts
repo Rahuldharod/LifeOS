@@ -166,7 +166,7 @@ describe("a crash during undo", () => {
       expect(await audits(restarted.application, "review.undone"), `crash after change ${crashAfter}`).toHaveLength(1);
       expect(await restarted.application.recoverOperations()).toEqual([]);
     }
-  });
+  }, 60_000); // one fresh vault and restart per crash point: slow under a full parallel run
 
   it("lets the user retry the undo without a restart, and finishes the same one", async () => {
     const s = await proposals();
