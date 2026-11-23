@@ -1,0 +1,30 @@
+# ADR 0025: Review actions can be undone
+
+- Status: Accepted
+- Date: 2026-11-23
+- Supersedes: the "no undo of a decision" line of PB-035 (Inbox auto-advance)
+
+## Context
+
+A Review Item's status has only moved forward: pending to accepted or rejected, never back. Only an applied Patch Draft could be undone. Bulk reject therefore asked "This cannot be undone." before acting.
+
+The Inbox redesign makes the user act from the list, often on whole groups at once, so a slip is more likely. Mail apps handle this with Undo instead of a confirmation prompt. The user wants that in the action toast and in an Inbox History of the last 100 Review actions.
+
+## Decision
+
+- **Every Review action can be undone**: accept, edit, reject, merge, keep separate and apply, whether the user took it or the system did.
+- **Undoing a reject or keep separate** puts the Review Item back to pending.
+- **Undoing an accept** puts the Review Item back to pending and deletes the object the accept created (a soft delete that sets `deleted_at`, through the normal use cases).
+- **Undo is refused when the created object has been edited since the accept.** This is the same rule as Patch undo, so nothing the user changed afterwards is lost silently. The refusal says why and offers to open the object.
+- **Undo replaces confirmation.** Bulk reject no longer asks first. The toast offers Undo instead.
+
+## Considered options
+
+- **Keep forward-only status and keep confirmations.** Rejected: it slows group triage, and "are you sure?" prompts get clicked through anyway.
+- **Undo an accept by archiving the created object.** Rejected: archived objects still resolve by identifier and can be reused (see *Live* in `CONTEXT.md`). A deleted object is gone, which matches "it was never accepted".
+
+## Consequences
+
+- Undoing an accept writes two files (the Review Item and the created object), so it follows the crash-recovery pattern of ADR 0013, with the undo journalled as a Recorded intent.
+- Undo must know which object an accept created. `resolved_object_id` already records this for accepts. Merge and apply need the same link back to what they changed.
+- An accepted item that was then edited can only be "undone" by deleting or changing the object by hand.
