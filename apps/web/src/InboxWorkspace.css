@@ -3,9 +3,10 @@
 .inbox-tabs { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-1) var(--space-3); margin-top: var(--space-3); }
 .inbox-tablist { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 /* The row-layout setting is quieter than the tabs: small muted text, no underline bar. */
-.inbox-tabs .inbox-row-layout { display: flex; gap: 2px; margin-left: auto; padding-bottom: var(--space-1); }
-.inbox-tabs .inbox-row-layout button { padding: 2px var(--space-2); border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 600; white-space: nowrap; }
-.inbox-tabs .inbox-row-layout button[aria-pressed="true"] { background: color-mix(in srgb, var(--color-text) 9%, transparent); color: var(--color-text); font-weight: 750; }
+.inbox-tabs .inbox-row-layout, .inbox-tabs .inbox-view-toggle { display: flex; gap: 2px; margin-left: auto; padding-bottom: var(--space-1); }
+.inbox-tabs .inbox-view-toggle { margin-right: var(--space-2); }
+.inbox-tabs .inbox-row-layout button, .inbox-tabs .inbox-view-toggle button { padding: 2px var(--space-2); border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 600; white-space: nowrap; }
+.inbox-tabs .inbox-row-layout button[aria-pressed="true"], .inbox-tabs .inbox-view-toggle button[aria-pressed="true"] { background: color-mix(in srgb, var(--color-text) 9%, transparent); color: var(--color-text); font-weight: 750; }
 .inbox-row-layout small { font-weight: 600; opacity: .8; }
 .inbox-legend { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .inbox-rows { margin-top: var(--space-2); }
@@ -103,3 +104,6 @@ kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-stron
 .inbox-decision-actions { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-surface) 94%, transparent); box-shadow: var(--shadow-surface); }
 .inbox-read-only { margin: var(--space-4) 0 0; padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-warning-surface); color: var(--color-warning); }
 .inbox-toast { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 50; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-primary); color: var(--color-text-inverse); box-shadow: var(--shadow-overlay); }
+/* List view (#240): one column; the reading pane is hidden until an item is opened, then it replaces the list. */
+.inbox-workspace[data-view="list"] { grid-template-columns: minmax(0, 1fr) !important; }
+.inbox-workspace[data-view="list"] .narrow-back { display: inline-flex; align-self: flex-start; }

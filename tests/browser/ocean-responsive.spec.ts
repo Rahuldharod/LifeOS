@@ -95,7 +95,7 @@ test.describe("bounded canvas, pane clamps and content measures", () => {
 
   for (const [path, list, min, max] of [
     ["/tasks", "Tasks list", 460, 640], ["/calendar", "Calendar timeline", 320, 480], ["/notes", "Notes list", 360, 520],
-    ["/inbox", "Review queue", 380, 900], ["/decisions", "Decisions list", 380, 560], ["/knowledge", "Knowledge list", 360, 520], ["/settings", "Settings sections", 240, 320]
+    ["/decisions", "Decisions list", 380, 560], ["/knowledge", "Knowledge list", 360, 520], ["/settings", "Settings sections", 240, 320]
   ] as const) {
     test(`${list} stays within ${min}–${max}px on a laptop and a large display`, async ({ page }) => {
       for (const viewport of [{ width: 1280, height: 800 }, { width: 2560, height: 1440 }]) {

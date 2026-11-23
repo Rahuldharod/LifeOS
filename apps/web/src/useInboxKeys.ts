@@ -14,8 +14,10 @@ export type InboxKeyActions = {
   decide: (outcome: Outcome) => boolean;
   /** S: the Open item's Save edits. */
   save: () => boolean;
-  /** Esc: clear the ticks. */
+  /** Esc: go back to the list from an item shown full width (List view), else clear the ticks. */
   clearSelection: () => boolean;
+  /** V: switch between Split and List view. */
+  toggleView: () => boolean;
   showHelp: () => void;
 };
 
@@ -41,6 +43,7 @@ export function useInboxKeys(actions: InboxKeyActions) {
     if (lower === "a") done(actions.decide("accepted"));
     else if (lower === "r") done(actions.decide("rejected"));
     else if (lower === "s") done(actions.save());
+    else if (lower === "v") done(actions.toggleView());
   };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

@@ -4,11 +4,12 @@ import { WorkspaceFilterBar } from "./WorkspacePatterns.js";
 import { InboxRow, LowConfidenceDot } from "./InboxRow.js";
 import { groupKey, inboxTabs, type CreatedPeriod, type DateGroup, type InboxReview, type InboxTab, type Outcome, type RowCells } from "./inboxModel.js";
 import { rowLayoutModes, type RowLayoutMode } from "./useInboxRowLayout.js";
+import { inboxViews, type InboxView } from "./useInboxView.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
-export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
+export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, view, onView, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
   onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
-  paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean;
+  paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean; view: InboxView; /** Undefined where the view cannot be chosen (narrow screens). */ onView?: (view: InboxView) => void;
   onRowMode: (mode: RowLayoutMode) => void; onShowHelp: () => void; onFocusRow: (id: string) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
   openedId?: string; focusedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
@@ -24,7 +25,11 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
       <div className="inbox-tablist" role="tablist" aria-label="Proposal type">
         {inboxTabs.map((name, index) => <button role="tab" key={name} aria-selected={tab === name} className={tab === name ? "selected" : ""} title={`${name} (press ${index + 1})`} aria-keyshortcuts={String(index + 1)} onClick={() => onTab(name)}>{name} <small>{tabCounts.get(name)}</small></button>)}
       </div>
-      <div className="inbox-tab-tools"><div className="inbox-row-layout" role="group" aria-label="Row layout">
+      <div className="inbox-tab-tools">
+      {onView && <div className="inbox-view-toggle" role="group" aria-label="Reading pane view">
+        {inboxViews.map(({ view: name, label }) => <button key={name} aria-pressed={view === name} aria-keyshortcuts="v" title={name === "split" ? "List beside the reading pane (V)" : "List at full width; an opened item replaces it (V)"} onClick={() => onView(name)}>{label}</button>)}
+      </div>}
+      <div className="inbox-row-layout" role="group" aria-label="Row layout">
         {rowLayoutModes.map(({ mode, label }) => <button key={mode} aria-pressed={rowMode === mode} title={mode === "auto" ? "One line with columns when the list is wide, two lines when it is narrow" : `Always ${label}`} onClick={() => onRowMode(mode)}>{label}{mode === "auto" && rowMode === "auto" && <small> · {twoLine ? "2 lines" : "1 line"}</small>}</button>)}
       </div>
       <button className="inbox-shortcuts-link" aria-keyshortcuts="?" title="Keyboard shortcuts (?)" onClick={onShowHelp}>Shortcuts <kbd>?</kbd></button></div>

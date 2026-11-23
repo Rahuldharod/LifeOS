@@ -20,4 +20,11 @@ describe("remembered list width (PB-024, #154)", () => {
     expect(readStoredWidth("notes")).toBeUndefined();
     expect(readStoredWidth("inbox")).toBeUndefined();
   });
+
+  it("does not cap a remembered Inbox width, but still raises one under its minimum (#240)", () => {
+    localStorage.setItem("lifeos.split.inbox", "1400");
+    expect(readStoredWidth("inbox")).toBe(1400);
+    localStorage.setItem("lifeos.split.inbox", "200");
+    expect(readStoredWidth("inbox")).toBe(380);
+  });
 });

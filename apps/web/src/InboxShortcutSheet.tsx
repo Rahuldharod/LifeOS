@@ -10,8 +10,9 @@ export const inboxShortcuts: Array<{ keys: string; what: string }> = [
   { keys: "S", what: "Save edits on the open item" },
   { keys: "X", what: "Tick or untick the focused item" },
   { keys: "Shift + X or Shift + click", what: "Tick a range from the last ticked item" },
-  { keys: "Esc", what: "Clear the ticks" },
+  { keys: "Esc", what: "Clear the ticks; in List view, go back to the list" },
   { keys: "1 – 6", what: "Switch tab" },
+  { keys: "V", what: "Switch between Split and List view" },
   { keys: "?", what: "Show this sheet" }
 ];
 

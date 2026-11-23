@@ -7,9 +7,11 @@ import { InboxToast, useInboxToast } from "./InboxToast.js";
 import { InboxShortcutSheet } from "./InboxShortcutSheet.js";
 import { useInboxKeys } from "./useInboxKeys.js";
 import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
+import type { InboxView } from "./useInboxView.js";
 import { useSplitPane } from "./splitPane.js";
 import { useListDetailReturn } from "./useListDetailReturn.js";
 import { useInboxRowLayout } from "./useInboxRowLayout.js";
+import { useInboxView } from "./useInboxView.js";
 import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 import "./InboxWorkspace.css";
 
@@ -26,8 +28,12 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   linkActionsFor?: (reviewId: string) => LinkCardActions;
 }) {
   const narrow = useNarrowWorkspace();
-  const [openedId, setOpenedId] = useState<string | undefined>(() => selectedId ?? (narrow ? undefined : reviews[0]?.frontmatter.id));
-  const split = useSplitPane("inbox");
+  const { view, setView } = useInboxView();
+  /** One pane at a time: a narrow screen, or List view. The list is hidden while an item is open, and nothing opens by itself. */
+  const oneUp = narrow || view === "list";
+  const [openedId, setOpenedId] = useState<string | undefined>(() => selectedId ?? (oneUp ? undefined : reviews[0]?.frontmatter.id));
+  /** Double-clicking the divider goes to List view; the width stays remembered for when the user comes back to Split. */
+  const split = useSplitPane("inbox", { onDoubleClick: () => chooseView("list") });
   const [query, setQuery] = useState(""); const [tab, setTabState] = useState<InboxTab>("All"); const [advanced, setAdvanced] = useState(false);
   const [meetingId, setMeetingId] = useState(""); const [period, setPeriod] = useState<CreatedPeriod>("");
   const [deciding, setDeciding] = useState<InboxReview>(); const { notification, notify } = useInboxToast(); const [actionError, setActionError] = useState("");
@@ -35,7 +41,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const [checked, setChecked] = useState<Set<string>>(() => new Set()); const [bulkRunning, setBulkRunning] = useState(false);
   const detailRef = useRef<HTMLElement>(null); const queueRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const rowLayout = useInboxRowLayout(queueRef, narrow && openedId !== undefined);
+  const rowLayout = useInboxRowLayout(queueRef, oneUp && openedId !== undefined);
 
   /** The Focused item is what the keys act on; the Open item is what the reading pane shows. `dom` asks to move real keyboard focus to the row too. */
   const [focusState, setFocusState] = useState<{ id?: string; dom?: boolean }>({});
@@ -83,14 +89,17 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const listHasKeyboard = () => { const element = globalThis.document.activeElement; return !element || element === globalThis.document.body || Boolean(queueRef.current?.contains(element)); };
 
   useEffect(() => {
-    if (narrow || openedId || !visible.length) return;
+    if (oneUp || openedId || !visible.length) return;
     setOpenedId(visible[0]!.frontmatter.id);
-  }, [narrow, openedId, visible]);
+  }, [oneUp, openedId, visible]);
 
   // While a decision saves, the refresh drops the item from `reviews`; keep showing it until the Inbox moves on (no "Select a proposal" flash).
   const selected = reviews.find((review) => review.frontmatter.id === openedId) ?? (deciding?.frontmatter.id === openedId ? deciding : undefined);
   const open = (id: string, options?: { replace?: boolean }) => { setOpenedId(id); setFocusState({ id }); setActionError(""); onOpen?.(id, options); };
-  const back = () => { setOpenedId(undefined); setActionError(""); onBack?.(); };
+  /** Back to the list. Focus returns to the row that was open (List view and narrow screens hide the list while an item is open). */
+  const back = () => { if (openedId) setFocusState({ id: openedId, dom: true }); setOpenedId(undefined); setActionError(""); onBack?.(); };
+  /** Switching to List closes the open item (the list is the first thing the user sees); switching to Split opens the first item again. */
+  const chooseView = (next: InboxView) => { if (next === view || narrow) return; setView(next); if (next === "list") back(); };
   const setTab = (next: InboxTab) => { setTabState(next); setChecked(new Set()); };
   const clearFilters = () => { setQuery(""); setTab("All"); setMeetingId(""); setPeriod(""); };
   /** Tick or untick one item, or (`range`) tick everything from the last anchor to it. A plain tick sets the anchor. */
@@ -208,7 +217,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     setTab,
     // On a narrow screen with a proposal open the list is hidden, so ↑/↓ step through the open proposals as before.
     moveFocus: (direction) => {
-      if (narrow && selected) return step.current(direction);
+      if (oneUp && selected) return step.current(direction);
       if (!focusedId) return false;
       const target = adjacentId(visibleIds, hiddenIds, focusedId, direction);
       if (target) setFocusState({ id: target, dom: true });
@@ -222,7 +231,11 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       if (!control || control.disabled) return false;
       control.click(); return true;
     },
-    clearSelection: () => { if (!checked.size) return false; clearChecked(); return true; },
+    clearSelection: () => {
+      if (view === "list" && !narrow && selected) { back(); return true; }
+      if (!checked.size) return false; clearChecked(); return true;
+    },
+    toggleView: () => { if (narrow) return false; chooseView(view === "split" ? "list" : "split"); return true; },
     showHelp: () => setHelpOpen(true)
   });
   /** After a tab switch, an open item that is not in the new tab gives way to the tab's first item (wide screens; narrow shows the list). */
@@ -230,23 +243,23 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   useEffect(() => {
     if (shownTab.current === tab) return;
     shownTab.current = tab;
-    if (narrow || (openedId && visibleIds.includes(openedId))) return;
+    if (oneUp || (openedId && visibleIds.includes(openedId))) return;
     if (visibleIds[0]) open(visibleIds[0], { replace: true });
   });
   const itemBusy = Boolean(busy || bulkRunning || (selected && activeId === selected.frontmatter.id));
   const allTicked = visible.length > 0 && ticked.length === visible.length;
 
   const ref = useListDetailReturn(selected?.frontmatter.id);
-  return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" style={split.style}>
+  return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" data-view={narrow ? undefined : view} style={split.style}>
     <InboxToast message={notification} />
     <InboxShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
-    <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
+    <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} view={view} onView={narrow ? undefined : chooseView} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
-      hidden={narrow && Boolean(selected)}
+      hidden={oneUp && Boolean(selected)}
       onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters}
       onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} onDecideRow={decideRow} onDecideGroup={(items, outcome) => void decideSet(items, outcome)} />
-    {!narrow && <div {...split.dividerProps} />}
-    <InboxReadingPane paneRef={detailRef} selected={selected} hidden={narrow && !selected} position={position} total={visibleIds.length} previousId={previousId} followingId={followingId} readOnly={readOnly} actionError={actionError}
+    {!oneUp && <div {...split.dividerProps} />}
+    <InboxReadingPane paneRef={detailRef} selected={selected} hidden={oneUp && !selected} position={position} total={visibleIds.length} previousId={previousId} followingId={followingId} readOnly={readOnly} actionError={actionError}
       objectById={objectById} labels={labels} choices={choices} itemBusy={itemBusy} nextId={selected ? nextAfter(selected.frontmatter.id) : undefined} linkActions={selected ? linkActionsFor?.(selected.frontmatter.id) : undefined}
       onBack={back} onStep={(direction) => void step.current(direction)}
       onAccept={() => selected && void decide(selected, "accepted", () => onAccept(selected))} onReject={() => selected && void decide(selected, "rejected", () => onReject(selected))}

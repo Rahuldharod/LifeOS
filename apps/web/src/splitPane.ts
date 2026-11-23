@@ -2,7 +2,7 @@
 // (workspaceLayout.ts); a dragged width is a per-device preference (ADR 0005), stored per workspace in browser
 // storage and clamped again on read, so an old or hand-edited value can never break the layout. Double-click resets.
 import { useCallback, useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
-import { clampListWidth, listClamps, type ListWorkspace } from "./workspaceLayout.js";
+import { clampListWidth, detailReserve, listClamps, type ListWorkspace } from "./workspaceLayout.js";
 
 /** Earlier releases used these keys for Notes and Calendar; keep them so a remembered width survives. */
 export const splitStorageKey = (workspace: ListWorkspace) => workspace === "notes" ? "lifeos.notesSplitWidth" : `lifeos.split.${workspace}`;
@@ -12,7 +12,7 @@ export function readStoredWidth(workspace: ListWorkspace) {
     const raw = localStorage.getItem(splitStorageKey(workspace));
     const value = raw === null ? Number.NaN : Number(raw);
     if (!Number.isFinite(value) || value <= 0) return undefined;
-    const { min, max } = listClamps[workspace];
+    const { min, max = Number.POSITIVE_INFINITY } = listClamps[workspace];
     return Math.round(Math.min(Math.max(value, min), max));
   } catch { return undefined; }
 }
@@ -24,10 +24,12 @@ function writeWidth(workspace: ListWorkspace, width: number | undefined) {
 
 const STEP = 24;
 
-export function useSplitPane(workspace: ListWorkspace) {
+/** `onDoubleClick` replaces the default reset (the Inbox goes to its List view; Enter still resets the width). */
+export function useSplitPane(workspace: ListWorkspace, options: { onDoubleClick?: () => void } = {}) {
   const [width, setWidth] = useState(() => readStoredWidth(workspace));
   const update = (next: number | undefined) => { setWidth(next); writeWidth(workspace, next); };
   const { min, max } = listClamps[workspace];
+  const { onDoubleClick } = options;
   // The default width comes from CSS, so announce the width the list actually has, not a guess.
   const [divider, setDivider] = useState<HTMLDivElement | null>(null);
   const [rendered, setRendered] = useState<number>();
@@ -61,7 +63,7 @@ export function useSplitPane(workspace: ListWorkspace) {
     const current = event.currentTarget.previousElementSibling?.getBoundingClientRect().width;
     if (!container || current === undefined) return;
     const containerWidth = container.getBoundingClientRect().width;
-    const next = event.key === "ArrowLeft" ? current - STEP : event.key === "ArrowRight" ? current + STEP : event.key === "Home" ? min : event.key === "End" ? max : undefined;
+    const next = event.key === "ArrowLeft" ? current - STEP : event.key === "ArrowRight" ? current + STEP : event.key === "Home" ? min : event.key === "End" ? (max ?? containerWidth) : undefined;
     if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); update(undefined); return; }
     if (next === undefined) return;
     event.preventDefault();
@@ -69,12 +71,12 @@ export function useSplitPane(workspace: ListWorkspace) {
   }
 
   return {
-    style: { "--list-min": `${min}px`, "--list-max": `${max}px`, ...(width === undefined ? {} : { "--split-width": `${width}px` }) } as CSSProperties,
+    style: { "--list-min": `${min}px`, "--list-max": max === undefined ? "100000px" : `${max}px`, "--detail-reserve": `${detailReserve(workspace)}px`, ...(width === undefined ? {} : { "--split-width": `${width}px` }) } as CSSProperties,
     dividerProps: {
-      role: "separator", "aria-orientation": "vertical" as const, "aria-label": "Resize list (double-click or Enter to reset)", tabIndex: 0,
-      ref, "aria-valuemin": min, "aria-valuemax": max, "aria-valuenow": width ?? rendered ?? min,
-      title: "Drag to resize · double-click to reset", className: "split-divider",
-      onPointerDown, onKeyDown, onDoubleClick: () => update(undefined)
+      role: "separator", "aria-orientation": "vertical" as const, "aria-label": onDoubleClick ? "Resize list (Enter to reset, double-click for List view)" : "Resize list (double-click or Enter to reset)", tabIndex: 0,
+      ref, "aria-valuemin": min, ...(max === undefined ? {} : { "aria-valuemax": max }), "aria-valuenow": width ?? rendered ?? min,
+      title: onDoubleClick ? "Drag to resize · double-click for List view" : "Drag to resize · double-click to reset", className: "split-divider",
+      onPointerDown, onKeyDown, onDoubleClick: onDoubleClick ?? (() => update(undefined))
     }
   };
 }

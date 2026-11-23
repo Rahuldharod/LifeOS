@@ -43,6 +43,15 @@ describe("list pane clamps (#154)", () => {
     expect(clampListWidth(430.4, "notes", 1600)).toBe(430);
   });
 
+  it("gives the Inbox list no maximum, only the 380px minimum, and keeps the reading pane at 360px (#240)", () => {
+    expect(listClamps.inbox).toEqual({ min: 380, detailMin: 360 });
+    expect(clampListWidth(100, "inbox", 1600)).toBe(380);
+    // container - 360 (reading pane) - 12 (divider)
+    expect(clampListWidth(5000, "inbox", 1600)).toBe(1228);
+    expect(clampListWidth(1000, "inbox", 1600)).toBe(1000);
+    expect(clampListWidth(5000, "inbox", 600)).toBe(380);
+  });
+
   it("leaves the detail pane its minimum before reaching the list maximum, but never goes below the list minimum", () => {
     expect(clampListWidth(640, "tasks", 1000)).toBe(600);
     expect(clampListWidth(640, "tasks", 700)).toBe(460);
