@@ -14,7 +14,7 @@ const review = (id: string, title: string, fields: Record<string, unknown> = {})
   relativePath: `review-items/${id}.md`, contentHash: `${id}-hash`, body: `# ${title}`, evidence: {},
   frontmatter: { id, type: "review-item", schema_version: 1, revision: 1, title, created_at: "2026-10-10T08:00:00Z", updated_at: "2026-10-10T08:00:00Z", updated_by_device: "test", review_type: "create", target_object_type: "task", status: "pending", confidence_label: "High", source_meeting_id: "meeting-1", source_ids: [], proposed_fields: { title }, ...fields }
 });
-const all = () => [review("a", "Alpha task"), review("b", "Bravo task"), review("l", "Link owner", { review_type: "link-resolution" }), review("m", "Merge pair", { review_type: "person-merge", target_object_type: "person" })];
+const all = () => [review("a", "Alpha task"), review("b", "Bravo task"), review("l", "Link owner", { review_type: "link-resolution" }), review("m", "Merge pair", { review_type: "person-merge", target_object_type: "person" }), review("u", "Change title", { review_type: "update", target_object_type: "task", proposed_fields: { changes: [{ field: "title", current: "A", proposed: "B" }], base_revision: 1, base_hash: "h", reasons: [], draft_key: "k", captured_at: "2026-10-10T08:00:00Z" } })];
 
 let root: Root | undefined;
 afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; root = undefined; vi.useRealTimers(); });
@@ -82,12 +82,38 @@ describe("the toast after a Review action", () => {
     expect(toast()).toBeNull();
   });
 
-  it("shows no Undo for a decision that cannot be undone yet (a merge suggestion)", async () => {
+  it("offers Undo after Keep separate on a merge suggestion", async () => {
     await mount({ onUndo: async (ids) => ({ undone: ids, refused: [] }) });
-    await act(async () => { (document.querySelector("[aria-label='Select proposal: Merge pair']") as HTMLInputElement).click(); });
+    await tickBox("Merge pair");
     await press("r");
     expect(toast()?.textContent).toContain("1 proposal rejected");
-    expect(toastButtons()).toEqual([]);
+    expect(toastButtons()).toEqual(["undo"]);
+  });
+
+  it.each([
+    ["Merge", "Merge pair", "person-1"],
+    ["Apply change", "Change title", "task-9"]
+  ])("offers Undo and View after %s, opened from the item", async (button, title, objectId) => {
+    const view = vi.fn();
+    await mount({ onUndo: async (ids) => ({ undone: ids, refused: [] }), onView: view, created: { m: objectId, u: objectId } });
+    const open = [...document.querySelectorAll(".inbox-row-open")].find((element) => element.textContent?.includes(title)) as HTMLElement;
+    await act(async () => open.click());
+    const accept = [...document.querySelectorAll(".inbox-decision-actions button.primary")].find((element) => element.textContent === button) as HTMLElement;
+    await act(async () => accept.click());
+    expect(toastButtons()).toEqual(["undo", "view"]);
+    await click("[data-toast-action='view']");
+    expect(view).toHaveBeenCalledWith(objectId);
+  });
+
+  it("brings a link resolution back from Undo", async () => {
+    const onUndo = vi.fn(async (ids: string[]) => ({ undone: ids, refused: [] }));
+    await mount({ onUndo });
+    await tickBox("Link owner");
+    await press("r");
+    expect(toastButtons()).toEqual(["undo"]);
+    await click("[data-toast-action='undo']");
+    expect(onUndo).toHaveBeenCalledWith(["l"]);
+    expect(focusedTitle()).toBe("Link owner");
   });
 });
 

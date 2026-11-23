@@ -29,7 +29,7 @@ async function linkReview() {
   await utimes(target, past, past);
   await call("POST /api/v1/inbox/adopt");
   const review = (await call("GET /api/v1/review-items")).find((item) => item.frontmatter.review_type === "link-resolution")!;
-  return { call, send: built.send, reviewId: review.frontmatter.id, durandId: durand.id };
+  return { call, send: built.send, reviewId: review.frontmatter.id, durandId: durand.id, martinId: martin.id };
 }
 
 const statusOf = async (call: Api, id: string) => (await call("GET /api/v1/review-items")).find((item) => item.frontmatter.id === id)!.frontmatter.status;
@@ -46,12 +46,22 @@ describe("POST /api/v1/review-items/:id/undo", () => {
     expect((await call("POST /api/v1/review-items/:id/undo", { params: { id: reviewId } })).outcome).toBe("already-pending");
   });
 
-  it("answers 409 with the reason for a decision that cannot be undone yet, and changes nothing", async () => {
-    const { call, send, reviewId, durandId } = await linkReview();
+  it("takes an accepted link back (200), and answers 409 with the reason once the field was changed since, changing nothing", async () => {
+    const { call, send, reviewId, durandId, martinId } = await linkReview();
+    const task = async () => (await call("GET /api/v1/objects")).find((object) => object.frontmatter.type === "task")!;
     await call("POST /api/v1/review-items/:id/accept", { params: { id: reviewId }, body: { linkTo: durandId } });
+    expect((await task()).frontmatter.waiting_for_person_id).toBe(durandId);
+    const undone = await call("POST /api/v1/review-items/:id/undo", { params: { id: reviewId } });
+    expect(undone).toMatchObject({ outcome: "undone", revertedObjectIds: [(await task()).frontmatter.id] });
+    expect((await task()).frontmatter.waiting_for_person_id).toBeUndefined();
+
+    await call("POST /api/v1/review-items/:id/accept", { params: { id: reviewId }, body: { linkTo: durandId } });
+    const linked = await task();
+    const edited = await send("PATCH", `/api/v1/entities/by-id/${linked.frontmatter.id}`, { fields: { waiting_for_person_id: martinId }, expectedHash: linked.contentHash });
+    expect(edited.statusCode).toBe(200);
     const refused = await send("POST", `/api/v1/review-items/${reviewId}/undo`);
     expect(refused.statusCode).toBe(409);
-    expect(refused.json()).toMatchObject({ error: expect.stringMatching(/cannot be undone yet/) });
+    expect(refused.json()).toMatchObject({ error: expect.stringMatching(/was changed after the link was accepted/) });
     expect(await statusOf(call, reviewId)).toBe("accepted");
   });
 

@@ -331,7 +331,7 @@ export async function buildApi(options: ApiOptions): Promise<LifeOSApi> {
   // Edits a pending proposal: title, owner, due, priority and context links (#34); `null` clears a field.
   route(server, "PATCH /api/v1/review-items/:id", async (request) => application.updateReviewFields(request.params.id, request.body ?? {}));
   route(server, "POST /api/v1/review-items/:id/reject", async (request) => application.rejectReviewItem(request.params.id));
-  // ADR 0025: back to pending; an accept's created object is deleted. 409 when that object was edited since, or the kind is not undoable yet.
+  // ADR 0025: back to pending; an accept is taken back (created object deleted; merge, link or change put back). 409 with the reason when something it touched was edited since.
   route(server, "POST /api/v1/review-items/:id/undo", async (request) => application.undoReviewAction(request.params.id));
   // #46: `date` is the user's local date (the browser knows the display time zone); it picks the Daily Focus brief.
   route(server, "GET /api/v1/today", async (request, reply) => {

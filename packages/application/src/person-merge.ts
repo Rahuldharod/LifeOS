@@ -1,6 +1,6 @@
 import { uuidV7, type LifeOSObject } from "@lifeos/domain";
 import { emailNameMatch, isUnreviewedPerson, type NameCandidate, type PersonMergeMatch } from "@lifeos/shared";
-import { foldForSearch, type AppContext } from "./context.js";
+import { foldForSearch, ObjectConflictError, type AppContext } from "./context.js";
 import { addressInName, internalDomainsOf, personEmails } from "./people.js";
 import { operationKinds, type Operation } from "./ports.js";
 import { proposeReviewItem } from "./review-items.js";
@@ -53,6 +53,58 @@ const valueOf = (object: LifeOSObject, key: string) => key === bodyKey ? object.
 const isAt = (object: LifeOSObject, side: Record<string, unknown>) => Object.entries(side).every(([key, value]) => sameValue(valueOf(object, key), value));
 // A merge names both people by ID, so like any explicit ID it reaches an archived person; only a deleted (or already merged) one is refused.
 const mergeable = (object: LifeOSObject | undefined): object is LifeOSObject => Boolean(object && object.frontmatter.type === "person" && !object.frontmatter.deleted_at);
+/**
+ * #242 (ADR 0025): what a merge changed, kept in its `person.merged` audit so the merge can be undone. `revision` is the file's
+ * revision right after the merge (any other revision means it was edited since). A file whose body had links moved keeps only
+ * those places: `at` in the merged body (where the kept person's ID now stands) and `was_at` in the original, with the text that
+ * stood there. Merges made before this record existed have none and cannot be undone.
+ */
+interface RecordedLink { at: number; was_at: number; was: string }
+interface RecordedChange { id: string; revision: number; before: Record<string, unknown>; after: Record<string, unknown>; body_links?: RecordedLink[] }
+interface MergeRecord { version: 1; changes: RecordedChange[] }
+const linkPrefix = "lifeos://object/";
+
+function recordOf(ctx: AppContext, plan: PlanEntry[], fromId: string, toId: string): MergeRecord {
+  const link = new RegExp(`${linkPrefix}${fromId}`, "gi");
+  return {
+    version: 1,
+    changes: plan.map((entry) => {
+      const { [bodyKey]: originalBody, ...before } = entry.before;
+      const { [bodyKey]: _mergedBody, ...after } = entry.after;
+      const change: RecordedChange = { id: entry.id, revision: ctx.index.get(entry.id)?.frontmatter.revision ?? 0, before, after };
+      if (typeof originalBody === "string") {
+        let shift = 0;
+        change.body_links = [...originalBody.matchAll(link)].map((match) => {
+          const place = { at: match.index + linkPrefix.length + shift, was_at: match.index + linkPrefix.length, was: match[0].slice(linkPrefix.length) };
+          shift += toId.length - fromId.length;
+          return place;
+        });
+      }
+      return change;
+    })
+  };
+}
+
+/** The record a `person.merged` audit holds, or undefined for a merge made before it was kept (or a malformed one). */
+function readRecord(audit: LifeOSObject | undefined): { record: MergeRecord; keepId: string; mergedId: string } | undefined {
+  const metadata = (audit?.frontmatter.metadata ?? {}) as Record<string, unknown>;
+  const record = metadata.undo_record as Partial<MergeRecord> | undefined;
+  if (!audit || !record || record.version !== 1 || !Array.isArray(record.changes) || typeof metadata.merged_person_id !== "string") return undefined;
+  return { record: record as MergeRecord, keepId: String(audit.frontmatter.object_id), mergedId: metadata.merged_person_id };
+}
+
+/** The body with the originals put back (`before`), or with them moved to the kept person again (`after`). */
+function relink(body: string, links: RecordedLink[], direction: "before" | "after", keepId: string) {
+  let result = body;
+  for (const entry of [...links].reverse()) {
+    result = direction === "before"
+      ? result.slice(0, entry.at) + entry.was + result.slice(entry.at + keepId.length)
+      : result.slice(0, entry.was_at) + keepId + result.slice(entry.was_at + entry.was.length);
+  }
+  return result;
+}
+const bodyIs = (body: string, links: RecordedLink[] | undefined, side: "before" | "after", keepId: string) =>
+  !links || links.every((entry) => side === "before" ? body.slice(entry.was_at, entry.was_at + entry.was.length) === entry.was : body.slice(entry.at, entry.at + keepId.length) === keepId);
 const pairKey = (a: string, b: string) => [a, b].sort().join("|");
 const nameKey = (value: unknown) => typeof value === "string" ? foldForSearch(value.normalize("NFC")).trim().replace(/\s+/g, " ") : "";
 /** Every name a person is known by, for matching an email address against: title, given + family name, aliases. */
@@ -388,7 +440,8 @@ export class PersonMergeModule {
       if (open) {
         // #160: the crash came after the item was marked accepted and before its audit.
         const plan = open.payload.plan as PlanEntry[] | undefined ?? [];
-        await ctx.writeAuditOnce("person.merged", proposal.keep_person_id, String(review.frontmatter.reviewed_at ?? new Date().toISOString()), { operation_id: operationId, review_id: review.frontmatter.id, merged_person_id: proposal.merge_person_id, changed_object_ids: plan.map((entry) => entry.id) }, { matchOn: ["operation_id"] });
+        await ctx.rebuildIndex();
+        await this.auditMerged(review, proposal, operationId, plan, String(review.frontmatter.reviewed_at ?? new Date().toISOString()));
         await ctx.objects.completeOperation?.(operationId);
       }
       return ctx.required(proposal.keep_person_id);
@@ -410,10 +463,20 @@ export class PersonMergeModule {
     await ctx.rebuildIndex();
     const latest = ctx.required(review.frontmatter.id);
     await ctx.update(latest, { status: "accepted", reviewed_at: now, resolved_object_id: proposal.keep_person_id, merge_problem: undefined }, { expectedHash: latest.contentHash, now });
-    await ctx.writeAuditOnce("person.merged", proposal.keep_person_id, now, { operation_id: operationId, review_id: review.frontmatter.id, merged_person_id: proposal.merge_person_id, changed_object_ids: plan.map((entry) => entry.id) }, { matchOn: ["operation_id"] });
+    await this.auditMerged(review, proposal, operationId, plan, now);
     await ctx.objects.completeOperation?.(operationId);
     await ctx.rebuildIndex();
     return ctx.required(proposal.keep_person_id);
+  }
+
+  /**
+   * The `person.merged` audit, once per merge operation. It also keeps what the merge changed (#242, ADR 0025), so the merge
+   * can be undone later: each changed file's before and after values, its revision right after the merge, and where a body's
+   * links were moved (the bodies themselves are not copied). The index must be current: the revisions are read from it.
+   */
+  private auditMerged(review: LifeOSObject, proposal: PersonMergeProposal, operationId: string, plan: PlanEntry[], timestamp: string) {
+    const record = recordOf(this.ctx, plan, proposal.merge_person_id, proposal.keep_person_id);
+    return this.ctx.writeAuditOnce("person.merged", proposal.keep_person_id, timestamp, { operation_id: operationId, review_id: review.frontmatter.id, merged_person_id: proposal.merge_person_id, changed_object_ids: plan.map((entry) => entry.id), undo_record: record }, { matchOn: ["operation_id"] });
   }
 
   /** Startup recovery of an interrupted merge: finish it, or roll it back if a file it touches changed meanwhile. */
@@ -425,6 +488,93 @@ export class PersonMergeModule {
     if (review.frontmatter.status !== "pending" && review.frontmatter.status !== "accepted") { await this.abandon(review, operation); return "rolled-back"; }
     try { await this.accept(review); return "completed"; }
     catch (error) { if (error instanceof PersonMergeConflictError) return "rolled-back"; throw error; }
+  }
+
+  /**
+   * #242 (ADR 0025): checks that an accepted `person-merge` item can be undone, writing nothing. Refuses (409) when the merge kept
+   * no record of what it changed (made before #242), or when any file it changed has a revision other than the one right after the
+   * merge: that covers the kept person being edited or merged again, and a re-pointed reference being edited. Returns the ID of
+   * the accept operation, which names the record.
+   */
+  checkUndo(review: LifeOSObject): string {
+    const operationId = String(review.frontmatter.operation_id);
+    const found = readRecord(this.ctx.findAudits("person.merged", { operation_id: operationId })[0]);
+    if (!found) throw new ObjectConflictError("Cannot undo: this merge was made before LifeOS kept a record of what it changed. Edit the two people by hand instead.");
+    // The kept person first: if it was merged again, that is the reason to give.
+    for (const change of [...found.record.changes].sort((a, b) => Number(b.id === found.keepId) - Number(a.id === found.keepId))) {
+      const object = this.ctx.index.get(change.id);
+      if (!object) throw new ObjectConflictError(`Cannot undo: ${change.id} no longer exists, so the merge cannot be put back as it was.`);
+      if (object.frontmatter.revision !== change.revision) {
+        const merged = change.id === found.keepId ? " or merged again" : "";
+        throw new ObjectConflictError(`Cannot undo: "${object.frontmatter.title}" was changed${merged} after the merge (revision ${change.revision}, now ${object.frontmatter.revision}). Open it to change it yourself.`);
+      }
+    }
+    return operationId;
+  }
+
+  /**
+   * Puts both people, and every file the merge re-pointed, back as they were. Every file is put back only while it still holds the
+   * merged values at the revision the merge left, or is already back (a replay after a crash); anything else is a conflict. A conflict
+   * found part-way (an edit made while the undo was running) re-applies the files already put back, so the merge is whole again,
+   * and throws. Returns the IDs of the files put back, with the merged-away person's ID.
+   */
+  async undoMerge(acceptOperationId: string): Promise<{ restoredIds: string[]; restoredPersonId: string; keptPersonId: string }> {
+    const { ctx } = this;
+    await ctx.rebuildIndex();
+    const found = readRecord(ctx.findAudits("person.merged", { operation_id: acceptOperationId })[0]);
+    if (!found) throw new ObjectConflictError("Cannot undo: this merge was made before LifeOS kept a record of what it changed.");
+    const { record, keepId } = found;
+    const now = new Date().toISOString();
+    // Put back in the reverse of the order the merge changed them: the merged person's tombstone first, references last.
+    const changes = [...record.changes].reverse();
+    const stateOf = (change: RecordedChange) => {
+      const object = ctx.index.get(change.id);
+      if (!object) return "conflict" as const;
+      if (isAt(object, change.before) && bodyIs(object.body, change.body_links, "before", keepId)) return "restored" as const;
+      return object.frontmatter.revision === change.revision ? "merged" as const : "conflict" as const;
+    };
+    const put = (change: RecordedChange, direction: "before" | "after") => {
+      const object = ctx.index.get(change.id)!;
+      const side = change[direction];
+      const body = change.body_links ? relink(object.body, change.body_links, direction, keepId) : undefined;
+      return ctx.update(object, Object.fromEntries(Object.entries(side).map(([key, value]) => [key, value ?? undefined])), { expectedHash: object.contentHash, now, ...(body !== undefined ? { body } : {}) });
+    };
+    const done: RecordedChange[] = [];
+    let conflict: RecordedChange | undefined;
+    for (const change of changes) {
+      const state = stateOf(change);
+      if (state === "conflict") { conflict = change; break; }
+      if (state === "restored") { done.push(change); continue; }
+      try { await put(change, "before"); done.push(change); }
+      catch (error) { if (!(error instanceof ObjectConflictError)) throw error; conflict = change; break; }
+      await ctx.rebuildIndex();
+    }
+    if (conflict) {
+      for (const change of done) {
+        if (stateOf(change) === "restored") await put(change, "after").catch(() => undefined);
+        await ctx.rebuildIndex();
+      }
+      throw new ObjectConflictError(`Cannot undo: "${ctx.index.get(conflict.id)?.frontmatter.title ?? conflict.id}" was changed while the merge was being undone, so the merge was left as it was.`);
+    }
+    await ctx.rebuildIndex();
+    return { restoredIds: record.changes.map((change) => change.id), restoredPersonId: found.mergedId, keptPersonId: keepId };
+  }
+
+  /**
+   * #242: whether a rejected (kept separate) `person-merge` item can go back to pending. It can unless that would leave a dead or
+   * duplicate suggestion: one of the two people is gone or was merged into someone else, or the same pair has another item
+   * (a Manual merge proposed after the Keep separate) that is pending or accepted. Nothing is written. The "not proposed again"
+   * rule is the rejected item itself (`scan` skips pairs that have any item), so pending again needs no other marker.
+   */
+  checkKeepSeparateUndo(review: LifeOSObject) {
+    const proposal = review.frontmatter.proposed_fields as PersonMergeProposal;
+    const keep = this.ctx.index.get(proposal.keep_person_id), merge = this.ctx.index.get(proposal.merge_person_id);
+    if (!mergeable(keep) || !mergeable(merge)) throw new ObjectConflictError(`Cannot undo: ${mergeable(keep) ? proposal.merge_title : proposal.keep_title} no longer exists or was merged since, so the suggestion has nothing left to merge.`);
+    const key = pairKey(proposal.keep_person_id, proposal.merge_person_id);
+    const other = this.ctx.index.all().find((object) => object.frontmatter.type === "review-item" && object.frontmatter.review_type === personMergeReviewType && object.frontmatter.id !== review.frontmatter.id
+      && (object.frontmatter.status === "pending" || object.frontmatter.status === "accepted")
+      && pairKey(String((object.frontmatter.proposed_fields as Partial<PersonMergeProposal>).keep_person_id), String((object.frontmatter.proposed_fields as Partial<PersonMergeProposal>).merge_person_id)) === key);
+    if (other) throw new ObjectConflictError(`Cannot undo: another suggestion for ${proposal.keep_title} and ${proposal.merge_title} was made since, so this one is not needed.`);
   }
 
   /** The full before/after change set. References are listed first and the tombstone last. */

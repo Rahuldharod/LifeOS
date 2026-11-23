@@ -1,25 +1,19 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MockAiProvider } from "@lifeos/ai";
-import { LifeOSApplication, type CalendarConnector, type CalendarEvent } from "@lifeos/application";
+import { LifeOSApplication, type CalendarConnector } from "@lifeos/application";
 import { MockCalendarConnector } from "@lifeos/connectors";
 import { MemoryIndex } from "@lifeos/index-memory";
 import { FilesystemInboxStore } from "@lifeos/object-store-markdown";
 import { CrashingStore } from "./crash-store.js";
 
-// ADR 0025: Review actions can be undone. Undoing a reject puts the item back to pending; undoing an accept also
+// ADR 0025: Review actions can be undone. Undoing a reject puts the item back to pending; undoing an accept of a create item also
 // deletes the object the accept created, unless that object was edited since. The undo is journalled (ADR 0013).
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
-
-class FakeCalendar implements CalendarConnector {
-  readonly provider = "fake";
-  events: CalendarEvent[] = [];
-  async listEvents() { return this.events; }
-}
 
 async function open(root?: string, calendar: CalendarConnector = new MockCalendarConnector()) {
   root ??= await mkdtemp(path.join(tmpdir(), "lifeos-review-undo-"));
@@ -75,19 +69,15 @@ describe("undoing a reject", () => {
     expect(await audits(application, "review.undone")).toHaveLength(2);
   });
 
-  it("refuses a kind of decision it cannot undo yet, and leaves it as it was", async () => {
-    const calendar = new FakeCalendar();
-    const startsAt = new Date(Date.now() + 3_600_000).toISOString();
-    calendar.events = [{ externalId: "e1", title: "Pilot", startsAt, endsAt: new Date(Date.parse(startsAt) + 1_800_000).toISOString(), timezone: "Europe/Paris", attendees: ["Marie Curie"], attendeeDetails: [{ email: "marie.curie@example.com", displayName: "Marie Curie" }] }];
-    const { application } = await open(undefined, calendar);
-    await application.createEntity("person", { title: "Marie Curie" });
-    await application.createMeetingFromEvent("e1");
-    const duplicate = (await application.listObjects()).find((object) => object.frontmatter.type === "person" && object.frontmatter.origin === "calendar")!;
-    await application.createEntity("task", { title: "Send Marie the deck", owner_person_id: duplicate.frontmatter.id });
-    const [reviewId] = await application.suggestPersonMerges();
-    await application.rejectReviewItem(reviewId!);
-    await expect(application.undoReviewAction(reviewId!)).rejects.toThrow(/cannot be undone yet/);
-    expect(application.object(reviewId!).frontmatter.status).toBe("rejected");
+  it("refuses an accepted kind of decision it cannot take back (a meeting summary), and leaves it as it was", async () => {
+    const { application, root, reviewId } = await proposals();
+    await application.acceptReviewItem(reviewId);
+    // A summary is accepted by writing into the meeting note; nothing records how to take that back.
+    const file = path.join(root, application.object(reviewId).relativePath);
+    await writeFile(file, (await readFile(file, "utf8")).replace("review_type: create", "review_type: summary"));
+    await application.rebuildIndex();
+    await expect(application.undoReviewAction(reviewId)).rejects.toThrow(/cannot be undone yet/);
+    expect(application.object(reviewId).frontmatter.status).toBe("accepted");
   });
 });
 
