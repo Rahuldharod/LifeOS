@@ -32,6 +32,8 @@ export const proposalTab = (review: InboxReview): Exclude<InboxTab, "All"> => {
 export const needsChoice = (review: InboxReview) => ["link-resolution", "person-merge"].includes(reviewType(review));
 /** Single-key shortcuts must not fire while the user types; checkboxes and radios are not typing. */
 export const typingTarget = "input:not([type='checkbox']):not([type='radio']), textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']";
+/** Controls that already use Enter or Space themselves; the Inbox's Enter-to-open leaves them alone. */
+export const interactiveTarget = "button, a[href], input, select, textarea, summary, [role='button'], [role='tab'], [role='separator'], [contenteditable=''], [contenteditable='true']";
 export const errorText = (caught: unknown) => caught instanceof Error ? caught.message : "Something went wrong";
 
 export const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string) => {
@@ -101,6 +103,14 @@ export function adjacentId(ordered: string[], hidden: Set<string>, id: string, d
   if (index < 0) return ordered.find((candidate) => !hidden.has(candidate));
   for (let at = index + direction; at >= 0 && at < ordered.length; at += direction) if (!hidden.has(ordered[at]!)) return ordered[at];
   return undefined;
+}
+
+/** The ids from `anchor` to `id` inclusive in the visual order, skipping hidden (collapsed) ones. Without a usable anchor, just `id`. */
+export function rangeIds(ordered: string[], hidden: Set<string>, anchor: string | undefined, id: string): string[] {
+  const shown = ordered.filter((candidate) => !hidden.has(candidate));
+  const from = anchor ? shown.indexOf(anchor) : -1; const to = shown.indexOf(id);
+  if (from < 0 || to < 0) return [id];
+  return shown.slice(Math.min(from, to), Math.max(from, to) + 1);
 }
 
 export type RowCells = { kind: ReviewKind; owner?: string; due?: string; project?: string; time: string; low: boolean };

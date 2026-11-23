@@ -41,6 +41,16 @@
 .inbox-colhead > * { font-size: 11px !important; }
 .inbox-row:not(.inbox-colhead):hover, .inbox-row.selected { background: var(--color-surface); }
 .inbox-row.selected { box-shadow: inset 3px 0 0 var(--color-primary); }
+/* Focused row (what the keys act on) is an outline; the Open row is the filled bar and tint. They differ, and can be on different rows. */
+.inbox-row.focused:not(.inbox-colhead) { outline: 2px solid var(--color-focus); outline-offset: -2px; border-radius: var(--radius-sm); }
+.inbox-row-open:focus-visible { outline: none; }
+.inbox-shortcuts-link { margin-left: var(--space-2); padding: 2px var(--space-2); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 600; white-space: nowrap; }
+.inbox-tab-tools { display: flex; align-items: center; margin-left: auto; }
+kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-quiet); font: inherit; font-size: .85em; font-weight: 700; }
+.inbox-shortcuts { min-width: min(440px, 92vw); padding: var(--space-5); }
+.inbox-shortcuts h3 { margin-top: 0; }
+.inbox-shortcuts th { padding: var(--space-1) var(--space-3) var(--space-1) 0; text-align: left; white-space: nowrap; }
+.inbox-shortcuts td { padding: var(--space-1) 0; }
 .inbox-row.checked { background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface)); }
 /* Titles always wrap in full; the other cells align on the title's first line. */
 .inbox-row-open { display: block; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--color-text); font: inherit; text-align: left; }

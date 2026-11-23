@@ -45,6 +45,7 @@ async function tab(name: string) {
   await act(async () => control.click());
 }
 
+const focusedTitle = () => document.querySelector(".inbox-row.focused .inbox-row-open strong")?.textContent;
 const queueText = () => document.querySelector("[aria-label='Review queue']")?.textContent ?? "";
 const press = async (key: string, target: EventTarget = document.body, init: KeyboardEventInit = {}) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })); });
 
@@ -274,13 +275,13 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
     await click("Next proposal");
     expect(heading()).toBe("Bravo task");
     expect(opened.at(-1)).toEqual(["b", undefined]);
-    await press("ArrowDown");
+    await click("Next proposal");
     expect(heading()).toBe("Charlie decision");
     expect(button("Next proposal").disabled).toBe(true);
-    await press("ArrowUp");
+    await click("Previous proposal");
     expect(heading()).toBe("Bravo task");
     await press("ArrowDown", document.querySelector("[aria-label='Proposed title']")!);
-    expect(heading()).toBe("Bravo task");
+    expect(focusedTitle()).toBe("Bravo task"); // typing in a field: the key does nothing
   });
 });
 
@@ -441,14 +442,16 @@ describe("InboxWorkspace grouped list (#237)", () => {
     expect(document.querySelector(".inbox-legend")?.textContent).toContain("Low confidence");
   });
 
-  it("collapses a group and moves with the arrow keys over it", async () => {
-    await render(props);
+  it("collapses a group and moves focus with the arrow keys over it", async () => {
+    await render({ ...props, selectedId: "a2" });
     const header = [...document.querySelectorAll(".inbox-source")].find((item) => item.textContent?.includes("Alpha sync")) as HTMLButtonElement;
     await act(async () => header.click());
     expect(header.getAttribute("aria-expanded")).toBe("false");
     expect(rowTitles()).toEqual(["Beta item", "Run item", "Loose item"]);
+    expect(focusedTitle()).toBe("Beta item"); // the focused row was collapsed away
     await press("ArrowDown");
-    expect(detailTitle()).toBe("Beta item");
+    expect(focusedTitle()).toBe("Run item");
+    expect(detailTitle()).toBe("Alpha older");
     await act(async () => header.click());
     expect(rowTitles()).toHaveLength(5);
   });

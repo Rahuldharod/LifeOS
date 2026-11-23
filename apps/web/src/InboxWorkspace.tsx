@@ -4,8 +4,9 @@ import type { LinkCardActions } from "./LinkResolutionCard.js";
 import { InboxQueue } from "./InboxQueue.js";
 import { InboxReadingPane } from "./InboxReadingPane.js";
 import { InboxToast, useInboxToast } from "./InboxToast.js";
+import { InboxShortcutSheet } from "./InboxShortcutSheet.js";
 import { useInboxKeys } from "./useInboxKeys.js";
-import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, reviewRowCells, reviewType, type ActionResult, type BulkResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
+import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
 import { useSplitPane } from "./splitPane.js";
 import { useListDetailReturn } from "./useListDetailReturn.js";
 import { useInboxRowLayout } from "./useInboxRowLayout.js";
@@ -36,8 +37,13 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const rowLayout = useInboxRowLayout(queueRef, narrow && openedId !== undefined);
 
+  /** The Focused item is what the keys act on; the Open item is what the reading pane shows. `dom` asks to move real keyboard focus to the row too. */
+  const [focusState, setFocusState] = useState<{ id?: string; dom?: boolean }>({});
+  const [helpOpen, setHelpOpen] = useState(false); const anchor = useRef<string | undefined>(undefined);
+
   const openedRef = useRef(openedId); openedRef.current = openedId;
-  useEffect(() => { if (selectedId !== undefined) setOpenedId(selectedId); }, [selectedId]);
+  /** The route followed a link or the back button. When it only echoes an item the user just opened, leave focus where the keys have moved it since. */
+  useEffect(() => { if (selectedId !== undefined && selectedId !== openedRef.current) { setOpenedId(selectedId); setFocusState({ id: selectedId }); } }, [selectedId]);
 
   const objectById = useMemo(() => new Map(objects.map((object) => [String(object.frontmatter.id), object])), [objects]);
   const meetings = useMemo(() => objects.filter((object) => object.frontmatter.type === "meeting"), [objects]);
@@ -61,6 +67,20 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   /** Bulk actions only touch ticked items that are on screen now. */
   const ticked = visible.filter((review) => checked.has(review.frontmatter.id));
   const acceptable = ticked.filter((review) => !needsChoice(review));
+  const visibleIds = visible.map((review) => review.frontmatter.id);
+  /** The Focused item: the last one the user moved to, else the Open item, else the first one shown (a decided or collapsed item gives way). */
+  const shownIds = visibleIds.filter((id) => !hiddenIds.has(id));
+  const focusedId = focusState.id && shownIds.includes(focusState.id) ? focusState.id : openedId && shownIds.includes(openedId) ? openedId : shownIds[0];
+  const focusedRef = useRef(focusedId); focusedRef.current = focusedId;
+  /** Where focus was put, before the "decided item gave way" fallback: a decision refreshes the list mid-flight, so `focusedId` can already have moved on. */
+  const focusSourceRef = useRef(focusState.id ?? openedId); focusSourceRef.current = focusState.id ?? openedId;
+  useEffect(() => {
+    if (!focusState.dom || !focusState.id) return;
+    const row = [...(queueRef.current?.querySelectorAll<HTMLElement>("[data-review-id]") ?? [])].find((element) => element.dataset.reviewId === focusState.id);
+    row?.querySelector<HTMLElement>(".inbox-row-open")?.focus(); // real focus scrolls the row into view and announces it
+  }, [focusState]);
+  /** Keyboard focus is on the page or in the list (not in the reading pane or a field), so it may follow the Focused item. */
+  const listHasKeyboard = () => { const element = globalThis.document.activeElement; return !element || element === globalThis.document.body || Boolean(queueRef.current?.contains(element)); };
 
   useEffect(() => {
     if (narrow || openedId || !visible.length) return;
@@ -69,12 +89,17 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
 
   // While a decision saves, the refresh drops the item from `reviews`; keep showing it until the Inbox moves on (no "Select a proposal" flash).
   const selected = reviews.find((review) => review.frontmatter.id === openedId) ?? (deciding?.frontmatter.id === openedId ? deciding : undefined);
-  const open = (id: string, options?: { replace?: boolean }) => { setOpenedId(id); setActionError(""); onOpen?.(id, options); };
+  const open = (id: string, options?: { replace?: boolean }) => { setOpenedId(id); setFocusState({ id }); setActionError(""); onOpen?.(id, options); };
   const back = () => { setOpenedId(undefined); setActionError(""); onBack?.(); };
   const setTab = (next: InboxTab) => { setTabState(next); setChecked(new Set()); };
   const clearFilters = () => { setQuery(""); setTab("All"); setMeetingId(""); setPeriod(""); };
-  const toggleChecked = (id: string) => setChecked((current) => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
-  const visibleIds = visible.map((review) => review.frontmatter.id);
+  /** Tick or untick one item, or (`range`) tick everything from the last anchor to it. A plain tick sets the anchor. */
+  const toggleChecked = (id: string, range = false) => {
+    const rangeOf = range && anchor.current && anchor.current !== id ? rangeIds(visibleIds, hiddenIds, anchor.current, id) : undefined;
+    if (!rangeOf) anchor.current = id;
+    setChecked((current) => { const next = new Set(current); if (rangeOf) rangeOf.forEach((rangeId) => next.add(rangeId)); else if (!next.delete(id)) next.add(id); return next; });
+  };
+  const clearChecked = () => { anchor.current = undefined; setChecked(new Set()); };
   /** PB-035: the item below in the list, or the one above when the decided item was the bottom one. */
   const nextAfter = (id: string) => adjacentId(visibleIds, hiddenIds, id, 1) ?? adjacentId(visibleIds, hiddenIds, id, -1);
   /** PB-035: once a decision is recorded, open the next waiting item; after the last one, show the empty list state. */
@@ -83,21 +108,24 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     if (nextId) { open(nextId, { replace: true }); return; }
     setOpenedId(undefined); setActionError("");
   };
+  /** After a Review action on the Focused item, focus lands on the next item (the Open item advances separately, above). */
+  const moveFocusOn = (decidedId: string, nextId: string | undefined, dom: boolean) => { if (nextId && focusSourceRef.current === decidedId) setFocusState({ id: nextId, dom }); };
   const decide = async (review: InboxReview, outcome: Outcome, action: () => Promise<ActionResult>) => {
     const id = review.frontmatter.id;
     if (active.current.has(id) || busy || readOnly) return;
-    const nextId = nextAfter(id);
+    const nextId = nextAfter(id); const followWithKeyboard = listHasKeyboard();
     active.current.add(id); setActiveId(id); setActionError(""); setDeciding(review);
     try {
       const result = await action();
       if (result === false) return;
       notify(`Proposal ${outcome}`);
       advanceFrom(id, nextId);
+      moveFocusOn(id, nextId, followWithKeyboard);
     } catch (caught) { setActionError(errorText(caught)); }
     finally { active.current.delete(id); setActiveId((current) => current === id ? undefined : current); setDeciding((current) => current?.frontmatter.id === id ? undefined : current); }
   };
   /** Link-resolution cards run their own requests; once one finishes, the Inbox moves on the same way. */
-  const linkFinished = (review: InboxReview, nextId: string | undefined, outcome: Outcome) => { notify(`Proposal ${outcome}`); advanceFrom(review.frontmatter.id, nextId); };
+  const linkFinished = (review: InboxReview, nextId: string | undefined, outcome: Outcome) => { const followWithKeyboard = listHasKeyboard(); notify(`Proposal ${outcome}`); advanceFrom(review.frontmatter.id, nextId); moveFocusOn(review.frontmatter.id, nextId, followWithKeyboard); };
   const position = selected ? visibleIds.indexOf(selected.frontmatter.id) : -1;
   const previousId = selected ? adjacentId(visibleIds, hiddenIds, selected.frontmatter.id, -1) : undefined;
   const followingId = selected && position >= 0 ? adjacentId(visibleIds, hiddenIds, selected.frontmatter.id, 1) : undefined;
@@ -109,20 +137,24 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     if (busy || readOnly || bulkRunning) return;
     const targets = outcome === "accepted" ? acceptable : ticked;
     const skipped = ticked.length - targets.length;
-    if (!targets.length) return;
+    if (!targets.length) { if (skipped) notify(`${skipped} skipped (link or merge needs a choice)`); return; }
     if (outcome === "rejected" && !globalThis.confirm(`Reject ${targets.length === 1 ? "1 proposal" : `${targets.length} proposals`}? This cannot be undone.`)) return;
     const targetIds = new Set(targets.map((review) => review.frontmatter.id));
     const openId = openedRef.current;
     const skip = new Set([...hiddenIds, ...targetIds]);
     const nextId = openId ? adjacentId(visibleIds, skip, openId, 1) ?? adjacentId(visibleIds, skip, openId, -1) : undefined;
+    const focusId = focusedRef.current; const followWithKeyboard = listHasKeyboard();
+    const nextFocus = focusId && targetIds.has(focusId) ? adjacentId(visibleIds, skip, focusId, 1) ?? adjacentId(visibleIds, skip, focusId, -1) : undefined;
     setBulkRunning(true); setActionError("");
     try {
       const result = onDecideMany ? await onDecideMany(targets, outcome) : await decideEach(targets, outcome);
       const decided = new Set(result.decided);
       setChecked((current) => new Set([...current].filter((id) => !decided.has(id))));
+      if (anchor.current && decided.has(anchor.current)) anchor.current = undefined;
       notify([`${decided.size === 1 ? "1 proposal" : `${decided.size} proposals`} ${outcome}`, ...(skipped ? [`${skipped} skipped (link or merge needs a choice)`] : [])].join(" · "));
       if (result.failures.length) setActionError(`${result.failures.length} not ${outcome}: ${result.failures.join("; ")}`);
       if (openId && decided.has(openId)) advanceFrom(openId, nextId);
+      if (focusId && nextFocus && decided.has(focusId)) setFocusState({ id: nextFocus, dom: followWithKeyboard });
     } catch (caught) { setActionError(errorText(caught)); }
     finally { setBulkRunning(false); }
   };
@@ -143,13 +175,42 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     finally { active.current.delete(id); setActiveId(undefined); }
   };
 
-  useInboxKeys({
-    detailRef, setTab,
-    step: (direction) => step.current(direction),
-    toggleOpenChecked: () => {
-      if (!selected || !visibleIds.includes(selected.frontmatter.id)) return false;
-      toggleChecked(selected.frontmatter.id); return true;
+  /** A / R: every ticked item, else the Focused item. When the Focused item is the Open one, its own buttons run (so unsaved edits still block Accept). */
+  const decideFocused = (outcome: Outcome) => {
+    if (ticked.length) { void decideTicked(outcome); return true; }
+    const target = visible.find((review) => review.frontmatter.id === focusedId);
+    if (!target) return false;
+    const id = target.frontmatter.id; const link = reviewType(target) === "link-resolution";
+    if (link && outcome === "accepted") { notify("Link proposals need a choice: open it to link, create or reject."); return true; }
+    if (id === selected?.frontmatter.id) {
+      const control = detailRef.current?.querySelector<HTMLButtonElement>(`button[data-shortcut='${outcome === "accepted" ? "a" : "r"}']`);
+      if (control && !control.disabled) control.click();
+      return Boolean(control);
     }
+    const linkActions = link ? linkActionsFor?.(id) : undefined;
+    void decide(target, outcome, outcome === "accepted" ? () => onAccept(target) : linkActions ? async () => { await linkActions.onReject(); } : () => onReject(target));
+    return true;
+  };
+  useInboxKeys({
+    setTab,
+    // On a narrow screen with a proposal open the list is hidden, so ↑/↓ step through the open proposals as before.
+    moveFocus: (direction) => {
+      if (narrow && selected) return step.current(direction);
+      if (!focusedId) return false;
+      const target = adjacentId(visibleIds, hiddenIds, focusedId, direction);
+      if (target) setFocusState({ id: target, dom: true });
+      return true; // at either end the key is still ours, so the page does not scroll
+    },
+    openFocused: () => { if (!focusedId || focusedId === openedId) return false; open(focusedId); return true; },
+    toggleFocused: (range) => { if (!focusedId) return false; toggleChecked(focusedId, range); return true; },
+    decide: decideFocused,
+    save: () => {
+      const control = detailRef.current?.querySelector<HTMLButtonElement>("button[data-shortcut='s']");
+      if (!control || control.disabled) return false;
+      control.click(); return true;
+    },
+    clearSelection: () => { if (!checked.size) return false; clearChecked(); return true; },
+    showHelp: () => setHelpOpen(true)
   });
   /** After a tab switch, an open item that is not in the new tab gives way to the tab's first item (wide screens; narrow shows the list). */
   const shownTab = useRef(tab);
@@ -165,11 +226,12 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const ref = useListDetailReturn(selected?.frontmatter.id);
   return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" style={split.style}>
     <InboxToast message={notification} />
-    <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} onRowMode={rowLayout.setMode} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId}
+    <InboxShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
+    <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
       hidden={narrow && Boolean(selected)}
       onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters}
-      onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={() => setChecked(new Set())} onDecideTicked={(outcome) => void decideTicked(outcome)} />
+      onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} />
     {!narrow && <div {...split.dividerProps} />}
     <InboxReadingPane paneRef={detailRef} selected={selected} hidden={narrow && !selected} position={position} total={visibleIds.length} previousId={previousId} followingId={followingId} readOnly={readOnly} actionError={actionError}
       objectById={objectById} labels={labels} choices={choices} itemBusy={itemBusy} nextId={selected ? nextAfter(selected.frontmatter.id) : undefined} linkActions={selected ? linkActionsFor?.(selected.frontmatter.id) : undefined}

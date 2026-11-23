@@ -6,14 +6,14 @@ import { groupKey, inboxTabs, type CreatedPeriod, type DateGroup, type InboxRevi
 import { rowLayoutModes, type RowLayoutMode } from "./useInboxRowLayout.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
-export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
-  onRowMode, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
+export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
+  onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
   paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean;
-  onRowMode: (mode: RowLayoutMode) => void; onToggleGroup: (key: string) => void;
+  onRowMode: (mode: RowLayoutMode) => void; onShowHelp: () => void; onFocusRow: (id: string) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
-  openedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
+  openedId?: string; focusedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
   onTab: (tab: InboxTab) => void; onQuery: (query: string) => void; onToggleAdvanced: () => void; onMeeting: (id: string) => void; onPeriod: (period: CreatedPeriod) => void; onClearFilters: () => void;
-  onOpen: (id: string) => void; onToggleChecked: (id: string) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
+  onOpen: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
 }) {
   return <section ref={paneRef} className={`inbox-queue ${twoLine ? "two-line" : "one-line"}`} data-pane="list" aria-label="Review queue" hidden={hidden}>
     <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div></header>
@@ -21,9 +21,10 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
       <div className="inbox-tablist" role="tablist" aria-label="Proposal type">
         {inboxTabs.map((name, index) => <button role="tab" key={name} aria-selected={tab === name} className={tab === name ? "selected" : ""} title={`${name} (press ${index + 1})`} aria-keyshortcuts={String(index + 1)} onClick={() => onTab(name)}>{name} <small>{tabCounts.get(name)}</small></button>)}
       </div>
-      <div className="inbox-row-layout" role="group" aria-label="Row layout">
+      <div className="inbox-tab-tools"><div className="inbox-row-layout" role="group" aria-label="Row layout">
         {rowLayoutModes.map(({ mode, label }) => <button key={mode} aria-pressed={rowMode === mode} title={mode === "auto" ? "One line with columns when the list is wide, two lines when it is narrow" : `Always ${label}`} onClick={() => onRowMode(mode)}>{label}{mode === "auto" && rowMode === "auto" && <small> · {twoLine ? "2 lines" : "1 line"}</small>}</button>)}
       </div>
+      <button className="inbox-shortcuts-link" aria-keyshortcuts="?" title="Keyboard shortcuts (?)" onClick={onShowHelp}>Shortcuts <kbd>?</kbd></button></div>
     </div>
     <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={onToggleAdvanced}>
       <input type="search" aria-label="Search proposals" placeholder="Search proposals…" value={query} onChange={(event) => onQuery(event.target.value)} />
@@ -51,7 +52,7 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
           const key = groupKey(bucket, source); const isCollapsed = collapsed.has(key);
           return <div key={key} className="inbox-source-group">
             <button className="inbox-source" aria-expanded={!isCollapsed} aria-label={`${source.label}, ${source.items.length}`} onClick={() => onToggleGroup(key)}><span aria-hidden>{isCollapsed ? "▸" : "▾"}</span> {source.label} <small>{source.items.length}</small></button>
-            {!isCollapsed && source.items.map((review) => <InboxRow key={review.frontmatter.id} review={review} cells={cellsFor(review)} twoLine={twoLine} opened={openedId === review.frontmatter.id} checked={checked.has(review.frontmatter.id)} onOpen={onOpen} onToggleChecked={onToggleChecked} />)}
+            {!isCollapsed && source.items.map((review) => <InboxRow key={review.frontmatter.id} review={review} cells={cellsFor(review)} twoLine={twoLine} opened={openedId === review.frontmatter.id} focused={focusedId === review.frontmatter.id} onFocusRow={onFocusRow} checked={checked.has(review.frontmatter.id)} onOpen={onOpen} onToggleChecked={onToggleChecked} />)}
           </div>;
         })}
       </div>)}</div>

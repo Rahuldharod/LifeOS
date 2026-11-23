@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InboxReview } from "./inboxModel.js";
-import { adjacentId, dateBucket, groupKey, groupReviews, reviewKind, reviewRowCells } from "./inboxModel.js";
+import { adjacentId, dateBucket, groupKey, groupReviews, rangeIds, reviewKind, reviewRowCells } from "./inboxModel.js";
 
 const review = (id: string, createdAt: string, front: Record<string, unknown> = {}): InboxReview => ({
   relativePath: `review-items/${id}.md`, contentHash: id, body: `# ${id}`,
@@ -75,6 +75,22 @@ describe("groupReviews", () => {
   it("puts date buckets in Today, Yesterday, Earlier this week, Older order whatever the input order", () => {
     const groups = group([review("o", "2026-10-01T09:00:00Z"), review("t", "2026-11-23T09:00:00Z"), review("e", "2026-11-19T09:00:00Z"), review("y", "2026-11-22T12:00:00Z")]);
     expect(groups.map((entry) => entry.bucket)).toEqual(["Today", "Yesterday", "Earlier this week", "Older"]);
+  });
+});
+
+describe("rangeIds", () => {
+  const ids = ["a", "b", "c", "d", "e"];
+  it("runs from the anchor to the item, in either direction, inclusive", () => {
+    expect(rangeIds(ids, new Set(), "b", "d")).toEqual(["b", "c", "d"]);
+    expect(rangeIds(ids, new Set(), "d", "b")).toEqual(["b", "c", "d"]);
+  });
+  it("skips hidden (collapsed) ids", () => {
+    expect(rangeIds(ids, new Set(["c"]), "a", "d")).toEqual(["a", "b", "d"]);
+  });
+  it("is just the item without a usable anchor", () => {
+    expect(rangeIds(ids, new Set(), undefined, "c")).toEqual(["c"]);
+    expect(rangeIds(ids, new Set(), "zzz", "c")).toEqual(["c"]);
+    expect(rangeIds(ids, new Set(["a"]), "a", "c")).toEqual(["c"]);
   });
 });
 
