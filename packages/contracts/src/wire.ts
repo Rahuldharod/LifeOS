@@ -103,7 +103,9 @@ export type StoredAsset = { relativePath: string; markdownPath: string; sha256: 
 /** One evidence reference as the Review screen shows it; a source that cannot be found is unresolved. */
 export type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };
 /** `GET /review-items`: each item carries its evidence per field. */
-export type ReviewItem = LifeObject & { evidence: Record<string, ReviewEvidence[]> };
+/** `POST /review-items/:id/undo` (ADR 0025): `deletedObjectId` is the object an undone accept had created. */
+export type ReviewUndo = { review: LifeObject; outcome: "undone" | "already-pending"; deletedObjectId?: string };
+export type ReviewItem =LifeObject & { evidence: Record<string, ReviewEvidence[]> };
 /** #34: the proposal fields the user may edit before accepting; `null` clears a field. */
 export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" | "due_at" | "due_timezone" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id", string | null>>;
 

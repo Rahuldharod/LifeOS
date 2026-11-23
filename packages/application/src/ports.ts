@@ -49,6 +49,7 @@ export const operationKinds = {
   acceptReview: "accept-review",
   mergePerson: "merge-person",
   rejectReview: "reject-review",
+  undoReview: "undo-review",
   createMeeting: "create-meeting",
   linkRecurringSeries: "link-recurring-series",
   migrateRecurringNotes: "migrate-recurring-notes",

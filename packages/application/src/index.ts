@@ -257,6 +257,8 @@ export class LifeOSApplication {
   updateReviewFields(reviewId: string, changes: ReviewEdits) { return this.review.updateReviewFields(reviewId, changes); }
   reviewEvidence(reviewId: string) { return this.review.reviewEvidence(reviewId); }
   rejectReviewItem(reviewId: string) { return this.review.rejectReviewItem(reviewId); }
+  /** ADR 0025: puts a rejected or accepted Review Item back to pending; undoing an accept also deletes the object it created. */
+  undoReviewAction(reviewId: string) { return this.review.undoReviewAction(reviewId); }
   /** #40: proposes `person-merge` Review Items for likely duplicate people; never merges by itself. */
   suggestPersonMerges() { return this.review.merges.suggest(); }
   /** #215: the pairs `suggestPersonMerges` would propose now, with the match reason; writes nothing. */

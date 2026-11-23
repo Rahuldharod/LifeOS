@@ -141,6 +141,21 @@ const scenarios: Record<OperationKind, Scenario> = {
     retry: decideAgain("reject"),
     check: (objects, { reviewId }) => expect(reviewStatus(objects, reviewId!)).toBe("rejected")
   },
+  [operationKinds.undoReview]: {
+    // ADR 0025: the user accepted, then undoes it; the item is pending again and the object the accept created is deleted.
+    setup: async (root, application) => {
+      const state = await meetingProposal(root, application);
+      const created = await application.acceptReviewItem(state.reviewId);
+      return { ...state, createdId: created.frontmatter.id };
+    },
+    act: (application, { reviewId }) => application.undoReviewAction(reviewId!),
+    // Undoing again is how the user finishes an undo that is still showing as accepted after the restart.
+    retry: async (application, { reviewId }) => { if (application.object(reviewId!).frontmatter.status !== "pending") await application.undoReviewAction(reviewId!); },
+    check: (objects, { reviewId, createdId }) => {
+      expect(reviewStatus(objects, reviewId!)).toBe("pending");
+      expect(objects.find((object) => object.frontmatter.id === createdId)?.frontmatter.deleted_at).toBeTruthy();
+    }
+  },
   [operationKinds.createMeeting]: {
     setup: async (_root, application) => ({ externalId: (await application.listCalendarEvents())[0]!.externalId }),
     act: (application, { externalId }) => application.createMeetingFromEvent(externalId!),

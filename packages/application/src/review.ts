@@ -1,4 +1,5 @@
 import { originOf, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { isReviewActionUndoable, notYetUndoable } from "@lifeos/shared";
 import { isCalendarDate, proposalBody, toUtc } from "./adoption.js";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { acceptSummary, summaryReviewType } from "./meeting-material.js";
@@ -338,6 +339,86 @@ export class ReviewModule {
     await ctx.rebuildIndex();
   }
 
+  /**
+   * ADR 0025: undoes the user's accept or reject. The item goes back to pending; undoing an accept also soft-deletes the
+   * object the accept created, and is refused (409) when that object was edited since (revision no longer 1: the accept
+   * wrote revision 1 and every later guarded write adds one, the same rule as `abandonCreate`). Nothing is written then.
+   * Idempotent: an item that is already pending is returned as it is. Journalled as an `undo-review` intent (ADR 0013).
+   */
+  undoReviewAction(reviewId: string): Promise<ReviewUndoResult> {
+    return this.serialise(reviewId, async () => {
+      const { ctx } = this;
+      // A retry of an undo a failure interrupted finishes that undo (its intent is already recorded).
+      const open = await this.openUndo(reviewId);
+      if (open) return this.finishUndo(open);
+      const review = ctx.required(reviewId, "review-item");
+      const status = review.frontmatter.status;
+      if (status === "pending") return { review, outcome: "already-pending" };
+      if (status !== "accepted" && status !== "rejected") throw new Error("Only accepted or rejected review items can be undone");
+      if (!isReviewActionUndoable(typeof review.frontmatter.review_type === "string" ? review.frontmatter.review_type : undefined, status)) throw new ObjectConflictError(notYetUndoable);
+      const created = status === "accepted" ? this.createdObject(review) : undefined;
+      if (created && !created.frontmatter.deleted_at && created.frontmatter.revision !== 1) throw new ObjectConflictError(this.editedSince(created));
+      const operation = await ctx.objects.prepareOperation?.(operationKinds.undoReview, { reviewId, undoes: status, ...(created ? { objectId: created.frontmatter.id } : {}), nextOperationId: uuidV7() }, uuidV7());
+      if (!operation) throw new Error("The object store cannot journal an undo");
+      return this.finishUndo(operation);
+    });
+  }
+
+  /** The object an accept created for this item, if it is still on disk. */
+  private createdObject(review: LifeOSObject) {
+    const id = review.frontmatter.resolved_object_id;
+    return typeof id === "string" ? this.ctx.index.get(id) : undefined;
+  }
+
+  private editedSince(created: LifeOSObject) {
+    return `Cannot undo: "${created.frontmatter.title}" was changed after it was accepted (revision ${created.frontmatter.revision}). Open it to change or delete it yourself.`;
+  }
+
+  /**
+   * Finishes a journalled undo. Every step is replay-safe: the object is deleted only while live, the item leaves its
+   * decided state only while decided, the audit is written once, and the item gets a fresh accept-operation ID from the
+   * journal so accepting it again creates a new object instead of finding the deleted one.
+   */
+  private async finishUndo(operation: Operation): Promise<ReviewUndoResult> {
+    const { ctx } = this;
+    await ctx.rebuildIndex();
+    const reviewId = String(operation.payload.reviewId);
+    const review = ctx.index.get(reviewId);
+    if (review?.frontmatter.type !== "review-item") { await ctx.objects.completeOperation?.(operation.id); throw new ObjectConflictError(`Review item not found: ${reviewId}`); }
+    const objectId = typeof operation.payload.objectId === "string" ? operation.payload.objectId : undefined;
+    const created = objectId ? ctx.index.get(objectId) : undefined;
+    const now = new Date().toISOString();
+    let deletedObjectId: string | undefined;
+    if (created && !created.frontmatter.deleted_at) {
+      if (created.frontmatter.revision !== 1) {
+        // Edited between the intent and now (or the app was restarted into a state the user changed): nothing was lost, so the undo is dropped.
+        await ctx.objects.completeOperation?.(operation.id);
+        throw new ObjectConflictError(this.editedSince(created));
+      }
+      await ctx.update(created, { deleted_at: now }, { expectedHash: created.contentHash, now });
+      deletedObjectId = created.frontmatter.id;
+    }
+    const latest = ctx.required(reviewId, "review-item");
+    if (latest.frontmatter.status === "accepted" || latest.frontmatter.status === "rejected") {
+      const nextOperationId = typeof operation.payload.nextOperationId === "string" ? operation.payload.nextOperationId : uuidV7();
+      await ctx.update(latest, { status: "pending", reviewed_at: undefined, resolved_object_id: undefined, operation_id: nextOperationId }, { expectedHash: latest.contentHash, now });
+    }
+    await ctx.writeAuditOnce("review.undone", reviewId, now, { operation_id: operation.id, review_id: reviewId, undone: String(operation.payload.undoes), ...(objectId ? { deleted_object_id: objectId } : {}) }, { matchOn: ["operation_id"] });
+    await ctx.objects.completeOperation?.(operation.id);
+    await ctx.rebuildIndex();
+    return { review: ctx.required(reviewId, "review-item"), outcome: "undone", ...(deletedObjectId ? { deletedObjectId } : {}) };
+  }
+
+  /** The open (journalled, not finished) undo of a Review Item, if any. */
+  private async openUndo(reviewId: string) {
+    return (await this.ctx.objects.incompleteOperations?.())?.find((operation) => operation.kind === operationKinds.undoReview && operation.payload.reviewId === reviewId);
+  }
+
+  /** Startup recovery of an `undo-review` operation: the undo is finished, or dropped when the object was edited meanwhile. */
+  recoverUndo(operation: Operation) {
+    return this.serialise(String(operation.payload.reviewId), () => this.finishUndo(operation).then(() => undefined, (error: unknown) => { if (!(error instanceof ObjectConflictError)) throw error; }));
+  }
+
   /** The open (journalled, not finished) reject of a Review Item, if any (#82). */
   private async openReject(reviewId: string) {
     return (await this.ctx.objects.incompleteOperations?.())?.find((operation) => operation.kind === operationKinds.rejectReview && operation.payload.reviewId === reviewId);
@@ -408,6 +489,9 @@ export class ReviewModule {
     await ctx.rebuildIndex();
   }
 }
+
+/** What `undoReviewAction` did: `already-pending` when there was nothing to undo; `deletedObjectId` when an accept's object was deleted. */
+export interface ReviewUndoResult { review: LifeOSObject; outcome: "undone" | "already-pending"; deletedObjectId?: string }
 
 /** Fields the user may change on a pending proposal; `null` clears one. */
 export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" | "due_at" | "due_timezone" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id", string | null>>;
