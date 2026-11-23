@@ -19,7 +19,7 @@ import "./InboxWorkspace.css";
 export type { BulkResult, InboxReview, InboxTab, ReviewChoices, UndoResult } from "./inboxModel.js";
 
 /** The Inbox page: owns the state (filters, opened item, ticks, decisions) and composes the queue, reading pane, keys and toast. */
-export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onDecideMany, onUndo, onView, linkActionsFor, switcher }: {
+export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onDecideMany, onUndo, onView, linkActionsFor, switcher, processedToday, onSeeHistory }: {
   reviews: InboxReview[]; objects: Array<LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices;
   selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; displayTimeZone: string; now?: Date;
   onOpen?: (id: string, options?: { replace?: boolean }) => void; onBack?: () => void;
@@ -33,6 +33,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   linkActionsFor?: (reviewId: string) => LinkCardActions;
   /** The Inbox / History switch for the page header (#243). */
   switcher?: React.ReactNode;
+  /** #244: Review actions made today (from History), and the button that opens the History tab, for the Inbox zero screen. */
+  processedToday?: number; onSeeHistory?: () => void;
 }) {
   const narrow = useNarrowWorkspace();
   const { view, setView } = useInboxView();
@@ -272,7 +274,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} view={view} onView={narrow ? undefined : chooseView} switcher={switcher} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
       hidden={oneUp && Boolean(selected)}
-      onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters}
+      onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters} processedToday={processedToday} onSeeHistory={onSeeHistory}
       onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} onDecideRow={decideRow} onDecideGroup={(items, outcome) => void decideSet(items, outcome)} />
     {!oneUp && <div {...split.dividerProps} />}
     <InboxReadingPane paneRef={detailRef} selected={selected} hidden={oneUp && !selected} position={position} total={visibleIds.length} previousId={previousId} followingId={followingId} readOnly={readOnly} actionError={actionError}

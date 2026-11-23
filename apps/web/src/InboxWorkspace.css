@@ -85,6 +85,8 @@ kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-stron
 /* Key hint on buttons the Inbox presses with a key; "/ ''" keeps it out of the accessible name (aria-keyshortcuts carries it). */
 .inbox-workspace button[data-shortcut]::after { content: attr(data-shortcut); content: attr(data-shortcut) / ""; margin-left: var(--space-2); padding: 0 .35em; border: var(--border-thin) solid currentColor; border-radius: 4px; font-size: .75em; opacity: .7; text-transform: uppercase; }
 .inbox-state { padding: var(--space-7) var(--space-4); color: var(--color-text-muted); text-align: center; }
+.inbox-zero-mark { font-size: 48px; line-height: 1; color: var(--color-success); }
+.inbox-zero h3:focus { outline: none; }
 .inbox-state.failure { color: var(--color-error); }
 .inbox-record-header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-4); padding-bottom: var(--space-4); border-bottom: var(--border-thin) solid var(--color-border); }
 .inbox-record-header > div > span { color: var(--color-accent); font-size: var(--font-size-xs); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }

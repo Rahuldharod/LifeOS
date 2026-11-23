@@ -164,7 +164,9 @@ describe("InboxWorkspace", () => {
     await act(async () => root!.render(<InboxWorkspace reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" error="Could not load proposals" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Could not load proposals");
     await act(async () => root!.render(<InboxWorkspace reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
-    expect(document.body.textContent).toContain("Inbox clear");
+    expect(document.body.textContent).toContain("Inbox zero");
+    expect(document.body.textContent).toContain("Nothing waiting.");
+    expect(document.body.textContent).not.toContain("See History"); // no handler, no button
   });
 
   it("explains read-only state and disables decisions", async () => {
@@ -243,11 +245,35 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
     expect(heading()).toBe("Bravo task");
   });
 
-  it("shows Inbox clear after the last item", async () => {
+  it("shows Inbox zero after the last item and moves focus to its heading", async () => {
     await mount("a", [review("a", "Alpha task")]);
     await click("Accept task");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Inbox clear");
+    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Inbox zero");
+    expect(document.activeElement?.textContent).toBe("Inbox zero");
     expect(document.querySelector("[aria-label='Review detail']")?.textContent).toContain("Select a proposal");
+  });
+
+  it("shows today's count and a working See History button on Inbox zero", async () => {
+    const onSeeHistory = vi.fn();
+    await render({ reviews: [], processedToday: 4, onSeeHistory });
+    expect(document.querySelector("h3")?.textContent).toBe("Inbox zero");
+    expect(queueText()).toContain("You processed 4 items today.");
+    expect(document.querySelector("[aria-label='Review queue'] p b")?.textContent).toBe("4");
+    await click("See History");
+    expect(onSeeHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("says Nothing waiting when nothing was processed today", async () => {
+    await render({ reviews: [], processedToday: 0, onSeeHistory: () => undefined });
+    expect(queueText()).toContain("Nothing waiting.");
+    expect(queueText()).not.toContain("You processed");
+  });
+
+  it("keeps No matching proposals, not Inbox zero, while filters hide items", async () => {
+    await render({ processedToday: 3, onSeeHistory: () => undefined });
+    await act(async () => { const input = document.querySelector("input[type='search']") as HTMLInputElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "zzz"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(queueText()).toContain("No matching proposals");
+    expect(queueText()).not.toContain("Inbox zero");
   });
 
   it("offers Clear filters when filters hide the remaining items", async () => {

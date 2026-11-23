@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import type { LifeObject, ObjectLink } from "@lifeos/contracts";
 import { WorkspaceFilterBar } from "./WorkspacePatterns.js";
 import { InboxRow, LowConfidenceDot } from "./InboxRow.js";
@@ -8,17 +8,21 @@ import { inboxViews, type InboxView } from "./useInboxView.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
 export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, view, onView, switcher, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
-  onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
+  onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, processedToday, onSeeHistory, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
   paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean; view: InboxView; /** Undefined where the view cannot be chosen (narrow screens). */ onView?: (view: InboxView) => void; /** The Inbox / History switch, shown in the page header (#243). */ switcher?: React.ReactNode;
   onRowMode: (mode: RowLayoutMode) => void; onShowHelp: () => void; onFocusRow: (id: string) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
   openedId?: string; focusedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
-  onTab: (tab: InboxTab) => void; onQuery: (query: string) => void; onToggleAdvanced: () => void; onMeeting: (id: string) => void; onPeriod: (period: CreatedPeriod) => void; onClearFilters: () => void;
+  onTab: (tab: InboxTab) => void; onQuery: (query: string) => void; onToggleAdvanced: () => void; onMeeting: (id: string) => void; onPeriod: (period: CreatedPeriod) => void; onClearFilters: () => void; /** Review actions made today (#244); the Inbox zero screen shows it. */ processedToday?: number; onSeeHistory?: () => void;
   onOpen: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
   onDecideRow: (id: string, outcome: Outcome) => void; onDecideGroup: (items: InboxReview[], outcome: Outcome) => void;
 }) {
   /** Row and group buttons are off while the app is read-only or a decision is saving. */
   const groupLocked = busy || readOnly || bulkRunning;
+  /** When the last item is decided, the row that had focus is gone: move focus to the Inbox zero heading so keyboard and screen reader users land somewhere. */
+  const zeroRef = useRef<HTMLHeadingElement>(null); const hadItems = useRef(reviewCount > 0);
+  const zero = !loading && !error && reviewCount === 0;
+  useEffect(() => { if (zero && hadItems.current) zeroRef.current?.focus(); hadItems.current = reviewCount > 0; }, [zero, reviewCount]);
   return <section ref={paneRef} className={`inbox-queue ${twoLine ? "two-line" : "one-line"}`} data-pane="list" aria-label="Review queue" hidden={hidden}>
     <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div>{switcher}</header>
     <div className="workspace-tabs inbox-tabs">
@@ -42,7 +46,10 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
       <label>Created<select aria-label="Filter by created period" value={period} onChange={(event) => onPeriod(event.target.value as CreatedPeriod)}><option value="">Any time</option><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
       <button onClick={() => { onMeeting(""); onPeriod(""); }}>Clear advanced filters</button>
     </div>}
-    {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? <div className="inbox-state"><h3>{reviewCount ? "No matching proposals" : "Inbox clear"}</h3>{reviewCount ? <><p>{reviewCount === 1 ? "1 proposal is hidden by the filters." : `${reviewCount} proposals are hidden by the filters.`}</p><button onClick={onClearFilters}>Clear filters</button></> : <p>No proposals require your attention.</p>}</div> : <>
+    {loading ? <div className="inbox-state" aria-busy="true">Loading review queue…</div> : error ? <div className="inbox-state failure" role="alert">{error}</div> : visible.length === 0 ? reviewCount ? <div className="inbox-state"><h3>No matching proposals</h3><p>{reviewCount === 1 ? "1 proposal is hidden by the filters." : `${reviewCount} proposals are hidden by the filters.`}</p><button onClick={onClearFilters}>Clear filters</button></div>
+      : <div className="inbox-state inbox-zero"><div className="inbox-zero-mark" aria-hidden>✓</div><h3 ref={zeroRef} tabIndex={-1}>Inbox zero</h3>
+        <p>{processedToday ? <>You processed <b>{processedToday}</b> {processedToday === 1 ? "item" : "items"} today.</> : "Nothing waiting."}</p>
+        {onSeeHistory && <button onClick={onSeeHistory}>See History</button>}</div> : <>
       <div className="inbox-bulk" role="toolbar" aria-label="Bulk actions">
         <button disabled={allTicked} onClick={onSelectAll}>Select all</button>
         <button disabled={!ticked.length} onClick={onDeselectAll}>Deselect all</button>

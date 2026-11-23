@@ -142,3 +142,13 @@ export function reviewRowCells(review: InboxReview, { now, timeZone, personName,
     time, low: review.frontmatter.confidence_label === "Low"
   };
 }
+
+/**
+ * #244: how many Review actions the user made today, for the Inbox zero screen. Counts History entries whose instant falls on today's
+ * calendar day in `timeZone`, made by "you" (not the system) and not undone. History holds only the last 100 entries, so after 100
+ * actions in one day this under-counts; that is accepted.
+ */
+export const processedToday = (entries: Array<{ at: string; actor: string; undone: boolean }>, now: Date, timeZone: string) => {
+  const today = dayOf(now, timeZone);
+  return entries.filter((entry) => entry.actor === "you" && !entry.undone && dayOf(entry.at, timeZone) === today).length;
+};

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InboxReview } from "./inboxModel.js";
-import { adjacentId, dateBucket, groupKey, groupReviews, rangeIds, reviewKind, reviewRowCells } from "./inboxModel.js";
+import { adjacentId, dateBucket, groupKey, groupReviews, processedToday, rangeIds, reviewKind, reviewRowCells } from "./inboxModel.js";
 
 const review = (id: string, createdAt: string, front: Record<string, unknown> = {}): InboxReview => ({
   relativePath: `review-items/${id}.md`, contentHash: id, body: `# ${id}`,
@@ -124,4 +124,26 @@ describe("reviewRowCells", () => {
     expect(reviewRowCells(review("l", "2026-11-23T08:00:00Z", { confidence_label: "Low" }), lookups).low).toBe(true);
     expect(reviewRowCells(review("m", "2026-11-23T08:00:00Z", { confidence_label: "Medium" }), lookups).low).toBe(false);
   });
+});
+
+describe("processedToday", () => {
+  const zone = "Europe/Paris";
+  const now = new Date("2026-11-23T12:00:00Z");
+  const entry = (at: string, over: { actor?: string; undone?: boolean } = {}) => ({ at, actor: "you", undone: false, ...over });
+
+  it("counts the user's actions that fell on today in the display time zone, at both midnight edges", () => {
+    expect(processedToday([
+      entry("2026-11-22T22:59:59Z"), // 23:59:59 on the 22nd in Paris: yesterday
+      entry("2026-11-22T23:00:00Z"), // 00:00 on the 23rd: today
+      entry("2026-11-23T12:00:00Z"),
+      entry("2026-11-23T22:59:59Z"), // 23:59:59 on the 23rd: still today
+      entry("2026-11-23T23:00:00Z") // 00:00 on the 24th: tomorrow
+    ], now, zone)).toBe(3);
+  });
+
+  it("leaves out undone actions and System actions", () => {
+    expect(processedToday([entry("2026-11-23T09:00:00Z"), entry("2026-11-23T09:01:00Z", { undone: true }), entry("2026-11-23T09:02:00Z", { actor: "system" })], now, zone)).toBe(1);
+  });
+
+  it("is 0 for no entries", () => { expect(processedToday([], now, zone)).toBe(0); });
 });

@@ -77,7 +77,7 @@ import { useNewStandaloneNote } from "./useNewStandaloneNote.js";
 import { InboxHistory } from "./InboxHistory.js";
 import { InboxSwitch } from "./InboxSwitch.js";
 import { InboxWorkspace } from "./InboxWorkspace.js";
-import { createdObjectId, type UndoResult } from "./inboxModel.js";
+import { createdObjectId, processedToday, type UndoResult } from "./inboxModel.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
 import { firstEditPeopleIds, headerPeopleIds } from "./firstEditPeople.js";
@@ -1271,6 +1271,8 @@ function App() {
           onSave={(review, changes) => editReview(review.frontmatter.id, changes)}
           linkActionsFor={linkActionsFor}
           switcher={inboxSwitch("inbox")}
+          processedToday={processedToday(inboxHistory.entries, new Date(), displayTimeZone)}
+          onSeeHistory={() => void go({ view: "Inbox", inboxTab: "history" })}
         />
       </>)}
 
