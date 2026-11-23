@@ -31,6 +31,8 @@ test("Esc leaves a search box and keeps its text", async ({ page, request }) => 
 test("Esc in Global Search closes the dialog first", async ({ page, request }) => {
   await seed(request);
   await page.goto("/tasks");
+  // page.goto returns on the load event, before React has drawn the shell; a shortcut pressed then has no listener.
+  await expect(page.getByRole("button", { name: "Search", exact: true })).toBeVisible();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
   const dialog = page.getByRole("dialog", { name: "Global Search" });
   await expect(dialog).toBeVisible();

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, type ReactNode } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { leaveFieldOnEscape } from "./escapeLeavesField.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import type { View } from "./routes.js";
@@ -62,19 +62,23 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
   const narrow = layout.band === "narrow";
   const content = useRef<HTMLElement>(null);
   useEffect(() => { if (!narrow) setMenuOpen(false); }, [narrow]);
-  useEffect(() => {
+  const shortcuts = useRef({ onSearch, onCapture });
+  shortcuts.current = { onSearch, onCapture };
+  // Layout effect, attached once: the shortcuts work from the first frame the shell is on screen. A passive effect ran
+  // after the page's load event, so a Cmd+K pressed right after the page appeared was silently lost.
+  useLayoutEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        onSearch();
+        shortcuts.current.onSearch();
       } else if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "c") {
         event.preventDefault();
-        onCapture();
+        shortcuts.current.onCapture();
       }
     };
     document.addEventListener("keydown", keydown);
     return () => document.removeEventListener("keydown", keydown);
-  }, [onSearch, onCapture]);
+  }, []);
   useEffect(() => {
     document.addEventListener("keydown", leaveFieldOnEscape);
     return () => document.removeEventListener("keydown", leaveFieldOnEscape);
