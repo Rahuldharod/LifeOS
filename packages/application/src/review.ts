@@ -1,15 +1,24 @@
 import { originOf, uuidV7, type LifeOSObject, type ObjectEnvelope } from "@lifeos/domain";
+import { isReviewActionUndoable, notYetUndoable } from "@lifeos/shared";
 import { isCalendarDate, proposalBody, toUtc } from "./adoption.js";
 import { markdownFileName, ObjectConflictError, type AppContext } from "./context.js";
 import { acceptSummary, summaryReviewType } from "./meeting-material.js";
 import type { DecisionsModule } from "./decisions.js";
 import type { MeetingsModule } from "./meetings.js";
 import { appendedText, type UpdateProposal } from "./patches.js";
+import { applyRevert, planLinkRevert, planUpdateRevert, rebasedProposal, type LinkUndo } from "./review-undo.js";
 import { followMergesInCandidates, followMergesInProposal, PersonMergeModule, personMergeReviewType, survivingPersonId } from "./person-merge.js";
 import { operationKinds, type Operation } from "./ports.js";
 import { proposeReviewItem, recordAgentRun, seededRun } from "./review-items.js";
 import { contextLinkFields, inheritContextLinks, isLive, isRestricted, OneAtATime, replayRoles, sameValue, validTimeZone } from "./support.js";
 
+
+/**
+ * #243: an item that is accepted, undone and accepted again must leave one `review.accepted` audit per accept, or the Inbox
+ * History would miss the second one (a link or update accept audits the same target both times). Undo gives the item a fresh
+ * `operation_id`, so the audit is matched on it; an item never undone has none, and a crash replay shares it.
+ */
+const acceptRound = (review: LifeOSObject) => typeof review.frontmatter.operation_id === "string" ? { operation_id: review.frontmatter.operation_id } : {};
 
 /** Review Items: proposing them from a meeting, editing, accepting and rejecting. */
 export class ReviewModule {
@@ -161,9 +170,16 @@ export class ReviewModule {
     const value = proposed.list ? [...(Array.isArray(current) ? current as string[] : []).filter((id) => id !== chosenId), chosenId] : chosenId;
     const now = new Date().toISOString();
     const unchanged = proposed.list ? Array.isArray(current) && current.includes(chosenId) : current === chosenId;
+    // #242: what the link replaces is recorded on the item before the link is written, so a crash between the two writes cannot
+    // lose it (a retry finds the link already in place and reuses this record instead of reading it as "was already linked").
+    const held = (review.frontmatter.link_undo ?? {}) as Partial<LinkUndo>;
+    const record: LinkUndo = unchanged && held.changed === true && held.linked === chosenId && held.field === proposed.link_field && held.target_id === targetId
+      ? held as LinkUndo
+      : { target_id: targetId, field: proposed.link_field, list: Boolean(proposed.list), previous: current ?? null, linked: chosenId, changed: !unchanged };
+    const recorded = sameValue(held, record) ? review : await ctx.update(review, { link_undo: record }, { expectedHash: review.contentHash, now });
     const updated = unchanged ? target : await ctx.update(target, { [proposed.link_field]: value }, { expectedHash: target.contentHash, now });
-    await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, chosen_object_id: chosenId }, { expectedHash: review.contentHash, now });
-    await ctx.writeAuditOnce("review.accepted", targetId, now, { review_id: review.frontmatter.id, link_field: proposed.link_field, linked_object_id: chosenId }, { matchOn: ["review_id"] });
+    await ctx.update(recorded, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, chosen_object_id: chosenId }, { expectedHash: recorded.contentHash, now });
+    await ctx.writeAuditOnce("review.accepted", targetId, now, { review_id: review.frontmatter.id, ...acceptRound(review), link_field: proposed.link_field, linked_object_id: chosenId }, { matchOn: ["review_id", "operation_id"] });
     await ctx.rebuildIndex();
     return updated;
   }
@@ -190,12 +206,15 @@ export class ReviewModule {
     const landed = target.frontmatter.revision === proposal.base_revision + 1 && proposal.changes.every((change) => sameValue(target.frontmatter[change.field], change.proposed)) && (!note || target.body.endsWith(`\n${note}\n`));
     const now = new Date().toISOString();
     let updated = target;
+    // #242: the exact text added to the body, kept on the item so undo can remove precisely that (unknown after a crash retry: undo is refused then).
+    let appended: string | undefined;
     if (!landed) {
       if (target.frontmatter.revision !== proposal.base_revision || target.contentHash !== proposal.base_hash) {
         throw new ObjectConflictError(`${target.frontmatter.title} changed since this review item was raised (revision ${proposal.base_revision}, now ${target.frontmatter.revision}); reject it and send the change again`);
       }
       const changes = Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed ?? undefined]));
-      const body = note ? target.body + appendedText(target.body, note) : undefined;
+      appended = note ? appendedText(target.body, note) : undefined;
+      const body = appended !== undefined ? target.body + appended : undefined;
       updated = successorId
         ? (await this.decisions.supersedeWith(targetId, successorId, proposal.base_hash, { changes, ...(body !== undefined ? { body } : {}) })).superseded
         : await ctx.update(target, changes, { expectedHash: proposal.base_hash, now, ...(body !== undefined ? { body } : {}) });
@@ -203,12 +222,12 @@ export class ReviewModule {
       // #67: a crash may have left the successor's back link unwritten; finish it (a no-op once both links are set).
       updated = (await this.decisions.supersedeWith(targetId, successorId, target.contentHash)).superseded;
     }
-    await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId }, { expectedHash: review.contentHash, now });
+    await ctx.update(review, { status: "accepted", reviewed_at: now, resolved_object_id: targetId, ...(appended !== undefined ? { applied_append: appended } : {}) }, { expectedHash: review.contentHash, now });
     await ctx.writeAuditOnce("review.accepted", targetId, now, {
-      review_id: review.frontmatter.id, draft_key: proposal.draft_key,
+      review_id: review.frontmatter.id, ...acceptRound(review), draft_key: proposal.draft_key,
       before: Object.fromEntries(proposal.changes.map((change) => [change.field, change.current])), after: Object.fromEntries(proposal.changes.map((change) => [change.field, change.proposed])),
       ...(note ? { append_note: note } : {})
-    }, { matchOn: ["review_id"] });
+    }, { matchOn: ["review_id", "operation_id"] });
     await ctx.rebuildIndex();
     return updated;
   }
@@ -338,6 +357,129 @@ export class ReviewModule {
     await ctx.rebuildIndex();
   }
 
+  /**
+   * ADR 0025: undoes the user's accept or reject. The item goes back to pending. Undoing an accept also takes back what it did:
+   * a `create` item's object is soft-deleted (refused, 409, when it was edited since: revision no longer 1, the same rule as
+   * `abandonCreate`); a Merge restores both People and every re-pointed file from the record the merge kept (#242); a link
+   * item puts the field back; an `update` item reverts its fields (Patch undo's rule). Keep separate goes back to pending.
+   * A refusal writes nothing. Idempotent: an item that is already pending is returned as it is. Journalled as an
+   * `undo-review` intent (ADR 0013), whose `revert` holds what to put back.
+   */
+  undoReviewAction(reviewId: string): Promise<ReviewUndoResult> {
+    return this.serialise(reviewId, async () => {
+      const { ctx } = this;
+      // A retry of an undo a failure interrupted finishes that undo (its intent is already recorded).
+      const open = await this.openUndo(reviewId);
+      if (open) return this.finishUndo(open);
+      const review = ctx.required(reviewId, "review-item");
+      const status = review.frontmatter.status;
+      if (status === "pending") return { review, outcome: "already-pending" };
+      if (status !== "accepted" && status !== "rejected") throw new ObjectConflictError(`Cannot undo: this item is ${String(status)}; only accepted or rejected items can be undone.`);
+      const type = typeof review.frontmatter.review_type === "string" ? review.frontmatter.review_type : undefined;
+      if (!isReviewActionUndoable(type, status)) throw new ObjectConflictError(notYetUndoable);
+      const plan = this.undoPlan(review, type ?? "create", status);
+      const operation = await ctx.objects.prepareOperation?.(operationKinds.undoReview, { reviewId, undoes: status, ...(plan.created ? { objectId: plan.created.frontmatter.id } : {}), ...(plan.revert ? { revert: plan.revert } : {}), nextOperationId: uuidV7() }, uuidV7());
+      if (!operation) throw new Error("The object store cannot journal an undo");
+      return this.finishUndo(operation);
+    });
+  }
+
+  /** What undoing this decision puts back, or the refusal (nothing is written). */
+  private undoPlan(review: LifeOSObject, type: string, status: "accepted" | "rejected"): { created?: LifeOSObject; revert?: Record<string, unknown> } {
+    if (type === personMergeReviewType) {
+      if (status === "rejected") { this.merges.checkKeepSeparateUndo(review); return {}; }
+      return { revert: { kind: "merge", acceptOperationId: this.merges.checkUndo(review) } };
+    }
+    if (status === "rejected") return {};
+    if (type === "link-resolution") return { revert: planLinkRevert(this.ctx, review) };
+    if (type === "update") return { revert: planUpdateRevert(this.ctx, review) };
+    const created = this.createdObject(review);
+    if (created && !created.frontmatter.deleted_at && created.frontmatter.revision !== 1) throw new ObjectConflictError(this.editedSince(created));
+    return { created };
+  }
+
+  /** The object an accept created for this item, if it is still on disk. */
+  private createdObject(review: LifeOSObject) {
+    const id = review.frontmatter.resolved_object_id;
+    return typeof id === "string" ? this.ctx.index.get(id) : undefined;
+  }
+
+  private editedSince(created: LifeOSObject) {
+    return `Cannot undo: "${created.frontmatter.title}" was changed after it was accepted (revision ${created.frontmatter.revision}). Open it to change or delete it yourself.`;
+  }
+
+  /**
+   * Finishes a journalled undo. Every step is replay-safe: the object is deleted only while live, the item leaves its
+   * decided state only while decided, the audit is written once, and the item gets a fresh accept-operation ID from the
+   * journal so accepting it again creates a new object instead of finding the deleted one.
+   */
+  private async finishUndo(operation: Operation): Promise<ReviewUndoResult> {
+    const { ctx } = this;
+    await ctx.rebuildIndex();
+    const reviewId = String(operation.payload.reviewId);
+    const review = ctx.index.get(reviewId);
+    if (review?.frontmatter.type !== "review-item") { await ctx.objects.completeOperation?.(operation.id); throw new ObjectConflictError(`Review item not found: ${reviewId}`); }
+    const objectId = typeof operation.payload.objectId === "string" ? operation.payload.objectId : undefined;
+    const created = objectId ? ctx.index.get(objectId) : undefined;
+    const now = new Date().toISOString();
+    let deletedObjectId: string | undefined;
+    if (created && !created.frontmatter.deleted_at) {
+      if (created.frontmatter.revision !== 1) {
+        // Edited between the intent and now (or the app was restarted into a state the user changed): nothing was lost, so the undo is dropped.
+        await ctx.objects.completeOperation?.(operation.id);
+        throw new ObjectConflictError(this.editedSince(created));
+      }
+      await ctx.update(created, { deleted_at: now }, { expectedHash: created.contentHash, now });
+      deletedObjectId = created.frontmatter.id;
+    }
+    const revert = operation.payload.revert as Record<string, unknown> | undefined;
+    let reverted: Reverted | undefined;
+    if (revert) {
+      try { reverted = await this.revert(revert, now); }
+      catch (error) {
+        // Something it would put back was changed between the intent and now: the undo is dropped (a merge left whole again).
+        if (error instanceof ObjectConflictError) await ctx.objects.completeOperation?.(operation.id);
+        throw error;
+      }
+      await ctx.rebuildIndex();
+    }
+    const latest = ctx.required(reviewId, "review-item");
+    if (latest.frontmatter.status === "accepted" || latest.frontmatter.status === "rejected") {
+      const nextOperationId = typeof operation.payload.nextOperationId === "string" ? operation.payload.nextOperationId : uuidV7();
+      // The undo records of link and update accepts go with the decision they described.
+      // An `update` item is guarded by the target's revision and hash: both move to the target as the undo left it, so it can be applied again.
+      const rebased = revert?.kind === "update" ? rebasedProposal(ctx, latest, revert) : undefined;
+      await ctx.update(latest, { status: "pending", reviewed_at: undefined, resolved_object_id: undefined, chosen_object_id: undefined, link_undo: undefined, applied_append: undefined, operation_id: nextOperationId, ...(rebased ? { proposed_fields: rebased } : {}) }, { expectedHash: latest.contentHash, now });
+    }
+    await ctx.writeAuditOnce("review.undone", reviewId, now, {
+      operation_id: operation.id, review_id: reviewId, undone: String(operation.payload.undoes),
+      ...(objectId ? { deleted_object_id: objectId } : {}),
+      ...(reverted ? { reverted_object_ids: reverted.ids, ...reverted.audit } : {})
+    }, { matchOn: ["operation_id"] });
+    await ctx.objects.completeOperation?.(operation.id);
+    await ctx.rebuildIndex();
+    return { review: ctx.required(reviewId, "review-item"), outcome: "undone", ...(deletedObjectId ? { deletedObjectId } : {}), ...(reverted ? { revertedObjectIds: reverted.ids } : {}) };
+  }
+
+  /** Puts back what an accept changed beyond creating an object: a merge, a link or an `update`. Replay-safe; see `undoMerge` and `applyRevert`. */
+  private async revert(revert: Record<string, unknown>, now: string): Promise<Reverted> {
+    if (revert.kind === "merge") {
+      const merged = await this.merges.undoMerge(String(revert.acceptOperationId));
+      return { ids: merged.restoredIds, audit: { restored_person_id: merged.restoredPersonId, kept_person_id: merged.keptPersonId } };
+    }
+    return { ids: await applyRevert(this.ctx, revert, now), audit: {} };
+  }
+
+  /** The open (journalled, not finished) undo of a Review Item, if any. */
+  private async openUndo(reviewId: string) {
+    return (await this.ctx.objects.incompleteOperations?.())?.find((operation) => operation.kind === operationKinds.undoReview && operation.payload.reviewId === reviewId);
+  }
+
+  /** Startup recovery of an `undo-review` operation: the undo is finished, or dropped when the object was edited meanwhile. */
+  recoverUndo(operation: Operation) {
+    return this.serialise(String(operation.payload.reviewId), () => this.finishUndo(operation).then(() => undefined, (error: unknown) => { if (!(error instanceof ObjectConflictError)) throw error; }));
+  }
+
   /** The open (journalled, not finished) reject of a Review Item, if any (#82). */
   private async openReject(reviewId: string) {
     return (await this.ctx.objects.incompleteOperations?.())?.find((operation) => operation.kind === operationKinds.rejectReview && operation.payload.reviewId === reviewId);
@@ -408,6 +550,11 @@ export class ReviewModule {
     await ctx.rebuildIndex();
   }
 }
+
+/** What `undoReviewAction` did: `already-pending` when there was nothing to undo; `deletedObjectId` when an accept's object was deleted; `revertedObjectIds` when a merge, link or change was put back. */
+export interface ReviewUndoResult { review: LifeOSObject; outcome: "undone" | "already-pending"; deletedObjectId?: string; revertedObjectIds?: string[] }
+/** What an undo put back besides the item: the objects written, and the audit fields that say what they were. */
+interface Reverted { ids: string[]; audit: Record<string, unknown> }
 
 /** Fields the user may change on a pending proposal; `null` clears one. */
 export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" | "due_at" | "due_timezone" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id", string | null>>;

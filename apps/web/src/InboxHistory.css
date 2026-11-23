@@ -1,0 +1,16 @@
+/* The Inbox / History switch and the History tab (#243). Pill buttons follow the Inbox tabs. */
+.inbox-switch, .inbox-history-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.inbox-switch button, .inbox-history-chips button { border-radius: var(--radius-pill); }
+.inbox-switch button.selected, .inbox-history-chips button.selected { background: var(--color-primary); color: var(--color-text-inverse); border-color: var(--color-primary); }
+.inbox-history { display: block; min-width: 0; padding: var(--space-4); background: var(--color-surface-quiet); border-radius: var(--radius-lg); }
+.inbox-history-chips { margin: var(--space-3) 0; }
+.inbox-history-table { width: 100%; border-collapse: collapse; }
+.inbox-history-table th { text-align: left; color: var(--color-text-muted); font-size: var(--font-size-xs); letter-spacing: .06em; text-transform: uppercase; }
+.inbox-history-table th, .inbox-history-table td { padding: var(--space-2); border-bottom: var(--border-thin) solid var(--color-border); vertical-align: middle; }
+.inbox-history-table td small { color: var(--color-text-muted); }
+.inbox-history-table .when { white-space: nowrap; color: var(--color-text-muted); }
+.inbox-history-table tr.undone td:not(.actions) { opacity: .55; }
+.inbox-history-table .actions { display: flex; flex-wrap: wrap; gap: var(--space-1); justify-content: flex-end; border-bottom: 0; }
+.inbox-history-table .actions em { color: var(--color-text-muted); font-weight: 650; }
+.inbox-history-system { display: inline-block; padding: 1px 8px; border: var(--border-thin) dashed var(--color-border-strong); border-radius: var(--radius-pill); background: var(--color-surface-quiet); font-size: 11px; font-weight: 750; }
+@media (max-width: 720px) { .inbox-history-table thead { display: none; } .inbox-history-table tr { display: block; padding: var(--space-2) 0; border-bottom: var(--border-thin) solid var(--color-border); } .inbox-history-table td { display: block; border: 0; padding: 2px var(--space-2); } .inbox-history-table .actions { justify-content: flex-start; } }

@@ -84,6 +84,12 @@ export type DraftResult = { draft: string; outcome: DraftOutcome; objectIds: str
 /** One adoption run: `retrySoon` when a draft was skipped only because it may still be being written. */
 export type AdoptionBatch = { agentRunId?: string; drafts: DraftResult[]; retrySoon: boolean };
 export type AppliedPatch = { auditEventId: string; objectId: string; title: string; type: string; appliedAt: string; before: Record<string, unknown>; after: Record<string, unknown>; appendedNote?: string; undone: boolean };
+/** `GET /inbox/history` (#243): one Review action, or one applied Patch Draft, newest first, at most 100. `actor` is "system" for what nobody at the keyboard did (see InboxHistoryModule). */
+export type InboxHistoryEntry = {
+  id: string; at: string; actor: "you" | "system"; action: "accepted" | "rejected" | "merged" | "kept-separate" | "applied" | "linked"; source: "review" | "patch";
+  reviewId?: string; reviewType: string; targetObjectType?: string; title: string; sourceMeetingId?: string; sourceMeetingTitle?: string; objectId?: string; summary?: string;
+  restricted: boolean; undone: boolean; undoable: boolean;
+};
 
 export type BackupSummary = { backupId: string; createdAt: string; fileCount: number; totalBytes: number };
 export type BackupVerification = BackupSummary & { valid: boolean; restoredToTemporaryDirectory: boolean; diagnostics: string[] };
@@ -103,7 +109,9 @@ export type StoredAsset = { relativePath: string; markdownPath: string; sha256: 
 /** One evidence reference as the Review screen shows it; a source that cannot be found is unresolved. */
 export type ReviewEvidence = { field: string; resolved: boolean; source_id?: string; source_ref?: string; source_title?: string; locator?: string; quote?: string };
 /** `GET /review-items`: each item carries its evidence per field. */
-export type ReviewItem = LifeObject & { evidence: Record<string, ReviewEvidence[]> };
+/** `POST /review-items/:id/undo` (ADR 0025): `deletedObjectId` is the object an undone accept had created; `revertedObjectIds` are the objects a merge, link or change put back (#242). */
+export type ReviewUndo = { review: LifeObject; outcome: "undone" | "already-pending"; deletedObjectId?: string; revertedObjectIds?: string[] };
+export type ReviewItem =LifeObject & { evidence: Record<string, ReviewEvidence[]> };
 /** #34: the proposal fields the user may edit before accepting; `null` clears a field. */
 export type ReviewEdits = Partial<Record<"title" | "owner_person_id" | "due_on" | "due_at" | "due_timezone" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id", string | null>>;
 

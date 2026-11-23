@@ -115,6 +115,7 @@ export interface Endpoints {
   "POST /api/v1/review-items/:id/accept": { body?: { linkTo?: string }; response: unknown };
   "PATCH /api/v1/review-items/:id": { body: W.ReviewEdits; response: unknown };
   "POST /api/v1/review-items/:id/reject": { response: unknown };
+  "POST /api/v1/review-items/:id/undo": { response: W.ReviewUndo };
 
   // Today and Daily Focus (#46, #47, #48)
   "GET /api/v1/today": { query: { date?: string }; response: W.Today };
@@ -153,6 +154,7 @@ export interface Endpoints {
   "POST /api/v1/enrichment/work-orders": { response: W.Message };
   "POST /api/v1/meetings/:id/enrichment/gave-up": Guarded & { response: unknown };
   "GET /api/v1/inbox/patches": { response: W.AppliedPatch[] };
+  "GET /api/v1/inbox/history": { response: W.InboxHistoryEntry[] };
   "POST /api/v1/inbox/patches/:id/undo": { response: unknown };
 
   // Backups (#84, #95)

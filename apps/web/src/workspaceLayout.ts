@@ -29,11 +29,12 @@ export function shellLayout(viewportWidth: number, viewportHeight: number, colla
 export type ListWorkspace = "tasks" | "calendar" | "notes" | "inbox" | "decisions" | "openPoints" | "knowledge" | "settings" | "reference";
 
 /** List widths are content-specific clamps, never permanent percentages. */
-export const listClamps: Record<ListWorkspace, { min: number; max: number }> = {
+export const listClamps: Record<ListWorkspace, { min: number; max?: number; detailMin?: number }> = {
   tasks: { min: 460, max: 640 },
   calendar: { min: 320, max: 480 },
   notes: { min: 360, max: 520 },
-  inbox: { min: 380, max: 520 },
+  // No maximum (#240): the user may give the list all the room they want. The reading pane keeps 360px.
+  inbox: { min: 380, detailMin: 360 },
   decisions: { min: 380, max: 560 },
   openPoints: { min: 380, max: 560 },
   knowledge: { min: 360, max: 520 },
@@ -43,9 +44,14 @@ export const listClamps: Record<ListWorkspace, { min: number; max: number }> = {
 
 /** The detail pane keeps at least this much before the list may grow towards its maximum. */
 export const detailMinWidth = 400;
+/** The divider column between the panes (grid column in styles.css). */
+export const dividerWidth = 12;
+
+/** The width the reading pane keeps, and the room reserved for it: a workspace with its own minimum is exact about the divider too. */
+export const detailReserve = (workspace: ListWorkspace) => { const own = listClamps[workspace].detailMin; return own === undefined ? detailMinWidth : own + dividerWidth; };
 
 export function clampListWidth(width: number, workspace: ListWorkspace, containerWidth: number) {
-  const { min, max } = listClamps[workspace];
-  const roomy = Math.max(min, Math.min(max, containerWidth - detailMinWidth));
+  const { min, max = Number.POSITIVE_INFINITY } = listClamps[workspace];
+  const roomy = Math.max(min, Math.min(max, containerWidth - detailReserve(workspace)));
   return Math.round(Math.min(Math.max(width, min), roomy));
 }

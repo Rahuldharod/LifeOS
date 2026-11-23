@@ -45,6 +45,7 @@ async function tab(name: string) {
   await act(async () => control.click());
 }
 
+const focusedTitle = () => document.querySelector(".inbox-row.focused .inbox-row-open strong")?.textContent;
 const queueText = () => document.querySelector("[aria-label='Review queue']")?.textContent ?? "";
 const press = async (key: string, target: EventTarget = document.body, init: KeyboardEventInit = {}) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })); });
 
@@ -126,7 +127,9 @@ describe("InboxWorkspace", () => {
     const nearMidnight = review("near-midnight", "Auckland today", { created_at: "2026-10-10T12:30:00.000Z" });
     const priorDay = review("prior-day", "Auckland yesterday", { created_at: "2026-10-09T12:29:59.000Z" });
     await render({ reviews: [nearMidnight, priorDay], selectedId: "near-midnight", displayTimeZone: "Pacific/Auckland", now: new Date("2026-10-11T02:00:00.000Z") });
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Auckland todayCreate task · 2026-10-11");
+    // Grouped by the Auckland day: the near-midnight item is Today (shown by time), the other Yesterday (shown by date).
+    expect([...document.querySelectorAll(".inbox-date")].map((heading) => heading.textContent)).toEqual(["Today", "Yesterday"]);
+    expect([...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .c-time")].map((cell) => cell.textContent)).toEqual(["01:30", "10 Oct"]);
     await click("Advanced");
     await choose("Filter by created period", "today");
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Auckland today");
@@ -161,7 +164,9 @@ describe("InboxWorkspace", () => {
     await act(async () => root!.render(<InboxWorkspace reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" error="Could not load proposals" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Could not load proposals");
     await act(async () => root!.render(<InboxWorkspace reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
-    expect(document.body.textContent).toContain("Inbox clear");
+    expect(document.body.textContent).toContain("Inbox zero");
+    expect(document.body.textContent).toContain("Nothing waiting.");
+    expect(document.body.textContent).not.toContain("See History"); // no handler, no button
   });
 
   it("explains read-only state and disables decisions", async () => {
@@ -240,11 +245,35 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
     expect(heading()).toBe("Bravo task");
   });
 
-  it("shows Inbox clear after the last item", async () => {
+  it("shows Inbox zero after the last item and moves focus to its heading", async () => {
     await mount("a", [review("a", "Alpha task")]);
     await click("Accept task");
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Inbox clear");
+    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Inbox zero");
+    expect(document.activeElement?.textContent).toBe("Inbox zero");
     expect(document.querySelector("[aria-label='Review detail']")?.textContent).toContain("Select a proposal");
+  });
+
+  it("shows today's count and a working See History button on Inbox zero", async () => {
+    const onSeeHistory = vi.fn();
+    await render({ reviews: [], processedToday: 4, onSeeHistory });
+    expect(document.querySelector("h3")?.textContent).toBe("Inbox zero");
+    expect(queueText()).toContain("You processed 4 items today.");
+    expect(document.querySelector("[aria-label='Review queue'] p b")?.textContent).toBe("4");
+    await click("See History");
+    expect(onSeeHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("says Nothing waiting when nothing was processed today", async () => {
+    await render({ reviews: [], processedToday: 0, onSeeHistory: () => undefined });
+    expect(queueText()).toContain("Nothing waiting.");
+    expect(queueText()).not.toContain("You processed");
+  });
+
+  it("keeps No matching proposals, not Inbox zero, while filters hide items", async () => {
+    await render({ processedToday: 3, onSeeHistory: () => undefined });
+    await act(async () => { const input = document.querySelector("input[type='search']") as HTMLInputElement; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "zzz"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(queueText()).toContain("No matching proposals");
+    expect(queueText()).not.toContain("Inbox zero");
   });
 
   it("offers Clear filters when filters hide the remaining items", async () => {
@@ -272,13 +301,13 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
     await click("Next proposal");
     expect(heading()).toBe("Bravo task");
     expect(opened.at(-1)).toEqual(["b", undefined]);
-    await press("ArrowDown");
+    await click("Next proposal");
     expect(heading()).toBe("Charlie decision");
     expect(button("Next proposal").disabled).toBe(true);
-    await press("ArrowUp");
+    await click("Previous proposal");
     expect(heading()).toBe("Bravo task");
     await press("ArrowDown", document.querySelector("[aria-label='Proposed title']")!);
-    expect(heading()).toBe("Bravo task");
+    expect(focusedTitle()).toBe("Bravo task"); // typing in a field: the key does nothing
   });
 });
 
@@ -298,6 +327,20 @@ describe("InboxWorkspace keyboard shortcuts", () => {
     await render({ reviews: reviews(), selectedId: "t", onAccept: accept, onReject: reject });
     await press("R");
     expect(reject).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "t" }) }));
+  });
+
+  it("A merges an Open merge proposal, but asks to open a closed one first", async () => {
+    const accept = vi.fn(async () => true);
+    const merge = review("m", "Merge Ana Silva into A. Silva", { created_at: "2026-10-10T11:00:00Z", review_type: "person-merge", target_object_type: "person", proposed_fields: {} });
+    await render({ reviews: [merge, ...reviews()], selectedId: "m", onAccept: accept });
+    await press("a");
+    expect(accept).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "m" }) }));
+    act(() => root?.unmount()); accept.mockClear();
+    await render({ reviews: [merge, ...reviews()], selectedId: "t", onAccept: accept });
+    await press("k");
+    await press("a");
+    expect(accept).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Merge proposals need a choice: open it to decide.");
   });
 
   it("S saves edits; A waits until they are saved", async () => {
@@ -376,16 +419,13 @@ describe("InboxWorkspace bulk actions", () => {
     expect(opened).toHaveBeenLastCalledWith("l", { replace: true });
   });
 
-  it("bulk Reject asks first, includes link proposals, and reports failures", async () => {
+  it("bulk Reject does not ask first, includes link proposals, and reports failures", async () => {
     const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
     const decideMany = vi.fn(async () => ({ decided: ["b"], failures: ["Link owner: Conflict"] }));
     await render({ reviews: reviews(), selectedId: "a", onDecideMany: decideMany });
     await tick("Bravo task"); await tick("Link owner");
     await click("Reject selected (2)");
-    expect(confirm).toHaveBeenCalledWith("Reject 2 proposals? This cannot be undone.");
-    expect(decideMany).not.toHaveBeenCalled();
-    confirm.mockReturnValue(true);
-    await click("Reject selected (2)");
+    expect(confirm).not.toHaveBeenCalled();
     expect(decideMany).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ frontmatter: expect.objectContaining({ id: "l" }) })]), "rejected");
     expect(document.querySelector("[role='alert']")?.textContent).toContain("1 not rejected: Link owner: Conflict");
   });
@@ -402,5 +442,82 @@ describe("InboxWorkspace bulk actions", () => {
     await render({ reviews: reviews(), selectedId: "a", readOnly: true });
     await tick("Alpha task");
     expect(([...document.querySelectorAll("button")].find((item) => item.textContent === "Accept selected (1)") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("InboxWorkspace grouped list (#237)", () => {
+  const now = new Date("2026-10-10T12:00:00Z");
+  const objects = [object("meeting-1", "meeting", "Alpha sync"), object("meeting-2", "meeting", "Beta review"), object("p1", "person", "Paula Martin")];
+  const rowTitles = () => [...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .inbox-row-open strong")].map((item) => item.textContent);
+  const sources = () => [...document.querySelectorAll(".inbox-source")].map((item) => item.textContent?.replace(/\s+/g, " ").trim());
+  const detailTitle = () => document.querySelector("[aria-label='Review detail'] h2")?.textContent;
+  const items = [
+    review("a1", "Alpha newest", { created_at: "2026-10-10T09:00:00Z" }),
+    review("b1", "Beta item", { created_at: "2026-10-10T08:00:00Z", source_meeting_id: "meeting-2", target_object_type: "decision" }),
+    review("a2", "Alpha older", { created_at: "2026-10-10T05:00:00Z", proposed_fields: { owner_person_id: "p1", due_on: "2026-10-28" }, primary_project_id: "pr1", confidence_label: "Low" }),
+    review("o1", "Run item", { created_at: "2026-10-01T05:00:00Z", source_meeting_id: undefined, agent_run_id: "run-7", review_type: "summary", target_object_type: "meeting", proposed_fields: { summary: "s" } }),
+    review("x1", "Loose item", { created_at: "2026-10-01T04:00:00Z", source_meeting_id: undefined })
+  ];
+  const props = { reviews: items, objects, now, selectedId: "a1", choices: { people: [{ id: "p1", title: "Paula Martin" }], projects: [{ id: "pr1", title: "Store rollout" }], clients: [], products: [] } };
+  afterEach(() => { try { localStorage.clear(); } catch { /* none */ } });
+
+  it("groups by date, then Source meeting, Agent run and Other, with counts, and lists rows in that order", async () => {
+    await render(props);
+    expect([...document.querySelectorAll(".inbox-date")].map((item) => item.textContent)).toEqual(["Today", "Older"]);
+    expect(sources()).toEqual(["▾ Meeting · Alpha sync 2", "▾ Meeting · Beta review 1", "▾ Agent run · 1 Oct 07:00 1", "▾ Other 1"]);
+    expect(rowTitles()).toEqual(["Alpha newest", "Alpha older", "Beta item", "Run item", "Loose item"]);
+  });
+
+  it("shows the Review kind badge and Owner, Due, Project and Time cells", async () => {
+    await render(props);
+    const badges = [...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .inbox-badge")].map((item) => item.textContent);
+    expect(badges).toEqual(["Task", "Task", "Decision", "Summary", "Task"]);
+    const older = document.querySelectorAll(".inbox-row:not(.inbox-colhead)")[1]!;
+    expect([".c-owner", ".c-due", ".c-project", ".c-time"].map((cell) => older.querySelector(cell)?.textContent)).toEqual(["Paula Martin", "28 Oct", "Store rollout", "07:00"]);
+    expect(older.querySelector(".inbox-low")?.getAttribute("data-tip")).toContain("Low confidence");
+    expect(document.querySelectorAll(".inbox-low[data-tip]")).toHaveLength(1);
+    expect(document.querySelector(".inbox-legend")?.textContent).toContain("Low confidence");
+  });
+
+  it("collapses a group and moves focus with the arrow keys over it", async () => {
+    await render({ ...props, selectedId: "a2" });
+    const header = [...document.querySelectorAll(".inbox-source")].find((item) => item.textContent?.includes("Alpha sync")) as HTMLButtonElement;
+    await act(async () => header.click());
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(rowTitles()).toEqual(["Beta item", "Run item", "Loose item"]);
+    expect(focusedTitle()).toBe("Beta item"); // the focused row was collapsed away
+    await press("ArrowDown");
+    expect(focusedTitle()).toBe("Run item");
+    expect(detailTitle()).toBe("Alpha older");
+    await act(async () => header.click());
+    expect(rowTitles()).toHaveLength(5);
+  });
+
+  it("grouping works inside a tab", async () => {
+    await render(props);
+    await tab("Decision");
+    expect(sources()).toEqual(["▾ Meeting · Beta review 1"]);
+    await tab("Summary");
+    expect(sources()).toEqual(["▾ Agent run · 1 Oct 07:00 1"]);
+  });
+
+  it("auto-advance follows the grouped order, not the time order", async () => {
+    await render(props);
+    await click("Accept task"); // by time Beta item is next; in the grouped list Alpha older is
+    expect(detailTitle()).toBe("Alpha older");
+  });
+
+  it("offers Auto, 1 line and 2 lines; 2 lines puts Owner, Due and Project on a sub line, and the choice is remembered", async () => {
+    await render(props);
+    expect(document.querySelector(".inbox-colhead")).not.toBeNull();
+    await click("2 lines");
+    expect(document.querySelector(".inbox-colhead")).toBeNull();
+    expect(document.querySelectorAll(".inbox-row-sub")[1]?.textContent).toBe("Paula MartinDue 28 OctStore rollout");
+    expect(localStorage.getItem("lifeos.inboxRowLayout")).toBe("two");
+    act(() => root?.unmount()); document.body.innerHTML = "";
+    await render(props);
+    expect(document.querySelector("[aria-label='Row layout'] [aria-pressed='true']")?.textContent).toBe("2 lines");
+    await click("Auto");
+    expect(localStorage.getItem("lifeos.inboxRowLayout")).toBeNull();
   });
 });

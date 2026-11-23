@@ -635,7 +635,7 @@ textarea { padding-right: max(24px, calc(100% - 85ch - 24px)); }
    remembered width; the detail keeps at least 400px before the list may grow. */
 [hidden] { display: none !important; }
 .shell-canvas:has(> .pane-workspace) { height: 100%; }
-.pane-workspace { --list-width: clamp(var(--list-min), var(--split-width, 36%), min(var(--list-max), calc(100% - 400px))); flex: 1 1 0 !important; display: grid; grid-template-columns: var(--list-width) 12px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: min(520px, 70dvh); margin-top: var(--space-2); overflow: hidden; border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.pane-workspace { --list-width: clamp(var(--list-min), var(--split-width, 36%), min(var(--list-max, 100%), calc(100% - var(--detail-reserve, 400px)))); flex: 1 1 0 !important; display: grid; grid-template-columns: var(--list-width) 12px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: min(520px, 70dvh); margin-top: var(--space-2); overflow: hidden; border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
 .pane-workspace[data-workspace="settings"] { grid-template-columns: clamp(var(--list-min), 26%, var(--list-max)) minmax(0, 1fr); }
 .pane-workspace > [data-pane] { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .pane-workspace > [data-pane="list"] { padding: var(--space-5); background: var(--color-surface); }
@@ -706,7 +706,7 @@ textarea { padding-right: 24px !important; }
 [data-band="wide"] .decision-detail > .decision-links { grid-column: 2; grid-row: 1 / span 20; margin-top: 0; padding: var(--space-4); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); }
 
 /* Reference data: nested list/detail only when both columns fit; otherwise list → detail. */
-.reference-settings { --list-width: clamp(var(--list-min), var(--split-width, 38%), min(var(--list-max), calc(100% - 400px))); grid-template-columns: var(--list-width) 12px minmax(0, 1fr) !important; }
+.reference-settings { --list-width: clamp(var(--list-min), var(--split-width, 38%), min(var(--list-max, 100%), calc(100% - var(--detail-reserve, 400px)))); grid-template-columns: var(--list-width) 12px minmax(0, 1fr) !important; }
 .reference-settings[data-stacked="true"] { display: block !important; }
 .reference-settings[data-stacked="true"].detail-open > [data-pane="list"], .reference-settings[data-stacked="true"]:not(.detail-open) > [data-pane="detail"] { display: none; }
 .reference-settings[data-stacked="true"] .reference-back { display: inline-flex; }

@@ -15,12 +15,14 @@ test("accept and reject move to the next proposal; arrows and Previous/Next move
   await rows.first().click();
   await expect(heading).toHaveText(titles[0]!);
   await expect(page.getByRole("button", { name: "Previous proposal" })).toBeDisabled();
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown"); // #238: arrows move focus only; Enter opens
+  await expect(heading).toHaveText(titles[0]!);
+  await page.keyboard.press("Enter");
   await expect(heading).toHaveText(titles[1]!);
   await page.getByRole("button", { name: "Next proposal" }).click();
   await expect(heading).toHaveText(titles[2]!);
   await expect(page.getByRole("button", { name: "Next proposal" })).toBeDisabled();
-  await page.keyboard.press("ArrowUp");
+  await page.getByRole("button", { name: "Previous proposal" }).click();
   await expect(heading).toHaveText(titles[1]!);
 
   // Middle item accepted: the item below opens and the URL follows it.
@@ -31,11 +33,11 @@ test("accept and reject move to the next proposal; arrows and Previous/Next move
   await expect(rows).toHaveCount(2);
 
   // Bottom item rejected: the item above opens.
-  await page.getByRole("button", { name: "Reject" }).click();
+  await page.getByRole("button", { name: "Reject", exact: true }).click();
   await expect(heading).toHaveText(titles[0]!);
 
   // Last visible item: other proposals are hidden by the search, so the Inbox offers to clear it.
-  await page.getByRole("button", { name: "Reject" }).click();
+  await page.getByRole("button", { name: "Reject", exact: true }).click();
   const queue = page.getByRole("region", { name: "Review queue" });
   await expect(queue).toContainText("No matching proposals");
   await expect(page).toHaveURL(/\/inbox$/);

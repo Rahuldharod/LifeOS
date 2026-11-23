@@ -185,6 +185,14 @@ draft("review-decision-1", { kind: "decision", draft_key: "browser-review-decisi
 for (const n of [1, 2, 3]) draft(`auto-advance-${n}`, { kind: "task", draft_key: `browser-auto-advance-${n}`, origin: "agent-extracted", confidence: "High", title: `Auto-advance proposal ${n}` }, "Extracted for the auto-advance test.");
 // Inbox bulk actions: proposals that only inbox-bulk.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
 for (const [n, kind] of [[1, "task"], [2, "task"], [3, "decision"]]) draft(`bulk-${n}`, { kind, draft_key: `browser-bulk-${n}`, origin: "agent-extracted", confidence: "High", title: `Bulk proposal ${n}` }, "Extracted for the bulk actions test.");
+// #238 keyboard triage: proposals that only inbox-keyboard-triage.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const n of [1, 2, 3, 4]) draft(`triage-${n}`, { kind: "task", draft_key: `browser-triage-${n}`, origin: "agent-extracted", confidence: "High", title: `Triage proposal ${n}` }, "Extracted for the keyboard triage test.");
+// #239 row and group actions: proposals that only inbox-row-actions.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const n of [1, 2, 3, 4]) draft(`rowact-${n}`, { kind: "task", draft_key: `browser-rowact-${n}`, origin: "agent-extracted", confidence: "High", title: `Row action proposal ${n}` }, "Extracted for the row actions test.");
+// #241 undo: proposals that only inbox-undo.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const n of [1, 2, 3, 4]) draft(`undo-${n}`, { kind: "task", draft_key: `browser-undo-${n}`, origin: "agent-extracted", confidence: "High", title: `Undo proposal ${n}` }, "Extracted for the undo test.");
+// #243 Inbox History: proposals that only inbox-history.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const n of [1, 2, 3]) draft(`history-${n}`, { kind: "task", draft_key: `browser-history-${n}`, origin: "agent-extracted", confidence: "High", title: `History proposal ${n}` }, "Extracted for the Inbox History test.");
 for (const [name, content] of Object.entries(files)) {
   const file = path.join(drafts, name);
   await writeFile(file, content);
