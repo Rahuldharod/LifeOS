@@ -40,3 +40,86 @@ export const createdWindow = (period: CreatedPeriod, now: Date, timeZone: string
   const startDay = period === "today" ? today : addCalendarDays(today, -(period === "7d" ? 6 : 29));
   return { from: zonedMidnight(startDay, timeZone).getTime(), to: zonedMidnight(addCalendarDays(today, 1), timeZone).getTime() };
 };
+
+/** What a Review Item is, in the words the list badge uses (CONTEXT.md: Review kind). Create items follow their target type. */
+export type ReviewKind = "Task" | "Decision" | "Open point" | "Knowledge note" | "Change" | "Summary" | "Link" | "Merge" | (string & {});
+const createKinds: Record<string, ReviewKind> = { task: "Task", decision: "Decision", "open-point": "Open point", "knowledge-note": "Knowledge note" };
+export const reviewKind = (review: InboxReview): ReviewKind => {
+  const type = reviewType(review);
+  if (type === "update") return "Change";
+  if (type === "summary") return "Summary";
+  if (type === "link-resolution") return "Link";
+  if (type === "person-merge") return "Merge";
+  const target = text(review.frontmatter.target_object_type);
+  return createKinds[target] ?? (target ? `${target[0]!.toUpperCase()}${target.slice(1).replaceAll("-", " ")}` : "Task");
+};
+export const kindClass = (kind: ReviewKind) => `kind-${kind.toLowerCase().replaceAll(" ", "-")}`;
+
+export type DateBucket = "Today" | "Yesterday" | "Earlier this week" | "Older";
+const dayMs = 86_400_000;
+const midday = (key: string) => Date.parse(`${key}T12:00:00.000Z`);
+/** The calendar day an instant falls on in `timeZone` ("YYYY-MM-DD"). */
+const dayOf = (value: string | Date, timeZone: string) => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).format(new Date(value));
+export const dateBucket = (iso: string, now: Date, timeZone: string): DateBucket => {
+  if (Number.isNaN(Date.parse(iso))) return "Older";
+  const days = Math.round((midday(dayOf(now, timeZone)) - midday(dayOf(iso, timeZone))) / dayMs);
+  return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? "Earlier this week" : "Older";
+};
+
+export type SourceGroup = { key: string; label: string; items: InboxReview[] };
+export type DateGroup = { bucket: DateBucket; sources: SourceGroup[] };
+export const groupKey = (bucket: DateBucket, source: SourceGroup) => `${bucket}|${source.key}`;
+const dateOrder: DateBucket[] = ["Today", "Yesterday", "Earlier this week", "Older"];
+const created = (review: InboxReview) => Date.parse(String(review.frontmatter.created_at)) || 0;
+const newestFirst = (a: InboxReview, b: InboxReview) => created(b) - created(a) || a.frontmatter.id.localeCompare(b.frontmatter.id);
+
+/** Date, then Source meeting; items with none group by the Agent run that wrote them, then "Other". Groups run newest item first. */
+export function groupReviews(reviews: InboxReview[], { now, timeZone, meetingTitle }: { now: Date; timeZone: string; meetingTitle: (id: string) => string | undefined }): DateGroup[] {
+  const sourceOf = (review: InboxReview) => {
+    const meetingId = text(review.frontmatter.source_meeting_id); const runId = text(review.frontmatter.agent_run_id);
+    if (meetingId) return { key: `meeting:${meetingId}`, label: `Meeting · ${meetingTitle(meetingId) ?? "unavailable"}` };
+    if (runId) return { key: `run:${runId}`, label: `Agent run · ${runId}` };
+    return { key: "other", label: "Other" };
+  };
+  const byBucket = new Map<DateBucket, Map<string, SourceGroup>>();
+  for (const review of [...reviews].sort(newestFirst)) {
+    const bucket = dateBucket(String(review.frontmatter.created_at), now, timeZone); const source = sourceOf(review);
+    const sources = byBucket.get(bucket) ?? new Map<string, SourceGroup>(); byBucket.set(bucket, sources);
+    const group = sources.get(source.key) ?? { ...source, items: [] }; sources.set(source.key, group);
+    group.items.push(review);
+  }
+  return dateOrder.filter((bucket) => byBucket.has(bucket)).map((bucket) => ({
+    bucket,
+    // Items are already newest first, so a group's first item is its newest.
+    sources: [...byBucket.get(bucket)!.values()].sort((a, b) => created(b.items[0]!) - created(a.items[0]!) || a.key.localeCompare(b.key))
+  }));
+}
+
+/** The id next to `id` in the visual order, skipping ids in `hidden` (collapsed groups). Unknown `id` gives the first shown id. */
+export function adjacentId(ordered: string[], hidden: Set<string>, id: string, direction: -1 | 1): string | undefined {
+  const index = ordered.indexOf(id);
+  if (index < 0) return ordered.find((candidate) => !hidden.has(candidate));
+  for (let at = index + direction; at >= 0 && at < ordered.length; at += direction) if (!hidden.has(ordered[at]!)) return ordered[at];
+  return undefined;
+}
+
+export type RowCells = { kind: ReviewKind; owner?: string; due?: string; project?: string; time: string; low: boolean };
+export type RowLookups = { now: Date; timeZone: string; personName: (id: string) => string | undefined; projectName: (id: string) => string | undefined };
+const shortDay = (key: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(midday(key));
+/** Owner, Due, Project and Time for one list row, read the way the detail pane reads them. */
+export function reviewRowCells(review: InboxReview, { now, timeZone, personName, projectName }: RowLookups): RowCells {
+  const proposed = (review.frontmatter.proposed_fields ?? {}) as Record<string, unknown>;
+  const target = text(review.frontmatter.target_object_type); const create = reviewType(review) === "create";
+  const ownerId = text(proposed.owner_person_id); const projectId = text(review.frontmatter.primary_project_id); const due = text(proposed.due_on);
+  const iso = String(review.frontmatter.created_at);
+  const time = Number.isNaN(Date.parse(iso)) ? "" : dayOf(iso, timeZone) === dayOf(now, timeZone)
+    ? new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone }).format(new Date(iso))
+    : shortDay(dayOf(iso, timeZone));
+  return {
+    kind: reviewKind(review),
+    owner: create && editableByTarget[target]?.includes("owner_person_id") ? (ownerId ? personName(ownerId) ?? "Unknown person" : "Me") : undefined,
+    due: /^\d{4}-\d{2}-\d{2}$/.test(due) ? shortDay(due) : undefined,
+    project: projectId ? projectName(projectId) ?? "Unknown project" : undefined,
+    time, low: review.frontmatter.confidence_label === "Low"
+  };
+}

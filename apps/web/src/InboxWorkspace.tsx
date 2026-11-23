@@ -5,9 +5,10 @@ import { InboxQueue } from "./InboxQueue.js";
 import { InboxReadingPane } from "./InboxReadingPane.js";
 import { InboxToast, useInboxToast } from "./InboxToast.js";
 import { useInboxKeys } from "./useInboxKeys.js";
-import { createdWindow, errorText, inboxTabs, needsChoice, proposalTab, reviewType, type ActionResult, type BulkResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
+import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, reviewRowCells, reviewType, type ActionResult, type BulkResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
 import { useSplitPane } from "./splitPane.js";
 import { useListDetailReturn } from "./useListDetailReturn.js";
+import { useInboxRowLayout } from "./useInboxRowLayout.js";
 import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 import "./InboxWorkspace.css";
 
@@ -31,7 +32,9 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const [deciding, setDeciding] = useState<InboxReview>(); const { notification, notify } = useInboxToast(); const [actionError, setActionError] = useState("");
   const [activeId, setActiveId] = useState<string>(); const active = useRef(new Set<string>());
   const [checked, setChecked] = useState<Set<string>>(() => new Set()); const [bulkRunning, setBulkRunning] = useState(false);
-  const detailRef = useRef<HTMLElement>(null);
+  const detailRef = useRef<HTMLElement>(null); const queueRef = useRef<HTMLElement>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const rowLayout = useInboxRowLayout(queueRef, narrow && openedId !== undefined);
 
   const openedRef = useRef(openedId); openedRef.current = openedId;
   useEffect(() => { if (selectedId !== undefined) setOpenedId(selectedId); }, [selectedId]);
@@ -48,8 +51,13 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     return true;
   });
   const tabCounts = new Map<InboxTab, number>(inboxTabs.map((name) => [name, name === "All" ? filtered.length : filtered.filter((review) => proposalTab(review) === name).length]));
-  const visible = filtered.filter((review) => tab === "All" || proposalTab(review) === tab)
-    .sort((a, b) => String(b.frontmatter.created_at).localeCompare(String(a.frontmatter.created_at)));
+  /** The queue is grouped by date, then Source meeting / Agent run; `visible` is the same items in that on-screen order. */
+  const groups = groupReviews(filtered.filter((review) => tab === "All" || proposalTab(review) === tab), { now, timeZone: displayTimeZone, meetingTitle: (id) => { const title = objectById.get(id)?.frontmatter.title; return typeof title === "string" ? title : undefined; } });
+  const visible = groups.flatMap((group) => group.sources.flatMap((source) => source.items));
+  /** Items in collapsed groups stay in `visible` (ticks, counts) but ↑/↓ and auto-advance skip them. */
+  const hiddenIds = new Set(groups.flatMap((group) => group.sources.filter((source) => collapsed.has(groupKey(group.bucket, source))).flatMap((source) => source.items.map((review) => review.frontmatter.id))));
+  const cellsFor = (review: InboxReview) => reviewRowCells(review, { now, timeZone: displayTimeZone, personName: (id) => labels.get(id)?.label ?? choices.people.find((person) => person.id === id)?.title, projectName: (id) => choices.projects.find((project) => project.id === id)?.title ?? (typeof objectById.get(id)?.frontmatter.title === "string" ? String(objectById.get(id)!.frontmatter.title) : undefined) });
+  const toggleGroup = (key: string) => setCollapsed((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
   /** Bulk actions only touch ticked items that are on screen now. */
   const ticked = visible.filter((review) => checked.has(review.frontmatter.id));
   const acceptable = ticked.filter((review) => !needsChoice(review));
@@ -68,11 +76,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const toggleChecked = (id: string) => setChecked((current) => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
   const visibleIds = visible.map((review) => review.frontmatter.id);
   /** PB-035: the item below in the list, or the one above when the decided item was the bottom one. */
-  const nextAfter = (id: string) => {
-    const index = visibleIds.indexOf(id);
-    if (index < 0) return visibleIds[0];
-    return visibleIds[index + 1] ?? visibleIds[index - 1];
-  };
+  const nextAfter = (id: string) => adjacentId(visibleIds, hiddenIds, id, 1) ?? adjacentId(visibleIds, hiddenIds, id, -1);
   /** PB-035: once a decision is recorded, open the next waiting item; after the last one, show the empty list state. */
   const advanceFrom = (id: string, nextId: string | undefined) => {
     if (openedRef.current !== undefined && openedRef.current !== id) return; // the user already moved on while the decision was saving
@@ -95,8 +99,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   /** Link-resolution cards run their own requests; once one finishes, the Inbox moves on the same way. */
   const linkFinished = (review: InboxReview, nextId: string | undefined, outcome: Outcome) => { notify(`Proposal ${outcome}`); advanceFrom(review.frontmatter.id, nextId); };
   const position = selected ? visibleIds.indexOf(selected.frontmatter.id) : -1;
-  const previousId = position > 0 ? visibleIds[position - 1] : undefined;
-  const followingId = position >= 0 ? visibleIds[position + 1] : undefined;
+  const previousId = selected ? adjacentId(visibleIds, hiddenIds, selected.frontmatter.id, -1) : undefined;
+  const followingId = selected && position >= 0 ? adjacentId(visibleIds, hiddenIds, selected.frontmatter.id, 1) : undefined;
   const step = useRef<(direction: -1 | 1) => boolean>(() => false);
   step.current = (direction) => { const target = direction < 0 ? previousId : followingId; if (target) open(target); return Boolean(target); };
 
@@ -109,8 +113,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     if (outcome === "rejected" && !globalThis.confirm(`Reject ${targets.length === 1 ? "1 proposal" : `${targets.length} proposals`}? This cannot be undone.`)) return;
     const targetIds = new Set(targets.map((review) => review.frontmatter.id));
     const openId = openedRef.current;
-    const openIndex = openId ? visibleIds.indexOf(openId) : -1;
-    const nextId = visibleIds.slice(openIndex + 1).find((id) => !targetIds.has(id)) ?? visibleIds.slice(0, Math.max(openIndex, 0)).reverse().find((id) => !targetIds.has(id));
+    const skip = new Set([...hiddenIds, ...targetIds]);
+    const nextId = openId ? adjacentId(visibleIds, skip, openId, 1) ?? adjacentId(visibleIds, skip, openId, -1) : undefined;
     setBulkRunning(true); setActionError("");
     try {
       const result = onDecideMany ? await onDecideMany(targets, outcome) : await decideEach(targets, outcome);
@@ -161,9 +165,9 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const ref = useListDetailReturn(selected?.frontmatter.id);
   return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" style={split.style}>
     <InboxToast message={notification} />
-    <InboxQueue visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId}
+    <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} onRowMode={rowLayout.setMode} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId}
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
-      hidden={narrow && Boolean(selected)} displayTimeZone={displayTimeZone}
+      hidden={narrow && Boolean(selected)}
       onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters}
       onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={() => setChecked(new Set())} onDecideTicked={(outcome) => void decideTicked(outcome)} />
     {!narrow && <div {...split.dividerProps} />}

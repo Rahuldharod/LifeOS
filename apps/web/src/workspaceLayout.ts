@@ -33,7 +33,8 @@ export const listClamps: Record<ListWorkspace, { min: number; max: number }> = {
   tasks: { min: 460, max: 640 },
   calendar: { min: 320, max: 480 },
   notes: { min: 360, max: 520 },
-  inbox: { min: 380, max: 520 },
+  // Wide enough for the 1-line row layout (760px, #237); the detail pane still keeps detailMinWidth.
+  inbox: { min: 380, max: 900 },
   decisions: { min: 380, max: 560 },
   openPoints: { min: 380, max: 560 },
   knowledge: { min: 360, max: 520 },

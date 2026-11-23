@@ -1,21 +1,29 @@
 import React from "react";
 import type { LifeObject, ObjectLink } from "@lifeos/contracts";
 import { WorkspaceFilterBar } from "./WorkspacePatterns.js";
-import { InboxRow } from "./InboxRow.js";
-import { inboxTabs, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome } from "./inboxModel.js";
+import { InboxRow, LowConfidenceDot } from "./InboxRow.js";
+import { groupKey, inboxTabs, type CreatedPeriod, type DateGroup, type InboxReview, type InboxTab, type Outcome, type RowCells } from "./inboxModel.js";
+import { rowLayoutModes, type RowLayoutMode } from "./useInboxRowLayout.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
-export function InboxQueue({ visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden, displayTimeZone,
-  onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
+export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
+  onRowMode, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
+  paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean;
+  onRowMode: (mode: RowLayoutMode) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
-  openedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean; displayTimeZone: string;
+  openedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
   onTab: (tab: InboxTab) => void; onQuery: (query: string) => void; onToggleAdvanced: () => void; onMeeting: (id: string) => void; onPeriod: (period: CreatedPeriod) => void; onClearFilters: () => void;
   onOpen: (id: string) => void; onToggleChecked: (id: string) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
 }) {
-  return <section className="inbox-queue" data-pane="list" aria-label="Review queue" hidden={hidden}>
+  return <section ref={paneRef} className={`inbox-queue ${twoLine ? "two-line" : "one-line"}`} data-pane="list" aria-label="Review queue" hidden={hidden}>
     <header className="workspace-heading"><div><span>INBOX · {visible.length}</span><h2>Review proposals</h2><p className="muted">Nothing becomes a commitment until you accept it.</p></div></header>
-    <div className="workspace-tabs inbox-tabs" role="tablist" aria-label="Proposal type">
-      {inboxTabs.map((name, index) => <button role="tab" key={name} aria-selected={tab === name} className={tab === name ? "selected" : ""} title={`${name} (press ${index + 1})`} aria-keyshortcuts={String(index + 1)} onClick={() => onTab(name)}>{name} <small>{tabCounts.get(name)}</small></button>)}
+    <div className="workspace-tabs inbox-tabs">
+      <div className="inbox-tablist" role="tablist" aria-label="Proposal type">
+        {inboxTabs.map((name, index) => <button role="tab" key={name} aria-selected={tab === name} className={tab === name ? "selected" : ""} title={`${name} (press ${index + 1})`} aria-keyshortcuts={String(index + 1)} onClick={() => onTab(name)}>{name} <small>{tabCounts.get(name)}</small></button>)}
+      </div>
+      <div className="inbox-row-layout" role="group" aria-label="Row layout">
+        {rowLayoutModes.map(({ mode, label }) => <button key={mode} aria-pressed={rowMode === mode} title={mode === "auto" ? "One line with columns when the list is wide, two lines when it is narrow" : `Always ${label}`} onClick={() => onRowMode(mode)}>{label}{mode === "auto" && rowMode === "auto" && <small> · {twoLine ? "2 lines" : "1 line"}</small>}</button>)}
+      </div>
     </div>
     <WorkspaceFilterBar advanced={advanced} onToggleAdvanced={onToggleAdvanced}>
       <input type="search" aria-label="Search proposals" placeholder="Search proposals…" value={query} onChange={(event) => onQuery(event.target.value)} />
@@ -35,7 +43,18 @@ export function InboxQueue({ visible, reviewCount, tabCounts, tab, query, advanc
           <button className="danger" disabled={busy || readOnly || bulkRunning} onClick={() => onDecideTicked("rejected")}>Reject selected ({ticked.length})</button>
         </>}
       </div>
-      <div className="inbox-rows">{visible.map((review) => <InboxRow key={review.frontmatter.id} review={review} opened={openedId === review.frontmatter.id} checked={checked.has(review.frontmatter.id)} displayTimeZone={displayTimeZone} onOpen={onOpen} onToggleChecked={onToggleChecked} />)}</div>
+      <div className="inbox-legend"><LowConfidenceDot legend /> Low confidence: check the evidence before accepting</div>
+      {!twoLine && <div className="inbox-row inbox-colhead" aria-hidden><span className="c-check" /><span className="c-kind">Type</span><span className="c-dot" /><span className="c-title">Item</span><span className="c-owner">Owner</span><span className="c-due">Due</span><span className="c-project">Project</span><span className="c-time">Time</span></div>}
+      <div className="inbox-rows">{groups.map(({ bucket, sources }) => <div key={bucket} className="inbox-date-group">
+        <h3 className="inbox-date">{bucket}</h3>
+        {sources.map((source) => {
+          const key = groupKey(bucket, source); const isCollapsed = collapsed.has(key);
+          return <div key={key} className="inbox-source-group">
+            <button className="inbox-source" aria-expanded={!isCollapsed} aria-label={`${source.label}, ${source.items.length}`} onClick={() => onToggleGroup(key)}><span aria-hidden>{isCollapsed ? "▸" : "▾"}</span> {source.label} <small>{source.items.length}</small></button>
+            {!isCollapsed && source.items.map((review) => <InboxRow key={review.frontmatter.id} review={review} cells={cellsFor(review)} twoLine={twoLine} opened={openedId === review.frontmatter.id} checked={checked.has(review.frontmatter.id)} onOpen={onOpen} onToggleChecked={onToggleChecked} />)}
+          </div>;
+        })}
+      </div>)}</div>
     </>}
   </section>;
 }

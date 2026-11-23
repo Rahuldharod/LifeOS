@@ -126,7 +126,9 @@ describe("InboxWorkspace", () => {
     const nearMidnight = review("near-midnight", "Auckland today", { created_at: "2026-10-10T12:30:00.000Z" });
     const priorDay = review("prior-day", "Auckland yesterday", { created_at: "2026-10-09T12:29:59.000Z" });
     await render({ reviews: [nearMidnight, priorDay], selectedId: "near-midnight", displayTimeZone: "Pacific/Auckland", now: new Date("2026-10-11T02:00:00.000Z") });
-    expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Auckland todayCreate task · 2026-10-11");
+    // Grouped by the Auckland day: the near-midnight item is Today (shown by time), the other Yesterday (shown by date).
+    expect([...document.querySelectorAll(".inbox-date")].map((heading) => heading.textContent)).toEqual(["Today", "Yesterday"]);
+    expect([...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .c-time")].map((cell) => cell.textContent)).toEqual(["01:30", "10 Oct"]);
     await click("Advanced");
     await choose("Filter by created period", "today");
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Auckland today");
@@ -402,5 +404,80 @@ describe("InboxWorkspace bulk actions", () => {
     await render({ reviews: reviews(), selectedId: "a", readOnly: true });
     await tick("Alpha task");
     expect(([...document.querySelectorAll("button")].find((item) => item.textContent === "Accept selected (1)") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("InboxWorkspace grouped list (#237)", () => {
+  const now = new Date("2026-10-10T12:00:00Z");
+  const objects = [object("meeting-1", "meeting", "Alpha sync"), object("meeting-2", "meeting", "Beta review"), object("p1", "person", "Paula Martin")];
+  const rowTitles = () => [...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .inbox-row-open strong")].map((item) => item.textContent);
+  const sources = () => [...document.querySelectorAll(".inbox-source")].map((item) => item.textContent?.replace(/\s+/g, " ").trim());
+  const detailTitle = () => document.querySelector("[aria-label='Review detail'] h2")?.textContent;
+  const items = [
+    review("a1", "Alpha newest", { created_at: "2026-10-10T09:00:00Z" }),
+    review("b1", "Beta item", { created_at: "2026-10-10T08:00:00Z", source_meeting_id: "meeting-2", target_object_type: "decision" }),
+    review("a2", "Alpha older", { created_at: "2026-10-10T05:00:00Z", proposed_fields: { owner_person_id: "p1", due_on: "2026-10-28" }, primary_project_id: "pr1", confidence_label: "Low" }),
+    review("o1", "Run item", { created_at: "2026-10-01T05:00:00Z", source_meeting_id: undefined, agent_run_id: "run-7", review_type: "summary", target_object_type: "meeting", proposed_fields: { summary: "s" } }),
+    review("x1", "Loose item", { created_at: "2026-10-01T04:00:00Z", source_meeting_id: undefined })
+  ];
+  const props = { reviews: items, objects, now, selectedId: "a1", choices: { people: [{ id: "p1", title: "Paula Martin" }], projects: [{ id: "pr1", title: "Store rollout" }], clients: [], products: [] } };
+  afterEach(() => { try { localStorage.clear(); } catch { /* none */ } });
+
+  it("groups by date, then Source meeting, Agent run and Other, with counts, and lists rows in that order", async () => {
+    await render(props);
+    expect([...document.querySelectorAll(".inbox-date")].map((item) => item.textContent)).toEqual(["Today", "Older"]);
+    expect(sources()).toEqual(["▾ Meeting · Alpha sync 2", "▾ Meeting · Beta review 1", "▾ Agent run · run-7 1", "▾ Other 1"]);
+    expect(rowTitles()).toEqual(["Alpha newest", "Alpha older", "Beta item", "Run item", "Loose item"]);
+  });
+
+  it("shows the Review kind badge and Owner, Due, Project and Time cells", async () => {
+    await render(props);
+    const badges = [...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .inbox-badge")].map((item) => item.textContent);
+    expect(badges).toEqual(["Task", "Task", "Decision", "Summary", "Task"]);
+    const older = document.querySelectorAll(".inbox-row:not(.inbox-colhead)")[1]!;
+    expect([".c-owner", ".c-due", ".c-project", ".c-time"].map((cell) => older.querySelector(cell)?.textContent)).toEqual(["Paula Martin", "28 Oct", "Store rollout", "07:00"]);
+    expect(older.querySelector(".inbox-low")?.getAttribute("data-tip")).toContain("Low confidence");
+    expect(document.querySelectorAll(".inbox-low[data-tip]")).toHaveLength(1);
+    expect(document.querySelector(".inbox-legend")?.textContent).toContain("Low confidence");
+  });
+
+  it("collapses a group and moves with the arrow keys over it", async () => {
+    await render(props);
+    const header = [...document.querySelectorAll(".inbox-source")].find((item) => item.textContent?.includes("Alpha sync")) as HTMLButtonElement;
+    await act(async () => header.click());
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(rowTitles()).toEqual(["Beta item", "Run item", "Loose item"]);
+    await press("ArrowDown");
+    expect(detailTitle()).toBe("Beta item");
+    await act(async () => header.click());
+    expect(rowTitles()).toHaveLength(5);
+  });
+
+  it("grouping works inside a tab", async () => {
+    await render(props);
+    await tab("Decision");
+    expect(sources()).toEqual(["▾ Meeting · Beta review 1"]);
+    await tab("Summary");
+    expect(sources()).toEqual(["▾ Agent run · run-7 1"]);
+  });
+
+  it("auto-advance follows the grouped order, not the time order", async () => {
+    await render(props);
+    await click("Accept task"); // by time Beta item is next; in the grouped list Alpha older is
+    expect(detailTitle()).toBe("Alpha older");
+  });
+
+  it("offers Auto, 1 line and 2 lines; 2 lines puts Owner, Due and Project on a sub line, and the choice is remembered", async () => {
+    await render(props);
+    expect(document.querySelector(".inbox-colhead")).not.toBeNull();
+    await click("2 lines");
+    expect(document.querySelector(".inbox-colhead")).toBeNull();
+    expect(document.querySelectorAll(".inbox-row-sub")[1]?.textContent).toBe("Paula MartinDue 28 OctStore rollout");
+    expect(localStorage.getItem("lifeos.inboxRowLayout")).toBe("two");
+    act(() => root?.unmount()); document.body.innerHTML = "";
+    await render(props);
+    expect(document.querySelector("[aria-label='Row layout'] [aria-pressed='true']")?.textContent).toBe("2 lines");
+    await click("Auto");
+    expect(localStorage.getItem("lifeos.inboxRowLayout")).toBeNull();
   });
 });
