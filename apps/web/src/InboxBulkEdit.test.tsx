@@ -51,7 +51,7 @@ async function mount({ fail = [], readOnly = false }: { fail?: string[]; readOnl
   return { calls, accepted };
 }
 
-const fieldButtons = () => [...document.querySelectorAll(".inbox-bulk-edit .inbox-bulk-field > button")].map((button) => button.textContent?.replace(" ▾", ""));
+const fieldButtons = () => [...document.querySelectorAll(".inbox-bulk-edit .inbox-bulk-field > button .inbox-bulk-label")].map((label) => label.textContent);
 const fieldButton = (label: string) => [...document.querySelectorAll<HTMLButtonElement>(".inbox-bulk-edit .inbox-bulk-field > button")].find((button) => button.textContent?.startsWith(`${label}:`))!;
 const toastText = () => document.querySelector(".inbox-toast")?.textContent ?? "";
 const tick = async (title: string) => { const box = document.querySelector<HTMLInputElement>(`[aria-label='Select proposal: ${title}']`)!; await act(async () => box.click()); };
@@ -144,9 +144,78 @@ describe("Inbox Bulk edit", () => {
     expect(document.querySelector(".inbox-bulk")?.textContent).toContain("2 selected");
   });
 
-  it("is off on a read-only Mac", async () => {
+  it("is off on a read-only Mac, and a letter key says why", async () => {
     await mount({ readOnly: true });
     await tick("Task one");
     expect(fieldButton("Project").disabled).toBe(true);
+    await press("j", document.body);
+    expect(document.querySelector("[aria-label='Find project']")).toBeNull();
+    expect(toastText()).toContain("Read-only on this Mac");
+  });
+});
+
+// PB-044: O, D, I, J, C, P open a field's picker for the ticked items, else the Focused item.
+describe("Inbox field keys", () => {
+  it("open the field's picker for the ticked items: J searches projects, I focuses the Priority list, and each button shows its key", async () => {
+    const { calls } = await mount();
+    await tick("Task one"); await tick("Task two");
+    expect([...document.querySelectorAll(".inbox-bulk-key")].map((key) => key.textContent)).toEqual(["O", "D", "I", "J", "C", "P"]);
+    expect(fieldButton("Project").getAttribute("aria-keyshortcuts")).toBe("J");
+    await press("j", document.body);
+    const search = document.querySelector<HTMLInputElement>("[aria-label='Find project']")!;
+    expect(document.activeElement).toBe(search);
+    await typeInto(search, "harb");
+    await press("Enter", search);
+    expect(calls[0]!.map((change) => change.edits)).toEqual([{ primary_project_id: "pr2" }, { primary_project_id: "pr2" }]);
+    await press("i", document.body);
+    expect(document.activeElement).toBe(document.querySelector("[role='listbox'][aria-label='Priority']"));
+    await press("Escape");
+    expect(document.querySelector("[role='listbox'][aria-label='Priority']")).toBeNull();
+    expect(document.querySelector(".inbox-bulk")?.textContent).toContain("2 selected");
+  });
+
+  it("with nothing ticked, edit only the Focused item, then hand focus back to its row", async () => {
+    const { calls } = await mount();
+    const focused = document.querySelector(".inbox-row.focused")!;
+    const id = focused.getAttribute("data-review-id");
+    expect(document.querySelector(".inbox-bulk-edit")).toBeNull();
+    await press("c", document.body);
+    const group = document.querySelector(".inbox-bulk-edit")!;
+    expect(group.getAttribute("aria-label")).toBe("Set a field on the focused item");
+    expect(group.textContent).toContain("Focused item");
+    const search = document.querySelector<HTMLInputElement>("[aria-label='Find client']")!;
+    await press("ArrowDown", search); await press("Enter", search);
+    expect(calls[0]!.map((change) => [change.review.frontmatter.id, change.edits])).toEqual([[id, { primary_client_id: "c1" }]]);
+    expect(document.querySelector(".inbox-bulk-edit")).toBeNull();
+    expect(document.activeElement).toBe(focused.querySelector(".inbox-row-open"));
+    // Esc closes without a change and also goes back to the row.
+    await press("o", document.body);
+    await press("Escape", document.querySelector("[aria-label='Find owner']")!);
+    expect(document.querySelector(".inbox-bulk-edit")).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(document.activeElement).toBe(focused.querySelector(".inbox-row-open"));
+  });
+
+  it("open nothing for a field the targets lack, and say which kinds lack it", async () => {
+    await mount();
+    await tick("Task one"); await tick("Decision one");
+    await press("d", document.body);
+    expect(document.querySelector("[aria-label='Due date']")).toBeNull();
+    expect(toastText()).toContain("Due isn't available for Decisions");
+    await clickButton("Deselect all"); await tick("Summary one");
+    await press("p", document.body);
+    expect(toastText()).toContain("Product isn't available for Summaries");
+  });
+
+  it("skip the Open item while it has unsaved edits, and count it", async () => {
+    const { calls } = await mount();
+    const openTitle = document.querySelector(".inbox-row.selected .inbox-row-open strong")!.textContent!;
+    await typeInto(document.querySelector<HTMLInputElement>("[aria-label='Proposed title']")!, "Typed but not saved");
+    await tick("Task one"); await tick("Task two");
+    await press("p", document.body);
+    const search = document.querySelector<HTMLInputElement>("[aria-label='Find product']")!;
+    await press("ArrowDown", search); await press("Enter", search);
+    expect(calls[0]!.map((change) => change.review.frontmatter.title)).toEqual(["Task one", "Task two"].filter((title) => title !== openTitle));
+    expect(toastText()).toContain("1 skipped (unsaved edits)");
   });
 });

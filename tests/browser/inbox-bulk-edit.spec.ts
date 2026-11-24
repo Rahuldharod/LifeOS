@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { BULK_EDIT_PREFIX, seed } from "./fixtures.js";
 
 // PB-043 Inbox Bulk edit: field buttons for the fields the ticked proposals share; a picked value is set on all of them,
-// they stay pending and ticked, and the toast's Undo puts the old values back. Real local API, synthetic proposals from serve.mjs.
+// they stay pending and ticked, and the toast's Undo puts the old values back. PB-044: letter keys open the pickers. Real local API, synthetic proposals from serve.mjs.
 test("Bulk edit sets a shared field on the ticked proposals, by mouse and by keyboard, and Undo puts it back", async ({ page, request }) => {
   await seed(request);
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -62,4 +62,20 @@ test("Bulk edit sets a shared field on the ticked proposals, by mouse and by key
   await expect(owner).toBeFocused();
   await expect(rows).toHaveCount(3); // "a" did not accept anything
   await expect(owner).toContainText("Me");
+
+  // PB-044: J opens the Project picker by key. With nothing ticked it edits only the Focused item, then focus goes back to its row.
+  await page.keyboard.press("Escape"); // clears the ticks
+  await expect(fields).toHaveCount(0);
+  const first = rows.nth(0).locator(".inbox-row-open");
+  await first.focus();
+  await page.keyboard.press("j");
+  await expect(page.getByRole("group", { name: "Set a field on the focused item" })).toContainText("Focused item");
+  await expect(page.getByRole("combobox", { name: "Find project" })).toBeFocused();
+  await page.keyboard.type("Atlas");
+  await page.keyboard.press("Enter");
+  await expect(toast).toContainText("Project updated on 1 proposal");
+  await expect(rows.nth(0)).toContainText("Atlas migration");
+  await expect(rows.nth(1)).not.toContainText("Atlas migration");
+  await expect(first).toBeFocused();
+  await expect(page.getByRole("group", { name: "Set a field on the focused item" })).toHaveCount(0);
 });

@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 import { inboxTabs, interactiveTarget, typingTarget, type InboxTab, type Outcome } from "./inboxModel.js";
+import { bulkFieldForKey, type BulkFieldKey } from "./bulkEditModel.js";
 
 /** What each Inbox key does. Each action returns true when it did something, so the key's browser default (scrolling, typing) is cancelled only then. */
 export type InboxKeyActions = {
   setTab: (tab: InboxTab) => void;
-  /** ↑/↓ and J/K. */
+  /** ↑/↓. */
   moveFocus: (direction: -1 | 1) => boolean;
   /** Enter on the Focused item. */
   openFocused: () => boolean;
@@ -18,6 +19,8 @@ export type InboxKeyActions = {
   save: () => boolean;
   /** Esc: go back to the list from an item shown full width (List view), else clear the ticks. */
   clearSelection: () => boolean;
+  /** PB-044 O, D, I, J, C, P: open that field's picker for the ticked items, else the Focused item. */
+  setField: (key: BulkFieldKey) => boolean;
   /** V: switch between Split and List view. */
   toggleView: () => boolean;
   showHelp: () => void;
@@ -33,8 +36,8 @@ export function useInboxKeys(actions: InboxKeyActions) {
     const done = (handled: boolean) => { if (handled) event.preventDefault(); };
     if (key === "?") { event.preventDefault(); actions.showHelp(); return; }
     if (key === "Escape") { done(actions.clearSelection()); return; }
-    if (key === "ArrowUp" || key === "ArrowDown" || lower === "j" || lower === "k") { // holding the key keeps moving
-      if (!event.shiftKey) done(actions.moveFocus(key === "ArrowUp" || lower === "k" ? -1 : 1));
+    if (key === "ArrowUp" || key === "ArrowDown") { // holding the key keeps moving
+      if (!event.shiftKey) done(actions.moveFocus(key === "ArrowUp" ? -1 : 1));
       return;
     }
     if (key === "Enter") { if (!target?.closest(interactiveTarget)) done(actions.openFocused()); return; }
@@ -42,6 +45,8 @@ export function useInboxKeys(actions: InboxKeyActions) {
     if (/^[1-6]$/.test(key)) { event.preventDefault(); actions.setTab(inboxTabs[Number(key) - 1]!); return; } // AZERTY digits need Shift
     if (lower === "x") { done(actions.toggleFocused(event.shiftKey)); return; }
     if (event.shiftKey) return;
+    const field = bulkFieldForKey(lower);
+    if (field) { done(actions.setField(field)); return; }
     if (lower === "a") done(actions.decide("accepted"));
     else if (lower === "r") done(actions.decide("rejected"));
     else if (lower === "z") done(actions.undo());

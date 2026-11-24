@@ -98,6 +98,8 @@ kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-stron
 .inbox-bulk-field > button { padding: 3px var(--space-2); font-size: var(--font-size-xs); }
 .inbox-bulk-field > button b { font-weight: 650; }
 .inbox-bulk-field > button b.mixed { color: var(--color-text-muted); font-style: italic; font-weight: 500; }
+/* PB-044: each field's Inbox key, shown quietly in its button. */
+.inbox-bulk-key { margin-left: 2px; padding: 0 4px; border-color: var(--color-border); border-radius: 3px; background: transparent; color: var(--color-text-muted); font-size: 10px; font-weight: 600; line-height: 14px; }
 .inbox-bulk-popover { position: absolute; top: 100%; left: 0; z-index: 30; display: grid; gap: var(--space-1); min-width: 240px; margin-top: 4px; padding: var(--space-1); border: var(--border-thin) solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-surface-raised); box-shadow: 0 10px 28px color-mix(in srgb, var(--color-text) 13%, transparent); }
 .inbox-bulk-popover .inbox-bulk-list { position: static; max-height: 240px; margin: 0; padding: 0; border: 0; box-shadow: none; }
 .inbox-bulk-search { width: 100%; }
