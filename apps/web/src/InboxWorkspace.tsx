@@ -8,6 +8,7 @@ import { InboxShortcutSheet } from "./InboxShortcutSheet.js";
 import { InboxBulkEdit } from "./InboxBulkEdit.js";
 import { bulkEditChanges, bulkEditPlan, bulkFieldLabel, missingFieldNote, type BulkEditChange, type BulkFieldKey, type EditResult } from "./bulkEditModel.js";
 import { useInboxKeys } from "./useInboxKeys.js";
+import { goToEvent } from "./goToKeys.js";
 import { useInboxUndo } from "./useInboxUndo.js";
 import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type UndoResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
 import type { InboxView } from "./useInboxView.js";
@@ -323,7 +324,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       control.click(); return true;
     },
     clearSelection: () => {
-      if (view === "list" && !narrow && selected) { back(); return true; }
+      if (oneUp && selected) { back(); return true; } // List view, or a narrow window: the open item covers the list
       if (!checked.size) return false; clearChecked(); return true;
     },
     toggleView: () => { if (narrow) return false; chooseView(view === "split" ? "list" : "split"); return true; },
@@ -342,6 +343,22 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     },
     showHelp: () => setHelpOpen(true)
   });
+  /**
+   * PB-045 G then I while already on the Inbox: back to the list with the item's row focused. Where the open item hides the
+   * list (List view, narrow) it closes; in Split view the list is beside it, so only focus moves. Ticks and filters stay.
+   */
+  const goHome = useRef<() => void>(() => undefined);
+  goHome.current = () => {
+    openField(undefined);
+    if (oneUp && selected) { back(); return; }
+    const id = openedId && shownIds.includes(openedId) ? openedId : focusedId;
+    if (id) setFocusState({ id, dom: true });
+  };
+  useEffect(() => {
+    const onGo = (event: Event) => { if ((event as CustomEvent).detail !== "Inbox") return; event.preventDefault(); goHome.current(); };
+    globalThis.document.addEventListener(goToEvent, onGo);
+    return () => globalThis.document.removeEventListener(goToEvent, onGo);
+  }, []);
   /** After a tab switch, an open item that is not in the new tab gives way to the tab's first item (wide screens; narrow shows the list). */
   const shownTab = useRef(tab);
   useEffect(() => {

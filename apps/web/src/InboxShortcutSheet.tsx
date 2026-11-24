@@ -11,7 +11,7 @@ export const inboxShortcuts: Array<{ keys: string; what: string }> = [
   { keys: "S", what: "Save edits on the open item" },
   { keys: "X", what: "Tick or untick the focused item" },
   { keys: "Shift + X or Shift + click", what: "Tick a range from the last ticked item" },
-  { keys: "Esc", what: "Clear the ticks; in List view, go back to the list" },
+  { keys: "Esc", what: "Clear the ticks; with an item covering the list (List view, narrow window), go back to the list" },
   { keys: "O", what: "Set Owner on the ticked items, or the focused one" },
   { keys: "D", what: "Set Due date" },
   { keys: "I", what: "Set Priority" },
@@ -20,6 +20,10 @@ export const inboxShortcuts: Array<{ keys: string; what: string }> = [
   { keys: "P", what: "Set Product" },
   { keys: "1 – 6", what: "Switch tab" },
   { keys: "V", what: "Switch between Split and List view" },
+  { keys: "G then I", what: "Go to the Inbox list; from an open item, back to its row" },
+  { keys: "G then T C K N", what: "Go to Today, Calendar, Tasks, Notes" },
+  { keys: "G then D O L", what: "Go to Decisions, Open points, Knowledge" },
+  { keys: "G then Y S", what: "Go to System, Settings" },
   { keys: "?", what: "Show this sheet" }
 ];
 

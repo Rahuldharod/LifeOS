@@ -259,7 +259,44 @@ describe("shortcut sheet and typing", () => {
   });
 });
 
+// PB-045: G then I on the Inbox goes back to the list with the open item's row focused (ticks and filters stay).
+const goToInbox = () => act(async () => { globalThis.document.dispatchEvent(new CustomEvent("lifeos:go-to", { detail: "Inbox", cancelable: true })); });
+describe("G then I on the Inbox", () => {
+  it("in Split view, moves keyboard focus back to the open item's row and keeps the ticks", async () => {
+    await mount("b");
+    await press("ArrowDown"); await press("x"); await press("ArrowDown");
+    expect(focusedTitle()).toBe("Charlie decision");
+    let handled = false;
+    await act(async () => { handled = !globalThis.document.dispatchEvent(new CustomEvent("lifeos:go-to", { detail: "Inbox", cancelable: true })); });
+    expect(handled).toBe(true);
+    expect(focusedTitle()).toBe("Bravo task");
+    expect(document.activeElement).toBe(row("Bravo task")!.querySelector(".inbox-row-open"));
+    expect(detailTitle()).toBe("Bravo task");
+    expect(isTicked("Link owner")).toBe(true);
+  });
+
+  it("leaves other pages' go-to keys alone", async () => {
+    await mount("b");
+    let handled = true;
+    await act(async () => { handled = !globalThis.document.dispatchEvent(new CustomEvent("lifeos:go-to", { detail: "Tasks", cancelable: true })); });
+    expect(handled).toBe(false);
+  });
+});
+
 describe("narrow screens", () => {
+  it("with a proposal open, Esc and G then I both close it and focus its row (PB-045)", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    await mount("b");
+    await press("Escape");
+    expect(detailTitle()).toBeUndefined();
+    expect(document.activeElement).toBe(row("Bravo task")!.querySelector(".inbox-row-open"));
+    await clickRow("Charlie decision");
+    expect(detailTitle()).toBe("Charlie decision");
+    await goToInbox();
+    expect(detailTitle()).toBeUndefined();
+    expect(document.activeElement).toBe(row("Charlie decision")!.querySelector(".inbox-row-open"));
+  });
+
   it("with a proposal open, the list is hidden, so the arrows step through proposals as before", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
     await mount("b");
