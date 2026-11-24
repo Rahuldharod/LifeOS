@@ -35,7 +35,9 @@ test("toast Undo, Z and View; bulk Reject needs no confirmation and undoes as on
   await expect(focused).toContainText(one);
 
   // Accept creates the task; Z undoes it: back to pending, the task it created is deleted.
+  // PB-046: the undone item is Focused while the next one is Open, so Split view asks; F picks the Focused row.
   await page.keyboard.press("a");
+  await page.keyboard.press("f");
   await expect(rows).toHaveCount(3);
   await expect(toast.getByRole("button", { name: /^View/ })).toBeVisible();
   const created = await taskTitled(request, one);

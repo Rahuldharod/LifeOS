@@ -27,7 +27,7 @@ async function mount({ onUndo, onView, created = { a: "task-a", b: "task-b" } }:
   function Harness() {
     const [gone, setGone] = useState<Set<string>>(new Set());
     const drop = (ids: string[]) => setGone((current) => new Set([...current, ...ids]));
-    return <InboxWorkspace
+    return <InboxWorkspace rowExitMs={0}
       reviews={all().filter((item) => !gone.has(item.frontmatter.id))} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }}
       busy={false} readOnly={false} displayTimeZone="Europe/Paris"
       onAccept={async (item) => { decided.push(`accepted:${item.frontmatter.id}`); drop([item.frontmatter.id]); return { objectId: created[item.frontmatter.id] }; }}

@@ -7,6 +7,7 @@ export const inboxShortcuts: Array<{ keys: string; what: string }> = [
   { keys: "Enter or click", what: "Open the focused item" },
   { keys: "A", what: "Accept the focused item, or all ticked items" },
   { keys: "R", what: "Reject the focused item, or all ticked items" },
+  { keys: "F / O", what: "In Split view, when the focused row isn't the open item, A or R asks: F applies to the Focused row, O to the Open item, Esc cancels" },
   { keys: "Z", what: "Undo the last Accept or Reject while its message shows (8 seconds)" },
   { keys: "S", what: "Save edits on the open item" },
   { keys: "X", what: "Tick or untick the focused item" },

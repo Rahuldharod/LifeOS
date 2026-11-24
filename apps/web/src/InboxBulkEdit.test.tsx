@@ -44,7 +44,7 @@ async function mount({ fail = [], readOnly = false, shell }: { fail?: string[]; 
       }));
       return result;
     };
-    return <InboxWorkspace reviews={items} objects={[]} labels={new Map()} choices={choices} busy={false} readOnly={readOnly} displayTimeZone="Europe/Paris"
+    return <InboxWorkspace rowExitMs={0} reviews={items} objects={[]} labels={new Map()} choices={choices} busy={false} readOnly={readOnly} displayTimeZone="Europe/Paris"
       onAccept={async (item) => { accepted.push(item.frontmatter.id); return true; }} onReject={async () => true} onSave={async () => true} onEditMany={onEditMany} />;
   }
   root = createRoot(document.body.appendChild(document.createElement("div")));
