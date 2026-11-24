@@ -110,14 +110,18 @@ describe("adjacentId", () => {
 });
 
 describe("reviewRowCells", () => {
-  const lookups = { now, timeZone: zone, personName: (id: string) => id === "p1" ? "Paula Martin" : undefined, projectName: (id: string) => id === "pr1" ? "Store rollout" : undefined };
+  const lookups = { personName: (id: string) => id === "p1" ? "Paula Martin" : undefined, contextName: (id: string) => ({ pr1: "Store rollout", c1: "Acme", pd1: "P.Promo" } as Record<string, string>)[id] };
 
-  it("reads owner, due, project and time for a task", () => {
-    const cells = reviewRowCells(review("t", "2026-11-23T08:15:00Z", { primary_project_id: "pr1", proposed_fields: { owner_person_id: "p1", due_on: "2026-11-28" } }), lookups);
-    expect(cells).toMatchObject({ owner: "Paula Martin", due: "28 Nov", project: "Store rollout", time: "09:15", low: false });
+  it("reads owner, due, project, client and product for a task", () => {
+    const cells = reviewRowCells(review("t", "2026-11-23T08:15:00Z", { primary_project_id: "pr1", primary_client_id: "c1", primary_product_id: "pd1", proposed_fields: { owner_person_id: "p1", due_on: "2026-11-28" } }), lookups);
+    expect(cells).toMatchObject({ owner: "Paula Martin", due: "28 Nov", project: "Store rollout", client: "Acme", product: "P.Promo", low: false });
+    expect(cells).not.toHaveProperty("time");
   });
-  it("shows Me for a task with no owner, nothing for kinds without an owner, and the date for older items", () => {
-    expect(reviewRowCells(review("t", "2026-11-20T08:00:00Z"), lookups)).toMatchObject({ owner: "Me", due: undefined, project: undefined, time: "20 Nov" });
+  it("names a client or product it cannot find", () => {
+    expect(reviewRowCells(review("t", "2026-11-23T08:15:00Z", { primary_client_id: "c9", primary_product_id: "pd9" }), lookups)).toMatchObject({ client: "Unknown client", product: "Unknown product" });
+  });
+  it("shows Me for a task with no owner and nothing for kinds without an owner", () => {
+    expect(reviewRowCells(review("t", "2026-11-20T08:00:00Z"), lookups)).toMatchObject({ owner: "Me", due: undefined, project: undefined, client: undefined, product: undefined });
     expect(reviewRowCells(review("d", "2026-11-23T08:00:00Z", { target_object_type: "decision" }), lookups).owner).toBeUndefined();
   });
   it("flags low confidence only", () => {

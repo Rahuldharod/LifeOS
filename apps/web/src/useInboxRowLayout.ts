@@ -5,7 +5,7 @@ import { useEffect, useState, type RefObject } from "react";
 export type RowLayoutMode = "auto" | "one" | "two";
 export const rowLayoutModes: Array<{ mode: RowLayoutMode; label: string }> = [{ mode: "auto", label: "Auto" }, { mode: "one", label: "1 line" }, { mode: "two", label: "2 lines" }];
 /** Auto shows one line with columns when the list pane is at least this wide. */
-export const ONE_LINE_MIN_WIDTH = 760;
+export const ONE_LINE_MIN_WIDTH = 940;
 export const rowLayoutStorageKey = "lifeos.inboxRowLayout";
 
 export const readRowLayout = (): RowLayoutMode => {

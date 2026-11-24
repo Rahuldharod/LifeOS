@@ -123,27 +123,27 @@ export function rangeIds(ordered: string[], hidden: Set<string>, anchor: string 
   return shown.slice(Math.min(from, to), Math.max(from, to) + 1);
 }
 
-export type RowCells = { kind: ReviewKind; owner?: string; due?: string; project?: string; time: string; low: boolean };
-export type RowLookups = { now: Date; timeZone: string; personName: (id: string) => string | undefined; projectName: (id: string) => string | undefined };
-/** When an item arrived: the time today, else the short day. Empty when the date is unreadable. */
+export type RowCells = { kind: ReviewKind; owner?: string; due?: string; project?: string; client?: string; product?: string; low: boolean };
+/** `contextName` names a project, client or product by ID. */
+export type RowLookups = { personName: (id: string) => string | undefined; contextName: (id: string) => string | undefined };
 const clock = (iso: string, timeZone: string) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone }).format(new Date(iso));
-const arrivedAt = (iso: string, now: Date, timeZone: string) => Number.isNaN(Date.parse(iso)) ? "" : dayOf(iso, timeZone) === dayOf(now, timeZone) ? clock(iso, timeZone) : shortDay(dayOf(iso, timeZone));
 /** An Agent run is named by when it wrote: the time today, else the day and time (two runs on one older day stay apart). */
 const runTime = (iso: string, now: Date, timeZone: string) => Number.isNaN(Date.parse(iso)) ? "time unknown" : dayOf(iso, timeZone) === dayOf(now, timeZone) ? clock(iso, timeZone) : `${shortDay(dayOf(iso, timeZone))} ${clock(iso, timeZone)}`;
 const shortDay = (key: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(midday(key));
-/** Owner, Due, Project and Time for one list row, read the way the detail pane reads them. */
-export function reviewRowCells(review: InboxReview, { now, timeZone, personName, projectName }: RowLookups): RowCells {
+/** Owner, Due, Project, Client and Product for one list row, read the way the detail pane reads them (PB-043 dropped the arrival time). */
+export function reviewRowCells(review: InboxReview, { personName, contextName }: RowLookups): RowCells {
   const proposed = (review.frontmatter.proposed_fields ?? {}) as Record<string, unknown>;
   const target = text(review.frontmatter.target_object_type); const create = reviewType(review) === "create";
-  const ownerId = text(proposed.owner_person_id); const projectId = text(review.frontmatter.primary_project_id); const due = text(proposed.due_on);
-  const iso = String(review.frontmatter.created_at);
-  const time = arrivedAt(iso, now, timeZone);
+  const ownerId = text(proposed.owner_person_id); const due = text(proposed.due_on);
+  const context = (key: string, unknown: string) => { const id = text(review.frontmatter[key]); return id ? contextName(id) ?? unknown : undefined; };
   return {
     kind: reviewKind(review),
     owner: create && editableByTarget[target]?.includes("owner_person_id") ? (ownerId ? personName(ownerId) ?? "Unknown person" : "Me") : undefined,
     due: /^\d{4}-\d{2}-\d{2}$/.test(due) ? shortDay(due) : undefined,
-    project: projectId ? projectName(projectId) ?? "Unknown project" : undefined,
-    time, low: review.frontmatter.confidence_label === "Low"
+    project: context("primary_project_id", "Unknown project"),
+    client: context("primary_client_id", "Unknown client"),
+    product: context("primary_product_id", "Unknown product"),
+    low: review.frontmatter.confidence_label === "Low"
   };
 }
 

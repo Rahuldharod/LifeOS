@@ -127,9 +127,8 @@ describe("InboxWorkspace", () => {
     const nearMidnight = review("near-midnight", "Auckland today", { created_at: "2026-10-10T12:30:00.000Z" });
     const priorDay = review("prior-day", "Auckland yesterday", { created_at: "2026-10-09T12:29:59.000Z" });
     await render({ reviews: [nearMidnight, priorDay], selectedId: "near-midnight", displayTimeZone: "Pacific/Auckland", now: new Date("2026-10-11T02:00:00.000Z") });
-    // Grouped by the Auckland day: the near-midnight item is Today (shown by time), the other Yesterday (shown by date).
+    // Grouped by the Auckland day: the near-midnight item is Today, the other Yesterday.
     expect([...document.querySelectorAll(".inbox-date")].map((heading) => heading.textContent)).toEqual(["Today", "Yesterday"]);
-    expect([...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .c-time")].map((cell) => cell.textContent)).toEqual(["01:30", "10 Oct"]);
     await click("Advanced");
     await choose("Filter by created period", "today");
     expect(document.querySelector("[aria-label='Review queue']")?.textContent).toContain("Auckland today");
@@ -468,12 +467,14 @@ describe("InboxWorkspace grouped list (#237)", () => {
     expect(rowTitles()).toEqual(["Alpha newest", "Alpha older", "Beta item", "Run item", "Loose item"]);
   });
 
-  it("shows the Review kind badge and Owner, Due, Project and Time cells", async () => {
+  it("shows the Review kind badge and Owner, Due, Project, Client and Product cells (no Time, PB-043)", async () => {
     await render(props);
     const badges = [...document.querySelectorAll(".inbox-row:not(.inbox-colhead) .inbox-badge")].map((item) => item.textContent);
     expect(badges).toEqual(["Task", "Task", "Decision", "Summary", "Task"]);
     const older = document.querySelectorAll(".inbox-row:not(.inbox-colhead)")[1]!;
-    expect([".c-owner", ".c-due", ".c-project", ".c-time"].map((cell) => older.querySelector(cell)?.textContent)).toEqual(["Paula Martin", "28 Oct", "Store rollout", "07:00"]);
+    expect([".c-owner", ".c-due", ".c-project", ".c-client", ".c-product"].map((cell) => older.querySelector(cell)?.textContent)).toEqual(["Paula Martin", "28 Oct", "Store rollout", "—", "—"]);
+    expect(document.querySelector(".c-time")).toBeNull();
+    expect([...document.querySelectorAll(".inbox-colhead > span")].map((cell) => cell.textContent).filter(Boolean)).toEqual(["Type", "Item", "Owner", "Due", "Project", "Client", "Product"]);
     expect(older.querySelector(".inbox-low")?.getAttribute("data-tip")).toContain("Low confidence");
     expect(document.querySelectorAll(".inbox-low[data-tip]")).toHaveLength(1);
     expect(document.querySelector(".inbox-legend")?.textContent).toContain("Low confidence");

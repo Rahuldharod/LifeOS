@@ -36,6 +36,7 @@ export function recordUrl(view: View, id?: string): string {
 /** PB-035: Review Items reserved for inbox-auto-advance.spec.ts, which accepts and rejects them. */
 export const AUTO_ADVANCE_PREFIX = "Auto-advance proposal";
 export const BULK_PREFIX = "Bulk proposal";
+export const BULK_EDIT_PREFIX = "Bulk edit proposal";
 export const TRIAGE_PREFIX = "Triage proposal";
 export const ROW_ACTION_PREFIX = "Row action proposal";
 export const UNDO_PREFIX = "Undo proposal";
@@ -122,5 +123,5 @@ async function readBack(get: <T>(url: string) => Promise<T>): Promise<SeedData> 
   const long = knowledgeNotes.find((note) => note.title === "Browser knowledge note 1");
   const longTitleTask = tasks.find((task) => task.title === LONG_TASK_TITLE);
   if (!long || !longTitleTask) throw new Error("Seed data is incomplete");
-  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems: reviewItems.filter((item) => !item.title.startsWith(AUTO_ADVANCE_PREFIX) && !item.title.startsWith(BULK_PREFIX) && !item.title.startsWith(TRIAGE_PREFIX) && !item.title.startsWith(ROW_ACTION_PREFIX) && !item.title.startsWith(UNDO_PREFIX) && !item.title.startsWith(HISTORY_PREFIX)), recurringNote: RECURRING_NOTE };
+  return { tasks, longTitleTask, projects, people: people.filter((p) => p.title !== "You"), decisions, openPoints, knowledgeNotes, longKnowledgeNote: long, reviewItems: reviewItems.filter((item) => !item.title.startsWith(AUTO_ADVANCE_PREFIX) && !item.title.startsWith(BULK_PREFIX) && !item.title.startsWith(BULK_EDIT_PREFIX) && !item.title.startsWith(TRIAGE_PREFIX) && !item.title.startsWith(ROW_ACTION_PREFIX) && !item.title.startsWith(UNDO_PREFIX) && !item.title.startsWith(HISTORY_PREFIX)), recurringNote: RECURRING_NOTE };
 }
