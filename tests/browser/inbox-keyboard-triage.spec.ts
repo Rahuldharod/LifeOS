@@ -32,7 +32,13 @@ test("arrows move focus without opening; A and R act on the focused item and foc
   await expect(openRow).toHaveCSS("outline-style", "none");
 
   // A acts on the focused item while another one stays open; focus moves to the next item.
+  // PB-046: in Split view it first asks which item; F picks the Focused row. The row animates out before it leaves.
+  const applyTo = page.getByRole("dialog", { name: "Accept: apply to which item?" });
   await page.keyboard.press("a");
+  await expect(applyTo).toContainText("Focused row");
+  await expect(applyTo).toContainText(titles[2]!);
+  await page.keyboard.press("f");
+  await expect(applyTo).toBeHidden();
   await expect(toast("Proposal accepted")).toBeVisible();
   await expect(rows).toHaveCount(3);
   await expect(heading).toHaveText(titles[0]!);
@@ -40,6 +46,7 @@ test("arrows move focus without opening; A and R act on the focused item and foc
 
   // The last item rejected: focus lands on the one above.
   await page.keyboard.press("r");
+  await page.keyboard.press("f");
   await expect(rows).toHaveCount(2);
   await expect(focusedRow).toContainText(titles[1]!);
   await expect(heading).toHaveText(titles[0]!);

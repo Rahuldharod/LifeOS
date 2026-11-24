@@ -10,15 +10,15 @@ export function LowConfidenceDot({ legend = false }: { legend?: boolean }) {
 }
 
 /** One queue row. The tick box and the title button are the controls; clicking anywhere else on the row also opens it. */
-export function InboxRow({ review, cells, twoLine, opened, focused, checked, actionsDisabled, onOpen, onFocusRow, onToggleChecked, onDecide }: {
-  review: InboxReview; cells: RowCells; twoLine: boolean; opened: boolean; focused: boolean; checked: boolean; actionsDisabled: boolean;
+export function InboxRow({ review, cells, twoLine, opened, focused, checked, leaving = false, arriving = false, actionsDisabled, onOpen, onFocusRow, onToggleChecked, onDecide }: {
+  review: InboxReview; cells: RowCells; twoLine: boolean; opened: boolean; focused: boolean; checked: boolean; /** PB-046: decided, animating out before it leaves the list. */ leaving?: boolean; /** PB-046: back after Undo, sliding into its place. */ arriving?: boolean; actionsDisabled: boolean;
   onOpen: (id: string) => void; onFocusRow: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; onDecide: (id: string, outcome: Outcome) => void;
 }) {
   const id = review.frontmatter.id;
   const sub = [cells.owner, cells.due && `Due ${cells.due}`, cells.project, cells.client, cells.product].filter(Boolean) as string[];
   /** Shift+click ticks a range instead of opening (text selection is switched off for it). */
   const click = (event: React.MouseEvent) => { event.stopPropagation(); if (event.shiftKey) onToggleChecked(id, true); else onOpen(id); };
-  return <div data-review-id={id} className={`inbox-row${opened ? " selected" : ""}${focused ? " focused" : ""}${checked ? " checked" : ""}`} onClick={click} onMouseDown={(event) => { if (event.shiftKey) event.preventDefault(); }}>
+  return <div data-review-id={id} className={`inbox-row${opened ? " selected" : ""}${focused ? " focused" : ""}${checked ? " checked" : ""}${leaving ? " leaving" : ""}${arriving ? " arriving" : ""}`} aria-hidden={leaving || undefined} onClick={click} onMouseDown={(event) => { if (event.shiftKey) event.preventDefault(); }}>
     <input className="c-check" type="checkbox" aria-label={`Select proposal: ${review.frontmatter.title}`} title="Select for bulk actions (X)" checked={checked} onClick={(event) => { event.stopPropagation(); onFocusRow(id); onToggleChecked(id, event.shiftKey); }} onChange={() => undefined} />
     <span className="c-kind"><span className={`inbox-badge ${kindClass(cells.kind)}`}>{cells.kind}</span></span>
     <span className="c-dot">{cells.low && <LowConfidenceDot />}</span>

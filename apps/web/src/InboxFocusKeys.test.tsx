@@ -33,7 +33,7 @@ function Harness({ selectedId }: { selectedId: string }) {
   const [route, setRoute] = React.useState<string | undefined>(selectedId);
   const remove = (id: string) => setReviews((current) => current.filter((entry) => entry.frontmatter.id !== id));
   const decide = (outcome: string) => async (item: { frontmatter: { id: string } }) => { decided.push(`${outcome}:${item.frontmatter.id}`); remove(item.frontmatter.id); return true; };
-  return <InboxWorkspace reviews={reviews} selectedId={route} objects={[meeting]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={new Date("2026-10-10T12:00:00Z")}
+  return <InboxWorkspace rowExitMs={0} reviews={reviews} selectedId={route} objects={[meeting]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={new Date("2026-10-10T12:00:00Z")}
     onOpen={(id) => setRoute(id)} onAccept={decide("accepted")} onReject={decide("rejected")} onSave={async () => true}
     linkActionsFor={(id) => ({ onCreate: async () => ({}) as never, onLink: async () => undefined, onReject: async () => { linkRejected.push(id); remove(id); } })} />;
 }
@@ -51,6 +51,8 @@ const isTicked = (title: string) => (document.querySelector(`[aria-label='Select
 const row = (title: string) => [...document.querySelectorAll<HTMLElement>(".inbox-row:not(.inbox-colhead)")].find((item) => item.querySelector("strong")?.textContent === title);
 const clickRow = async (title: string, init: MouseEventInit = {}) => act(async () => { row(title)!.querySelector(".inbox-row-open")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...init })); });
 const tickBox = async (title: string) => act(async () => (document.querySelector(`[aria-label='Select proposal: ${title}']`) as HTMLInputElement).click());
+/** PB-046: answers the Split view question ("Apply to: F Focused row / O Open item") with a key; Escape cancels. */
+const answer = async (key: string) => { const dialog = document.querySelector("[role='dialog'].inbox-apply-to"); expect(dialog, "Apply to question").toBeTruthy(); await press(key, globalThis.document.activeElement ?? dialog!); };
 const downs = async (count: number) => { for (let step = 0; step < count; step += 1) await press("ArrowDown"); };
 
 describe("Focused item and Open item", () => {
@@ -104,6 +106,9 @@ describe("A and R", () => {
     await mount("a");
     await press("ArrowDown"); // focus Bravo, Alpha stays open
     await press("a");
+    expect(decided).toEqual([]); // PB-046: Split view asks which one first
+    await answer("f");
+    expect(document.querySelector("[role='dialog']")).toBeNull();
     expect(decided).toEqual(["accepted:b"]);
     expect(detailTitle()).toBe("Alpha task");
     expect(focusedTitle()).toBe("Link owner");
@@ -114,7 +119,7 @@ describe("A and R", () => {
     await mount("a");
     await downs(6);
     expect(focusedTitle()).toBe("Delta task");
-    await press("r");
+    await press("r"); await answer("f");
     expect(decided).toEqual(["rejected:d"]);
     expect(focusedTitle()).toBe("Charlie decision");
   });
@@ -138,10 +143,10 @@ describe("A and R", () => {
   it("R on a focused link item rejects it through its link actions; A explains it needs a choice", async () => {
     await mount("a");
     await downs(2);
-    await press("a");
+    await press("a"); await answer("f");
     expect(decided).toEqual([]);
     expect(status()).toContain("Link proposals need a choice");
-    await press("r");
+    await press("r"); await answer("f");
     expect(linkRejected).toEqual(["l"]);
     expect(focusedTitle()).toBe("Charlie decision");
   });
@@ -208,7 +213,7 @@ describe("selection", () => {
   it("a range skips items in collapsed groups", async () => {
     const reviews = [review("a", "Alpha", { created_at: "2026-10-10T10:00:00Z" }), review("b", "Bravo", { created_at: "2026-10-10T09:00:00Z", source_meeting_id: undefined }), review("c", "Charlie", { created_at: "2026-10-10T08:00:00Z" })];
     root = createRoot(document.body.appendChild(document.createElement("div")));
-    await act(async () => root!.render(<InboxWorkspace reviews={reviews} selectedId="a" objects={[meeting]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={new Date("2026-10-10T12:00:00Z")} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => root!.render(<InboxWorkspace rowExitMs={0} reviews={reviews} selectedId="a" objects={[meeting]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={new Date("2026-10-10T12:00:00Z")} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     await act(async () => ([...document.querySelectorAll(".inbox-source")].find((item) => item.textContent?.includes("Other")) as HTMLButtonElement).click());
     await tickBox("Alpha");
     await clickRow("Charlie", { shiftKey: true });
