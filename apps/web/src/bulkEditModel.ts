@@ -1,11 +1,14 @@
 import type { ReviewEdits } from "@lifeos/contracts";
-import { editableByTarget, reviewType, text, type InboxReview } from "./inboxModel.js";
+import { editableByTarget, reviewKind, reviewType, text, type InboxReview } from "./inboxModel.js";
 
 /** PB-043 Bulk edit: the fields it can set, in the fixed order of the buttons. */
 export type BulkFieldKey = "owner_person_id" | "due_on" | "priority" | "primary_project_id" | "primary_client_id" | "primary_product_id";
 export const bulkFieldOrder: BulkFieldKey[] = ["owner_person_id", "due_on", "priority", "primary_project_id", "primary_client_id", "primary_product_id"];
 export const bulkFieldLabel: Record<BulkFieldKey, string> = { owner_person_id: "Owner", due_on: "Due", priority: "Priority", primary_project_id: "Project", primary_client_id: "Client", primary_product_id: "Product" };
 export const priorities = ["High", "Medium", "Low"] as const;
+/** PB-044: the Inbox key that opens each field's picker (R rejects, so Priority is I; J is Project). */
+export const bulkFieldKeys: Record<BulkFieldKey, string> = { owner_person_id: "O", due_on: "D", priority: "I", primary_project_id: "J", primary_client_id: "C", primary_product_id: "P" };
+export const bulkFieldForKey = (key: string): BulkFieldKey | undefined => bulkFieldOrder.find((field) => bulkFieldKeys[field] === key.toUpperCase());
 
 /** One item's change in a Bulk edit (or its undo). */
 export type BulkEditChange = { review: InboxReview; edits: ReviewEdits };
@@ -60,4 +63,18 @@ export function bulkEditChanges(items: InboxReview[], key: BulkFieldKey, value: 
     undo: changing.map((review): BulkEditChange => ({ review, edits: restoreEdits(review, key) })),
     unchanged: items.length - changing.length
   };
+}
+
+/** "Kinds" in the plural a sentence needs: Task → Tasks, Open point → Open points, Summary → Summaries. */
+const plural = (kind: string) => kind.endsWith("y") ? `${kind.slice(0, -1)}ies` : `${kind}s`;
+
+/**
+ * PB-044: why a field key opened nothing, e.g. "Due isn't available for Decisions". Names the kinds among `targets` that lack
+ * the field (in list order); `undefined` when every target has it.
+ */
+export function missingFieldNote(targets: InboxReview[], key: BulkFieldKey): string | undefined {
+  const lacking = [...new Set(targets.filter((review) => !editableFieldsOf(review).includes(key)).map((review) => plural(reviewKind(review))))];
+  if (!lacking.length) return undefined;
+  const names = lacking.length === 1 ? lacking[0]! : `${lacking.slice(0, -1).join(", ")} and ${lacking.at(-1)!}`;
+  return `${bulkFieldLabel[key]} isn't available for ${names}`;
 }

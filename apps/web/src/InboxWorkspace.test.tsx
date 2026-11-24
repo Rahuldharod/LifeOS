@@ -336,7 +336,7 @@ describe("InboxWorkspace keyboard shortcuts", () => {
     expect(accept).toHaveBeenCalledWith(expect.objectContaining({ frontmatter: expect.objectContaining({ id: "m" }) }));
     act(() => root?.unmount()); accept.mockClear();
     await render({ reviews: [merge, ...reviews()], selectedId: "t", onAccept: accept });
-    await press("k");
+    await press("ArrowUp");
     await press("a");
     expect(accept).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Merge proposals need a choice: open it to decide.");

@@ -3,7 +3,7 @@ import { OverlayDialog } from "./OverlayDialog.js";
 
 /** Every Inbox key, in one list: the sheet shows it and the tests check it. */
 export const inboxShortcuts: Array<{ keys: string; what: string }> = [
-  { keys: "↑ ↓ or J K", what: "Move focus (the reading pane stays on the open item)" },
+  { keys: "↑ ↓", what: "Move focus (the reading pane stays on the open item)" },
   { keys: "Enter or click", what: "Open the focused item" },
   { keys: "A", what: "Accept the focused item, or all ticked items" },
   { keys: "R", what: "Reject the focused item, or all ticked items" },
@@ -12,6 +12,12 @@ export const inboxShortcuts: Array<{ keys: string; what: string }> = [
   { keys: "X", what: "Tick or untick the focused item" },
   { keys: "Shift + X or Shift + click", what: "Tick a range from the last ticked item" },
   { keys: "Esc", what: "Clear the ticks; in List view, go back to the list" },
+  { keys: "O", what: "Set Owner on the ticked items, or the focused one" },
+  { keys: "D", what: "Set Due date" },
+  { keys: "I", what: "Set Priority" },
+  { keys: "J", what: "Set Project" },
+  { keys: "C", what: "Set Client" },
+  { keys: "P", what: "Set Product" },
   { keys: "1 – 6", what: "Switch tab" },
   { keys: "V", what: "Switch between Split and List view" },
   { keys: "?", what: "Show this sheet" }

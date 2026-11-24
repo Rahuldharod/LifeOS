@@ -22,7 +22,7 @@ test("arrows move focus without opening; A and R act on the focused item and foc
   await rows.first().click();
   await expect(heading).toHaveText(titles[0]!);
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("j");
+  await page.keyboard.press("ArrowDown");
   await expect(focusedRow).toContainText(titles[2]!);
   await expect(rows.nth(2)).toBeFocused();
   await expect(openRow).toContainText(titles[0]!);

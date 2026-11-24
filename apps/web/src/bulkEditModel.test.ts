@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bulkEditChanges, bulkEditPlan, fieldValue, restoreEdits, sharedValue } from "./bulkEditModel.js";
+import { bulkEditChanges, bulkEditPlan, bulkFieldForKey, fieldValue, missingFieldNote, restoreEdits, sharedValue } from "./bulkEditModel.js";
 import type { InboxReview } from "./inboxModel.js";
 
 const review = (id: string, fields: Record<string, unknown> = {}): InboxReview => ({
@@ -56,5 +56,18 @@ describe("bulkEditChanges", () => {
   it("puts back a due date that had a time as its instant and time zone", () => {
     expect(restoreEdits(task("a", { proposed_fields: { due_at: "2026-12-01T15:00:00.000Z", due_timezone: "Europe/Paris" } }), "due_on")).toEqual({ due_at: "2026-12-01T15:00:00.000Z", due_timezone: "Europe/Paris" });
     expect(restoreEdits(task("b", { proposed_fields: { due_on: "2026-12-01" } }), "due_on")).toEqual({ due_on: "2026-12-01" });
+  });
+});
+
+describe("field keys (PB-044)", () => {
+  it("maps O D I J C P to their fields, in either case, and nothing else", () => {
+    expect(["o", "D", "i", "j", "c", "P"].map(bulkFieldForKey)).toEqual(["owner_person_id", "due_on", "priority", "primary_project_id", "primary_client_id", "primary_product_id"]);
+    expect(["r", "a", "k", "x"].map(bulkFieldForKey)).toEqual([undefined, undefined, undefined, undefined]);
+  });
+  it("names the kinds that lack a field, or nothing when all have it", () => {
+    expect(missingFieldNote([task("a"), decision("b")], "due_on")).toBe("Due isn't available for Decisions");
+    expect(missingFieldNote([task("a"), decision("b"), openPoint("c")], "priority")).toBe("Priority isn't available for Decisions and Open points");
+    expect(missingFieldNote([review("s", { review_type: "summary" })], "primary_product_id")).toBe("Product isn't available for Summaries");
+    expect(missingFieldNote([task("a"), openPoint("b")], "owner_person_id")).toBeUndefined();
   });
 });

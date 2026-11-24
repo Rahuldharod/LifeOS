@@ -6,7 +6,7 @@ import { InboxReadingPane } from "./InboxReadingPane.js";
 import { InboxToast, useInboxToast } from "./InboxToast.js";
 import { InboxShortcutSheet } from "./InboxShortcutSheet.js";
 import { InboxBulkEdit } from "./InboxBulkEdit.js";
-import { bulkEditChanges, bulkEditPlan, bulkFieldLabel, type BulkEditChange, type BulkFieldKey, type EditResult } from "./bulkEditModel.js";
+import { bulkEditChanges, bulkEditPlan, bulkFieldLabel, missingFieldNote, type BulkEditChange, type BulkFieldKey, type EditResult } from "./bulkEditModel.js";
 import { useInboxKeys } from "./useInboxKeys.js";
 import { useInboxUndo } from "./useInboxUndo.js";
 import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type UndoResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
@@ -57,6 +57,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const [checked, setChecked] = useState<Set<string>>(() => new Set()); const [bulkRunning, setBulkRunning] = useState(false);
   const detailRef = useRef<HTMLElement>(null); const queueRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  /** PB-044: the field picker that is open, and (with nothing ticked) the Focused item a letter key opened it for. */
+  const [fieldOpen, setFieldOpen] = useState<BulkFieldKey>(); const [soloId, setSoloId] = useState<string>();
   const rowLayout = useInboxRowLayout(queueRef, oneUp && openedId !== undefined);
 
   /** The Focused item is what the keys act on; the Open item is what the reading pane shows. `dom` asks to move real keyboard focus to the row too. */
@@ -217,15 +219,27 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     return result;
   };
   const saveMany = (changes: BulkEditChange[]) => onEditMany ? onEditMany(changes) : saveEach(changes);
-  /** PB-043 Bulk edit: sets one field on every ticked item that has it. The items stay pending and stay ticked; the toast offers Undo. */
-  const bulkPlan = bulkEditPlan(ticked);
-  const editTicked = async (key: BulkFieldKey, value: string) => {
+  /** PB-043 Bulk edit acts on the ticked items; PB-044: with nothing ticked, on the Focused item a letter key opened a picker for. */
+  const solo = ticked.length ? undefined : visible.find((review) => review.frontmatter.id === soloId);
+  const editTargets = ticked.length ? ticked : solo ? [solo] : [];
+  const bulkPlan = bulkEditPlan(editTargets);
+  /** Closing a picker opened for the Focused item takes keyboard focus back to its row. */
+  const openField = (key: BulkFieldKey | undefined) => {
+    setFieldOpen(key);
+    if (!key && soloId) { setFocusState({ id: soloId, dom: true }); setSoloId(undefined); }
+  };
+  /** PB-043 Bulk edit: sets one field on every target item that has it. The items stay pending and stay ticked; the toast offers Undo. */
+  const editTargetsField = async (targets: InboxReview[], key: BulkFieldKey, value: string) => {
     if (busy || readOnly || bulkRunning) return;
-    const { items, skipped } = bulkEditPlan(ticked);
+    const plan = bulkEditPlan(targets);
+    // PB-044: the Open item with unsaved edits in the reading pane is left alone, so the user's typing is never overwritten.
+    const unsavedId = detailRef.current?.querySelector("[data-unsaved]") ? selected?.frontmatter.id : undefined;
+    const items = plan.items.filter((review) => review.frontmatter.id !== unsavedId);
+    const unsaved = plan.items.length - items.length;
     const { changes, undo, unchanged } = bulkEditChanges(items, key, value);
     const label = bulkFieldLabel[key];
-    const skippedNote = skipped ? [`${skipped} skipped (no ${label})`] : [];
-    if (!changes.length) { notify([`${label} already set on ${count(unchanged)}`, ...skippedNote].join(" · ")); return; }
+    const skippedNote = [...(plan.skipped ? [`${plan.skipped} skipped (no ${label})`] : []), ...(unsaved ? [`${unsaved} skipped (unsaved edits)`] : [])];
+    if (!changes.length) { notify([unchanged ? `${label} already set on ${count(unchanged)}` : `${label} not changed`, ...skippedNote].join(" · ")); return; }
     setBulkRunning(true); setActionError("");
     try {
       const result = await saveMany(changes);
@@ -313,6 +327,19 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       if (!checked.size) return false; clearChecked(); return true;
     },
     toggleView: () => { if (narrow) return false; chooseView(view === "split" ? "list" : "split"); return true; },
+    // PB-044: O, D, I, J, C, P open a field's picker in the bulk bar, for the ticked items or else the Focused item, whenever the list shows.
+    setField: (key) => {
+      if (oneUp && selected) return false;
+      const targets = ticked.length ? ticked : visible.filter((review) => review.frontmatter.id === focusedId);
+      if (!targets.length) return false;
+      if (readOnly) { notify("Read-only on this Mac: click “Use LifeOS here” before editing."); return true; }
+      if (busy || bulkRunning) return true;
+      const plan = bulkEditPlan(targets);
+      if (!plan.fields.includes(key)) { notify(missingFieldNote(plan.items.length ? plan.items : targets, key) ?? `${bulkFieldLabel[key]} isn't available here`); return true; }
+      setSoloId(ticked.length ? undefined : focusedId);
+      setFieldOpen(key);
+      return true;
+    },
     showHelp: () => setHelpOpen(true)
   });
   /** After a tab switch, an open item that is not in the new tab gives way to the tab's first item (wide screens; narrow shows the list). */
@@ -332,7 +359,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     <InboxShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
     <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} view={view} onView={narrow ? undefined : chooseView} switcher={switcher} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked}
-      bulkEdit={<InboxBulkEdit items={bulkPlan.items} fields={bulkPlan.fields} choices={choices} personName={personName} contextName={contextName} disabled={readOnly} pending={busy || bulkRunning} onApply={(key, value) => void editTicked(key, value)} />} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
+      bulkEdit={<InboxBulkEdit items={bulkPlan.items} fields={bulkPlan.fields} choices={choices} personName={personName} contextName={contextName} disabled={readOnly} pending={busy || bulkRunning}
+        openKey={fieldOpen} scope={solo ? "Focused item" : undefined} onOpenKey={openField} onApply={(key, value) => void editTargetsField(editTargets, key, value)} />} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
       hidden={oneUp && Boolean(selected)}
       onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters} processedToday={processedToday} onSeeHistory={onSeeHistory}
       onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} onDecideRow={decideRow} onDecideGroup={(items, outcome) => void decideSet(items, outcome)} />

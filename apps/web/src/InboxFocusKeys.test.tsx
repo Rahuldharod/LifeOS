@@ -54,14 +54,16 @@ const tickBox = async (title: string) => act(async () => (document.querySelector
 const downs = async (count: number) => { for (let step = 0; step < count; step += 1) await press("ArrowDown"); };
 
 describe("Focused item and Open item", () => {
-  it("start together; arrows and J/K move focus while the reading pane stays on the open item", async () => {
+  it("start together; arrows move focus while the reading pane stays on the open item (J and K no longer do: PB-044)", async () => {
     await mount("b");
     expect(focusedTitle()).toBe("Bravo task");
     await press("ArrowDown");
     expect(focusedTitle()).toBe("Link owner");
-    await press("j");
+    await press("ArrowDown");
     expect(focusedTitle()).toBe("Charlie decision");
-    await press("k"); await press("ArrowUp");
+    await press("k"); // not a key any more
+    expect(focusedTitle()).toBe("Charlie decision");
+    await press("ArrowUp"); await press("ArrowUp");
     expect(focusedTitle()).toBe("Bravo task");
     await press("ArrowUp"); await press("ArrowUp"); // stops at the top
     expect(focusedTitle()).toBe("Alpha task");
@@ -229,7 +231,7 @@ describe("shortcut sheet and typing", () => {
     const dialog = document.querySelector("[role='dialog']")!;
     expect(dialog.getAttribute("aria-label")).toBe("Inbox keyboard shortcuts");
     for (const { keys, what } of inboxShortcuts) { expect(dialog.textContent).toContain(keys); expect(dialog.textContent).toContain(what); }
-    expect(inboxShortcuts.map((item) => item.keys).join(" ")).toMatch(/J K.*Enter.*A.*R.*S.*X.*Shift \+ X.*Esc.*1 – 6.*\?/);
+    expect(inboxShortcuts.map((item) => item.keys).join(" ")).toMatch(/↑ ↓.*Enter.*A.*R.*S.*X.*Shift \+ X.*Esc.*O.*D.*I.*J.*C.*P.*1 – 6.*\?/);
     await press("a", dialog.querySelector("button")!); // keys do nothing inside the sheet
     expect(decided).toEqual([]);
     await press("Escape", dialog.querySelector("button")!);
@@ -241,7 +243,7 @@ describe("shortcut sheet and typing", () => {
   it("no key fires while typing in a field, including ? and X", async () => {
     await mount("a");
     const search = document.querySelector("[aria-label='Search proposals']")!;
-    for (const key of ["a", "r", "x", "j", "Enter", "ArrowDown", "Escape"]) await press(key, search);
+    for (const key of ["a", "r", "x", "j", "p", "Enter", "ArrowDown", "Escape"]) await press(key, search);
     await press("?", search, { shiftKey: true });
     await press("a", document.querySelector("[aria-label='Proposed title']")!);
     expect(decided).toEqual([]);
