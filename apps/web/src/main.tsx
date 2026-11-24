@@ -76,7 +76,7 @@ import { NotesWorkspace } from "./NotesWorkspace.js";
 import { useNewStandaloneNote } from "./useNewStandaloneNote.js";
 import { InboxHistory } from "./InboxHistory.js";
 import { InboxSwitch } from "./InboxSwitch.js";
-import { InboxWorkspace } from "./InboxWorkspace.js";
+import { InboxWorkspace, type BulkEditChange, type EditResult } from "./InboxWorkspace.js";
 import { createdObjectId, processedToday, type UndoResult } from "./inboxModel.js";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace.js";
 import { buildTrail } from "./trail.js";
@@ -665,6 +665,22 @@ function App() {
   };
 
   const inboxSwitch = (page: "inbox" | "history") => <InboxSwitch page={page} onPage={(next) => void go(next === "history" ? { view: "Inbox", inboxTab: "history" } : { view: "Inbox" })} />;
+
+  /** PB-043 Inbox Bulk edit (and its Undo): one PATCH per item, one refresh at the end; a failure does not stop the rest. */
+  const editMany = async (changes: BulkEditChange[]): Promise<EditResult> => {
+    const result: EditResult = { edited: [], failures: [] };
+    setBusy(true);
+    try {
+      for (const { review, edits } of changes) {
+        const id = review.frontmatter.id;
+        try { await api("PATCH /api/v1/review-items/:id", { params: { id }, body: edits }); result.edited.push(id); }
+        catch (error) { result.failures.push(`${review.frontmatter.title}: ${error instanceof Error ? error.message : "Something went wrong"}`); }
+      }
+      if (workspace) await refreshWorkspace(workspace.meeting.frontmatter.id);
+      await refresh();
+      return result; // the Inbox shows the outcome in its own toast
+    } finally { setBusy(false); }
+  };
 
   const editReview = (reviewId: string, changes: ReviewEdits) => run(async () => {
     await api("PATCH /api/v1/review-items/:id", { params: { id: reviewId }, body: changes });
@@ -1266,6 +1282,7 @@ function App() {
           onAccept={accept}
           onReject={(review) => reject(review.frontmatter.id)}
           onDecideMany={decideMany}
+          onEditMany={editMany}
           onUndo={undoMany}
           onView={(id) => void openLifeosLink(`lifeos://object/${id}`)}
           onSave={(review, changes) => editReview(review.frontmatter.id, changes)}

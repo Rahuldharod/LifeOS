@@ -185,6 +185,8 @@ draft("review-decision-1", { kind: "decision", draft_key: "browser-review-decisi
 for (const n of [1, 2, 3]) draft(`auto-advance-${n}`, { kind: "task", draft_key: `browser-auto-advance-${n}`, origin: "agent-extracted", confidence: "High", title: `Auto-advance proposal ${n}` }, "Extracted for the auto-advance test.");
 // Inbox bulk actions: proposals that only inbox-bulk.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
 for (const [n, kind] of [[1, "task"], [2, "task"], [3, "decision"]]) draft(`bulk-${n}`, { kind, draft_key: `browser-bulk-${n}`, origin: "agent-extracted", confidence: "High", title: `Bulk proposal ${n}` }, "Extracted for the bulk actions test.");
+// PB-043 Bulk edit: proposals that only inbox-bulk-edit.spec.ts edits (fixtures.ts leaves them out of `reviewItems`).
+for (const [n, kind] of [[1, "task"], [2, "task"], [3, "decision"]]) draft(`bulk-edit-${n}`, { kind, draft_key: `browser-bulk-edit-${n}`, origin: "agent-extracted", confidence: "High", title: `Bulk edit proposal ${n}` }, "Extracted for the Bulk edit test.");
 // #238 keyboard triage: proposals that only inbox-keyboard-triage.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
 for (const n of [1, 2, 3, 4]) draft(`triage-${n}`, { kind: "task", draft_key: `browser-triage-${n}`, origin: "agent-extracted", confidence: "High", title: `Triage proposal ${n}` }, "Extracted for the keyboard triage test.");
 // #239 row and group actions: proposals that only inbox-row-actions.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).

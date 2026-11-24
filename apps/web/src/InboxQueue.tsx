@@ -7,12 +7,12 @@ import { rowLayoutModes, type RowLayoutMode } from "./useInboxRowLayout.js";
 import { inboxViews, type InboxView } from "./useInboxView.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
-export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, view, onView, switcher, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, loading, error, busy, readOnly, bulkRunning, hidden,
+export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, view, onView, switcher, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, ticked, acceptableCount, allTicked, bulkEdit, loading, error, busy, readOnly, bulkRunning, hidden,
   onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, processedToday, onSeeHistory, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
   paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean; view: InboxView; /** Undefined where the view cannot be chosen (narrow screens). */ onView?: (view: InboxView) => void; /** The Inbox / History switch, shown in the page header (#243). */ switcher?: React.ReactNode;
   onRowMode: (mode: RowLayoutMode) => void; onShowHelp: () => void; onFocusRow: (id: string) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
-  openedId?: string; focusedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
+  openedId?: string; focusedId?: string; checked: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; /** PB-043: the Bulk edit field buttons for the ticked items. */ bulkEdit?: React.ReactNode; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
   onTab: (tab: InboxTab) => void; onQuery: (query: string) => void; onToggleAdvanced: () => void; onMeeting: (id: string) => void; onPeriod: (period: CreatedPeriod) => void; onClearFilters: () => void; /** Review actions made today (#244); the Inbox zero screen shows it. */ processedToday?: number; onSeeHistory?: () => void;
   onOpen: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
   onDecideRow: (id: string, outcome: Outcome) => void; onDecideGroup: (items: InboxReview[], outcome: Outcome) => void;
@@ -57,10 +57,11 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
           <small>{ticked.length} selected</small>
           <button className="primary" disabled={busy || readOnly || bulkRunning || !acceptableCount} title={acceptableCount < ticked.length ? "Link and merge proposals need a choice, so they are skipped" : undefined} onClick={() => onDecideTicked("accepted")}>Accept selected ({acceptableCount})</button>
           <button className="danger" disabled={busy || readOnly || bulkRunning} onClick={() => onDecideTicked("rejected")}>Reject selected ({ticked.length})</button>
+          {bulkEdit}
         </>}
       </div>
       <div className="inbox-legend"><LowConfidenceDot legend /> Low confidence: check the evidence before accepting</div>
-      {!twoLine && <div className="inbox-row inbox-colhead" aria-hidden><span className="c-check" /><span className="c-kind">Type</span><span className="c-dot" /><span className="c-title">Item</span><span className="c-owner">Owner</span><span className="c-due">Due</span><span className="c-project">Project</span><span className="c-time">Time</span><span className="c-actions" /></div>}
+      {!twoLine && <div className="inbox-row inbox-colhead" aria-hidden><span className="c-check" /><span className="c-kind">Type</span><span className="c-dot" /><span className="c-title">Item</span><span className="c-owner">Owner</span><span className="c-due">Due</span><span className="c-project">Project</span><span className="c-client">Client</span><span className="c-product">Product</span><span className="c-actions" /></div>}
       <div className="inbox-rows">{groups.map(({ bucket, sources }) => <div key={bucket} className="inbox-date-group">
         <h3 className="inbox-date">{bucket}</h3>
         {sources.map((source) => {

@@ -5,6 +5,8 @@ import { InboxQueue } from "./InboxQueue.js";
 import { InboxReadingPane } from "./InboxReadingPane.js";
 import { InboxToast, useInboxToast } from "./InboxToast.js";
 import { InboxShortcutSheet } from "./InboxShortcutSheet.js";
+import { InboxBulkEdit } from "./InboxBulkEdit.js";
+import { bulkEditChanges, bulkEditPlan, bulkFieldLabel, type BulkEditChange, type BulkFieldKey, type EditResult } from "./bulkEditModel.js";
 import { useInboxKeys } from "./useInboxKeys.js";
 import { useInboxUndo } from "./useInboxUndo.js";
 import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type UndoResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
@@ -17,13 +19,18 @@ import { useNarrowWorkspace } from "./useNarrowWorkspace.js";
 import "./InboxWorkspace.css";
 
 export type { BulkResult, InboxReview, InboxTab, ReviewChoices, UndoResult } from "./inboxModel.js";
+export type { BulkEditChange, EditResult } from "./bulkEditModel.js";
+
+const count = (n: number) => n === 1 ? "1 proposal" : `${n} proposals`;
 
 /** The Inbox page: owns the state (filters, opened item, ticks, decisions) and composes the queue, reading pane, keys and toast. */
-export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onDecideMany, onUndo, onView, linkActionsFor, switcher, processedToday, onSeeHistory }: {
+export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onEditMany, onDecideMany, onUndo, onView, linkActionsFor, switcher, processedToday, onSeeHistory }: {
   reviews: InboxReview[]; objects: Array<LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices;
   selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; displayTimeZone: string; now?: Date;
   onOpen?: (id: string, options?: { replace?: boolean }) => void; onBack?: () => void;
   onAccept: (review: InboxReview) => Promise<ActionResult>; onReject: (review: InboxReview) => Promise<ActionResult>; onSave: (review: InboxReview, edits: ReviewEdits) => Promise<ActionResult>;
+  /** PB-043 Bulk edit: saves each item's edits (one request each, one refresh at the end). Without it, the Inbox calls onSave per item. */
+  onEditMany?: (changes: BulkEditChange[]) => Promise<EditResult>;
   /** Bulk decisions with one refresh at the end. Without it, the Inbox calls onAccept/onReject per item. */
   onDecideMany?: (reviews: InboxReview[], outcome: Outcome) => Promise<BulkResult>;
   /** ADR 0025: undoes these Review Items (one request each, one refresh at the end). Without it, the toast has no Undo. */
@@ -77,7 +84,10 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const visible = groups.flatMap((group) => group.sources.flatMap((source) => source.items));
   /** Items in collapsed groups stay in `visible` (ticks, counts) but ↑/↓ and auto-advance skip them. */
   const hiddenIds = new Set(groups.flatMap((group) => group.sources.filter((source) => collapsed.has(groupKey(group.bucket, source))).flatMap((source) => source.items.map((review) => review.frontmatter.id))));
-  const cellsFor = (review: InboxReview) => reviewRowCells(review, { now, timeZone: displayTimeZone, personName: (id) => labels.get(id)?.label ?? choices.people.find((person) => person.id === id)?.title, projectName: (id) => choices.projects.find((project) => project.id === id)?.title ?? (typeof objectById.get(id)?.frontmatter.title === "string" ? String(objectById.get(id)!.frontmatter.title) : undefined) });
+  const contextChoices = useMemo(() => new Map([...choices.projects, ...choices.clients, ...choices.products].map((choice) => [choice.id, choice.title])), [choices]);
+  const contextName = (id: string) => contextChoices.get(id) ?? (typeof objectById.get(id)?.frontmatter.title === "string" ? String(objectById.get(id)!.frontmatter.title) : undefined);
+  const personName = (id: string) => labels.get(id)?.label ?? choices.people.find((person) => person.id === id)?.title;
+  const cellsFor = (review: InboxReview) => reviewRowCells(review, { personName, contextName });
   const toggleGroup = (key: string) => setCollapsed((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
   /** Bulk actions only touch ticked items that are on screen now. */
   const ticked = visible.filter((review) => checked.has(review.frontmatter.id));
@@ -197,6 +207,46 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     }
     return result;
   };
+  /** Saves a set of edits; a failure does not stop the rest. */
+  const saveEach = async (changes: BulkEditChange[]): Promise<EditResult> => {
+    const result: EditResult = { edited: [], failures: [] };
+    for (const { review, edits } of changes) {
+      try { if (await onSave(review, edits) === false) result.failures.push(review.frontmatter.title); else result.edited.push(review.frontmatter.id); }
+      catch (caught) { result.failures.push(`${review.frontmatter.title}: ${errorText(caught)}`); }
+    }
+    return result;
+  };
+  const saveMany = (changes: BulkEditChange[]) => onEditMany ? onEditMany(changes) : saveEach(changes);
+  /** PB-043 Bulk edit: sets one field on every ticked item that has it. The items stay pending and stay ticked; the toast offers Undo. */
+  const bulkPlan = bulkEditPlan(ticked);
+  const editTicked = async (key: BulkFieldKey, value: string) => {
+    if (busy || readOnly || bulkRunning) return;
+    const { items, skipped } = bulkEditPlan(ticked);
+    const { changes, undo, unchanged } = bulkEditChanges(items, key, value);
+    const label = bulkFieldLabel[key];
+    const skippedNote = skipped ? [`${skipped} skipped (no ${label})`] : [];
+    if (!changes.length) { notify([`${label} already set on ${count(unchanged)}`, ...skippedNote].join(" · ")); return; }
+    setBulkRunning(true); setActionError("");
+    try {
+      const result = await saveMany(changes);
+      const edited = new Set(result.edited);
+      const failed = changes.length - edited.size;
+      const message = [`${label} updated on ${count(edited.size + unchanged)}`, ...skippedNote, ...(failed ? [`${failed} failed`] : [])].join(" · ");
+      if (result.failures.length) setActionError(`${failed} not updated: ${result.failures.join("; ")}`);
+      const restore = undo.filter((change) => edited.has(change.review.frontmatter.id));
+      notify(message, restore.length ? [{ id: "undo", label: "Undo", key: "Z", run: () => void undoBulkEdit(label, restore) }] : []);
+    } catch (caught) { setActionError(errorText(caught)); }
+    finally { setBulkRunning(false); }
+  };
+  /** The toast's Undo for a Bulk edit: puts back each item's previous value. Not a Review action, so not in Inbox History. */
+  const undoBulkEdit = async (label: string, restore: BulkEditChange[]) => {
+    setBulkRunning(true);
+    try {
+      const result = await saveMany(restore);
+      notify(result.failures.length ? `${result.edited.length} of ${restore.length} put back · not undone: ${result.failures.join("; ")}` : `${label} put back on ${count(result.edited.length)}`);
+    } catch (caught) { notify(`Not undone: ${errorText(caught)}`); }
+    finally { setBulkRunning(false); }
+  };
   const saveEdits = async (review: InboxReview, edits: ReviewEdits) => {
     const id = review.frontmatter.id;
     if (active.current.has(id) || busy || readOnly) return;
@@ -281,7 +331,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     <InboxToast toast={toasts.toast} held={toasts.held} onHold={toasts.hold} onRelease={toasts.release} />
     <InboxShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
     <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} view={view} onView={narrow ? undefined : chooseView} switcher={switcher} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
-      checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
+      checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked}
+      bulkEdit={<InboxBulkEdit items={bulkPlan.items} fields={bulkPlan.fields} choices={choices} personName={personName} contextName={contextName} disabled={readOnly} pending={busy || bulkRunning} onApply={(key, value) => void editTicked(key, value)} />} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
       hidden={oneUp && Boolean(selected)}
       onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters} processedToday={processedToday} onSeeHistory={onSeeHistory}
       onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} onDecideRow={decideRow} onDecideGroup={(items, outcome) => void decideSet(items, outcome)} />

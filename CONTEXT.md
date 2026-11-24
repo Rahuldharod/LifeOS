@@ -183,6 +183,10 @@ _Avoid_: Selected item (selection is the ticked set)
 The Review Item shown in full in the Inbox reading pane, opened by Enter or a click.
 _Avoid_: Selected item, current item
 
+**Bulk edit**:
+Setting one field to the same value on every selected Review Item that has that field. It changes the proposals only, never accepts them, and skips items without the field.
+_Avoid_: Batch update, mass edit
+
 **Inbox History**:
 The Inbox tab listing the last 100 Review actions, newest first, by the user and the system, where each can be undone or its result changed.
 _Avoid_: Audit log (the audit trail records every write, not only Review actions), activity feed

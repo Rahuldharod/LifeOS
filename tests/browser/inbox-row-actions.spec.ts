@@ -28,7 +28,8 @@ test("row buttons stay in their own column, act on the row and move focus on; gr
   const box = async (locator: ReturnType<typeof rows.locator>) => (await locator.boundingBox())!;
   for (const index of [0, 3]) {
     const buttons = await box(actions(index));
-    for (const cell of [".c-title", ".c-time"]) {
+    for (const cell of [".c-title", ".c-due", ".c-product"]) {
+      if (!await rows.nth(index).locator(cell).count()) continue; // the 2-line layout has no Due or Product cells
       const other = await box(rows.nth(index).locator(cell));
       expect(buttons.x >= other.x + other.width - 0.5 || buttons.x + buttons.width <= other.x + 0.5, `${cell} overlaps the buttons`).toBe(true);
     }
