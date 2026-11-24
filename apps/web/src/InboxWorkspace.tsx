@@ -6,8 +6,10 @@ import { InboxReadingPane } from "./InboxReadingPane.js";
 import { InboxToast, useInboxToast } from "./InboxToast.js";
 import { InboxShortcutSheet } from "./InboxShortcutSheet.js";
 import { InboxBulkEdit } from "./InboxBulkEdit.js";
+import { InboxApplyTo, type ApplyTarget } from "./InboxApplyTo.js";
 import { bulkEditChanges, bulkEditPlan, bulkFieldLabel, missingFieldNote, type BulkEditChange, type BulkFieldKey, type EditResult } from "./bulkEditModel.js";
 import { useInboxKeys } from "./useInboxKeys.js";
+import { goToEvent } from "./goToKeys.js";
 import { useInboxUndo } from "./useInboxUndo.js";
 import { adjacentId, createdWindow, errorText, groupKey, groupReviews, inboxTabs, needsChoice, proposalTab, rangeIds, reviewRowCells, reviewType, type ActionResult, type BulkResult, type UndoResult, type CreatedPeriod, type InboxReview, type InboxTab, type Outcome, type ReviewChoices } from "./inboxModel.js";
 import type { InboxView } from "./useInboxView.js";
@@ -22,9 +24,15 @@ export type { BulkResult, InboxReview, InboxTab, ReviewChoices, UndoResult } fro
 export type { BulkEditChange, EditResult } from "./bulkEditModel.js";
 
 const count = (n: number) => n === 1 ? "1 proposal" : `${n} proposals`;
+/** PB-046: how long a decided row takes to animate out before its request is sent. Matches `inbox-row-leave` in the CSS. */
+const defaultRowExitMs = 200;
+/** How long an undone row's slide back in lasts. Matches `inbox-row-arrive` in the CSS. */
+const rowArriveMs = 260;
+const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? true;
+const pause = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
 /** The Inbox page: owns the state (filters, opened item, ticks, decisions) and composes the queue, reading pane, keys and toast. */
-export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onEditMany, onDecideMany, onUndo, onView, linkActionsFor, switcher, processedToday, onSeeHistory }: {
+export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, loading = false, error, busy, readOnly, displayTimeZone, now = new Date(), onOpen, onBack, onAccept, onReject, onSave, onEditMany, onDecideMany, onUndo, onView, linkActionsFor, switcher, processedToday, onSeeHistory, rowExitMs = defaultRowExitMs }: {
   reviews: InboxReview[]; objects: Array<LifeObject | ObjectLink>; labels: Map<string, PersonLabel>; choices: ReviewChoices;
   selectedId?: string; loading?: boolean; error?: string; busy: boolean; readOnly: boolean; displayTimeZone: string; now?: Date;
   onOpen?: (id: string, options?: { replace?: boolean }) => void; onBack?: () => void;
@@ -42,7 +50,10 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   switcher?: React.ReactNode;
   /** #244: Review actions made today (from History), and the button that opens the History tab, for the Inbox zero screen. */
   processedToday?: number; onSeeHistory?: () => void;
+  /** PB-046: how long a decided row animates out before its request is sent; 0 turns the animations off (tests). Reduced motion always turns them off. */
+  rowExitMs?: number;
 }) {
+  const animate = () => rowExitMs > 0 && !reducedMotion();
   const narrow = useNarrowWorkspace();
   const { view, setView } = useInboxView();
   /** One pane at a time: a narrow screen, or List view. The list is hidden while an item is open, and nothing opens by itself. */
@@ -57,6 +68,12 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const [checked, setChecked] = useState<Set<string>>(() => new Set()); const [bulkRunning, setBulkRunning] = useState(false);
   const detailRef = useRef<HTMLElement>(null); const queueRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  /** PB-046: decided rows animating out (their request goes once the animation ends), and undone rows sliding back in. */
+  const [leaving, setLeaving] = useState<Set<string>>(() => new Set()); const [arriving, setArriving] = useState<Set<string>>(() => new Set());
+  const arriveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(arriveTimer.current), []);
+  /** PB-046: the Split view question (F Focused row / O Open item), and what to run once it has closed and given focus back. */
+  const [askApply, setAskApply] = useState<Outcome>(); const afterAsk = useRef<(() => void) | undefined>(undefined);
   /** PB-044: the field picker that is open, and (with nothing ticked) the Focused item a letter key opened it for. */
   const [fieldOpen, setFieldOpen] = useState<BulkFieldKey>(); const [soloId, setSoloId] = useState<string>();
   const rowLayout = useInboxRowLayout(queueRef, oneUp && openedId !== undefined);
@@ -84,8 +101,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   /** The queue is grouped by date, then Source meeting / Agent run; `visible` is the same items in that on-screen order. */
   const groups = groupReviews(filtered.filter((review) => tab === "All" || proposalTab(review) === tab), { now, timeZone: displayTimeZone, meetingTitle: (id) => { const title = objectById.get(id)?.frontmatter.title; return typeof title === "string" ? title : undefined; } });
   const visible = groups.flatMap((group) => group.sources.flatMap((source) => source.items));
-  /** Items in collapsed groups stay in `visible` (ticks, counts) but ↑/↓ and auto-advance skip them. */
-  const hiddenIds = new Set(groups.flatMap((group) => group.sources.filter((source) => collapsed.has(groupKey(group.bucket, source))).flatMap((source) => source.items.map((review) => review.frontmatter.id))));
+  /** Items in collapsed groups stay in `visible` (ticks, counts) but ↑/↓ and auto-advance skip them; so do rows animating out (PB-046). */
+  const hiddenIds = new Set([...groups.flatMap((group) => group.sources.filter((source) => collapsed.has(groupKey(group.bucket, source))).flatMap((source) => source.items.map((review) => review.frontmatter.id))), ...leaving]);
   const contextChoices = useMemo(() => new Map([...choices.projects, ...choices.clients, ...choices.products].map((choice) => [choice.id, choice.title])), [choices]);
   const contextName = (id: string) => contextChoices.get(id) ?? (typeof objectById.get(id)?.frontmatter.title === "string" ? String(objectById.get(id)!.frontmatter.title) : undefined);
   const personName = (id: string) => labels.get(id)?.label ?? choices.people.find((person) => person.id === id)?.title;
@@ -143,28 +160,52 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   const nextAfter = (id: string) => adjacentId(visibleIds, hiddenIds, id, 1) ?? adjacentId(visibleIds, hiddenIds, id, -1);
   /** PB-035: once a decision is recorded, open the next waiting item; after the last one, show the empty list state. */
   const advanceFrom = (id: string, nextId: string | undefined) => {
-    if (openedRef.current !== undefined && openedRef.current !== id) return; // the user already moved on while the decision was saving
+    // Only the Open item advances: the user may have moved on while the decision saved, and (PB-046) a row decided in place, with nothing open, opens nothing.
+    if (openedRef.current !== id) return;
     if (nextId) { open(nextId, { replace: true }); return; }
     setOpenedId(undefined); setActionError("");
   };
   /** After a Review action on the Focused item, focus lands on the next item (the Open item advances separately, above). */
   const moveFocusOn = (decidedId: string, nextId: string | undefined, dom: boolean) => { if (nextId && focusSourceRef.current === decidedId) setFocusState({ id: nextId, dom }); };
   /** ADR 0025: an undone item is back in the list and becomes the Focused item. */
-  const undoing = useInboxUndo({ toasts, onUndo, onView, onRestored: (ids) => setFocusState({ id: ids[0], dom: listHasKeyboard() }) });
+  const undoing = useInboxUndo({ toasts, onUndo, onView, onRestored: (ids) => {
+    setFocusState({ id: ids[0], dom: listHasKeyboard() });
+    // PB-046: the rows slide back into their places.
+    if (!animate()) return;
+    clearTimeout(arriveTimer.current); setArriving(new Set(ids));
+    arriveTimer.current = setTimeout(() => setArriving(new Set()), rowArriveMs);
+  } });
+  /** PB-046: rows animate out first, then their request is sent; the refresh after it removes them. A failed request brings them back. */
+  const animateOut = (ids: string[]): Promise<void> | undefined => {
+    if (!animate()) return undefined; // no pause at all, so the request goes at once (and a second click still finds it in flight)
+    setLeaving((current) => new Set([...current, ...ids]));
+    return pause(rowExitMs);
+  };
+  const stopLeaving = (ids: string[]) => setLeaving((current) => { if (!ids.some((id) => current.has(id))) return current; const next = new Set(current); ids.forEach((id) => next.delete(id)); return next; });
   const decide = async (review: InboxReview, outcome: Outcome, action: () => Promise<ActionResult>) => {
     const id = review.frontmatter.id;
     if (active.current.has(id) || busy || readOnly) return;
     const nextId = nextAfter(id); const followWithKeyboard = listHasKeyboard();
     active.current.add(id); setActiveId(id); setActionError(""); setDeciding(review);
+    // PB-046: focus moves on as the row starts to leave, so the next key acts on the next row; it comes back if the decision fails.
+    const focusHere = focusSourceRef.current === id;
+    if (focusHere && nextId) setFocusState({ id: nextId, dom: followWithKeyboard });
+    const restoreFocus = () => { if (focusHere && focusSourceRef.current === nextId) setFocusState({ id, dom: followWithKeyboard }); };
+    let decided = false;
     try {
+      const exit = animateOut([id]); if (exit) await exit;
       const result = await action();
       if (result === false) return;
+      decided = true;
       const objectId = typeof result === "object" ? result.objectId : undefined;
       undoing.announce(`Proposal ${outcome}`, [review], outcome, objectId ? { [id]: objectId } : {});
       advanceFrom(id, nextId);
       moveFocusOn(id, nextId, followWithKeyboard);
     } catch (caught) { setActionError(errorText(caught)); }
-    finally { active.current.delete(id); setActiveId((current) => current === id ? undefined : current); setDeciding((current) => current?.frontmatter.id === id ? undefined : current); }
+    finally {
+      active.current.delete(id); setActiveId((current) => current === id ? undefined : current); setDeciding((current) => current?.frontmatter.id === id ? undefined : current);
+      stopLeaving([id]); if (!decided) restoreFocus();
+    }
   };
   /** Link-resolution cards run their own requests; once one finishes, the Inbox moves on the same way. */
   const linkFinished = (review: InboxReview, nextId: string | undefined, outcome: Outcome) => { const followWithKeyboard = listHasKeyboard(); undoing.announce(`Proposal ${outcome}`, [review], outcome); advanceFrom(review.frontmatter.id, nextId); moveFocusOn(review.frontmatter.id, nextId, followWithKeyboard); };
@@ -187,7 +228,9 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     const focusId = focusedRef.current; const followWithKeyboard = listHasKeyboard();
     const nextFocus = focusId && targetIds.has(focusId) ? adjacentId(visibleIds, skip, focusId, 1) ?? adjacentId(visibleIds, skip, focusId, -1) : undefined;
     setBulkRunning(true); setActionError("");
+    if (focusId && nextFocus) setFocusState({ id: nextFocus, dom: followWithKeyboard }); // PB-046: as the rows start to leave
     try {
+      const exit = animateOut([...targetIds]); if (exit) await exit;
       const result = onDecideMany ? await onDecideMany(targets, outcome) : await decideEach(targets, outcome);
       const decided = new Set(result.decided);
       setChecked((current) => new Set([...current].filter((id) => !decided.has(id))));
@@ -196,9 +239,9 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       undoing.announce([`${decided.size === 1 ? "1 proposal" : `${decided.size} proposals`} ${outcome}`, ...(skipped ? [`${skipped} skipped (link or merge needs a choice)`] : [])].join(" · "), targets.filter((review) => decided.has(review.frontmatter.id)), outcome, result.objects);
       if (result.failures.length) setActionError(`${result.failures.length} not ${outcome}: ${result.failures.join("; ")}`);
       if (openId && decided.has(openId)) advanceFrom(openId, nextId);
-      if (focusId && nextFocus && decided.has(focusId)) setFocusState({ id: nextFocus, dom: followWithKeyboard });
-    } catch (caught) { setActionError(errorText(caught)); }
-    finally { setBulkRunning(false); }
+      if (focusId && nextFocus && !decided.has(focusId)) setFocusState({ id: focusId, dom: followWithKeyboard });
+    } catch (caught) { setActionError(errorText(caught)); if (focusId && nextFocus) setFocusState({ id: focusId, dom: followWithKeyboard }); }
+    finally { setBulkRunning(false); stopLeaving([...targetIds]); }
   };
   const decideTicked = (outcome: Outcome) => decideSet(ticked, outcome);
   const decideEach = async (targets: InboxReview[], outcome: Outcome): Promise<BulkResult> => {
@@ -294,12 +337,25 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     void decide(target, outcome, outcome === "accepted" ? () => onAccept(target) : linkActions ? async () => { await linkActions.onReject(); } : () => onReject(target));
     return true;
   };
-  /** A / R: every ticked item, else the Focused item. */
+  /** A / R: every ticked item, else the Focused item. PB-046: in Split view, with the Focused row not the Open item, ask which one first. */
   const decideFocused = (outcome: Outcome) => {
     if (ticked.length) { void decideTicked(outcome); return true; }
     const target = visible.find((review) => review.frontmatter.id === focusedId);
-    return target ? decideItem(target, outcome) : false;
+    if (!target) return false;
+    if (!oneUp && selected && selected.frontmatter.id !== target.frontmatter.id && visibleIds.includes(selected.frontmatter.id)) { setAskApply(outcome); return true; }
+    return decideItem(target, outcome);
   };
+  /** The answer to the Split view question runs once the question has closed and handed keyboard focus back. */
+  const answerApply = (choice: ApplyTarget | undefined) => {
+    const outcome = askApply; const focusedTarget = visible.find((review) => review.frontmatter.id === focusedId);
+    setAskApply(undefined);
+    if (!outcome || !choice) return;
+    afterAsk.current = () => {
+      if (choice === "open") { if (selected) decideItem(selected, outcome); }
+      else if (focusedTarget) decideItem(focusedTarget, outcome);
+    };
+  };
+  useEffect(() => { if (askApply !== undefined || !afterAsk.current) return; const run = afterAsk.current; afterAsk.current = undefined; run(); }, [askApply]);
   /** A row's own button: it makes that row the Focused item first, so focus moves on from it like after a key. */
   const decideRow = (id: string, outcome: Outcome) => {
     const target = visible.find((review) => review.frontmatter.id === id);
@@ -328,7 +384,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
       control.click(); return true;
     },
     clearSelection: () => {
-      if (view === "list" && !narrow && selected) { back(); return true; }
+      if (oneUp && selected) { back(); return true; } // List view, or a narrow window: the open item covers the list
       if (!checked.size) return false; clearChecked(); return true;
     },
     toggleView: () => { if (narrow) return false; chooseView(view === "split" ? "list" : "split"); return true; },
@@ -347,6 +403,22 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     },
     showHelp: () => setHelpOpen(true)
   });
+  /**
+   * PB-045 G then I while already on the Inbox: back to the list with the item's row focused. Where the open item hides the
+   * list (List view, narrow) it closes; in Split view the list is beside it, so only focus moves. Ticks and filters stay.
+   */
+  const goHome = useRef<() => void>(() => undefined);
+  goHome.current = () => {
+    openField(undefined);
+    if (oneUp && selected) { back(); return; }
+    const id = openedId && shownIds.includes(openedId) ? openedId : focusedId;
+    if (id) setFocusState({ id, dom: true });
+  };
+  useEffect(() => {
+    const onGo = (event: Event) => { if ((event as CustomEvent).detail !== "Inbox") return; event.preventDefault(); goHome.current(); };
+    globalThis.document.addEventListener(goToEvent, onGo);
+    return () => globalThis.document.removeEventListener(goToEvent, onGo);
+  }, []);
   /** After a tab switch, an open item that is not in the new tab gives way to the tab's first item (wide screens; narrow shows the list). */
   const shownTab = useRef(tab);
   useEffect(() => {
@@ -362,7 +434,8 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
   return <div ref={ref} className={`inbox-workspace pane-workspace${selected ? " detail-open" : ""}`} data-workspace="inbox" data-view={narrow ? undefined : view} style={split.style}>
     <InboxToast toast={toasts.toast} held={toasts.held} onHold={toasts.hold} onRelease={toasts.release} />
     <InboxShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
-    <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} view={view} onView={narrow ? undefined : chooseView} switcher={switcher} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId}
+    <InboxApplyTo outcome={askApply} focusedTitle={visible.find((review) => review.frontmatter.id === focusedId)?.frontmatter.title} openTitle={selected?.frontmatter.title} onChoose={answerApply} onCancel={() => answerApply(undefined)} />
+    <InboxQueue paneRef={queueRef} groups={groups} collapsed={collapsed} cellsFor={cellsFor} rowMode={rowLayout.mode} twoLine={rowLayout.twoLine} view={view} onView={narrow ? undefined : chooseView} switcher={switcher} onRowMode={rowLayout.setMode} onShowHelp={() => setHelpOpen(true)} onFocusRow={(id) => setFocusState((current) => current.id === id ? current : { id })} onToggleGroup={toggleGroup} visible={visible} reviewCount={reviews.length} tabCounts={tabCounts} tab={tab} query={query} advanced={advanced} meetings={meetings} meetingId={meetingId} period={period} openedId={openedId} focusedId={focusedId} leaving={leaving} arriving={arriving}
       checked={checked} ticked={ticked} acceptableCount={acceptable.length} allTicked={allTicked}
       bulkEdit={<InboxBulkEdit items={bulkPlan.items} fields={bulkPlan.fields} choices={choices} personName={personName} contextName={contextName} disabled={readOnly} pending={busy || bulkRunning}
         openKey={fieldOpen} scope={solo ? "Focused item" : undefined} onOpenKey={openField} onApply={(key, value) => void editTargetsField(editTargets, key, value)} />} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}

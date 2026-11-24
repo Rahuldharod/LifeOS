@@ -7,11 +7,12 @@ export const inboxShortcuts: Array<{ keys: string; what: string }> = [
   { keys: "Enter or click", what: "Open the focused item" },
   { keys: "A", what: "Accept the focused item, or all ticked items" },
   { keys: "R", what: "Reject the focused item, or all ticked items" },
+  { keys: "F / O", what: "In Split view, when the focused row isn't the open item, A or R asks: F applies to the Focused row, O to the Open item, Esc cancels" },
   { keys: "Z", what: "Undo the last Accept or Reject while its message shows (8 seconds)" },
   { keys: "S", what: "Save edits on the open item" },
   { keys: "X", what: "Tick or untick the focused item" },
   { keys: "Shift + X or Shift + click", what: "Tick a range from the last ticked item" },
-  { keys: "Esc", what: "Clear the ticks; in List view, go back to the list" },
+  { keys: "Esc", what: "Clear the ticks; with an item covering the list (List view, narrow window), go back to the list" },
   { keys: "O", what: "Set Owner on the ticked items, or the focused one" },
   { keys: "D", what: "Set Due date" },
   { keys: "I", what: "Set Priority" },
@@ -20,6 +21,10 @@ export const inboxShortcuts: Array<{ keys: string; what: string }> = [
   { keys: "P", what: "Set Product" },
   { keys: "1 – 6", what: "Switch tab" },
   { keys: "V", what: "Switch between Split and List view" },
+  { keys: "G then I", what: "Go to the Inbox list; from an open item, back to its row" },
+  { keys: "G then T C K N", what: "Go to Today, Calendar, Tasks, Notes" },
+  { keys: "G then D O L", what: "Go to Decisions, Open points, Knowledge" },
+  { keys: "G then Y S", what: "Go to System, Settings" },
   { keys: "?", what: "Show this sheet" }
 ];
 

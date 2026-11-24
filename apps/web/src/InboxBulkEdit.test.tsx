@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItem } from "@lifeos/contracts";
 import { InboxWorkspace, type BulkEditChange, type EditResult } from "./InboxWorkspace.js";
+import { ApplicationShell } from "./ApplicationShell.js";
 
 // PB-043 Inbox Bulk edit: field buttons for the fields the ticked proposals share; one value set on all of them, with Undo.
 
@@ -25,7 +26,7 @@ let root: Root | undefined;
 afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; root = undefined; vi.useRealTimers(); });
 
 /** The Inbox over state like the app's: a saved edit changes the item; `fail` names items whose save fails. */
-async function mount({ fail = [], readOnly = false }: { fail?: string[]; readOnly?: boolean } = {}) {
+async function mount({ fail = [], readOnly = false, shell }: { fail?: string[]; readOnly?: boolean; shell?: (view: string) => void } = {}) {
   const calls: BulkEditChange[][] = []; const accepted: string[] = [];
   function Harness() {
     const [items, setItems] = useState(initial);
@@ -43,11 +44,11 @@ async function mount({ fail = [], readOnly = false }: { fail?: string[]; readOnl
       }));
       return result;
     };
-    return <InboxWorkspace reviews={items} objects={[]} labels={new Map()} choices={choices} busy={false} readOnly={readOnly} displayTimeZone="Europe/Paris"
+    return <InboxWorkspace rowExitMs={0} reviews={items} objects={[]} labels={new Map()} choices={choices} busy={false} readOnly={readOnly} displayTimeZone="Europe/Paris"
       onAccept={async (item) => { accepted.push(item.frontmatter.id); return true; }} onReject={async () => true} onSave={async () => true} onEditMany={onEditMany} />;
   }
   root = createRoot(document.body.appendChild(document.createElement("div")));
-  await act(async () => root!.render(<Harness />));
+  await act(async () => root!.render(shell ? <ApplicationShell activeView="Inbox" status="Ready" onNavigate={shell} onSearch={() => undefined} onCapture={() => undefined}><Harness /></ApplicationShell> : <Harness />));
   return { calls, accepted };
 }
 
@@ -205,6 +206,18 @@ describe("Inbox field keys", () => {
     await clickButton("Deselect all"); await tick("Summary one");
     await press("p", document.body);
     expect(toastText()).toContain("Product isn't available for Summaries");
+  });
+
+  it("G then I (go to Inbox) never opens Priority, and stays on the Inbox page (PB-045)", async () => {
+    const navigate = vi.fn();
+    await mount({ shell: navigate });
+    await tick("Task one"); await tick("Task two");
+    await press("g", document.body); await press("i", document.body);
+    expect(document.querySelector("[role='listbox'][aria-label='Priority']")).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(document.querySelector(".inbox-bulk")?.textContent).toContain("2 selected");
+    await press("i", document.body); // I alone still opens Priority
+    expect(document.querySelector("[role='listbox'][aria-label='Priority']")).not.toBeNull();
   });
 
   it("skip the Open item while it has unsaved edits, and count it", async () => {

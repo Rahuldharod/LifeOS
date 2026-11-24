@@ -34,7 +34,7 @@ function Harness({ selectedId, initial = queue() }: { selectedId: string; initia
   const [route, setRoute] = React.useState<string | undefined>(selectedId);
   const remove = (id: string) => setReviews((current) => current.filter((entry) => entry.frontmatter.id !== id));
   const decide = (outcome: string) => async (item: { frontmatter: { id: string } }) => { decided.push(`${outcome}:${item.frontmatter.id}`); remove(item.frontmatter.id); return true; };
-  return <InboxWorkspace reviews={reviews} selectedId={route} objects={[meeting]} labels={new Map()} choices={choices} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={now}
+  return <InboxWorkspace rowExitMs={0} reviews={reviews} selectedId={route} objects={[meeting]} labels={new Map()} choices={choices} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={now}
     onOpen={(id) => setRoute(id)} onAccept={decide("accepted")} onReject={decide("rejected")} onSave={async () => true}
     linkActionsFor={(id) => ({ onCreate: async () => ({}) as never, onLink: async () => undefined, onReject: async () => { linkRejected.push(id); remove(id); } })} />;
 }
@@ -103,7 +103,7 @@ describe("row buttons", () => {
 
   it("A on the Open item says to save first only when there are unsaved edits, not when read-only", async () => {
     root = createRoot(document.body.appendChild(document.createElement("div")));
-    await act(async () => root!.render(<InboxWorkspace reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly busy={false} displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => root!.render(<InboxWorkspace rowExitMs={0} reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly busy={false} displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true })); });
     expect(status()).not.toContain("Save your edits");
     expect(status()).toMatch(/Read-only/);
@@ -111,14 +111,14 @@ describe("row buttons", () => {
 
   it("A on the Open item stays quiet while a decision is saving", async () => {
     root = createRoot(document.body.appendChild(document.createElement("div")));
-    await act(async () => root!.render(<InboxWorkspace reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly={false} busy displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => root!.render(<InboxWorkspace rowExitMs={0} reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly={false} busy displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true })); });
     expect(status() ?? "").toBe("");
   });
 
   it("are disabled when read-only, but Open stays available", async () => {
     root = createRoot(document.body.appendChild(document.createElement("div")));
-    await act(async () => root!.render(<InboxWorkspace reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly busy={false} displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => root!.render(<InboxWorkspace rowExitMs={0} reviews={queue()} selectedId="a" objects={[meeting]} labels={new Map()} choices={choices} readOnly busy={false} displayTimeZone="Europe/Paris" now={now} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     expect(rowButton("Bravo task", "Accept proposal").disabled).toBe(true);
     expect(rowButton("Bravo task", "Reject proposal").disabled).toBe(true);
     expect(groupButton(/^Accept all/).disabled).toBe(true);

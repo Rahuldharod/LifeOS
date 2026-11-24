@@ -22,7 +22,7 @@ afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; root
 /** #240: Split / List view. The route is kept in the harness so Back and open behave like the real app. */
 function Harness({ selectedId }: { selectedId?: string }) {
   const [route, setRoute] = React.useState<string | undefined>(selectedId);
-  return <InboxWorkspace reviews={reviews} selectedId={route} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={new Date("2026-10-10T12:00:00Z")}
+  return <InboxWorkspace rowExitMs={0} reviews={reviews} selectedId={route} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" now={new Date("2026-10-10T12:00:00Z")}
     onOpen={setRoute} onBack={() => setRoute(undefined)} onAccept={async () => true} onReject={async () => true} onSave={async () => true} />;
 }
 async function mount(selectedId?: string) { root = createRoot(document.body.appendChild(document.createElement("div"))); await act(async () => root!.render(<Harness selectedId={selectedId} />)); }

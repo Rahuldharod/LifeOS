@@ -30,7 +30,7 @@ async function render(props: Partial<React.ComponentProps<typeof InboxWorkspace>
     labels: new Map(), choices: { people: [], projects: [], clients: [], products: [] }, selectedId: "r1", readOnly: false, busy: false, displayTimeZone: "Europe/Paris",
     onAccept: async () => true, onReject: async () => true, onSave: async () => true
   };
-  await act(async () => root!.render(<InboxWorkspace {...defaults} {...props} />));
+  await act(async () => root!.render(<InboxWorkspace rowExitMs={0} {...defaults} {...props} />));
 }
 
 async function click(name: string) {
@@ -160,9 +160,9 @@ describe("InboxWorkspace", () => {
   it("shows loading, failure and empty states", async () => {
     await render({ reviews: [], loading: true });
     expect(document.body.textContent).toContain("Loading review queue");
-    await act(async () => root!.render(<InboxWorkspace reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" error="Could not load proposals" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => root!.render(<InboxWorkspace rowExitMs={0} reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" error="Could not load proposals" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Could not load proposals");
-    await act(async () => root!.render(<InboxWorkspace reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
+    await act(async () => root!.render(<InboxWorkspace rowExitMs={0} reviews={[]} objects={[]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" onAccept={async () => true} onReject={async () => true} onSave={async () => true} />));
     expect(document.body.textContent).toContain("Inbox zero");
     expect(document.body.textContent).toContain("Nothing waiting.");
     expect(document.body.textContent).not.toContain("See History"); // no handler, no button
@@ -185,7 +185,7 @@ describe("InboxWorkspace", () => {
     await act(async () => release());
 
     const reject = vi.fn(async () => { throw new Error("Conflict: proposal changed"); });
-    await act(async () => root!.render(<InboxWorkspace reviews={[review("r3", "Ship the pilot")]} selectedId="r3" objects={[object("meeting-1", "meeting", "Pilot review")]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" onAccept={async () => true} onReject={reject} onSave={async () => true} />));
+    await act(async () => root!.render(<InboxWorkspace rowExitMs={0} reviews={[review("r3", "Ship the pilot")]} selectedId="r3" objects={[object("meeting-1", "meeting", "Pilot review")]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris" onAccept={async () => true} onReject={reject} onSave={async () => true} />));
     await click("Reject");
     expect(document.querySelector("[role='alert']")?.textContent).toContain("Conflict: proposal changed");
     expect(document.querySelector("[aria-label='Review detail']")?.textContent).not.toContain("Rejected");
@@ -220,7 +220,7 @@ describe("InboxWorkspace auto-advance (PB-035)", () => {
     const [reviews, setReviews] = React.useState(initial);
     const [route, setRoute] = React.useState<string | undefined>(selectedId);
     const decide = async (item: { frontmatter: { id: string } }) => { setReviews((current) => current.filter((entry) => entry.frontmatter.id !== item.frontmatter.id)); setRoute(undefined); return true; };
-    return <InboxWorkspace reviews={reviews} selectedId={route} objects={[object("meeting-1", "meeting", "Pilot review")]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris"
+    return <InboxWorkspace rowExitMs={0} reviews={reviews} selectedId={route} objects={[object("meeting-1", "meeting", "Pilot review")]} labels={new Map()} choices={{ people: [], projects: [], clients: [], products: [] }} readOnly={false} busy={false} displayTimeZone="Europe/Paris"
       onOpen={(id, options) => { opened.push([id, options]); setRoute(id); }} onAccept={decide} onReject={decide} onSave={async () => true} />;
   }
   async function mount(selectedId: string, initial = queue()) {
@@ -338,6 +338,7 @@ describe("InboxWorkspace keyboard shortcuts", () => {
     await render({ reviews: [merge, ...reviews()], selectedId: "t", onAccept: accept });
     await press("ArrowUp");
     await press("a");
+    await press("f", globalThis.document.activeElement!); // PB-046: Split view asks; F applies to the Focused row
     expect(accept).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Merge proposals need a choice: open it to decide.");
   });

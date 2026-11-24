@@ -150,3 +150,18 @@ kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-stron
   .inbox-queue.two-line .inbox-row .c-dot { grid-area: dot; align-self: center; }
   .inbox-queue.two-line .inbox-row .c-actions { position: absolute; top: var(--space-1); right: var(--space-2); padding-left: var(--space-1); border-radius: var(--radius-sm); background: var(--color-surface); }
 }
+/* PB-046: a decided row fades, slides right and folds its height away before it leaves; an undone row slides back in. Reduced motion skips both (styles.css). */
+@keyframes inbox-row-leave {
+  from { max-height: 6rem; opacity: 1; transform: none; }
+  60% { opacity: 0; transform: translateX(var(--space-5)); }
+  to { max-height: 0; padding-block: 0; border-bottom-width: 0; opacity: 0; transform: translateX(var(--space-5)); }
+}
+@keyframes inbox-row-arrive { from { opacity: 0; transform: translateX(calc(-1 * var(--space-4))); } }
+.inbox-row.leaving { overflow: hidden; pointer-events: none; animation: inbox-row-leave 200ms ease-in forwards; }
+.inbox-row.arriving { animation: inbox-row-arrive 260ms ease-out; }
+/* PB-046: the Split view question, "Apply to: F Focused row / O Open item". */
+.inbox-apply-to { max-width: 28rem; }
+.inbox-apply-to h3 { margin-top: 0; }
+.inbox-apply-to-choices { display: grid; gap: var(--space-2); }
+.inbox-apply-to-choices button { display: grid; grid-template-columns: auto 1fr; justify-items: start; column-gap: var(--space-2); padding: var(--space-2) var(--space-3); text-align: left; }
+.inbox-apply-to-choices small { grid-column: 2; overflow: hidden; max-width: 100%; color: var(--color-text-muted); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }

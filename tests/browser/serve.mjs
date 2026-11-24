@@ -195,6 +195,8 @@ for (const n of [1, 2, 3, 4]) draft(`rowact-${n}`, { kind: "task", draft_key: `b
 for (const n of [1, 2, 3, 4]) draft(`undo-${n}`, { kind: "task", draft_key: `browser-undo-${n}`, origin: "agent-extracted", confidence: "High", title: `Undo proposal ${n}` }, "Extracted for the undo test.");
 // #243 Inbox History: proposals that only inbox-history.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
 for (const n of [1, 2, 3]) draft(`history-${n}`, { kind: "task", draft_key: `browser-history-${n}`, origin: "agent-extracted", confidence: "High", title: `History proposal ${n}` }, "Extracted for the Inbox History test.");
+// PB-046 decide in place: proposals that only inbox-decide-in-place.spec.ts decides (fixtures.ts leaves them out of `reviewItems`).
+for (const n of [1, 2, 3, 4]) draft(`inplace-${n}`, { kind: "task", draft_key: `browser-inplace-${n}`, origin: "agent-extracted", confidence: "High", title: `In place proposal ${n}` }, "Extracted for the decide in place test.");
 for (const [name, content] of Object.entries(files)) {
   const file = path.join(drafts, name);
   await writeFile(file, content);
