@@ -407,6 +407,25 @@ describe("InboxWorkspace bulk actions", () => {
     expect(isTicked("Alpha task")).toBe(false);
   });
 
+  it("a meeting's tick box ticks every item from that meeting, shows mixed when some are ticked, and unticks them all", async () => {
+    const groupBox = (meeting: string) => document.querySelector(`[aria-label^='Select all in Meeting · ${meeting}']`) as HTMLInputElement;
+    const tickGroup = async (meeting: string) => act(async () => groupBox(meeting).click());
+    await render({ reviews: [...reviews(), review("d", "Delta task", { created_at: "2026-10-10T06:00:00Z", source_meeting_id: "meeting-2" })], selectedId: "a",
+      objects: [object("meeting-1", "meeting", "Pilot review"), object("meeting-2", "meeting", "Budget sync")] });
+    await tickGroup("Pilot review");
+    expect(["Alpha task", "Bravo task", "Link owner", "Charlie decision"].every(isTicked)).toBe(true);
+    expect(isTicked("Delta task")).toBe(false);
+    expect(groupBox("Pilot review").checked).toBe(true);
+    expect(document.querySelector("[aria-label='Bulk actions']")?.textContent).toContain("4 selected");
+    await tick("Bravo task");
+    expect([groupBox("Pilot review").checked, groupBox("Pilot review").indeterminate]).toEqual([false, true]);
+    await tickGroup("Pilot review");
+    expect(["Alpha task", "Bravo task", "Link owner", "Charlie decision"].every(isTicked)).toBe(true);
+    await tickGroup("Pilot review");
+    expect(["Alpha task", "Bravo task", "Link owner", "Charlie decision"].some(isTicked)).toBe(false);
+    expect(groupBox("Pilot review").indeterminate).toBe(false);
+  });
+
   it("bulk Accept skips link proposals and moves off a decided open item", async () => {
     const decideMany = vi.fn(async (items: Array<{ frontmatter: { id: string } }>) => ({ decided: items.map((item) => item.frontmatter.id), failures: [] }));
     const opened = vi.fn();

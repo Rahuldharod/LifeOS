@@ -133,6 +133,11 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
     if (!rangeOf) anchor.current = id;
     setChecked((current) => { const next = new Set(current); if (rangeOf) rangeOf.forEach((rangeId) => next.add(rangeId)); else if (!next.delete(id)) next.add(id); return next; });
   };
+  /** Tick every item in a group, or untick them all when every one is already ticked. */
+  const toggleGroupChecked = (items: InboxReview[]) => {
+    const ids = items.map((review) => review.frontmatter.id);
+    setChecked((current) => { const next = new Set(current); const all = ids.every((id) => next.has(id)); ids.forEach((id) => all ? next.delete(id) : next.add(id)); return next; });
+  };
   const clearChecked = () => { anchor.current = undefined; setChecked(new Set()); };
   /** PB-035: the item below in the list, or the one above when the decided item was the bottom one. */
   const nextAfter = (id: string) => adjacentId(visibleIds, hiddenIds, id, 1) ?? adjacentId(visibleIds, hiddenIds, id, -1);
@@ -363,7 +368,7 @@ export function InboxWorkspace({ reviews, objects, labels, choices, selectedId, 
         openKey={fieldOpen} scope={solo ? "Focused item" : undefined} onOpenKey={openField} onApply={(key, value) => void editTargetsField(editTargets, key, value)} />} loading={loading} error={error} busy={busy} readOnly={readOnly} bulkRunning={bulkRunning}
       hidden={oneUp && Boolean(selected)}
       onTab={setTab} onQuery={setQuery} onToggleAdvanced={() => setAdvanced(!advanced)} onMeeting={setMeetingId} onPeriod={setPeriod} onClearFilters={clearFilters} processedToday={processedToday} onSeeHistory={onSeeHistory}
-      onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} onDecideRow={decideRow} onDecideGroup={(items, outcome) => void decideSet(items, outcome)} />
+      onOpen={(id) => open(id)} onToggleChecked={toggleChecked} onToggleGroupChecked={toggleGroupChecked} onSelectAll={() => setChecked(new Set(visibleIds))} onDeselectAll={clearChecked} onDecideTicked={(outcome) => void decideTicked(outcome)} onDecideRow={decideRow} onDecideGroup={(items, outcome) => void decideSet(items, outcome)} />
     {!oneUp && <div {...split.dividerProps} />}
     <InboxReadingPane paneRef={detailRef} selected={selected} hidden={oneUp && !selected} position={position} total={visibleIds.length} previousId={previousId} followingId={followingId} readOnly={readOnly} actionError={actionError}
       objectById={objectById} labels={labels} choices={choices} itemBusy={itemBusy} nextId={selected ? nextAfter(selected.frontmatter.id) : undefined} linkActions={selected ? linkActionsFor?.(selected.frontmatter.id) : undefined}
