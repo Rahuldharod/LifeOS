@@ -31,9 +31,13 @@ test("A in List view animates the row out, Undo slides it back; in Split view A 
   await expect(page.getByRole("region", { name: "Review detail" })).toBeHidden();
   await expect(queue.locator(".inbox-row.focused")).toContainText(titles[1]!);
 
-  // Undo (Z) brings it back, sliding into its place.
+  // Undo (Z) brings it back, sliding into its place. The class lasts 260 ms, so watch for it rather than poll (slow CI misses it).
+  const arrived = queue.evaluate((element, title) => new Promise<boolean>((resolve) => {
+    const seen = () => [...element.querySelectorAll(".inbox-row.arriving")].some((row) => row.textContent?.includes(title));
+    new MutationObserver(() => { if (seen()) resolve(true); }).observe(element, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+  }), titles[0]!);
   await page.keyboard.press("z");
-  await expect(rowOf(titles[0]!)).toHaveClass(/arriving/);
+  expect(await arrived).toBe(true);
   await expect(rows).toHaveCount(4);
   await expect(rowOf(titles[0]!)).not.toHaveClass(/arriving/);
 
