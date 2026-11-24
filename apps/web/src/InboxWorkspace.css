@@ -1,4 +1,5 @@
-.inbox-queue { background: var(--color-surface-quiet) !important; }
+/* Option A (prototype/inbox-colours): the list is the brightest surface; the open row is a teal tint, hover a faint warm wash. */
+.inbox-queue { background: var(--color-surface) !important; }
 .inbox-queue { container-type: inline-size; }
 .inbox-tabs { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-1) var(--space-3); margin-top: var(--space-3); }
 .inbox-tablist { display: flex; flex-wrap: wrap; gap: var(--space-1); }
@@ -11,7 +12,7 @@
 .inbox-legend { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .inbox-rows { margin-top: var(--space-2); }
 .inbox-date { margin: var(--space-4) 0 var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); letter-spacing: .08em; text-transform: uppercase; }
-.inbox-source-head { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); border-bottom: var(--border-thin) solid var(--color-border); }
+.inbox-source-head { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); border-bottom: var(--border-thin) solid var(--color-border); border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--color-surface-raised); }
 .inbox-source { display: flex; flex: 1; align-items: center; justify-content: flex-start; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: 0; background: none; color: var(--color-text); font-size: var(--font-size-sm); font-weight: 750; text-align: left; }
 .inbox-source small { color: var(--color-text-muted); font-weight: 600; }
 /* Rows and the column header share one grid, so badges, titles and the right-hand columns line up. Cells are placed by column, so a dropped column leaves no gap or height. */
@@ -49,11 +50,14 @@
 }
 .inbox-colhead { margin-top: var(--space-2); border-bottom: 0; color: var(--color-text-muted); cursor: default; font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
 .inbox-colhead > * { font-size: 11px !important; }
-.inbox-row:not(.inbox-colhead):hover, .inbox-row.selected { background: var(--color-surface); }
-.inbox-row.selected { box-shadow: inset 3px 0 0 var(--color-primary); }
+.inbox-row { transition: background-color var(--motion-fast); }
+.inbox-row:not(.inbox-colhead):hover { background: color-mix(in srgb, var(--color-surface-quiet) 40%, var(--color-surface)); }
+.inbox-row.selected, .inbox-row.selected:hover { background: var(--color-selection-surface); box-shadow: inset 3px 0 0 var(--color-selection); }
 /* Focused row (what the keys act on) is an outline; the Open row is the filled bar and tint. They differ, and can be on different rows. */
 .inbox-row.focused:not(.inbox-colhead) { outline: 2px solid var(--color-focus); outline-offset: -2px; border-radius: var(--radius-sm); }
-.inbox-row-open:focus-visible { outline: none; }
+/* Keyboard focus rings the whole row, never the title text inside it (a ring over the text is hard to read). */
+.inbox-row-open:focus-visible { outline: none; box-shadow: none; }
+.inbox-row:has(.inbox-row-open:focus-visible) { outline: 2px solid var(--color-focus); outline-offset: -2px; border-radius: var(--radius-sm); }
 .inbox-shortcuts-link { margin-left: var(--space-2); padding: 2px var(--space-2); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 600; white-space: nowrap; }
 .inbox-tab-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; row-gap: var(--space-1); margin-left: auto; min-width: 0; }
 kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-strong); border-radius: 4px; background: var(--color-surface-quiet); font: inherit; font-size: .85em; font-weight: 700; }
@@ -61,7 +65,7 @@ kbd { padding: 0 .4em; border: var(--border-thin) solid var(--color-border-stron
 .inbox-shortcuts h3 { margin-top: 0; }
 .inbox-shortcuts th { padding: var(--space-1) var(--space-3) var(--space-1) 0; text-align: left; white-space: nowrap; }
 .inbox-shortcuts td { padding: var(--space-1) 0; }
-.inbox-row.checked { background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface)); }
+.inbox-row.checked { background: color-mix(in srgb, var(--color-info-surface) 35%, var(--color-surface)); }
 /* Titles always wrap in full; the other cells align on the title's first line. */
 .inbox-row-open { display: block; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--color-text); font: inherit; text-align: left; }
 .inbox-row-open strong { font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; white-space: normal; }
