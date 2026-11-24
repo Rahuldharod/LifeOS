@@ -30,6 +30,23 @@ function button(name: string) {
   return [...document.querySelectorAll("button")].find((candidate) => candidate.getAttribute("aria-label") === name || candidate.textContent?.trim() === name) as HTMLButtonElement | undefined;
 }
 
+describe("go-to keys (PB-045)", () => {
+  const press = (key: string, target: EventTarget = document.body) => act(() => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
+  it("G then a letter navigates; the page showing that View may handle it instead", () => {
+    const onNavigate = vi.fn();
+    act(() => root!.render(<ApplicationShell activeView="Today" status="Ready" onNavigate={onNavigate} onSearch={vi.fn()} onCapture={vi.fn()}><p>Page</p></ApplicationShell>));
+    press("g"); press("k");
+    expect(onNavigate).toHaveBeenLastCalledWith("Tasks");
+    const handled = (event: Event) => event.preventDefault();
+    document.addEventListener("lifeos:go-to", handled);
+    press("g"); press("i");
+    document.removeEventListener("lifeos:go-to", handled);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(button("Inbox")!.getAttribute("aria-keyshortcuts")).toBe("G I");
+    expect(button("Inbox")!.title).toBe("Inbox (G then I)");
+  });
+});
+
 describe("ApplicationShell", () => {
   it("renders the approved destination groups and keeps Settings at the bottom", () => {
     act(() => root!.render(<ApplicationShell activeView="Today" pendingReviewCount={2} status="Ready" onNavigate={vi.fn()} onSearch={vi.fn()} onCapture={vi.fn()}><p>Page</p></ApplicationShell>));

@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { leaveFieldOnEscape } from "./escapeLeavesField.js";
+import { goToEvent, goToKeyHandler, goToLetter } from "./goToKeys.js";
 import { OverlayDialog } from "./OverlayDialog.js";
 import type { View } from "./routes.js";
 import { useShellLayout, WorkspaceLayoutContext } from "./useNarrowWorkspace.js";
@@ -62,8 +63,8 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
   const narrow = layout.band === "narrow";
   const content = useRef<HTMLElement>(null);
   useEffect(() => { if (!narrow) setMenuOpen(false); }, [narrow]);
-  const shortcuts = useRef({ onSearch, onCapture });
-  shortcuts.current = { onSearch, onCapture };
+  const shortcuts = useRef({ onSearch, onCapture, onNavigate });
+  shortcuts.current = { onSearch, onCapture, onNavigate };
   // Layout effect, attached once: the shortcuts work from the first frame the shell is on screen. A passive effect ran
   // after the page's load event, so a Cmd+K pressed right after the page appeared was silently lost.
   useLayoutEffect(() => {
@@ -79,6 +80,14 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
     document.addEventListener("keydown", keydown);
     return () => document.removeEventListener("keydown", keydown);
   }, []);
+  // PB-045: G then a letter goes to a page. The page already showing it may handle that itself (the Inbox closes its open item).
+  useLayoutEffect(() => {
+    const keydown = goToKeyHandler((view) => {
+      if (document.dispatchEvent(new CustomEvent(goToEvent, { detail: view, cancelable: true }))) { setMenuOpen(false); shortcuts.current.onNavigate(view); }
+    });
+    window.addEventListener("keydown", keydown, true);
+    return () => window.removeEventListener("keydown", keydown, true);
+  }, []);
   useEffect(() => {
     document.addEventListener("keydown", leaveFieldOnEscape);
     return () => document.removeEventListener("keydown", leaveFieldOnEscape);
@@ -93,7 +102,7 @@ export function ApplicationShell({ activeView, pendingReviewCount = 0, status, r
   const action = (name: "Search" | "Capture", onClick: () => void) => <button type="button" className="shell-action" aria-label={name} title={iconOnly ? name : undefined} onClick={onClick}>
     {iconOnly && <ShellIcon name={name} />}<span className="shell-label">{name}</span>
   </button>;
-  const destination = (item: ShellDestination) => <button type="button" aria-label={item} title={iconOnly ? item : undefined} aria-current={item === activeView ? "page" : undefined} className={item === activeView ? "active" : undefined} onClick={() => navigate(item)}>
+  const destination = (item: ShellDestination) => <button type="button" aria-label={item} aria-keyshortcuts={`G ${goToLetter(item)}`} title={`${item} (G then ${goToLetter(item)})`} aria-current={item === activeView ? "page" : undefined} className={item === activeView ? "active" : undefined} onClick={() => navigate(item)}>
     {iconOnly && <ShellIcon name={item} />}<span className="shell-label">{item}</span>
     {item === "Inbox" && pendingReviewCount > 0 ? <> <em title={`${pendingReviewCount} pending`}>{pendingReviewCount}<span className="shell-pending-label"> pending</span></em></> : null}
   </button>;
