@@ -8,13 +8,13 @@ import { inboxViews, type InboxView } from "./useInboxView.js";
 
 /** The queue pane: heading, type tabs, filters, bulk actions and the rows (or its loading, error and empty states). */
 export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoLine, view, onView, switcher, visible, reviewCount, tabCounts, tab, query, advanced, meetings, meetingId, period, openedId, focusedId, checked, leaving, arriving, ticked, acceptableCount, allTicked, bulkEdit, loading, error, busy, readOnly, bulkRunning, hidden,
-  onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, processedToday, onSeeHistory, onOpen, onToggleChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
+  onDecideRow, onDecideGroup, onRowMode, onShowHelp, onFocusRow, onToggleGroup, onTab, onQuery, onToggleAdvanced, onMeeting, onPeriod, onClearFilters, processedToday, onSeeHistory, onOpen, onToggleChecked, onToggleGroupChecked, onSelectAll, onDeselectAll, onDecideTicked }: {
   paneRef: React.RefObject<HTMLElement | null>; groups: DateGroup[]; collapsed: Set<string>; cellsFor: (review: InboxReview) => RowCells; rowMode: RowLayoutMode; twoLine: boolean; view: InboxView; /** Undefined where the view cannot be chosen (narrow screens). */ onView?: (view: InboxView) => void; /** The Inbox / History switch, shown in the page header (#243). */ switcher?: React.ReactNode;
   onRowMode: (mode: RowLayoutMode) => void; onShowHelp: () => void; onFocusRow: (id: string) => void; onToggleGroup: (key: string) => void;
   visible: InboxReview[]; reviewCount: number; tabCounts: Map<InboxTab, number>; tab: InboxTab; query: string; advanced: boolean; meetings: Array<LifeObject | ObjectLink>; meetingId: string; period: CreatedPeriod;
   openedId?: string; focusedId?: string; checked: Set<string>; /** PB-046: rows animating out after a decision, and rows sliding back after Undo. */ leaving: Set<string>; arriving: Set<string>; ticked: InboxReview[]; acceptableCount: number; allTicked: boolean; /** PB-043: the Bulk edit field buttons for the ticked items (PB-044: or the Focused item, while a letter key's picker is open). */ bulkEdit?: React.ReactNode; loading: boolean; error?: string; busy: boolean; readOnly: boolean; bulkRunning: boolean; hidden: boolean;
   onTab: (tab: InboxTab) => void; onQuery: (query: string) => void; onToggleAdvanced: () => void; onMeeting: (id: string) => void; onPeriod: (period: CreatedPeriod) => void; onClearFilters: () => void; /** Review actions made today (#244); the Inbox zero screen shows it. */ processedToday?: number; onSeeHistory?: () => void;
-  onOpen: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
+  onOpen: (id: string) => void; onToggleChecked: (id: string, range?: boolean) => void; /** Tick every item in a source group (meeting, agent run), or untick them all when all are ticked. */ onToggleGroupChecked: (items: InboxReview[]) => void; onSelectAll: () => void; onDeselectAll: () => void; onDecideTicked: (outcome: Outcome) => void;
   onDecideRow: (id: string, outcome: Outcome) => void; onDecideGroup: (items: InboxReview[], outcome: Outcome) => void;
 }) {
   /** Row and group buttons are off while the app is read-only or a decision is saving. */
@@ -69,6 +69,7 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
           const key = groupKey(bucket, source); const isCollapsed = collapsed.has(key);
           return <div key={key} className="inbox-source-group">
             <div className="inbox-source-head">
+              <GroupCheck label={source.label} items={source.items} checked={checked} onToggle={onToggleGroupChecked} />
               <button className="inbox-source" aria-expanded={!isCollapsed} aria-label={`${source.label}, ${source.items.length}`} onClick={() => onToggleGroup(key)}><span aria-hidden>{isCollapsed ? "▸" : "▾"}</span> {source.label} <small>{source.items.length}</small></button>
               <span className="inbox-group-actions" role="group" aria-label={`Actions for ${source.label}`}>
                 <button disabled={groupLocked} title="Accept all in this group (skips Link and Merge)" aria-label={`Accept all in ${source.label}`} onClick={() => onDecideGroup(source.items, "accepted")}>Accept all</button>
@@ -81,4 +82,13 @@ export function InboxQueue({ paneRef, groups, collapsed, cellsFor, rowMode, twoL
       </div>)}</div>
     </>}
   </section>;
+}
+
+/** A source group's tick box: ticked when every item in the group is ticked, mixed when some are. */
+function GroupCheck({ label, items, checked, onToggle }: { label: string; items: InboxReview[]; checked: Set<string>; onToggle: (items: InboxReview[]) => void }) {
+  const count = items.filter((review) => checked.has(review.frontmatter.id)).length;
+  const all = count > 0 && count === items.length; const some = count > 0 && !all;
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = some; }, [some]);
+  return <input ref={ref} className="inbox-group-check" type="checkbox" aria-label={`Select all in ${label}`} title="Select all items in this group" checked={all} onChange={() => onToggle(items)} />;
 }

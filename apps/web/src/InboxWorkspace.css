@@ -13,6 +13,7 @@
 .inbox-rows { margin-top: var(--space-2); }
 .inbox-date { margin: var(--space-4) 0 var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); letter-spacing: .08em; text-transform: uppercase; }
 .inbox-source-head { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); border-bottom: var(--border-thin) solid var(--color-border); border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--color-surface-raised); }
+.inbox-group-check { flex: none; margin: 0 0 0 var(--space-2); }
 .inbox-source { display: flex; flex: 1; align-items: center; justify-content: flex-start; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: 0; background: none; color: var(--color-text); font-size: var(--font-size-sm); font-weight: 750; text-align: left; }
 .inbox-source small { color: var(--color-text-muted); font-weight: 600; }
 /* Rows and the column header share one grid, so badges, titles and the right-hand columns line up. Cells are placed by column, so a dropped column leaves no gap or height. */
